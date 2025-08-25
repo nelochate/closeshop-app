@@ -21,8 +21,10 @@ const goToRegister = () => {
     <div>
       <div class="login-divider-1">
         <div class="circle"></div>
-        <h1>Login</h1>
-        <h2>Sign in to your account</h2>
+        <div class="text-div">
+          <h1 id="login">Login</h1>
+          <h2 id="sign-in">Sign in to your account</h2>
+        </div>
       </div>
       <v-spacer />
       <div class="login-divider-2">
@@ -45,8 +47,9 @@ const goToRegister = () => {
           />
           <div class="form-actions">
             <v-btn type="submit" color="primary" class="center-btn">Login</v-btn>
-            <v-spacer />
-            <v-btn text @click="goToRegister" class="bottom-btn">Register</v-btn>
+
+            <span class="forgot-link">Forgot password? Click here</span>
+            <v-btn text @click="goToRegister" class="bottom-btn">Register New Account</v-btn>
           </div>
         </v-form>
       </div>
@@ -56,10 +59,11 @@ const goToRegister = () => {
 <style scoped>
 .login-divider-1 {
   background: #3d79b6;
+  height: 250px;
 }
 .circle {
-  width: 300px;
-  height: 300px;
+  width: 250px;
+  height: 250px;
   border-radius: 50%;
   background: #deeff5;
   position: relative; /* stays in place while scrolling */
@@ -84,12 +88,29 @@ const goToRegister = () => {
   position: relative;
 }
 .center-btn {
-  margin-top: 16px;
+  padding: 5px 50px 5px 50px;
+  font-weight: 500;
 }
 .bottom-btn {
   position: absolute;
   bottom: 0;
   left: 50%;
   transform: translateX(-50%);
+}
+#login,
+#sign-in {
+  color: #ffffff;
+}
+#login {
+  font-size: 3.1rem;
+  color: #ffffff;
+}
+
+.forgot-link {
+  font-size: 20px;
+}
+.text-div {
+  margin-left: 5%;
+  margin-top: -25%;
 }
 </style>
