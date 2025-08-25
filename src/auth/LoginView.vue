@@ -21,10 +21,10 @@ const goToRegister = () => {
     <div>
       <div class="login-divider-1">
         <div class="circle"></div>
-        <div class="text-div">
-          <h1 id="login">Login</h1>
-          <h2 id="sign-in">Sign in to your account</h2>
-        </div>
+       <div class="text-div">
+         <h1 id="login">Login</h1>
+        <h2 id="sign-in" >Sign in to your account</h2>
+       </div>
       </div>
       <v-spacer />
       <div class="login-divider-2">
@@ -47,7 +47,7 @@ const goToRegister = () => {
           />
           <div class="form-actions">
             <v-btn type="submit" color="primary" class="center-btn">Login</v-btn>
-
+           
             <span class="forgot-link">Forgot password? Click here</span>
             <v-btn text @click="goToRegister" class="bottom-btn">Register New Account</v-btn>
           </div>
@@ -103,13 +103,13 @@ const goToRegister = () => {
 }
 #login {
   font-size: 3.1rem;
-  color: #ffffff;
+   color: #ffffff;
 }
 
-.forgot-link {
+.forgot-link{
   font-size: 20px;
 }
-.text-div {
+.text-div{
   margin-left: 5%;
   margin-top: -25%;
 }
