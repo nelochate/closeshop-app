@@ -1,9 +1,11 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import closeshopbg from '@/image/closeshopbg.png'
 
 const username = ref('')
 const password = ref('')
+const showPassword = ref(false)
 const router = useRouter()
 
 const login = () => {
@@ -20,11 +22,12 @@ const goToRegister = () => {
   <v-app class="main-bg">
     <div>
       <div class="login-divider-1">
-        <div class="circle"></div>
-       <div class="text-div">
-         <h1 id="login">Login</h1>
-        <h2 id="sign-in" >Sign in to your account</h2>
-       </div>
+        <v-img :src="closeshopbg" cover class="logo"> </v-img>
+
+        <div class="text-div">
+          <h1 id="login">Login</h1>
+          <h2 id="sign-in">Sign in to your account</h2>
+        </div>
       </div>
       <v-spacer />
       <div class="login-divider-2">
@@ -39,15 +42,17 @@ const goToRegister = () => {
 
           <v-text-field
             v-model="password"
+            :type="showPassword ? 'text' : 'password'"
             label="Password"
-            type="password"
             required
             prepend-inner-icon="mdi-key-variant"
+            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword"
             class="pass-input"
           />
           <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn">Login</v-btn>
-           
+            <v-btn type="submit" color="primary" class="center-btn mb-5">Login</v-btn>
+
             <span class="forgot-link">Forgot password? Click here</span>
             <v-btn text @click="goToRegister" class="bottom-btn">Register New Account</v-btn>
           </div>
@@ -58,18 +63,15 @@ const goToRegister = () => {
 </template>
 <style scoped>
 .login-divider-1 {
-  background: #3d79b6;
+  background: #5ca3eb;
   height: 250px;
+  position: relative;
 }
-.circle {
-  width: 250px;
-  height: 250px;
-  border-radius: 50%;
-  background: #deeff5;
-  position: relative; /* stays in place while scrolling */
-  top: -100px;
-  right: 10px;
-  left: 300px;
+
+.login-divider-2 {
+  background: #ffffff; /* make the second section visible */
+  padding: 2rem 1rem; /* space inside */
+  min-height: 300px; /* ensure enough height for the form */
 }
 .email-input,
 .pass-input {
@@ -84,33 +86,43 @@ const goToRegister = () => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  height: 120px; /* adjust as needed */
+  gap: 10px; /* automatically adds space between children */
   position: relative;
+  /* remove height: 120px; */
 }
 .center-btn {
   padding: 5px 50px 5px 50px;
   font-weight: 500;
 }
 .bottom-btn {
-  position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
-}
-#login,
-#sign-in {
-  color: #ffffff;
-}
-#login {
-  font-size: 3.1rem;
-   color: #ffffff;
+  position: static; /* let it flow under forgot-link */
+  transform: none;
+  margin-top: 10px; /* optional spacing */
 }
 
-.forgot-link{
-  font-size: 20px;
+#sign-in {
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
 }
-.text-div{
-  margin-left: 5%;
-  margin-top: -25%;
+#login {
+  font-size: 2.5rem;
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+.forgot-link {
+  font-size: 20px;
+  margin-bottom: 5px; /* this now works */
+  display: block;
+}
+.text-div {
+  text-align: center;
+  margin-top: 1rem; /* adjust spacing below the image */
+}
+.logo {
+  width: 350px;
+  max-width: 100%;
+  display: block;
+  margin: 0 auto; /* centers horizontally */
 }
 </style>
