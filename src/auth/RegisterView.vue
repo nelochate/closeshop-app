@@ -1,0 +1,157 @@
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import closeshopbg from '@/image/closeshopbg.png'
+
+const fname = ref('')
+const lname = ref('')
+const username = ref('')
+const password = ref('')
+const confirmPassword = ref('')
+const showPassword = ref(false)
+const router = useRouter()
+
+const login = () => {
+  console.log(
+    'Registering with',
+    fname.value,
+    lname.value,
+    username.value,
+    password.value,
+    confirmPassword.value,
+  )
+  // TODO: Call API later
+}
+
+const goToLogin = () => {
+  router.push('/login')
+}
+</script>
+
+<template>
+  <v-app class="main-bg">
+    <div>
+      <!-- Top Banner -->
+      <div class="login-divider-1">
+        <v-img :src="closeshopbg" cover class="logo" />
+        <div class="text-div">
+          <h1 id="login">Register Now!</h1>
+          <h2 id="sign-in">Sign up for a new account</h2>
+        </div>
+      </div>
+
+      <!-- Form Section -->
+      <div class="login-divider-2">
+        <v-form @submit.prevent="login" class="reg-form">
+          <v-text-field
+            v-model="fname"
+            label="First Name"
+            required
+            prepend-inner-icon="mdi-account"
+            class="input-field"
+          />
+
+          <v-text-field
+            v-model="lname"
+            label="Last Name"
+            required
+            prepend-inner-icon="mdi-account"
+            class="input-field"
+          />
+
+          <v-text-field
+            v-model="username"
+            label="Email"
+            type="email"
+            required
+            prepend-inner-icon="mdi-email"
+            class="input-field"
+          />
+
+          <v-text-field
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            label="Password"
+            required
+            prepend-inner-icon="mdi-key-variant"
+            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword"
+            class="input-field"
+          />
+
+          <v-text-field
+            v-model="confirmPassword"
+            :type="showPassword ? 'text' : 'password'"
+            label="Confirm Password"
+            required
+            prepend-inner-icon="mdi-key-variant"
+            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword"
+            class="input-field"
+          />
+
+          <div class="form-actions">
+            <v-btn type="submit" color="primary" class="center-btn mb-3" block> Register </v-btn>
+            <v-btn text @click="goToLogin" class="bottom-btn" block>
+              Already have an account? Login
+            </v-btn>
+          </div>
+        </v-form>
+      </div>
+    </div>
+  </v-app>
+</template>
+
+<style scoped>
+/* Banner */
+.login-divider-1 {
+  background: #5ca3eb;
+  padding: 2rem 1rem;
+  text-align: center;
+}
+.logo {
+  width: 60%;
+  max-width: 280px;
+  margin: 0 auto;
+  display: block;
+}
+.text-div {
+  margin-top: 1rem;
+}
+#login {
+  font-size: 1.8rem;
+  font-weight: 600;
+  color: #fff;
+}
+#sign-in {
+  font-size: 1rem;
+  color: #fff;
+}
+
+/* Form */
+.login-divider-2 {
+  background: #fff;
+  padding: 1.5rem 1rem;
+}
+.reg-form {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
+}
+.input-field {
+  width: 100%;
+}
+.form-actions {
+  margin-top: 1rem;
+}
+.center-btn {
+  font-weight: 500;
+  border-radius: 8px;
+}
+.bottom-btn {
+  font-size: 0.9rem;
+  text-transform: none;
+}
+</style>
