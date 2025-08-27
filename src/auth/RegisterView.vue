@@ -24,7 +24,7 @@ const login = () => {
 }
 
 const goToLogin = () => {
-  router.push('/login')
+  router.push('/')
 }
 </script>
 
@@ -105,9 +105,17 @@ const goToLogin = () => {
 <style scoped>
 /* Banner */
 .login-divider-1 {
-  background: #5ca3eb;
-  padding: 2rem 1rem;
+background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
+  height: 500px;
+  max-height: 100%;
   text-align: center;
+}
+.login-divider-2 {
+  background: #ffffff;
+  min-height: 300px;
+  margin-top: -200px; /* pulls the form up into the banner space */
+  padding-top: 2rem;  /* keeps spacing inside */
+  border-radius: 12px; /* optional: for smoother transition */
 }
 .logo {
   width: 60%;
@@ -131,7 +139,6 @@ const goToLogin = () => {
 /* Form */
 .login-divider-2 {
   background: #fff;
-  padding: 1.5rem 1rem;
 }
 .reg-form {
   display: flex;

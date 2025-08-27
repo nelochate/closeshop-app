@@ -63,7 +63,7 @@ const goToRegister = () => {
 </template>
 <style scoped>
 .login-divider-1 {
-  background: #5ca3eb;
+background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
   height: 250px;
   position: relative;
 }
@@ -95,7 +95,6 @@ const goToRegister = () => {
   font-weight: 500;
 }
 .bottom-btn {
-  position: static; /* let it flow under forgot-link */
   transform: none;
   margin-top: 10px; /* optional spacing */
 }
