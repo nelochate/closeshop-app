@@ -51,7 +51,7 @@ const goToRegister = () => {
             class="pass-input"
           />
           <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn mb-5">Login</v-btn>
+            <v-btn type="submit" color="primary" class="center-btn mb-5"to="homepage">Login</v-btn>
 
             <span class="forgot-link">Forgot password? Click here</span>
             <v-btn text @click="goToRegister" class="bottom-btn">Register New Account</v-btn>
@@ -64,14 +64,16 @@ const goToRegister = () => {
 <style scoped>
 .login-divider-1 {
 background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
-  height: 250px;
-  position: relative;
+  height: 500px;
+  max-height: 100%;
+  text-align: center;
 }
-
 .login-divider-2 {
-  background: #ffffff; /* make the second section visible */
-  padding: 2rem 1rem; /* space inside */
-  min-height: 300px; /* ensure enough height for the form */
+  background: #ffffff;
+  min-height: 300px;
+  margin-top: -200px; /* pulls the form up into the banner space */
+  padding-top: .1rem;  /* keeps spacing inside */
+  border-radius: 12px; /* optional: for smoother transition */
 }
 .email-input,
 .pass-input {
@@ -80,7 +82,7 @@ background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
   margin: auto;
 }
 .email-input {
-  margin-top: 5%;
+  margin-top: 3%;
 }
 .form-actions {
   display: flex;
