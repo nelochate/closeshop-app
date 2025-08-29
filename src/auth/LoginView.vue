@@ -1,95 +1,130 @@
-<script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+<script setup>
+import { ref } from "vue";
+import { useRouter } from "vue-router";
 
-const username = ref('')
-const password = ref('')
-const router = useRouter()
+const username = ref("");
+const password = ref("");
+const router = useRouter();
 
 const login = () => {
-  console.log('Logging in with', username.value, password.value)
-  // TODO: Call API later
-}
+  console.log("Logging in with:", username.value, password.value);
+  // TODO: Add your API call for login
+};
 
-const goToRegister = () => {
-  router.push('/register')
-}
+const forgotPassword = () => {
+  router.push("/forgot-password");
+};
+
+const register = () => {
+  router.push("/register");
+};
 </script>
 
 <template>
-  <v-app class="main-bg">
-    <div>
-      <div class="login-divider-1">
+  <v-app>
+    <div class="container">
+      <!-- Header Section -->
+      <div class="header">
         <div class="circle"></div>
         <h1>Login</h1>
-        <h2>Sign in to your account</h2>
+        <p>Sign in to your account</p>
       </div>
-      <v-spacer />
-      <div class="login-divider-2">
-        <v-form @submit.prevent="login" class="login-form">
+
+      <!-- Form Section -->
+      <div class="form">
+        <v-form @submit.prevent="login" class="login-form w-100" style="max-width: 320px;">
+          <!-- Username -->
           <v-text-field
             v-model="username"
-            label="Email"
-            required
+            label="Username"
             prepend-inner-icon="mdi-account"
-            class="email-input"
+            required
+            variant="outlined"
+            class="mb-3"
           />
 
+          <!-- Password -->
           <v-text-field
             v-model="password"
             label="Password"
             type="password"
-            required
             prepend-inner-icon="mdi-key-variant"
-            class="pass-input"
+            required
+            variant="outlined"
+            class="mb-3"
           />
-          <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn">Login</v-btn>
-            <v-spacer />
-            <v-btn text @click="goToRegister" class="bottom-btn">Register</v-btn>
-          </div>
+
+          <!-- Login Button -->
+          <v-btn type="submit" color="primary" block class="mb-3">
+            Login
+          </v-btn>
+
+          <!-- Forgot password -->
+          <p
+            class="text-center text-medium-emphasis text-caption mb-3"
+            @click="forgotPassword"
+            style="cursor: pointer"
+          >
+            I forgot my password. Click here to reset
+          </p>
+
+          <!-- Register Button -->
+          <v-btn color="secondary" variant="outlined" block @click="register">
+            Register New Account
+          </v-btn>
         </v-form>
       </div>
     </div>
   </v-app>
 </template>
+
 <style scoped>
-.login-divider-1 {
-  background: #3d79b6;
-}
-.circle {
-  width: 300px;
-  height: 300px;
-  border-radius: 50%;
-  background: #deeff5;
-  position: relative; /* stays in place while scrolling */
-  top: -100px;
-  right: 10px;
-  left: 300px;
-}
-.email-input,
-.pass-input {
-  width: 350px;
-  max-width: 100%;
-  margin: auto;
-}
-.email-input {
-  margin-top: 5%;
-}
-.form-actions {
+.container {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  height: 120px; /* adjust as needed */
+  height: 100vh;
+  background: #ffffff;
+  font-family: Arial, sans-serif;
+}
+
+/* Header */
+.header {
+  background: #2f6db2;
+  height: 200px;
+  color: white;
+  padding: 20px;
   position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  overflow: hidden;
 }
-.center-btn {
-  margin-top: 16px;
+.header h1 {
+  font-size: 32px;
+  font-weight: bold;
+  margin: 0;
+  margin-top: 8px;
 }
-.bottom-btn {
+.header p {
+  font-size: 14px;
+  margin-top: 4px;
+}
+.header .circle {
+  width: 215px;
+  height: 200px;
+  background: #deeff5;
+  border-radius: 50%;
   position: absolute;
-  bottom: 0;
-  left: 50%;
-  transform: translateX(-50%);
+  top: -40px;
+  right: -60px;
+}
+
+/* Form */
+.form {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  margin-top: 30px;
+  padding: 0 20px;
 }
 </style>
