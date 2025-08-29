@@ -103,7 +103,7 @@ const register = () => {
   font-size: 32px;
   font-weight: bold;
   margin: 0;
-  margin-top: 6px;
+  margin-top: 8px;
 }
 .header p {
   font-size: 14px;
