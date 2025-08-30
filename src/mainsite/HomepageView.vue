@@ -1,11 +1,11 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
+import { useGeolocation } from '@/composables/useGeolocation'
 
 const search = ref('')
 
 const onSearch = () => {
   console.log('Searching for:', search.value)
-  // Add your search logic here
 }
 
 const goHome = () => console.log("Home clicked")
@@ -13,18 +13,28 @@ const goCart = () => console.log("Cart clicked")
 const goChat = () => console.log("Chat clicked")
 const goNotifications = () => console.log("Notifications clicked")
 const goAccount = () => console.log("Account clicked")
+
+// Import location composable
+const { latitude, longitude, error, requestPermission, getLocation } = useGeolocation()
+
+onMounted(async () => {
+  await requestPermission()
+  await getLocation()
+})
 </script>
 
 <template>
   <v-app>
     <!-- Top Navigation -->
     <v-app-bar
-      class="top-nav"
+      class="top-nav "
       elevation="0"
       flat
       color="#5ca3eb"
+
     >
-      <v-text-field
+     <div class="m-10">
+       <v-text-field
         v-model="search"
         label="Search..."
         hide-details
@@ -37,16 +47,19 @@ const goAccount = () => console.log("Account clicked")
           <v-btn icon @click="onSearch">
             <v-icon>mdi-magnify</v-icon>
           </v-btn>
-          <v-btn icon>
+          <v-btn icon to="/mapsearch">
             <v-icon>mdi-search-web</v-icon>
           </v-btn>
         </template>
       </v-text-field>
+     </div>
     </v-app-bar>
 
     <!-- Main Content -->
     <v-main class="app-main">
-      <slot />
+    <v-card class="mx-auto my-8 pa-6" color="primary" elevation="2" max-width="400">
+  <h1 class="text-h4 text-center text-white font-weight-bold">second</h1>
+</v-card>
     </v-main>
 
     <!-- Bottom Navigation -->
