@@ -45,5 +45,9 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSLocationWhenInUseUsageDescription</key>
+<string>Closeshop needs your location to show nearby sellers.</string>
+<key>NSLocationAlwaysUsageDescription</key>
+<string>Closeshop needs your location even in the background to improve your experience.</string>
 </dict>
 </plist>
