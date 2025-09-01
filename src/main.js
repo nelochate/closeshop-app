@@ -19,7 +19,7 @@ const vuetify = createVuetify({
   },
   components,
   directives,
-  
+
 })
 app.use(createPinia())
 app.use(router)
