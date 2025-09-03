@@ -61,6 +61,7 @@ const goToRegister = () => {
     </div>
   </v-app>
 </template>
+
 <style scoped>
 .login-divider-1 {
 background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
