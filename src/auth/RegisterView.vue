@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import closeshopbg from '@/image/closeshopbg.png'
+
 
 const fname = ref('')
 const lname = ref('')
@@ -33,7 +33,7 @@ const goToLogin = () => {
     <div>
       <!-- Top Banner -->
       <div class="login-divider-1">
-        <v-img :src="closeshopbg" cover class="logo" />
+        <v-img src="/images/closeshopbg.png" cover class="logo" />
         <div class="text-div">
           <h1 id="login">Register Now!</h1>
           <h2 id="sign-in">Sign up for a new account</h2>

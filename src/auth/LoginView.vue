@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import closeshopbg from '@/image/closeshopbg.png'
 
 const username = ref('')
 const password = ref('')
@@ -22,7 +21,7 @@ const goToRegister = () => {
   <v-app class="main-bg">
     <div>
       <div class="login-divider-1">
-        <v-img :src="closeshopbg" cover class="logo"> </v-img>
+        <v-img src="/images/closeshopbg.png" cover class="logo"> </v-img>
 
         <div class="text-div">
           <h1 id="login">Login</h1>
