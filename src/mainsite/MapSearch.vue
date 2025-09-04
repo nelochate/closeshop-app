@@ -20,7 +20,7 @@ L.Marker.prototype.options.icon = L.icon({
   shadowSize: [41, 41],
 })
 
-// ✅ get geolocation composable
+//  get geolocation composable
 const { latitude, longitude, requestPermission, getLocation, startWatching, stopWatching } =
   useGeolocation()
 
@@ -68,7 +68,7 @@ watch([latitude, longitude], ([lat, lng]) => {
   }
 })
 
-// ✅ cleanup tracking when leaving page
+// cleanup tracking when leaving page
 onUnmounted(() => {
   stopWatching()
 })
@@ -79,7 +79,7 @@ onUnmounted(() => {
     <v-app-bar color="primary" flat>
       <!-- Back Button -->
       <v-btn icon @click="goBack">
-        <v-icon>mdi-keyboard-backspace</v-icon>
+        <v-icon>mdi-keyboard-backspace</v-icon>back
       </v-btn>
 
       <!-- Search -->

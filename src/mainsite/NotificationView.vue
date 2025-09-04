@@ -1,14 +1,37 @@
-<template>
-  <div class="notification-view">
-    <h1>Notifications</h1>
-    <p>No notifications yet.</p>
-  </div>
-</template>
 
 <script setup lang="ts">
-// you can add logic later here
+import { useRouter } from 'vue-router'
+
+// router instance
+const router = useRouter()
+
+// go back
+const goBack = () => {
+  router.back()
+}
 </script>
 
+<template>
+<v-app>
+ <v-app-bar flat elevation="0" color="transparent">
+   <v-btn variant="text" @click="goBack">
+  <v-icon start>mdi-arrow-left</v-icon>
+  Back
+</v-btn>
+    <v-toolbar-title class="font-bold"><strong>Notification</strong></v-toolbar-title>
+  </v-app-bar> 
+    <v-divider></v-divider>
+<v-main>
+<div class="notification-view">
+  <v-alert type="info" border="start" color="primary" icon="mdi-information-outline">
+    No notification yet!!
+  </v-alert>
+</div>
+</v-main>
+    
+</v-app>
+
+</template>
 <style scoped>
 .notification-view {
   padding: 16px;
