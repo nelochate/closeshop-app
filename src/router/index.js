@@ -12,25 +12,26 @@ router.beforeEach(async (to) => {
   const authStore = useAuthUserStore()
   const isLoggedIn = await authStore.isAuthenticated()
 
-  // 🔹 1. Redirect logged-in users away from login/register
-  if (isLoggedIn && (to.name === 'LoginView' || to.name === 'RegisterView')) {
-    return { name: 'homepage' }
+  // Prevent logged-in users from going back to /login or /register
+  if (isLoggedIn && (to.path === '/login' || to.path === '/register')) {
+    return { path: '/homepage' }
   }
 
-  // 🔹 2. Redirect guests away from protected routes
+  // Protect routes that need authentication
   if (!isLoggedIn && to.meta.requiresAuth) {
-    return { name: 'LoginView' }
+    return { path: '/login' }
   }
 
-  // 🔹 3. Admin-only routes protection
+  // 🔒 Admin route protection
   if (to.meta.requiresAdmin) {
-    if (!isLoggedIn) {
-      return { name: 'LoginView' }
-    }
+    if (!isLoggedIn) return { path: '/login' }
 
     try {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return { name: 'LoginView' }
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      if (!user) return { path: '/login' }
 
       const { data: profile, error } = await supabase
         .from('profiles')
@@ -41,15 +42,14 @@ router.beforeEach(async (to) => {
       if (error) throw error
 
       if (profile?.role !== 'admin') {
-        return { name: 'homepage' }
+        return { path: '/homepage' } // redirect non-admins
       }
     } catch (error) {
       console.error('Admin check failed:', error)
-      return { name: 'homepage' }
+      return { path: '/homepage' }
     }
   }
 
-  // 🔹 4. No special rules → allow
   return true
 })
 
