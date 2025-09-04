@@ -2,6 +2,7 @@ import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
 import HomepageView from '@/mainsite/HomepageView.vue'
 import MapSearch from '@/mainsite/MapSearch.vue'
+import { useAuthUserStore } from '@/stores/authUser'
 
 // Toggle for system deface mode
 const isDefaced = false
@@ -10,27 +11,34 @@ const isDefaced = false
 export const routes = isDefaced
   ? [
       {
+        path: '/',
+        redirect: () => {
+        const authStore = useAuthUserStore()
+        return authStore.isLoggedIn ? '/homepage' : '/login'
+        },
+      },
+      {
         path: '/login',
         name: 'LoginView',
-        component: LoginView,
+        component: () => import('@/auth/LoginView.vue'),
         meta: { requiresAuth: false }
       },
       {
         path: '/register',
         name: 'RegisterView',
-        component: RegisterView,
+        component: () => import('@/auth/RegisterView.vue'),
         meta: { requiresAuth: false }
       },
       {
         path: '/homepage',
         name: 'homepage',
-        component: HomepageView,
+        component: () => import('@/mainsite/HomepageView.vue'),
         meta: { requiresAuth: true } // protect homepage
       },
       {
         path: '/mapsearch',
         name: 'mapsearch',
-        component: MapSearch,
+        component: () => import('@/mainsite/MapSearch.vue'),
         meta: { requiresAuth: true } // protect mapsearch
       }
     ]
