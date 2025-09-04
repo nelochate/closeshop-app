@@ -1,3 +1,4 @@
+
 // /src/stores/authUser.ts
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
@@ -74,10 +75,22 @@ export const useAuthUserStore = defineStore('authUser', () => {
     return data
   }
 
-  async function signOut() {
-    await supabase.auth.signOut()
+ async function signOut() {
+  try {
+    isLoading.value = true
+    const { error: signOutError } = await supabase.auth.signOut()
+    if (signOutError) throw signOutError
+
     $reset()
+    return true
+  } catch (err) {
+    error.value = err.message || 'Logout failed'
+    throw err
+  } finally {
+    isLoading.value = false
   }
+}
+
   async function isAuthenticated() {
   try {
     const { data, error } = await supabase.auth.getSession()
@@ -88,6 +101,7 @@ export const useAuthUserStore = defineStore('authUser', () => {
     return false
   }
 }
+
 
   return {
     userData,
