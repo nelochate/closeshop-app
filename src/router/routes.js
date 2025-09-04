@@ -37,7 +37,7 @@ export const routes = isDefaced
   : [
       // ✅ if deface is off, still provide the normal routes
       {
-        path: '/',
+        path: '/login',
         name: 'LoginView',
         component: LoginView,
         meta: { requiresAuth: false }
