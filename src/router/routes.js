@@ -2,7 +2,6 @@ import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
 import HomepageView from '@/mainsite/HomepageView.vue'
 import MapSearch from '@/mainsite/MapSearch.vue'
-import { useAuthUserStore } from '@/stores/authUser'
 
 // Toggle for system deface mode
 const isDefaced = false
@@ -10,15 +9,9 @@ const isDefaced = false
 // Routes
 export const routes = isDefaced
   ? [
+
       {
         path: '/',
-        redirect: () => {
-        const authStore = useAuthUserStore()
-        return authStore.isLoggedIn ? '/homepage' : '/login'
-        },
-      },
-      {
-        path: '/login',
         name: 'LoginView',
         component: () => import('@/auth/LoginView.vue'),
         meta: { requiresAuth: false }
@@ -45,7 +38,7 @@ export const routes = isDefaced
   : [
       // ✅ if deface is off, still provide the normal routes
       {
-        path: '/login',
+        path: '/',
         name: 'LoginView',
         component: LoginView,
         meta: { requiresAuth: false }

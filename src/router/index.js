@@ -13,25 +13,25 @@ router.beforeEach(async (to) => {
   const isLoggedIn = await authStore.isAuthenticated()
 
   // Prevent logged-in users from going back to /login or /register
-  if (isLoggedIn && (to.path === '/login' || to.path === '/register')) {
+  if (isLoggedIn && (to.path === '/' || to.path === '/register')) {
     return { path: '/homepage' }
   }
 
   // Protect routes that need authentication
   if (!isLoggedIn && to.meta.requiresAuth) {
-    return { path: '/login' }
+    return { path: '/' }
   }
 
   // 🔒 Admin route protection
   if (to.meta.requiresAdmin) {
-    if (!isLoggedIn) return { path: '/login' }
+    if (!isLoggedIn) return { path: '/' }
 
     try {
       const {
         data: { user },
       } = await supabase.auth.getUser()
 
-      if (!user) return { path: '/login' }
+      if (!user) return { path: '/' }
 
       const { data: profile, error } = await supabase
         .from('profiles')
