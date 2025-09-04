@@ -54,7 +54,7 @@ const goToRegister = () => {
             :rules="[requiredValidator]"
           />
           <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn mb-5"to="homepage">Login</v-btn>
+            <v-btn type="submit" color="primary" class="center-btn mb-5" to="homepage">Login</v-btn>
 
             <span class="forgot-link">Forgot password? Click here</span>
             <v-btn text @click="goToRegister" class="bottom-btn">Register New Account</v-btn>
