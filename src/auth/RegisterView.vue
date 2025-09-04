@@ -8,6 +8,7 @@ import {
   confirmedValidator,
 } from '@/utils/validators'
 import { supabase, formActionDefault } from '@/utils/supabase'
+import AlertNotification from '@/common/AlertNotification.vue'
 
 const router = useRouter()
 
@@ -74,6 +75,10 @@ const goToLogin = () => {
 <template>
   <v-app class="main-bg">
     <div class="responsive-container">
+      <!-- Alert Notification -->
+      <AlertNotification :formSuccessMessage="formAction.formSuccessMessage"
+        :formErrorMessage="formAction.formErrorMessage">
+      </AlertNotification>
       <!-- Banner -->
       <div class="login-divider-1">
         <v-img src="/images/closeshopbg.png" cover class="logo" />
@@ -86,68 +91,37 @@ const goToLogin = () => {
       <!-- Form -->
       <div class="login-divider-2">
         <v-form ref="refVform" @submit.prevent="onFormSubmit">
-          <v-text-field
-            v-model="formData.firstName"
-            label="First Name"
-            prepend-inner-icon="mdi-account"
-            class="input-field"
-            :rules="[requiredValidator]"
-            density="comfortable"
-          />
+          <v-text-field v-model="formData.firstName" label="First Name" prepend-inner-icon="mdi-account"
+            class="input-field" :rules="[requiredValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="formData.lastName"
-            label="Last Name"
-            prepend-inner-icon="mdi-account"
-            class="input-field"
-            :rules="[requiredValidator]"
-            density="comfortable"
-          />
+          <v-text-field v-model="formData.lastName" label="Last Name" prepend-inner-icon="mdi-account"
+            class="input-field" :rules="[requiredValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="formData.email"
-            label="Email"
-            type="email"
-            prepend-inner-icon="mdi-email"
-            class="input-field"
-            :rules="[requiredValidator, emailValidator]"
-            density="comfortable"
-          />
+          <v-text-field v-model="formData.email" label="Email" type="email" prepend-inner-icon="mdi-email"
+            class="input-field" :rules="[requiredValidator, emailValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="formData.password"
-            :type="showPassword ? 'text' : 'password'"
-            label="Password"
-            prepend-inner-icon="mdi-key-variant"
-            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            class="input-field"
-            :rules="[requiredValidator, passwordValidator]"
-            density="comfortable"
-          />
+          <v-text-field v-model="formData.password" :type="showPassword ? 'text' : 'password'" label="Password"
+            prepend-inner-icon="mdi-key-variant" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword" class="input-field"
+            :rules="[requiredValidator, passwordValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="formData.confirmPassword"
-            :type="showConfirmPassword ? 'text' : 'password'"
-            label="Confirm Password"
-            prepend-inner-icon="mdi-key-variant"
+          <v-text-field v-model="formData.confirmPassword" :type="showConfirmPassword ? 'text' : 'password'"
+            label="Confirm Password" prepend-inner-icon="mdi-key-variant"
             :append-inner-icon="showConfirmPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showConfirmPassword = !showConfirmPassword"
-            class="input-field"
-            :rules="[
+            @click:append-inner="showConfirmPassword = !showConfirmPassword" class="input-field" :rules="[
               requiredValidator,
               () => confirmedValidator(formData.confirmPassword, formData.password),
-            ]"
-            density="comfortable"
-          />
+            ]" density="comfortable" />
 
           <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn mb-3" block :loading="formAction.formProcess">
+            <v-btn type="submit" color="primary" class="center-btn mb-5" prepend-icon="mdi-account-plus"
+              :disabled="formAction.formProcess" :loading="formAction.formProcess">
               Register
             </v-btn>
-            <v-btn text @click="goToLogin" class="bottom-btn" block>
-              Already have an account? Login
-            </v-btn>
+            <h4 class="text-center" text @click="goToLogin">
+              Already have an account?<RouterLink to="/" class="text-primary">
+                Login</RouterLink>
+            </h4>
           </div>
         </v-form>
       </div>
@@ -157,118 +131,68 @@ const goToLogin = () => {
 
 <style scoped>
 /* Base responsive styles */
-.responsive-container {
-  width: 100%;
-  max-width: 100%;
-  margin: 0 auto;
-  padding: 0;
-  box-sizing: border-box;
-}
-
-/* Banner section */
 .login-divider-1 {
-  width: 100%;
+  background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
+  height: 500px;
+  max-height: 100%;
   text-align: center;
-  padding: 1rem;
-  box-sizing: border-box;
+  margin-top: 5;
 }
 
-.logo {
-  max-width: 100%;
-  height: auto;
-  margin: 0 auto;
-}
-
-.text-div {
-  padding: 0.5rem;
-}
-
-#login {
-  font-size: 1.5rem;
-  margin-bottom: 0.5rem;
-}
-
-#sign-in {
-  font-size: 1rem;
-  font-weight: normal;
-  margin-top: 0;
-}
-
-/* Form section */
 .login-divider-2 {
-  width: 100%;
-  padding: 1rem;
-  box-sizing: border-box;
+  background: #ffffff;
+  min-height: 300px;
+  margin-top: -200px; /* pulls the form up into the banner space */
+  padding-top: 1rem; /* consistent with LoginView */
+  border-radius: 12px; /* optional: for smoother transition */
 }
 
 .input-field {
+  width: 350px;
+  max-width: 100%;
+  margin: auto;
   margin-bottom: 1rem;
 }
 
 .form-actions {
-  margin-top: 1.5rem;
-}
-
-.center-btn, .bottom-btn {
-  min-height: 48px; /* Better touch target for mobile */
-}
-
-/* Media queries for different screen sizes */
-@media (max-width: 600px) {
-  .responsive-container {
-    padding: 0.5rem;
-  }
-
-  .login-divider-1, .login-divider-2 {
-    padding: 0.75rem;
-  }
-
-  #login {
-    font-size: 1.25rem;
-  }
-
-  #sign-in {
-    font-size: 0.9rem;
-  }
-
-  .input-field {
-    margin-bottom: 0.75rem;
-  }
-}
-
-@media (min-width: 601px) and (max-width: 960px) {
-  .responsive-container {
-    max-width: 80%;
-  }
-}
-
-@media (min-width: 961px) {
-  .responsive-container {
-    max-width: 50%;
-  }
-}
-
-/* Ensure Vuetify components are mobile-friendly */
-:deep(.v-input__control) {
-  min-height: 56px; /* Standard mobile form field height */
-}
-
-:deep(.v-field) {
-  font-size: 16px; /* Prevents zoom on iOS */
-}
-
-:deep(.v-field__input) {
-  padding-top: 12px;
-  padding-bottom: 12px;
-}
-
-/* Improve touch targets for mobile */
-:deep(.v-btn) {
-  min-height: 48px;
-}
-
-/* Loading state for better mobile UX */
-:deep(.v-btn__loader) {
+  display: flex;
+  flex-direction: column;
   align-items: center;
+  gap: 10px; /* spacing between children */
+  position: relative;
 }
+
+.center-btn {
+  padding: 5px 50px 5px 50px;
+  font-weight: 500;
+}
+
+.bottom-btn {
+  transform: none;
+  margin-top: 10px;
+}
+
+#sign-in {
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+#login {
+  font-size: 2.5rem;
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+.text-div {
+  text-align: center;
+  margin-top: 1rem;
+}
+
+.logo {
+  width: 350px;
+  max-width: 100%;
+  display: block;
+  margin: 0 auto;
+}
+
 </style>

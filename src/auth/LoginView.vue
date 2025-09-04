@@ -33,31 +33,21 @@ const goToRegister = () => {
       <v-spacer />
       <div class="login-divider-2">
         <v-form @submit.prevent="login" class="login-form">
-          <v-text-field
-            v-model="username"
-            label="Email"
-            required
-            prepend-inner-icon="mdi-email-outline"
-            class="email-input"
-            :rules="[requiredValidator, emailValidator]"
-          />
+          <v-text-field v-model="username" label="Email" required prepend-inner-icon="mdi-email-outline"
+            class="email-input" :rules="[requiredValidator, emailValidator]" />
 
-          <v-text-field
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            label="Password"
-            required
-            prepend-inner-icon="mdi-key-variant"
-            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            class="pass-input"
-            :rules="[requiredValidator]"
-          />
+          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" label="Password" required
+            prepend-inner-icon="mdi-key-variant" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword" class="pass-input" :rules="[requiredValidator]" />
           <div class="form-actions">
             <v-btn type="submit" color="primary" class="center-btn mb-5" to="homepage">Login</v-btn>
 
             <span class="forgot-link">Forgot password? Click here</span>
-            <v-btn text @click="goToRegister" class="bottom-btn">Register New Account</v-btn>
+            <h4 class="text-center" text @click="goToRegister" >
+              Don't have an account?<RouterLink to="/register" class="text-primary">
+                Register</RouterLink>
+            </h4>
+
           </div>
         </v-form>
       </div>
