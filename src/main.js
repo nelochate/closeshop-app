@@ -6,6 +6,7 @@ import router from './router'
 import '@mdi/font/css/materialdesignicons.css'
 
 // Vuetify
+
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
 import * as components from 'vuetify/components'
@@ -21,7 +22,7 @@ const vuetify = createVuetify({
   },
   components,
   directives,
-  
+
 })
 app.use(createPinia())
 app.use(router)

@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { requiredValidator, emailValidator } from '@/utils/validators'
 
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const router = useRouter()
+
 
 const login = () => {
   console.log('Logging in with', username.value, password.value)
@@ -35,8 +37,9 @@ const goToRegister = () => {
             v-model="username"
             label="Email"
             required
-            prepend-inner-icon="mdi-account"
+            prepend-inner-icon="mdi-email-outline"
             class="email-input"
+            :rules="[requiredValidator, emailValidator]"
           />
 
           <v-text-field
@@ -48,6 +51,7 @@ const goToRegister = () => {
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
             @click:append-inner="showPassword = !showPassword"
             class="pass-input"
+            :rules="[requiredValidator]"
           />
           <div class="form-actions">
             <v-btn type="submit" color="primary" class="center-btn mb-5"to="homepage">Login</v-btn>

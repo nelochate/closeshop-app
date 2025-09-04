@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-
+import {
+  requiredValidator,
+  emailValidator,
+  passwordValidator,
+  confirmedValidator,
+} from '@/utils/validators'
 
 const fname = ref('')
 const lname = ref('')
@@ -11,6 +16,18 @@ const confirmPassword = ref('')
 const showPassword = ref(false)
 const router = useRouter()
 
+//Load Variables
+const formDataDefault = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
+}
+
+const formData = ref({
+  ...formDataDefault,
+})
 const login = () => {
   console.log(
     'Registering with',
@@ -49,6 +66,7 @@ const goToLogin = () => {
             required
             prepend-inner-icon="mdi-account"
             class="input-field"
+            :rules="[requiredValidator]"
           />
 
           <v-text-field
@@ -57,6 +75,7 @@ const goToLogin = () => {
             required
             prepend-inner-icon="mdi-account"
             class="input-field"
+            :rules="[requiredValidator]"
           />
 
           <v-text-field
@@ -66,6 +85,7 @@ const goToLogin = () => {
             required
             prepend-inner-icon="mdi-email"
             class="input-field"
+            :rules="[requiredValidator, emailValidator]"
           />
 
           <v-text-field
@@ -77,6 +97,7 @@ const goToLogin = () => {
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
             @click:append-inner="showPassword = !showPassword"
             class="input-field"
+            :rules="[requiredValidator, passwordValidator]"
           />
 
           <v-text-field
@@ -88,6 +109,7 @@ const goToLogin = () => {
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
             @click:append-inner="showPassword = !showPassword"
             class="input-field"
+            :rules="[requiredValidator, confirmedValidator(formData.confirmPassword, formData.password)]"
           />
 
           <div class="form-actions">
