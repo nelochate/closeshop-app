@@ -49,7 +49,7 @@ const onSubmit = async () => {
     formAction.value.formStatus = error.status
   } else if (data) {
     formAction.value.formSuccessMessage = 'Registration successful'
-    router.replace('/dashboard')
+    router.replace('/homepage')
   }
 
   refVform.value?.reset()
@@ -75,10 +75,7 @@ const goToLogin = () => {
 <template>
   <v-app class="main-bg">
     <div class="responsive-container">
-      <!-- Alert Notification -->
-      <AlertNotification :formSuccessMessage="formAction.formSuccessMessage"
-        :formErrorMessage="formAction.formErrorMessage">
-      </AlertNotification>
+
       <!-- Banner -->
       <div class="login-divider-1">
         <v-img src="/images/closeshopbg.png" cover class="logo" />
@@ -90,6 +87,10 @@ const goToLogin = () => {
 
       <!-- Form -->
       <div class="login-divider-2">
+      <!-- Alert Notification -->
+      <AlertNotification :formSuccessMessage="formAction.formSuccessMessage"
+        :formErrorMessage="formAction.formErrorMessage">
+      </AlertNotification>
         <v-form ref="refVform" @submit.prevent="onFormSubmit">
           <v-text-field v-model="formData.firstName" label="First Name" prepend-inner-icon="mdi-account"
             class="input-field" :rules="[requiredValidator]" density="comfortable" />
