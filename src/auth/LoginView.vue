@@ -17,7 +17,7 @@ const showError = ref(false) // Controls the visibility of the error message
 const successMessage = ref('') // Stores the success message
 const showSuccess = ref(false) // Controls the visibility of the success message
 
-const isLoading = ref() // Tracks the loading state
+const isLoading = ref()
 
 // Login function using Supabase
 const login = async () => {
