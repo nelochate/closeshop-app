@@ -35,6 +35,7 @@ const onSubmit = async () => {
     email: formData.value.email,
     password: formData.value.password,
     options: {
+      emailRedirectTo: `${window.location.origin}/`, // 👈 user will be redirected here after confirming
       data: {
         firstName: formData.value.firstName,
         lastName: formData.value.lastName,
@@ -48,8 +49,7 @@ const onSubmit = async () => {
     formAction.value.formErrorMessage = error.message
     formAction.value.formStatus = error.status
   } else if (data) {
-    formAction.value.formSuccessMessage = 'Registration successful'
-    router.replace('/homepage')
+    formAction.value.formSuccessMessage = 'Registration successful! Please check your email to confirm your account.'
   }
 
   refVform.value?.reset()
@@ -66,7 +66,7 @@ const onFormSubmit = () => {
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
-// Redirect to login
+// Redirect to login when already have an account
 const goToLogin = () => {
   router.push('/')
 }
