@@ -102,6 +102,10 @@ export const useAuthUserStore = defineStore('authUser', () => {
   }
 }
 
+async function forceLogout() {
+  await supabase.auth.signOut()
+  $reset()
+}
 
   return {
     userData,
@@ -118,5 +122,6 @@ export const useAuthUserStore = defineStore('authUser', () => {
     signUp,
     signOut,
     isAuthenticated,
+    forceLogout,
   }
 })
