@@ -75,9 +75,11 @@ export const useAuthUserStore = defineStore('authUser', () => {
     return data
   }
 
- async function signOut() {
+async function signOut() {
   try {
     isLoading.value = true
+    error.value = null
+
     const { error: signOutError } = await supabase.auth.signOut()
     if (signOutError) throw signOutError
 
