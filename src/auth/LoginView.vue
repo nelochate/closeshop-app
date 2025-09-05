@@ -205,26 +205,6 @@ onMounted(async () => {
   display: block;
   margin: 0 auto;
 }
-
-/* 🔹 Responsive */
-@media (max-width: 600px) {
-  .login-divider-2 {
-    margin: -80px 10px 0 10px;
-    padding: 1.5rem;
-  }
-
-  #login {
-    font-size: 1.8rem;
-  }
-
-  #sign-in {
-    font-size: 1rem;
-  }
-
-  .center-btn {
-    padding: 8px 20px;
-  }
-
 .error-message {
   position: absolute; /* Ensures it appears above other elements */
   top: 20px; /* Adjust the position as needed */
@@ -258,5 +238,26 @@ onMounted(async () => {
   width: 90%; /* Optional: Adjust width */
   max-width: 400px; /* Optional: Limit max width */
 }
+
+/* 🔹 Responsive */
+@media (max-width: 600px) {
+  .login-divider-2 {
+    margin: -80px 10px 0 10px;
+    padding: 1.5rem;
+  }
+
+  #login {
+    font-size: 1.8rem;
+  }
+
+  #sign-in {
+    font-size: 1rem;
+  }
+
+  .center-btn {
+    padding: 8px 20px;
+  }
+
+
 }
 </style>
