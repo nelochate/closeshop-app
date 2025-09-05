@@ -228,9 +228,9 @@ onMounted(async () => {
   left: 50%;
   transform: translateX(-50%);
   z-index: 10; /* Higher than the form container */
-  color: #52c41a;
+  color: rgb(30, 79, 6);
   background-color: #f6ffed;
-  border: 1px solid #b7eb8f;
+  border: 1px solid #c2e8a5;
   padding: 10px;
   margin: 10px 0;
   text-align: center;
