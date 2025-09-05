@@ -1,77 +1,135 @@
-<script setup>
-import { ref } from "vue";
-import { useRouter } from "vue-router";
 
-const username = ref("");
-const password = ref("");
-const router = useRouter();
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { supabase } from '@/utils/supabase'
+import { requiredValidator, emailValidator } from '@/utils/validators'
+import { onMounted } from 'vue'
 
-const login = () => {
-  console.log("Logging in with:", username.value, password.value);
-  // TODO: Add your API call for login
-};
+const username = ref('')
+const password = ref('')
+const showPassword = ref(false)
+const router = useRouter()
 
-const forgotPassword = () => {
-  router.push("/forgot-password");
-};
+// Reactive variable for error/success message
+const errorMessage = ref('') // Stores the error message
+const showError = ref(false) // Controls the visibility of the error message
+const successMessage = ref('') // Stores the success message
+const showSuccess = ref(false) // Controls the visibility of the success message
 
-const register = () => {
-  router.push("/register");
-};
+const isLoading = ref() // Tracks the loading state
+
+// Login function using Supabase
+const login = async () => {
+  isLoading.value = true
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: username.value,
+      password: password.value,
+    })
+
+    if (error) {
+      console.error('Login failed:', error.message)
+      errorMessage.value = 'Invalid credentials: ' + error.message
+      showError.value = true
+
+       // Hide the error message after 3 seconds
+      setTimeout(() => {
+        showError.value = false
+      }, 3000)
+
+      return
+    }
+
+    console.log('Login success:', data.user)
+
+    // Show success message
+    successMessage.value = 'Login successful! Redirecting to homepage...'
+    showSuccess.value = true
+
+    // Hide the success message after 3 seconds and redirect
+    setTimeout(() => {
+      showSuccess.value = false
+      router.push('/homepage') // Redirect to homepage
+    }, 3000)
+  } catch (err) {
+    console.error('Unexpected error:', err)
+    errorMessage.value = 'Something went wrong, please try again.'
+    showError.value = true
+
+    // Hide the error message after 3 seconds
+    setTimeout(() => {
+      showError.value = false
+    }, 3000)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+const goToRegister = () => {
+  router.push('/register')
+}
+
+onMounted(async () => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session) {
+    router.push('/homepage') // auto redirect if already logged in
+  }
+})
 </script>
 
 <template>
-  <v-app>
-    <div class="container">
-      <!-- Header Section -->
-      <div class="header">
-        <div class="circle"></div>
-        <h1>Login</h1>
-        <p>Sign in to your account</p>
+  <v-app class="main-bg">
+    <div>
+      <!-- Header / Banner -->
+      <div class="login-divider-1">
+        <v-img src="/images/closeshopbg.png" cover class="logo"> </v-img>
+
+        <div class="text-div">
+          <h1 id="login">Login</h1>
+          <h2 id="sign-in">Sign in to your account</h2>
+        </div>
       </div>
 
-      <!-- Form Section -->
-      <div class="form">
-        <v-form @submit.prevent="login" class="login-form w-100" style="max-width: 320px;">
-          <!-- Username -->
-          <v-text-field
-            v-model="username"
-            label="Username"
-            prepend-inner-icon="mdi-account"
-            required
-            variant="outlined"
-            class="mb-3"
-          />
+      <!-- Error Message -->
+      <div v-if="showError" class="error-message">
+        {{ errorMessage }}
+      </div>
 
-          <!-- Password -->
-          <v-text-field
-            v-model="password"
-            label="Password"
-            type="password"
-            prepend-inner-icon="mdi-key-variant"
-            required
-            variant="outlined"
-            class="mb-3"
-          />
+      <!-- Success Message -->
+      <div v-if="showSuccess" class="success-message">
+        {{ successMessage }}
+      </div>
 
-          <!-- Login Button -->
-          <v-btn type="submit" color="primary" block class="mb-3">
-            Login
-          </v-btn>
+      <!-- Login Form -->
+      <div class="login-divider-2">
+        <v-form @submit.prevent="login" class="login-form">
+          <v-text-field v-model="username" label="Email" required prepend-inner-icon="mdi-email-outline"
+            class="email-input" :rules="[requiredValidator, emailValidator]" />
 
-          <!-- Forgot password -->
-          <p
-            class="text-center text-medium-emphasis text-caption mb-3"
-            @click="forgotPassword"
-            style="cursor: pointer"
-          >
-            I forgot my password. Click here to reset
-          </p>
+          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" label="Password" required
+            prepend-inner-icon="mdi-key-variant" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword" class="pass-input" :rules="[requiredValidator]" />
 
-          <!-- Register Button -->
-          <v-btn color="secondary" variant="outlined" block @click="register">
-            Register New Account
-          </v-btn>
+          <div class="form-actions">
+            <v-btn type="submit" color="primary" class="center-btn mb-5" prepend-icon="mdi-login" :loading="isLoading"
+              :disabled="isLoading">
+              <template v-slot:default>
+                <span v-if="!isLoading">Login</span>
+                <v-progress-circular v-else indeterminate color="white" size="20" />
+              </template>
+            </v-btn>
+
+
+            <span class="forgot-link">Forgot password? Click here</span>
+
+            <h4 class="text-center" text @click="goToRegister">
+              Don't have an account?
+              <RouterLink to="/register" class="text-primary">
+                Register
+              </RouterLink>
+            </h4>
+          </div>
         </v-form>
       </div>
     </div>
@@ -79,52 +137,125 @@ const register = () => {
 </template>
 
 <style scoped>
-.container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
+/* Banner section */
+.login-divider-1 {
+  background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
+  min-height: 300px;
+  text-align: center;
+  padding: 1rem;
+}
+
+/* Form container */
+.login-divider-2 {
   background: #ffffff;
-  font-family: Arial, sans-serif;
+  padding: 2rem 1rem;
+  border-radius: 12px;
+  margin: -100px auto 0 auto;
+  max-width: 400px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-/* Header */
-.header {
-  background: #2f6db2;
-  height: 200px;
-  color: white;
-  padding: 20px;
-  position: relative;
+/* Inputs */
+.email-input,
+.pass-input {
+  width: 100%;
+  margin: 10px 0;
+}
+
+/* Form actions */
+.form-actions {
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  overflow: hidden;
-}
-.header h1 {
-  font-size: 32px;
-  font-weight: bold;
-  margin: 0;
-  margin-top: 8px;
-}
-.header p {
-  font-size: 14px;
-  margin-top: 4px;
-}
-.header .circle {
-  width: 215px;
-  height: 200px;
-  background: #deeff5;
-  border-radius: 50%;
-  position: absolute;
-  top: -40px;
-  right: -60px;
+  align-items: center;
+  gap: 12px;
 }
 
-/* Form */
-.form {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  margin-top: 30px;
-  padding: 0 20px;
+.center-btn {
+  padding: 10px 40px;
+  font-weight: 500;
+  width: 100%;
+}
+
+#sign-in {
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+#login {
+  font-size: 2rem;
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+.forgot-link {
+  font-size: 14px;
+  margin-bottom: 5px;
+  color: #555;
+  cursor: pointer;
+}
+
+.text-div {
+  text-align: center;
+  margin-top: 1rem;
+}
+
+.logo {
+  width: 200px;
+  max-width: 100%;
+  display: block;
+  margin: 0 auto;
+}
+.error-message {
+  position: absolute; /* Ensures it appears above other elements */
+  top: 20px; /* Adjust the position as needed */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10; /* Higher than the form container */
+  color: #ff4d4f;
+  background-color: #fff1f0c8;
+  border: 1px solid #ffa39ed1;
+  padding: 10px;
+  margin: 10px 0;
+  text-align: center;
+  border-radius: 5px;
+  width: 90%; /* Optional: Adjust width */
+  max-width: 400px; /* Optional: Limit max width */
+}
+
+.success-message {
+  position: absolute; /* Ensures it appears above other elements */
+  top: 20px; /* Adjust the position as needed */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10; /* Higher than the form container */
+  color: rgb(30, 79, 6);
+  background-color: #f6ffed;
+  border: 1px solid #c2e8a5;
+  padding: 10px;
+  margin: 10px 0;
+  text-align: center;
+  border-radius: 5px;
+  width: 90%; /* Optional: Adjust width */
+  max-width: 400px; /* Optional: Limit max width */
+}
+
+/* 🔹 Responsive */
+@media (max-width: 600px) {
+  .login-divider-2 {
+    margin: -80px 10px 0 10px;
+    padding: 1.5rem;
+  }
+
+  #login {
+    font-size: 1.8rem;
+  }
+
+  #sign-in {
+    font-size: 1rem;
+  }
+
+  .center-btn {
+    padding: 8px 20px;
+  }
 }
 </style>
