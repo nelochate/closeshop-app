@@ -1,28 +1,78 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
-import closeshopbg from '@/image/closeshopbg.png'
+import {
+  requiredValidator,
+  emailValidator,
+  passwordValidator,
+  confirmedValidator,
+} from '@/utils/validators'
+import { supabase, formActionDefault } from '@/utils/supabase'
+import AlertNotification from '@/common/AlertNotification.vue'
 
-const fname = ref('')
-const lname = ref('')
-const username = ref('')
-const password = ref('')
-const confirmPassword = ref('')
-const showPassword = ref(false)
 const router = useRouter()
 
-const login = () => {
-  console.log(
-    'Registering with',
-    fname.value,
-    lname.value,
-    username.value,
-    password.value,
-    confirmPassword.value,
-  )
-  // TODO: Call API later
+// Default form data
+const formDataDefault = {
+  firstName: '',
+  lastName: '',
+  email: '',
+  password: '',
+  confirmPassword: '',
 }
 
+const formData = ref({ ...formDataDefault })
+
+const formAction = ref({ ...formActionDefault })
+
+const refVform = ref()
+
+// Register function
+const onSubmit = async () => {
+  formAction.value = { ...formActionDefault, formProcess: true }
+
+  const { data, error } = await supabase.auth.signUp({
+    email: formData.value.email,
+    password: formData.value.password,
+    options: {
+      emailRedirectTo: `${window.location.origin}/`, // 👈 user will be redirected here after confirming
+      data: {
+        firstName: formData.value.firstName,
+        lastName: formData.value.lastName,
+        is_admin: false,
+      },
+    },
+  })
+
+  if (error) {
+    console.error(error)
+    formAction.value.formErrorMessage = error.message
+    formAction.value.formStatus = error.status
+    setTimeout(() => {
+      formAction.value.formErrorMessage = ''
+    }, 3000)
+  } else if (data) {
+    formAction.value.formSuccessMessage = 'Registration successful! Please check your email to confirm your account.'
+    setTimeout(() => {
+    router.replace('/')
+  }, 3000)
+  }
+
+  refVform.value?.reset()
+  formAction.value.formProcess = false
+}
+
+const onFormSubmit = () => {
+  refVform.value.validate().then(({ valid }) => {
+    if (valid) onSubmit()
+  })
+}
+
+// Password visibility states
+const showPassword = ref(false)
+const showConfirmPassword = ref(false)
+
+// Redirect to login when already have an account
 const goToLogin = () => {
   router.push('/')
 }
@@ -30,71 +80,55 @@ const goToLogin = () => {
 
 <template>
   <v-app class="main-bg">
-    <div>
-      <!-- Top Banner -->
+    <div class="responsive-container">
+
+      <!-- Banner -->
       <div class="login-divider-1">
-        <v-img :src="closeshopbg" cover class="logo" />
+        <v-img src="/images/closeshopbg.png" cover class="logo" />
         <div class="text-div">
           <h1 id="login">Register Now!</h1>
           <h2 id="sign-in">Sign up for a new account</h2>
         </div>
       </div>
 
-      <!-- Form Section -->
+      <!-- Form -->
       <div class="login-divider-2">
-        <v-form @submit.prevent="login" class="reg-form">
-          <v-text-field
-            v-model="fname"
-            label="First Name"
-            required
-            prepend-inner-icon="mdi-account"
-            class="input-field"
-          />
+      <!-- Alert Notification -->
+      <AlertNotification :formSuccessMessage="formAction.formSuccessMessage"
+        :formErrorMessage="formAction.formErrorMessage">
+      </AlertNotification>
+        <v-form ref="refVform" @submit.prevent="onFormSubmit">
+          <v-text-field v-model="formData.firstName" label="First Name" prepend-inner-icon="mdi-account"
+            class="input-field" :rules="[requiredValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="lname"
-            label="Last Name"
-            required
-            prepend-inner-icon="mdi-account"
-            class="input-field"
-          />
+          <v-text-field v-model="formData.lastName" label="Last Name" prepend-inner-icon="mdi-account"
+            class="input-field" :rules="[requiredValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="username"
-            label="Email"
-            type="email"
-            required
-            prepend-inner-icon="mdi-email"
-            class="input-field"
-          />
+          <v-text-field v-model="formData.email" label="Email" type="email" prepend-inner-icon="mdi-email"
+            class="input-field" :rules="[requiredValidator, emailValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            label="Password"
-            required
-            prepend-inner-icon="mdi-key-variant"
-            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            class="input-field"
-          />
+          <v-text-field v-model="formData.password" :type="showPassword ? 'text' : 'password'" label="Password"
+            prepend-inner-icon="mdi-key-variant" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword" class="input-field"
+            :rules="[requiredValidator, passwordValidator]" density="comfortable" />
 
-          <v-text-field
-            v-model="confirmPassword"
-            :type="showPassword ? 'text' : 'password'"
-            label="Confirm Password"
-            required
-            prepend-inner-icon="mdi-key-variant"
-            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            class="input-field"
-          />
+          <v-text-field v-model="formData.confirmPassword" :type="showConfirmPassword ? 'text' : 'password'"
+            label="Confirm Password" prepend-inner-icon="mdi-key-variant"
+            :append-inner-icon="showConfirmPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showConfirmPassword = !showConfirmPassword" class="input-field" :rules="[
+              requiredValidator,
+              () => confirmedValidator(formData.confirmPassword, formData.password),
+            ]" density="comfortable" />
 
           <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn mb-3" block> Register </v-btn>
-            <v-btn text @click="goToLogin" class="bottom-btn" block>
-              Already have an account? Login
+            <v-btn type="submit" color="primary" class="center-btn mb-5" prepend-icon="mdi-account-plus"
+              :disabled="formAction.formProcess" :loading="formAction.formProcess">
+              Register
             </v-btn>
+            <h4 class="text-center" text @click="goToLogin">
+              Already have an account?<RouterLink to="/" class="text-primary">
+                Login</RouterLink>
+            </h4>
           </div>
         </v-form>
       </div>
@@ -103,62 +137,69 @@ const goToLogin = () => {
 </template>
 
 <style scoped>
-/* Banner */
+/* Base responsive styles */
 .login-divider-1 {
-background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
+  background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
   height: 500px;
   max-height: 100%;
   text-align: center;
+  margin-top: 5;
 }
+
 .login-divider-2 {
   background: #ffffff;
   min-height: 300px;
   margin-top: -200px; /* pulls the form up into the banner space */
-  padding-top: 2rem;  /* keeps spacing inside */
+  padding-top: 1rem; /* consistent with LoginView */
   border-radius: 12px; /* optional: for smoother transition */
 }
-.logo {
-  width: 60%;
-  max-width: 280px;
-  margin: 0 auto;
-  display: block;
-}
-.text-div {
-  margin-top: 1rem;
-}
-#login {
-  font-size: 1.8rem;
-  font-weight: 600;
-  color: #fff;
-}
-#sign-in {
-  font-size: 1rem;
-  color: #fff;
+
+.input-field {
+  width: 350px;
+  max-width: 100%;
+  margin: auto;
+  margin-bottom: 1rem;
 }
 
-/* Form */
-.login-divider-2 {
-  background: #fff;
-}
-.reg-form {
+.form-actions {
   display: flex;
   flex-direction: column;
-  width: 100%;
-  max-width: 400px;
-  margin: 0 auto;
+  align-items: center;
+  gap: 10px; /* spacing between children */
+  position: relative;
 }
-.input-field {
-  width: 100%;
+
+.center-btn {
+  padding: 5px 50px 5px 50px;
+  font-weight: 500;
 }
-.form-actions {
+
+.bottom-btn {
+  transform: none;
+  margin-top: 10px;
+}
+
+#sign-in {
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+#login {
+  font-size: 2.5rem;
+  color: #ffffff;
+  font-family: 'Roboto', sans-serif;
+}
+
+.text-div {
+  text-align: center;
   margin-top: 1rem;
 }
-.center-btn {
-  font-weight: 500;
-  border-radius: 8px;
+
+.logo {
+  width: 350px;
+  max-width: 100%;
+  display: block;
+  margin: 0 auto;
 }
-.bottom-btn {
-  font-size: 0.9rem;
-  text-transform: none;
-}
+
 </style>
