@@ -11,8 +11,17 @@ const password = ref('')
 const showPassword = ref(false)
 const router = useRouter()
 
-// 🔹 Login function using Supabase
+// Reactive variable for error/success message
+const errorMessage = ref('') // Stores the error message
+const showError = ref(false) // Controls the visibility of the error message
+const successMessage = ref('') // Stores the success message
+const showSuccess = ref(false) // Controls the visibility of the success message
+
+const isLoading = ref() // Tracks the loading state
+
+// Login function using Supabase
 const login = async () => {
+  isLoading.value = true
   try {
     const { data, error } = await supabase.auth.signInWithPassword({
       email: username.value,
@@ -21,17 +30,39 @@ const login = async () => {
 
     if (error) {
       console.error('Login failed:', error.message)
-      alert('Invalid credentials: ' + error.message)
+      errorMessage.value = 'Invalid credentials: ' + error.message
+      showError.value = true
+
+       // Hide the error message after 3 seconds
+      setTimeout(() => {
+        showError.value = false
+      }, 3000)
+
       return
     }
 
     console.log('Login success:', data.user)
 
-    // Redirect to homepage after successful login
-    router.push('/homepage')
+    // Show success message
+    successMessage.value = 'Login successful! Redirecting to homepage...'
+    showSuccess.value = true
+
+    // Hide the success message after 3 seconds and redirect
+    setTimeout(() => {
+      showSuccess.value = false
+      router.push('/homepage') // Redirect to homepage
+    }, 3000)
   } catch (err) {
     console.error('Unexpected error:', err)
-    alert('Something went wrong, please try again.')
+    errorMessage.value = 'Something went wrong, please try again.'
+    showError.value = true
+
+    // Hide the error message after 3 seconds
+    setTimeout(() => {
+      showError.value = false
+    }, 3000)
+  } finally {
+    isLoading.value = false
   }
 }
 
@@ -60,34 +91,35 @@ onMounted(async () => {
         </div>
       </div>
 
+      <!-- Error Message -->
+      <div v-if="showError" class="error-message">
+        {{ errorMessage }}
+      </div>
+
+      <!-- Success Message -->
+      <div v-if="showSuccess" class="success-message">
+        {{ successMessage }}
+      </div>
+
       <!-- Login Form -->
       <div class="login-divider-2">
         <v-form @submit.prevent="login" class="login-form">
-          <v-text-field
-            v-model="username"
-            label="Email"
-            required
-            prepend-inner-icon="mdi-email-outline"
-            class="email-input"
-            :rules="[requiredValidator, emailValidator]"
-          />
+          <v-text-field v-model="username" label="Email" required prepend-inner-icon="mdi-email-outline"
+            class="email-input" :rules="[requiredValidator, emailValidator]" />
 
-          <v-text-field
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            label="Password"
-            required
-            prepend-inner-icon="mdi-key-variant"
-            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            class="pass-input"
-            :rules="[requiredValidator]"
-          />
+          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" label="Password" required
+            prepend-inner-icon="mdi-key-variant" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword" class="pass-input" :rules="[requiredValidator]" />
 
           <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn mb-5">
-              Login
+            <v-btn type="submit" color="primary" class="center-btn mb-5" prepend-icon="mdi-login" :loading="isLoading"
+              :disabled="isLoading">
+              <template v-slot:default>
+                <span v-if="!isLoading">Login</span>
+                <v-progress-circular v-else indeterminate color="white" size="20" />
+              </template>
             </v-btn>
+
 
             <span class="forgot-link">Forgot password? Click here</span>
 
@@ -192,5 +224,39 @@ onMounted(async () => {
   .center-btn {
     padding: 8px 20px;
   }
+
+.error-message {
+  position: absolute; /* Ensures it appears above other elements */
+  top: 20px; /* Adjust the position as needed */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10; /* Higher than the form container */
+  color: #ff4d4f;
+  background-color: #fff1f0c8;
+  border: 1px solid #ffa39ed1;
+  padding: 10px;
+  margin: 10px 0;
+  text-align: center;
+  border-radius: 5px;
+  width: 90%; /* Optional: Adjust width */
+  max-width: 400px; /* Optional: Limit max width */
+}
+
+.success-message {
+  position: absolute; /* Ensures it appears above other elements */
+  top: 20px; /* Adjust the position as needed */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10; /* Higher than the form container */
+  color: #52c41a;
+  background-color: #f6ffed;
+  border: 1px solid #b7eb8f;
+  padding: 10px;
+  margin: 10px 0;
+  text-align: center;
+  border-radius: 5px;
+  width: 90%; /* Optional: Adjust width */
+  max-width: 400px; /* Optional: Limit max width */
+}
 }
 </style>
