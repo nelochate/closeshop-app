@@ -48,8 +48,14 @@ const onSubmit = async () => {
     console.error(error)
     formAction.value.formErrorMessage = error.message
     formAction.value.formStatus = error.status
+    setTimeout(() => {
+      formAction.value.formErrorMessage = ''
+    }, 3000)
   } else if (data) {
     formAction.value.formSuccessMessage = 'Registration successful! Please check your email to confirm your account.'
+    setTimeout(() => {
+    router.replace('/')
+  }, 3000)
   }
 
   refVform.value?.reset()
