@@ -2,6 +2,13 @@
 import { onMounted, ref } from 'vue'
 import { useGeolocation } from '@/composables/useGeolocation'
 import { useRouter } from 'vue-router'
+<<<<<<< HEAD
+=======
+import { useAuthUserStore } from '@/stores/authUser'
+
+const router = useRouter()
+const authStore = useAuthUserStore()
+>>>>>>> feat/supabase
 
 const search = ref('')
 
@@ -27,11 +34,22 @@ onMounted(async () => {
   await requestPermission()
   await getLocation()
 })
+
+const handleLogout = async () => {
+  try {
+    await authStore.signOut()
+    router.push({ name: 'LoginView' }) // ✅ always go back to login
+  } catch (error) {
+    console.error('Logout failed:', error)
+    alert('Something went wrong while logging out.')
+  }
+}
 </script>
 
 <template>
   <v-app>
     <!-- Top Navigation -->
+<<<<<<< HEAD
     <v-app-bar class="top-nav" elevation="0" flat color="#5ca3eb">
       <div class="m-10">
         <v-text-field
@@ -43,13 +61,24 @@ onMounted(async () => {
           class="search-bar"
           @keyup.enter="onSearch"
         >
+=======
+    <v-app-bar class="top-nav " elevation="0" flat color="#5ca3eb">
+      <div class="m-10">
+        <v-text-field v-model="search" label="Search..." hide-details density="comfortable" variant="outlined"
+          class="search-bar" @keyup.enter="onSearch">
+>>>>>>> feat/supabase
           <template v-slot:append>
             <v-btn icon @click="onSearch">
               <v-icon>mdi-magnify</v-icon>
             </v-btn>
+<<<<<<< HEAD
 
             <v-btn value="notifications" @click="goNotifications">
               <v-icon>mdi-bell-outline</v-icon>
+=======
+            <v-btn icon to="/mapsearch">
+              <v-icon>mdi-search-web</v-icon>
+>>>>>>> feat/supabase
             </v-btn>
           </template>
         </v-text-field>
@@ -59,8 +88,14 @@ onMounted(async () => {
     <!-- Main Content -->
     <v-main class="app-main">
       <v-card class="mx-auto my-8 pa-6" color="primary" elevation="2" max-width="400">
+<<<<<<< HEAD
         <h1 class="text-h4 text-center text-white font-weight-bold">wapay content waiting for the database</h1>
       </v-card>
+=======
+        <h1 class="text-h4 text-center text-white font-weight-bold">second</h1>
+      </v-card>
+      <v-btn color="error" @click="handleLogout">Logout</v-btn>
+>>>>>>> feat/supabase
     </v-main>
 
     <!-- Bottom Navigation -->
