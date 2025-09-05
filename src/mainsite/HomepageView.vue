@@ -64,7 +64,7 @@ const handleLogout = async () => {
     <!-- Main Content -->
     <v-main class="app-main">
       <v-card class="mx-auto my-8 pa-6" color="primary" elevation="2" max-width="400">
-        <h1 class="text-h4 text-center text-white font-weight-bold">second</h1>
+        <h1 class="text-h4 text-center text-white font-weight-bold">testing 2.0</h1>
       </v-card>
       <v-btn color="error" @click="handleLogout">Logout</v-btn>
     </v-main>
