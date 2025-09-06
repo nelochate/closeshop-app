@@ -1,4 +1,3 @@
-import { createRouter, createWebHistory } from 'vue-router'
 import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
 import HomepageView from '@/mainsite/HomepageView.vue'
@@ -7,9 +6,12 @@ import CartView from '@/mainsite/CartView.vue'
 import MessageView from '@/mainsite/MessageView.vue'
 import ProfileView from '@/mainsite/ProfileView.vue'
 import NotificationView from '@/mainsite/NotificationView.vue'
+import ConfirmEmail from '@/common/ConfirmEmail.vue'
+import AdminDashboard from '@/mainsite/AdminDashboard.vue'
 
 import { useAuthUserStore } from '@/stores/authUser'
 import { supabase } from '@/utils/supabase'
+import { createRouter, createWebHistory } from 'vue-router'
 
 // define all routes in one place
 const routes = [
@@ -58,7 +60,19 @@ const routes = [
     name: 'notificationview',
     component: NotificationView,
     meta: { requiresAuth: true }
-  }
+  },
+  {
+  path: '/register-success',
+  name: 'cormfirm-email',
+  component: ConfirmEmail
+  },
+  {
+    path: '/admin-dashboard',
+    name: 'admin-dashboard',
+    component: AdminDashboard,
+    meta: { requiresAuth: true, requiresAdmin: true }
+  },
+
 ]
 
 const router = createRouter({
@@ -83,32 +97,34 @@ router.beforeEach(async (to) => {
 
   // protect admin routes
   if (to.meta.requiresAdmin) {
-    if (!isLoggedIn) return { path: '/' }
+    // get current session (make sure session is available)
+    const { data } = await supabase.auth.getSession()
+    const session = data?.session
 
-    try {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
+    // if no session, force login
+    if (!session) return { path: '/' }
 
-      if (!user) return { path: '/' }
+    const userId = session.user.id
 
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('role')
-        .eq('id', user.id)
-        .single()
+    // fetch role from profiles
+    const { data: profile, error } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', userId)
+      .single()
 
-      if (error) throw error
+    if (error) {
+      console.error('Error fetching profile in route guard:', error)
+      // if profile can't be fetched, send to homepage (or login if you prefer)
+      return { path: '/' }
+    }
 
-      if (profile?.role !== 'admin') {
-        return { path: '/homepage' }
-      }
-    } catch (err) {
-      console.error('Admin check failed:', err)
+    if (profile?.role !== 'admin') {
       return { path: '/homepage' }
     }
   }
 
+  // allow navigation
   return true
 })
 

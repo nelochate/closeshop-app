@@ -34,7 +34,7 @@ onMounted(async () => {
 const handleLogout = async () => {
   try {
     await authStore.signOut()
-    router.push({ name: 'LoginView' }) // ✅ always go back to login
+    router.push({ name: 'login' }) // ✅ always go back to login
   } catch (error) {
     console.error('Logout failed:', error)
     alert('Something went wrong while logging out.')
