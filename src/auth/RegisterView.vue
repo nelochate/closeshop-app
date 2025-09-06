@@ -39,7 +39,6 @@ const onSubmit = async () => {
       data: {
         firstName: formData.value.firstName,
         lastName: formData.value.lastName,
-        is_admin: false,
       },
     },
   })
@@ -52,10 +51,7 @@ const onSubmit = async () => {
       formAction.value.formErrorMessage = ''
     }, 3000)
   } else if (data) {
-    formAction.value.formSuccessMessage = 'Registration successful! Please check your email to confirm your account.'
-    setTimeout(() => {
-    router.replace('/')
-  }, 3000)
+    router.push('/register-success')
   }
 
   refVform.value?.reset()
