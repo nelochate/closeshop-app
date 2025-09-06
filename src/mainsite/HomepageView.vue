@@ -45,16 +45,23 @@ const handleLogout = async () => {
 <template>
   <v-app>
     <!-- Top Navigation -->
-    <v-app-bar class="top-nav " elevation="0" flat color="#5ca3eb">
+    <v-app-bar class="top-nav" elevation="0" flat color="#5ca3eb">
       <div class="m-10">
-        <v-text-field v-model="search" label="Search..." hide-details density="comfortable" variant="outlined"
-          class="search-bar" @keyup.enter="onSearch">
+        <v-text-field
+          v-model="search"
+          label="Search..."
+          hide-details
+          density="comfortable"
+          variant="outlined"
+          class="search-bar"
+          @keyup.enter="onSearch"
+        >
           <template v-slot:append>
             <v-btn icon @click="onSearch">
               <v-icon>mdi-magnify</v-icon>
             </v-btn>
-            <v-btn icon to="/mapsearch">
-              <v-icon>mdi-search-web</v-icon>
+            <v-btn icon @click="goNotifications">
+              <v-icon>mdi-bell-outline</v-icon>
             </v-btn>
           </template>
         </v-text-field>
