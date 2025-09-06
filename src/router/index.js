@@ -12,6 +12,7 @@ import AdminDashboard from '@/mainsite/AdminDashboard.vue'
 import { useAuthUserStore } from '@/stores/authUser'
 import { supabase } from '@/utils/supabase'
 import { createRouter, createWebHistory } from 'vue-router'
+import ShopBuild from '@/mainsite/ShopBuild.vue'
 
 // define all routes in one place
 const routes = [
@@ -72,6 +73,13 @@ const routes = [
     component: AdminDashboard,
     meta: { requiresAuth: true, requiresAdmin: true }
   },
+  {
+    path: '/shop-build',
+    name: 'shop-build',
+    component: ShopBuild,
+    meta: { requiresAuth: true, requiresAdmin: true }// ikaw edit ani bep ug sakto bani murag kaw may nakasabot dri new ni
+  }
+
 
 ]
 
