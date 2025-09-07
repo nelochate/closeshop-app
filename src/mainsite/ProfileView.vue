@@ -67,12 +67,7 @@ const pickImage = async (source: 'camera' | 'gallery') => {
 onMounted(loadProfile)
 
 // purchase sections
-const purchaseSections = [
-  'My purchases',
-  'On going',
-  'Cancelled',
-  'Purchased done/rated'
-]
+const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
 const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
 </script>
 
@@ -89,62 +84,186 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
     <v-divider />
 
     <!-- Main Profile Content -->
-   <v-main>
-  <div class="acc-view">
-    <div class="avatar-container">
-      <!-- Avatar -->
-      <v-avatar size="120" color="grey-lighten-3">
-        <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-        <v-icon v-else size="60">mdi-account</v-icon>
-      </v-avatar>
+    <v-main>
+      <div class="acc-view">
+        <div class="avatar-container">
+          <!-- Avatar -->
+          <v-avatar size="50" color="grey-lighten-3">
+            <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+            <v-icon v-else size="60">mdi-account</v-icon>
+          </v-avatar>
 
-      <!-- Floating Edit Button -->
-      <v-btn
-        class="edit-btn"
-        color="primary"
-        size="small"
-        icon
-        :loading="uploading"
-        @click="showPicker = true"
-      >
-        <v-icon>mdi-camera</v-icon>
-      </v-btn>
-    </div>
+          <!-- Floating Edit Button -->
+          <v-btn
+            class="edit-btn"
+            color="primary"
+            icon
+            elevation="4"
+            :loading="uploading"
+            @click="showPicker = true"
+          >
+            <v-icon class="camera-icon">mdi-camera</v-icon>
+          </v-btn>
+        </div>
 
-    <!-- Profile Info -->
-    <div class="profile-info">
-      <h2 class="name">Full Name</h2>
-      <v-btn variant="outlined" color="primary" size="small">Edit / Verify Profile</v-btn>
-      <p class="sell-link"><u>Click here to start selling</u></p>
-    </div>
-  </div>
+        <!-- Profile Info -->
+        <div class="profile-info">
+          <h2 class="name">Full Name</h2>
+          <v-btn variant="outlined" color="primary" size="small">Edit / Verify Profile</v-btn>
+          <p class="sell-link"><u>Click here to start selling</u></p>
+        </div>
+      </div>
 
-  <v-divider thickness="2" class="my-4"></v-divider>
+      <v-divider thickness="2" class="my-4"></v-divider>
+      <!-- Dropdown for Sections -->
+      <v-select
+        v-model="selectedSection"
+        :items="purchaseSections"
+        label="Purchase Status"
+        variant="outlined"
+        density="comfortable"
+      />
 
-  <!-- Dropdown for Sections -->
-  <v-select
-    v-model="selectedSection"
-    :items="purchaseSections"
-    label="Purchase Status"
-    variant="outlined"
-    density="comfortable"
-  ></v-select>
+      <!-- Show this when "My purchases" is chosen -->
+      <v-expand-transition>
+        <div v-if="selectedSection === 'My purchases'" class="mypurchases">
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 1</v-card-title>
+              <span class="price">₱100.00</span>
+            </div>
+          </v-card>
 
-  <!-- Show content depending on selection -->
-  <v-expand-transition>
-    <div v-if="selectedSection">
-      <v-card class="my-4" outlined>
-        <v-card-title>{{ selectedSection }}</v-card-title>
-        <v-card-subtitle>Sample item 1</v-card-subtitle>
-      </v-card>
-      <v-card class="my-2" outlined>
-        <v-card-title>{{ selectedSection }}</v-card-title>
-        <v-card-subtitle>Sample item 2</v-card-subtitle>
-      </v-card>
-    </div>
-  </v-expand-transition>
-</v-main>
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 2</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
 
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic3.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 3</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+        </div>
+      </v-expand-transition>
+
+      <!-- Show this when "On going" is chosen -->
+      <v-expand-transition>
+        <div v-if="selectedSection === 'On going'" class="ongoing">
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic3.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 3</v-card-title>
+              <span class="price">₱100.00</span>
+            </div>
+          </v-card>
+
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic3.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 2</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic3.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 3</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+        </div>
+      </v-expand-transition>
+
+      <!-- Show this when "Cancelled" is chosen -->
+      <v-expand-transition>
+        <div v-if="selectedSection === 'Cancelled'" class="cancelled">
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 1</v-card-title>
+              <span class="price">₱100.00</span>
+            </div>
+          </v-card>
+
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 1</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 1</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+        </div>
+      </v-expand-transition>
+
+      <!-- Show this when "Purchased done/rated" is chosen -->
+      <v-expand-transition>
+        <div v-if="selectedSection === 'Purchased done/rated'" class="purchased-done">
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 2</v-card-title>
+              <span class="price">₱100.00</span>
+            </div>
+          </v-card>
+
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 2</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+
+          <v-card class="my-4 d-flex align-center pa-2" outlined>
+            <div class="img-container">
+              <v-img src="/public/sample_img/pic1.jpg" width="50" height="50" cover />
+            </div>
+            <div class="ml-4 d-flex flex-column">
+              <v-card-title class="pa-0">Pic 2</v-card-title>
+              <span class="price">₱150.00</span>
+            </div>
+          </v-card>
+        </div>
+      </v-expand-transition>
+    </v-main>
 
     <!-- Bottom Sheet for options -->
     <v-bottom-sheet v-model="showPicker">
@@ -168,41 +287,140 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
 </template>
 
 <style scoped>
+/* Profile container */
 .acc-view {
   padding: 24px;
   display: flex;
-  align-items: center;
+  align-items: left;
   gap: 24px;
   background: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
   border-radius: 16px;
+  flex-wrap: wrap; /* allow wrapping on smaller screens */
 }
 
+/* Avatar container */
 .avatar-container {
   position: relative;
-  display: inline-block;
+  display: inline-flex;
+  flex-shrink: 0;
 }
 
 .edit-btn {
   position: absolute;
   bottom: 0;
   right: 0;
-  transform: translate(25%, 25%);
+  transform: translate(30%, 30%);
   border: 2px solid white;
+  border-radius: 50%;
+  transition: all 0.2s ease-in-out;
+}
+/* Add a hover animation */
+.edit-btn:hover {
+  transform: translate(30%, 30%) scale(1.1);
 }
 
+/* Profile text section */
 .profile-info {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0;
 }
 
 .name {
   margin: 0;
+  font-size: 1.2rem;
 }
 
 .sell-link {
   font-size: 0.9rem;
   color: #1976d2;
   cursor: pointer;
+}
+
+/* Card responsiveness */
+.v-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.img-container {
+  flex-shrink: 0;
+}
+
+/* Camera icon responsive scaling */
+.camera-icon {
+  font-size: 22px;
+}
+
+/* Responsive breakpoints */
+@media (max-width: 768px) {
+  /* Tablet */
+  .acc-view {
+    padding: 16px;
+    gap: 16px;
+  }
+
+  .name {
+    font-size: 1.1rem;
+  }
+
+  .profile-info {
+    gap: 6px;
+  }
+
+  .v-card {
+    flex-direction: row;
+    align-items: center;
+  }
+  .edit-btn {
+    width: 36px;
+    height: 36px;
+  }
+  .camera-icon {
+    font-size: 20px;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Mobile */
+  .acc-view {
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 12px;
+  }
+
+  .profile-info {
+    align-items: center;
+  }
+
+  .name {
+    font-size: 1rem;
+  }
+
+  .v-card {
+    flex-direction: row;
+    align-items: center;
+    width: 100%;
+  }
+
+  .img-container v-img {
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .price {
+    font-size: 0.85rem;
+  }
+  .edit-btn {
+    width: 30px;
+    height: 30px;
+  }
+  .camera-icon {
+    font-size: 18px;
+  }
 }
 </style>
