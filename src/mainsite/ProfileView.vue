@@ -291,20 +291,21 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
 .acc-view {
   padding: 24px;
   display: flex;
-  align-items: left;
+  align-items: center;
   gap: 24px;
   background: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
   border-radius: 16px;
-  flex-wrap: wrap; /* allow wrapping on smaller screens */
+  flex-wrap: wrap; /* allow wrapping if very small */
 }
 
 /* Avatar container */
 .avatar-container {
   position: relative;
-  display: inline-flex;
+  display: inline-block;
   flex-shrink: 0;
 }
 
+/* Floating edit button */
 .edit-btn {
   position: absolute;
   bottom: 0;
@@ -314,17 +315,18 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
   border-radius: 50%;
   transition: all 0.2s ease-in-out;
 }
-/* Add a hover animation */
 .edit-btn:hover {
   transform: translate(30%, 30%) scale(1.1);
 }
 
-/* Profile text section */
+/* Profile info always sits beside avatar */
 .profile-info {
   display: flex;
   flex-direction: column;
   gap: 8px;
   min-width: 0;
+  align-items: flex-start; /* keep left aligned */
+  text-align: left;
 }
 
 .name {
@@ -350,14 +352,13 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
   flex-shrink: 0;
 }
 
-/* Camera icon responsive scaling */
+/* Camera icon */
 .camera-icon {
   font-size: 22px;
 }
 
-/* Responsive breakpoints */
+/* Tablet */
 @media (max-width: 768px) {
-  /* Tablet */
   .acc-view {
     padding: 16px;
     gap: 16px;
@@ -371,30 +372,28 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
     gap: 6px;
   }
 
-  .v-card {
-    flex-direction: row;
-    align-items: center;
-  }
   .edit-btn {
     width: 36px;
     height: 36px;
   }
+
   .camera-icon {
     font-size: 20px;
   }
 }
 
+/* Mobile */
 @media (max-width: 480px) {
-  /* Mobile */
   .acc-view {
-    flex-direction: column;
-    align-items: center;
-    text-align: center;
+    flex-direction: row;         /* ✅ keep avatar + info side by side */
+    align-items: flex-start;     /* align top */
     gap: 12px;
   }
 
   .profile-info {
-    align-items: center;
+    align-items: flex-start;     /* ✅ text/buttons left aligned */
+    text-align: left;
+    flex: 1;                     /* take remaining width */
   }
 
   .name {
@@ -415,10 +414,12 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
   .price {
     font-size: 0.85rem;
   }
+
   .edit-btn {
     width: 30px;
     height: 30px;
   }
+
   .camera-icon {
     font-size: 18px;
   }
