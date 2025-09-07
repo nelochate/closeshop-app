@@ -91,10 +91,10 @@ const login = async () => {
 }
 
 
-
+/*
 const goToRegister = () => {
   router.push('/register')
-}
+}*/
 
 onMounted(async () => {
   const { data: { session } } = await supabase.auth.getSession()
@@ -106,182 +106,223 @@ onMounted(async () => {
 
 <template>
   <v-app class="main-bg">
-    <div>
-      <!-- Header / Banner -->
-      <div class="login-divider-1">
-        <v-img src="/images/closeshopbg.png" cover class="logo"> </v-img>
+    <div class="login-container">
+      <!-- Logo + Title -->
+      <div class="login-header d-flex flex-column align-center">
+        <div class="circle-deco"></div>
 
-        <div class="text-div">
-          <h1 id="login">Login</h1>
-          <h2 id="sign-in">Sign in to your account</h2>
-        </div>
+        <!-- Logo -->
+        <v-img
+          src="/images/logo.png"
+          max-width="100"
+          class="logo"
+
+        ></v-img>
+
+        <!-- Title + Subtitle -->
+        <h2 class="login-title">CloseShop</h2>
+        <p class="login-subtitle">Use the account below to sign in</p>
       </div>
 
-      <!-- Error Message -->
-      <div v-if="showError" class="error-message">
-        {{ errorMessage }}
-      </div>
 
-      <!-- Success Message -->
-      <div v-if="showSuccess" class="success-message">
-        {{ successMessage }}
-      </div>
+      <!-- Error & Success Messages -->
+      <div v-if="showError" class="error-message">{{ errorMessage }}</div>
+      <div v-if="showSuccess" class="success-message">{{ successMessage }}</div>
 
-      <!-- Login Form -->
-      <div class="login-divider-2">
-        <v-form @submit.prevent="login" class="login-form">
-          <v-text-field v-model="username" label="Email" required prepend-inner-icon="mdi-email-outline"
-            class="email-input" :rules="[requiredValidator, emailValidator]" />
+      <!-- Form Card -->
+      <div class="login-card">
+        <v-form @submit.prevent="login">
+          <v-text-field
+            v-model="username"
+            placeholder="Email"
+            variant="outlined"
+            density="comfortable"
+            class="login-input"
+            :rules="[requiredValidator, emailValidator]"
+          />
 
-          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" label="Password" required
-            prepend-inner-icon="mdi-key-variant" :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword" class="pass-input" :rules="[requiredValidator]" />
+          <v-text-field
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="Password"
+            variant="outlined"
+            density="comfortable"
+            class="login-input"
+            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword"
+            :rules="[requiredValidator]"
+          />
 
-          <div class="form-actions">
-            <v-btn type="submit" color="primary" class="center-btn mb-5" prepend-icon="mdi-login" :loading="isLoading"
-              :disabled="isLoading">
-              <template v-slot:default>
-                <span v-if="!isLoading">Login</span>
-                <v-progress-circular v-else indeterminate color="white" size="20" />
-              </template>
-            </v-btn>
+          <v-btn
+            type="submit"
+            color="primary"
+            block
+            class="login-btn"
+            :loading="isLoading"
+            :disabled="isLoading"
+            prepend-icon="mdi-login"
+          >
+            Sign In
+          </v-btn>
 
+          <p class="forgot-link">Forgot Password</p>
 
-            <span class="forgot-link">Forgot password? Click here</span>
+          <p class="register-link">
+            Don’t have an account? <RouterLink to="/register">Register</RouterLink>
+          </p>
 
-            <h4 class="text-center" text @click="goToRegister">
-              Don't have an account?
-              <RouterLink to="/register" class="text-primary">
-                Register
-              </RouterLink>
-            </h4>
+          <!-- Divider -->
+          <div class="divider">
+            <span></span>
+            <p>Or sign up with</p>
+            <span></span>
           </div>
+
+          <!-- Social Buttons -->
+          <v-btn block outlined class="social-btn">
+            <v-icon start>mdi-google</v-icon> Continue with Google
+          </v-btn>
+          <v-btn block outlined class="social-btn">
+            <v-icon start>mdi-apple</v-icon> Continue with Apple
+          </v-btn>
         </v-form>
       </div>
     </div>
   </v-app>
 </template>
 
+
 <style scoped>
-/* Banner section */
-.login-divider-1 {
-  background-image: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
-  min-height: 300px;
-  text-align: center;
-  padding: 1rem;
-}
-
-/* Form container */
-.login-divider-2 {
-  background: #ffffff;
-  padding: 2rem 1rem;
-  border-radius: 12px;
-  margin: -100px auto 0 auto;
-  max-width: 400px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-/* Inputs */
-.email-input,
-.pass-input {
-  width: 100%;
-  margin: 10px 0;
-}
-
-/* Form actions */
-.form-actions {
+.login-container {
+  position: relative;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 12px;
+  min-height: 100vh;
+  background: #f5f5f5; /* light background */
+  padding: 0;
 }
 
-.center-btn {
-  padding: 10px 40px;
-  font-weight: 500;
+.login-header {
+  background-color: #2e73b8; /* solid blue like your screenshot */
+  color: #fff;
   width: 100%;
+  height: 30%;
+  padding: 3rem 2rem 5rem 2rem;
+  position: relative;
+  border-bottom-left-radius: 40px; /* smooth curve if you want */
+  overflow: hidden;
+  margin-bottom: 50px; /* pulls the header down */
 }
 
-#sign-in {
-  color: #ffffff;
-  font-family: 'Roboto', sans-serif;
+.circle-deco {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 155px;
+  height: 148px;
+  background-color: rgba(255, 255, 255, 0.252);
+  border-radius: 50%;
 }
 
-#login {
-  font-size: 2rem;
-  color: #ffffff;
-  font-family: 'Roboto', sans-serif;
+.login-title {
+  font-size: 28px;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.login-subtitle {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.login-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  padding: 2rem;
+  width: 100%;
+  max-width: 400px;
+  margin-top: -60px; /* pulls card upward into header */
+}
+
+.login-input {
+  margin-bottom: 1rem;
+  border-radius: 10px;
+}
+
+.login-btn {
+  margin-top: 1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  height: 45px;
 }
 
 .forgot-link {
-  font-size: 14px;
-  margin-bottom: 5px;
-  color: #555;
+  margin-top: 0.8rem;
+  font-size: 13px;
+  color: #666;
+  text-align: center;
   cursor: pointer;
 }
 
-.text-div {
+.register-link {
+  margin: 1rem 0;
+  font-size: 14px;
   text-align: center;
-  margin-top: 1rem;
 }
 
-.logo {
-  width: 200px;
-  max-width: 100%;
-  display: block;
-  margin: 0 auto;
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 1.5rem 0;
 }
-.error-message {
-  position: absolute; /* Ensures it appears above other elements */
-  top: 20px; /* Adjust the position as needed */
+
+.divider span {
+  flex: 1;
+  height: 1px;
+  background: #ddd;
+}
+
+.divider p {
+  margin: 0 10px;
+  font-size: 13px;
+  color: #777;
+}
+
+.social-btn {
+  margin-top: 0.6rem;
+  border-radius: 10px;
+  font-weight: 500;
+  text-transform: none;
+}
+.logo {
+  width: 80px;
+}
+
+.error-message,
+.success-message {
+  position: absolute;
+  top: 20px;
   left: 50%;
   transform: translateX(-50%);
-  z-index: 10; /* Higher than the form container */
-  color: #ff4d4f;
-  background-color: #fff1f0c8;
-  border: 1px solid #ffa39ed1;
-  padding: 10px;
-  margin: 10px 0;
-  text-align: center;
-  border-radius: 5px;
-  width: 90%; /* Optional: Adjust width */
-  max-width: 400px; /* Optional: Limit max width */
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 10;
+}
+
+.error-message {
+  background: #ffcdd2cf;
+  color: #b71c1c;
 }
 
 .success-message {
-  position: absolute; /* Ensures it appears above other elements */
-  top: 20px; /* Adjust the position as needed */
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 10; /* Higher than the form container */
-  color: rgb(30, 79, 6);
-  background-color: #f6ffed;
-  border: 1px solid #c2e8a5;
-  padding: 10px;
-  margin: 10px 0;
-  text-align: center;
-  border-radius: 5px;
-  width: 90%; /* Optional: Adjust width */
-  max-width: 400px; /* Optional: Limit max width */
+  background: #c8e6c9d4;
+  color: #1b5e1fa8;
 }
 
-/* 🔹 Responsive */
-@media (max-width: 600px) {
-  .login-divider-2 {
-    margin: -80px 10px 0 10px;
-    padding: 1.5rem;
-  }
-
-  #login {
-    font-size: 1.8rem;
-  }
-
-  #sign-in {
-    font-size: 1rem;
-  }
-
-  .center-btn {
-    padding: 8px 20px;
-  }
-}
 </style>
+
