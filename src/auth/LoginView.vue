@@ -33,31 +33,55 @@ const login = async () => {
       errorMessage.value = 'Invalid credentials: ' + error.message
       showError.value = true
 
-       // Hide the error message after 3 seconds
       setTimeout(() => {
         showError.value = false
       }, 3000)
-
       return
     }
 
-    console.log('Login success:', data.user)
+    const user = data.user
+    console.log('Login success:', user)
+
+    // ✅ Check profile role
+    let { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .single()
+
+    if (profileError && profileError.code === 'PGRST116') {
+      // No profile found → create one
+      const { error: insertError } = await supabase.from('profiles').insert([
+        {
+          id: user.id,
+          role: 'customer', // default role
+        },
+      ])
+      if (insertError) {
+        console.error('Failed to auto-create profile:', insertError.message)
+      }
+      profile = { id: user.id, role: 'customer' } // fallback
+    }
+
+    // ✅ Redirect based on role
+    let redirectPath = '/homepage'
+    if (profile?.role === 'admin') {
+      redirectPath = '/admin-dashboard'
+    }
 
     // Show success message
-    successMessage.value = 'Login successful! Redirecting to homepage...'
+    successMessage.value = 'Login successful! Redirecting...'
     showSuccess.value = true
 
-    // Hide the success message after 3 seconds and redirect
     setTimeout(() => {
       showSuccess.value = false
-      router.push('/homepage') // Redirect to homepage
-    }, 3000)
+      router.push(redirectPath)
+    }, 2000) // quicker redirect
   } catch (err) {
     console.error('Unexpected error:', err)
     errorMessage.value = 'Something went wrong, please try again.'
     showError.value = true
 
-    // Hide the error message after 3 seconds
     setTimeout(() => {
       showError.value = false
     }, 3000)
@@ -65,6 +89,8 @@ const login = async () => {
     isLoading.value = false
   }
 }
+
+
 
 const goToRegister = () => {
   router.push('/register')
