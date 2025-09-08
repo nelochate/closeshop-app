@@ -29,17 +29,19 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 // Register function
+// Register function
 const onSubmit = async () => {
   formAction.value = { ...formActionDefault, formProcess: true }
 
+  // 1. Sign up user in Supabase Auth
   const { data, error } = await supabase.auth.signUp({
     email: formData.value.email,
     password: formData.value.password,
     options: {
       emailRedirectTo: `${window.location.origin}/`,
       data: {
-        firstName: formData.value.firstName,
-        lastName: formData.value.lastName,
+        first_name: formData.value.firstName,
+        last_name: formData.value.lastName,
       },
     },
   })
@@ -51,7 +53,19 @@ const onSubmit = async () => {
     setTimeout(() => {
       formAction.value.formErrorMessage = ''
     }, 3000)
-  } else if (data) {
+  } else if (data?.user) {
+    // 2. Insert into profiles table
+    const { error: profileError } = await supabase.from('profiles').insert({
+      id: data.user.id, // link to auth.users.id
+      first_name: formData.value.firstName,
+      last_name: formData.value.lastName,
+    })
+
+    if (profileError) {
+      console.error('Profile insert error:', profileError.message)
+    }
+
+    // 3. Redirect to success page
     router.push('/register-success')
   }
 
@@ -59,6 +73,8 @@ const onSubmit = async () => {
   formAction.value.formProcess = false
 }
 
+
+//
 const onFormSubmit = () => {
   refVform.value.validate().then(({ valid }) => {
     if (valid) onSubmit()
