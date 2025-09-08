@@ -12,40 +12,93 @@ const showPicker = ref(false) // bottom sheet control
 const goBack = () => router.back()
 
 // Load profile
-const loadProfile = async () => {
-  const { data, error } = await supabase.from('profiles').select('avatar_url').single()
-  if (!error) avatarUrl.value = data?.avatar_url || null
+const user = ref<any>(null)
+const fullName = ref<string>('')
+
+const loadUser = async () => {
+  // 1. Get logged-in user from auth
+  const { data: userData, error } = await supabase.auth.getUser()
+
+  if (error || !userData?.user) {
+    console.error('No user found:', error?.message)
+    return
+  }
+
+  user.value = userData.user
+
+  // 2. Build full name from auth.user_metadata
+  const first = user.value.user_metadata?.first_name || ''
+  const last = user.value.user_metadata?.last_name || ''
+
+  fullName.value = `${first} ${last}`.trim()
 }
+
+onMounted(() => {
+  loadUser()
+})
+
 
 // Upload image to Supabase
 const uploadAvatar = async (file: Blob) => {
   try {
     uploading.value = true
+
+    // 1. Generate unique filename
     const fileName = `${Date.now()}.jpeg`
     const filePath = `avatars/${fileName}`
 
+    // 2. Upload to Supabase storage
     const { error: uploadError } = await supabase.storage
       .from('avatars')
       .upload(filePath, file, { upsert: true })
-    if (uploadError) throw uploadError
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    if (uploadError) {
+      console.error('Upload failed:', uploadError.message)
+      return
+    }
 
+    // 3. Get public URL
+    const { data: publicUrlData, error: publicUrlError } = supabase
+      .storage
+      .from('avatars')
+      .getPublicUrl(filePath)
+
+    if (publicUrlError) {
+      console.error('Failed to get public URL:', publicUrlError.message)
+      return
+    }
+
+    const publicUrl = publicUrlData.publicUrl
+
+    // 4. Get current user
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+
+    if (userError || !userData?.user) {
+      console.error('No logged in user found:', userError?.message)
+      return
+    }
+
+    // 5. Update profile with avatar_url
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ avatar_url: publicUrl })
-      .eq('id', (await supabase.auth.getUser()).data.user?.id)
-    if (updateError) throw updateError
+      .eq('id', userData.user.id)
 
+    if (updateError) {
+      console.error('Profile update failed:', updateError.message)
+      return
+    }
+
+    // 6. Update local state
     avatarUrl.value = publicUrl
   } catch (err) {
-    console.error('Upload error:', err)
+    console.error('Unexpected error:', err)
   } finally {
     uploading.value = false
   }
 }
+
+
 
 // Pick image from camera/gallery
 const pickImage = async (source: 'camera' | 'gallery') => {
@@ -64,7 +117,6 @@ const pickImage = async (source: 'camera' | 'gallery') => {
   showPicker.value = false
 }
 
-onMounted(loadProfile)
 
 // purchase sections
 const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
@@ -94,38 +146,38 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
           </v-avatar>
 
           <!-- Floating Edit Button -->
-          <v-btn
-            class="edit-btn"
-            color="primary"
-            icon
-            elevation="4"
-            :loading="uploading"
-            @click="showPicker = true"
-          >
+          <v-btn class="edit-btn" color="primary" icon elevation="4" :loading="uploading" @click="showPicker = true">
             <v-icon class="camera-icon">mdi-camera</v-icon>
           </v-btn>
         </div>
 
         <!-- Profile Info -->
         <div class="profile-info">
-          <h2 class="name">Full Name</h2>
-          <v-btn variant="outlined" color="primary" size="small">Edit / Verify Profile</v-btn>
+          <!-- Full name -->
+          <!-- Full name -->
+          <h2 class="name">
+            {{ fullName || 'Unnamed User' }}
+          </h2>
+
+          <!-- Email below -->
+          <p class="email">{{ user?.email || 'No email available' }}</p>
+
+          <!-- Actions -->
+          <v-btn variant="outlined" color="primary" size="small">
+            Edit / Verify Profile
+          </v-btn>
           <p class="sell-link" @click="$router.push('/shop-build')">
             <u>Click here to start selling</u>
           </p>
 
         </div>
-      </div>
 
+
+      </div>
       <v-divider thickness="2" class="my-4"></v-divider>
       <!-- Dropdown for Sections -->
-      <v-select
-        v-model="selectedSection"
-        :items="purchaseSections"
-        label="Purchase Status"
-        variant="outlined"
-        density="comfortable"
-      />
+      <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
+        density="comfortable" />
 
       <!-- Show this when "My purchases" is chosen -->
       <v-expand-transition>
@@ -399,9 +451,18 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
     flex: 1; /* take remaining width */
   }
 
-  .name {
-    font-size: 1rem;
-  }
+ .name {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.email {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
 
   .v-card {
     flex-direction: row;
