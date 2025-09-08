@@ -77,7 +77,7 @@ const routes = [
     path: '/shop-build',
     name: 'shop-build',
     component: ShopBuild,
-    meta: { requiresAuth: true, requiresAdmin: true }// ikaw edit ani bep ug sakto bani murag kaw may nakasabot dri new ni
+     meta: { requiresAuth: true }// ikaw edit ani bep ug sakto bani murag kaw may nakasabot dri new ni
   }
 
 
