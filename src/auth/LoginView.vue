@@ -91,10 +91,7 @@ const login = async () => {
 }
 
 
-/*
-const goToRegister = () => {
-  router.push('/register')
-}*/
+
 
 onMounted(async () => {
   const { data: { session } } = await supabase.auth.getSession()
@@ -170,7 +167,6 @@ onMounted(async () => {
   </v-app>
 </template>
 
-
 <style scoped>
 .login-container {
   position: relative;
@@ -181,6 +177,7 @@ onMounted(async () => {
   background: #f5f5f5; /* light background */
   padding: 0;
 }
+
 
 .login-header {
   background-color: #2e73b8; /* solid blue like your screenshot */
