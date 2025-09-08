@@ -1,7 +1,10 @@
-// src/composables/useGeolocation.ts
+// fr to display user location
 import { ref } from 'vue'
-import { Geolocation } from '@capacitor/geolocation'
+import { useGeolocation } from '@/composables/useGeolocation'
+import { useMap } from '@/composables/useMap'
 
+
+import { Geolocation } from '@capacitor/geolocation'
 const latitude = ref<number | null>(null)
 const longitude = ref<number | null>(null)
 const error = ref<string | null>(null)
@@ -73,3 +76,70 @@ export function useGeolocation() {
     stopWatching,
   }
 }
+
+ /*
+// use map for the shop-build.vue file, for display shop location
+import L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+
+let map: L.Map | null = null
+let marker: L.Marker | null = null
+
+const isMapReady = ref(false)
+
+/**
+ // Initialize the map
+ 
+export function initMap(elementId: string, defaultCoords: [number, number] = [8.9475, 125.5406]) {
+  if (map) return map
+
+  map = L.map(elementId).setView(defaultCoords, 13)
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors'
+  }).addTo(map)
+
+  marker = L.marker(defaultCoords).addTo(map)
+  isMapReady.value = true
+  return map
+}
+
+/**
+ // Update marker and center map
+ 
+export function updateMapPosition(coords: [number, number]) {
+  if (!map || !marker) return
+  marker.setLatLng(coords)
+  map.setView(coords, 16)
+}
+
+/**
+  Geocode an address string to coords
+ 
+export async function geocodeAddress(address: string): Promise<[number, number] | null> {
+  if (!address) return null
+
+  try {
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+    )
+    const results = await response.json()
+    if (results && results.length > 0) {
+      const { lat, lon } = results[0]
+      return [parseFloat(lat), parseFloat(lon)]
+    }
+  } catch (err) {
+    console.error('Geocode error:', err)
+  }
+  return null
+}
+
+export function useMap() {
+  return {
+    initMap,
+    updateMapPosition,
+    geocodeAddress,
+    isMapReady
+  }
+}
+  */
