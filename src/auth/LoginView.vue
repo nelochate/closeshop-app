@@ -91,10 +91,7 @@ const login = async () => {
 }
 
 
-/*
-const goToRegister = () => {
-  router.push('/register')
-}*/
+
 
 onMounted(async () => {
   const { data: { session } } = await supabase.auth.getSession()
@@ -183,7 +180,7 @@ onMounted(async () => {
             <v-icon start>mdi-google</v-icon> Continue with Google
           </v-btn>
           <v-btn block outlined class="social-btn">
-            <v-icon start>mdi-apple</v-icon> Continue with Apple
+            <v-icon start color="blue">mdi-facebook</v-icon> Continue with facebook
           </v-btn>
         </v-form>
       </div>
