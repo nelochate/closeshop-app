@@ -29,7 +29,6 @@ const showPassword = ref(false)
 const showConfirmPassword = ref(false)
 
 // Register function
-// Register function
 const onSubmit = async () => {
   formAction.value = { ...formActionDefault, formProcess: true }
 
@@ -72,6 +71,7 @@ const onSubmit = async () => {
   refVform.value?.reset()
   formAction.value.formProcess = false
 }
+
 
 
 //
