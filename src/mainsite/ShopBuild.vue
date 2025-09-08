@@ -1,20 +1,27 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useRouter } from 'vue-router';
-import { supabase } from '@/utils/supabase';
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera';
+import { ref, onMounted, watch, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { supabase } from '@/utils/supabase'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useGeolocation } from '@/composables/useGeolocation'
+import { useMap } from '@/composables/useMap'
 
+// router
+const router = useRouter()
 
-const router = useRouter();
-const avatarUrl = ref<string | null>(null);
-const uploading = ref(false);
-const showPicker = ref(false);
+// states
+const avatarUrl = ref<string | null>(null)
+const uploading = ref(false)
+const showPicker = ref(false)
 
-const businessName = ref('');
-const aboutUs = ref('');
-const openTime = ref('');
-const closeTime = ref('');
+const businessName = ref('')
+const aboutUs = ref('')
+const openTime = ref('')
+const closeTime = ref('')
+
+const { latitude, longitude, getLocation } = useGeolocation()
+const { initMap, updateMapPosition, geocodeAddress, isMapReady } = useMap()
+
 const address = {
   building: ref(''),
   street: ref(''),
@@ -25,41 +32,42 @@ const address = {
   province: ref(''),
   region: ref(''),
   postal: ref('')
-};
+}
 
-const goBack = () => router.back();
+// helpers
+const goBack = () => router.back()
 
 const loadProfile = async () => {
-  const { data, error } = await supabase.from('profiles').select('avatar_url').single();
-  if (!error) avatarUrl.value = data?.avatar_url || null;
-};
+  const { data, error } = await supabase.from('profiles').select('avatar_url').single()
+  if (!error) avatarUrl.value = data?.avatar_url || null
+}
 
 const uploadAvatar = async (file: Blob) => {
   try {
-    uploading.value = true;
-    const fileName = `${Date.now()}.jpeg`;
-    const filePath = `avatars/${fileName}`;
+    uploading.value = true
+    const fileName = `${Date.now()}.jpeg`
+    const filePath = `avatars/${fileName}`
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(filePath, file, { upsert: true });
-    if (uploadError) throw uploadError;
+      .upload(filePath, file, { upsert: true })
+    if (uploadError) throw uploadError
 
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath);
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
 
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ avatar_url: publicUrl })
-      .eq('id', (await supabase.auth.getUser()).data.user?.id);
-    if (updateError) throw updateError;
+      .eq('id', (await supabase.auth.getUser()).data.user?.id)
+    if (updateError) throw updateError
 
-    avatarUrl.value = publicUrl;
+    avatarUrl.value = publicUrl
   } catch (err) {
-    console.error('Upload error:', err);
+    console.error('Upload error:', err)
   } finally {
-    uploading.value = false;
+    uploading.value = false
   }
-};
+}
 
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
@@ -68,21 +76,55 @@ const pickImage = async (source: 'camera' | 'gallery') => {
       allowEditing: true,
       resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
-    });
+    })
 
     if (photo.webPath) {
-      const response = await fetch(photo.webPath);
-      const blob = await response.blob();
-      await uploadAvatar(blob);
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      await uploadAvatar(blob)
     }
   } catch (err) {
-    console.error('Error picking image:', err);
+    console.error('Error picking image:', err)
   } finally {
-    showPicker.value = false;
+    showPicker.value = false
   }
-};
+}
 
-onMounted(loadProfile);
+// build full address string
+const fullAddress = () => {
+  return [
+    address.building.value,
+    address.street.value,
+    address.purok.value,
+    address.subdivision.value,
+    address.barangay.value,
+    address.city.value,
+    address.province.value,
+    address.region.value,
+    address.postal.value
+  ].filter(Boolean).join(', ')
+}
+
+// lifecycle
+onMounted(async () => {
+  await loadProfile()
+  await nextTick()
+  initMap('map')
+
+  // Try to get user’s current location
+  const pos = await getLocation()
+  if (pos) {
+    updateMapPosition([pos.coords.latitude, pos.coords.longitude])
+  }
+})
+
+// watch for address changes → geocode
+watch(Object.values(address), async () => {
+  const addr = fullAddress()
+  if (!addr) return
+  const coords = await geocodeAddress(addr)
+  if (coords) updateMapPosition(coords)
+})
 </script>
 
 <template>
@@ -145,37 +187,27 @@ onMounted(loadProfile);
       <h2 class="section-title">Operating Hours</h2>
       <v-row>
         <v-col cols="6">
-          <v-text-field
-            v-model="openTime"
-            label="Opening Time"
-            type="time"
-            outlined
-          />
+          <v-text-field v-model="openTime" label="Opening Time" type="time" outlined />
         </v-col>
         <v-col cols="6">
-          <v-text-field
-            v-model="closeTime"
-            label="Closing Time"
-            type="time"
-            outlined
-          />
+          <v-text-field v-model="closeTime" label="Closing Time" type="time" outlined />
         </v-col>
       </v-row>
 
       <!-- Address Section -->
       <h2 class="section-title">Address</h2>
-      <v-text-field v-model="address.building.value" label="Building Name" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.street.value" label="Street Name" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." placeholder="Enter here" outlined />
-      <v-text-field v-model="address.subdivision.value" label="Subdivision / Village / Compound" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.barangay.value" label="Barangay" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.city.value" label="City / Municipality" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.province.value" label="Province" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.region.value" label="Region" placeholder="Enter here" outlined />
-      <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" placeholder="Enter here" outlined />
+      <v-text-field v-model="address.building.value" label="Building Name" outlined />
+      <v-text-field v-model="address.street.value" label="Street Name" outlined />
+      <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
+      <v-text-field v-model="address.subdivision.value" label="Subdivision / Village / Compound" outlined />
+      <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
+      <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
+      <v-text-field v-model="address.province.value" label="Province" outlined />
+      <v-text-field v-model="address.region.value" label="Region" outlined />
+      <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
       <!-- Map -->
-      <div id="map" class="map-placeholder">[Map Placeholder]</div>
+      <div id="map" class="map"></div>
 
       <!-- Action Buttons -->
       <div class="btns">
@@ -220,16 +252,10 @@ onMounted(loadProfile);
   border-radius: 50%;
 }
 
-.map-placeholder {
+.map {
   margin-top: 16px;
-  height: 200px;
-  background: #f0f0f0;
+  height: 300px;
   border-radius: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #888;
-  font-size: 14px;
 }
 
 .btns {
