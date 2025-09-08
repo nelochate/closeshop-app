@@ -112,12 +112,7 @@ onMounted(async () => {
         <div class="circle-deco"></div>
 
         <!-- Logo -->
-        <v-img
-          src="/images/logo.png"
-          max-width="100"
-          class="logo"
-
-        ></v-img>
+        <v-img src="/images/logo.png" max-width="100" class="logo"></v-img>
 
         <!-- Title + Subtitle -->
         <h2 class="login-title">CloseShop</h2>
@@ -132,36 +127,16 @@ onMounted(async () => {
       <!-- Form Card -->
       <div class="login-card">
         <v-form @submit.prevent="login">
-          <v-text-field
-            v-model="username"
-            placeholder="Email"
-            variant="outlined"
-            density="comfortable"
-            class="login-input"
-            :rules="[requiredValidator, emailValidator]"
-          />
+          <v-text-field v-model="username" placeholder="Email" variant="outlined" density="comfortable"
+            class="login-input" :rules="[requiredValidator, emailValidator]" />
 
-          <v-text-field
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            placeholder="Password"
-            variant="outlined"
-            density="comfortable"
-            class="login-input"
+          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" placeholder="Password"
+            variant="outlined" density="comfortable" class="login-input"
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            :rules="[requiredValidator]"
-          />
+            @click:append-inner="showPassword = !showPassword" :rules="[requiredValidator]" />
 
-          <v-btn
-            type="submit"
-            color="primary"
-            block
-            class="login-btn"
-            :loading="isLoading"
-            :disabled="isLoading"
-            prepend-icon="mdi-login"
-          >
+          <v-btn type="submit" color="primary" block class="login-btn" :loading="isLoading" :disabled="isLoading"
+            prepend-icon="mdi-login">
             Sign In
           </v-btn>
 
@@ -180,11 +155,15 @@ onMounted(async () => {
 
           <!-- Social Buttons -->
           <v-btn block outlined class="social-btn">
-            <v-icon start>mdi-google</v-icon> Continue with Google
+            <img width="20" height="20" src="https://img.icons8.com/fluency/48/facebook-new.png" alt="facebook-new" class="mr-2"/>
+            Continue with Facebook
           </v-btn>
+
           <v-btn block outlined class="social-btn">
-            <v-icon start>mdi-apple</v-icon> Continue with Apple
+            <img width="20" height="20" src="https://img.icons8.com/color/48/google-logo.png" alt="google-logo" class="mr-2" />
+            Continue with Google
           </v-btn>
+
         </v-form>
       </div>
     </div>
