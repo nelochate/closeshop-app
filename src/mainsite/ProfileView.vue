@@ -166,7 +166,10 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
           <v-btn variant="outlined" color="primary" size="small">
             Edit / Verify Profile
           </v-btn>
-          <p class="sell-link"><u>Click here to start selling</u></p>
+          <p class="sell-link" @click="$router.push('/shop-build')">
+            <u>Click here to start selling</u>
+          </p>
+
         </div>
 
 
@@ -437,15 +440,15 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
 /* Mobile */
 @media (max-width: 480px) {
   .acc-view {
-    flex-direction: row;         /* ✅ keep avatar + info side by side */
-    align-items: flex-start;     /* align top */
+    flex-direction: row; /* ✅ keep avatar + info side by side */
+    align-items: flex-start; /* align top */
     gap: 12px;
   }
 
   .profile-info {
-    align-items: flex-start;     /* ✅ text/buttons left aligned */
+    align-items: flex-start; /* ✅ text/buttons left aligned */
     text-align: left;
-    flex: 1;                     /* take remaining width */
+    flex: 1; /* take remaining width */
   }
 
  .name {

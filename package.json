@@ -26,6 +26,7 @@
     "@capacitor/status-bar": "7.0.2",
     "@supabase/supabase-js": "^2.57.2",
     "leaflet": "^1.9.4",
+    "leaflet-control-geocoder": "^3.3.0",
     "pinia": "^3.0.3",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1",
