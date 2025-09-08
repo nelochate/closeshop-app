@@ -96,7 +96,7 @@ const uploadAvatar = async (file: Blob) => {
   } finally {
     uploading.value = false
   }
-}
+} 
 
 
 
@@ -156,11 +156,11 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
           <!-- Full name -->
           <!-- Full name -->
           <h2 class="name">
-            {{ fullName || 'Unnamed User' }}
+            {{ fullName || 'Loading...' }}
           </h2>
 
           <!-- Email below -->
-          <p class="email">{{ user?.email || 'No email available' }}</p>
+          <p class="email">{{ user?.email || '...' }}</p>
 
           <!-- Actions -->
           <v-btn variant="outlined" color="primary" size="small">
