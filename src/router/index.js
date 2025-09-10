@@ -32,6 +32,13 @@ const routes = [
   { path: '/shop-build', name: 'shop-build', component: ShopBuild, meta: { requiresAuth: true } },
   { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },//sakto ni
 
+{
+  path: '/account-settings',
+  name: 'account-settings',
+  component: () => import('@/mainsite/AccountSettingsView.vue'),
+  meta: { requiresAuth: true }
+},
+
   // ✅ Catch-all route
   {
     path: '/:pathMatch(.*)*',
@@ -99,11 +106,13 @@ router.beforeEach(async (to, from, next) => {
 })
 
 // ✅ Handle navigation errors
+/*
 router.onError((error, to) => {
   console.error('Navigation error to:', to.fullPath, error)
   if (error.message.includes('Failed to fetch dynamically imported module')) {
     window.location.reload()
   }
 })
+*/
 
 export default router
