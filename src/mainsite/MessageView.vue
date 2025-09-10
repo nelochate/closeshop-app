@@ -120,6 +120,9 @@ const goAccount = () => router.push('/profileview')
 </template>
 
 <style scoped>
+.bot-nav {
+  background-color: #5ca3eb;
+}
 .messages-view {
   padding: 16px;
 }
