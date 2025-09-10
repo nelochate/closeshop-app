@@ -42,6 +42,7 @@ const editProduct = (id: number) => {
           prepend-icon="mdi-plus"
           class="mb-6"
           @click="router.push('/products/create')" 
+          to="/additem"
         >
           Add New Item
         </v-btn>

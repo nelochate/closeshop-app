@@ -16,6 +16,7 @@ import ShopBuild from '@/mainsite/ShopBuild.vue'
 import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
+import AddItem from '@/mainsite/AddItem.vue'
 
 
 // ✅ Define routes
@@ -33,6 +34,7 @@ const routes = [
   { path: '/shop-build', name: 'shop-build', component: ShopBuild, meta: { requiresAuth: true } },
   { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },//sakto ni
     { path: '/productlist', name: 'productlist', component: ProductListing, meta: { requiresAuth: true } },//sakto ni
+      { path: '/additem', name: 'additem', component: AddItem, meta: { requiresAuth: true } },//sakto ni
 
   // ✅ Catch-all route
   {
