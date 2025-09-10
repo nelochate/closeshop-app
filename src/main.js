@@ -14,29 +14,43 @@ import * as components from 'vuetify/components'
 import * as directives from 'vuetify/directives'
 import "leaflet/dist/leaflet.css";
 
-
-
 const app = createApp(App)
+const pinia = createPinia()
 const vuetify = createVuetify({
-     icons: {
-    defaultSet: 'mdi', // This is already the default value - only for display purposes
+  icons: {
+    defaultSet: 'mdi',
   },
   components,
   directives,
-
 })
-app.use(createPinia())
+
+// ✅ Use plugins in correct order
+app.use(pinia)
 app.use(router)
 app.use(vuetify)
 
-const authStore = useAuthUserStore()
-authStore.hydrateFromSession()
+// ✅ Wait for router to be ready before setting up auth listeners
+router.isReady().then(() => {
+  const authStore = useAuthUserStore()
 
-supabase.auth.onAuthStateChange(async (_event, session) => {
-  if (session?.user) {
-    await authStore.hydrateFromSession()
-  } else {
-    authStore.$reset()
-  }
+  // ✅ Initial auth hydration
+  authStore.hydrateFromSession().then(() => {
+    console.log('Auth initialized')
+  }).catch(console.error)
+
+  // ✅ Set up auth state change listener
+  supabase.auth.onAuthStateChange(async (_event, session) => {
+    if (session?.user) {
+      await authStore.hydrateFromSession()
+    } else {
+      authStore.$reset()
+    }
+  })
+
+  // ✅ Mount the app
+  app.mount('#app')
+  console.log('App mounted successfully')
+}).catch((error) => {
+  console.error('Router failed to initialize:', error)
+  app.mount('#app')
 })
-app.mount('#app')

@@ -93,8 +93,13 @@ async function signOut() {
   }
 }
 
-  async function isAuthenticated() {
+
+async function isAuthenticated() {
   try {
+    // Use the existing hydrated state if available
+    if (this.userData.value) return true
+
+    // Fallback to session check
     const { data, error } = await supabase.auth.getSession()
     if (error || !data.session) return false
     return true
