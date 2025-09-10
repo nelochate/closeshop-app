@@ -16,7 +16,7 @@ const goAccount = () => router.push('/profileview')
 
 <template>
 <v-app>  <!-- Header -->
-  <v-app-bar flat elevation="0" color="transparent">
+  <v-app-bar flat elevation="0" color="#5ca3eb">
    
     <v-toolbar-title class="font-bold"><strong>Cart</strong></v-toolbar-title>
   </v-app-bar>
