@@ -121,6 +121,13 @@ const pickImage = async (source: 'camera' | 'gallery') => {
 // purchase sections
 const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
 const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
+
+// Navigation functions
+const goHome = () => router.push('/homepage')
+const goCart = () => router.push('/cartview')
+const goChat = () => router.push('/messageview')
+const goMap = () => router.push('/mapsearch')
+const goAccount = () => router.push('/profileview')
 </script>
 
 <template>
@@ -318,7 +325,28 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
           </v-card>
         </div>
       </v-expand-transition>
-    </v-main>
+    </v-main>   <!-- Bottom Navigation -->
+    <v-bottom-navigation class="bot-nav" height="64">
+      <v-btn value="home" @click="goHome">
+        <v-icon>mdi-home-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="cart" @click="goCart">
+        <v-icon>mdi-cart-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="map" @click="goMap">
+        <v-icon>mdi-search-web</v-icon>
+      </v-btn>
+
+      <v-btn value="chat" @click="goChat">
+        <v-icon>mdi-chat-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="account" @click="goAccount">
+        <v-icon>mdi-account-check-outline</v-icon>
+      </v-btn>
+      </v-bottom-navigation>
 
     <!-- Bottom Sheet for options -->
     <v-bottom-sheet v-model="showPicker">
@@ -342,6 +370,9 @@ const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
 </template>
 
 <style scoped>
+.bot-nav {
+  background-color: #5ca3eb;
+}
 /* Profile container */
 .acc-view {
   padding: 24px;
