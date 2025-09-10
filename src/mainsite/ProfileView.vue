@@ -128,7 +128,7 @@ const goAccount = () => router.push('/profileview')
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat color="transparent" density="comfortable">
+    <v-app-bar flat  density="comfortable" class="top-nav" color="#5ca3eb">
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -171,7 +171,7 @@ const goAccount = () => router.push('/profileview')
           <p class="sell-link" @click="$router.push('/shop-build')">
             <u>Click here to start selling</u>
           </p>
-          <v-btn to="\usershop">My shop</v-btn>
+          <v-btn to="/usershop">My shop</v-btn>
 
         </div>
 

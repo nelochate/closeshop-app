@@ -80,7 +80,7 @@ const goNotifications = () => {
 
 <template>
   <v-app>
-    <v-app-bar color="primary" flat>
+    <v-app-bar color="#5ca3eb" flat>
 
       <!-- Search -->
       <v-text-field

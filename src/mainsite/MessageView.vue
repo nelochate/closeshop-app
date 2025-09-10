@@ -38,7 +38,7 @@ const goAccount = () => router.push('/profileview')
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat elevation="0" color="transparent">
+    <v-app-bar flat elevation="0" class="top-nav" color="#5ca3eb">
       <v-btn variant="text" @click="goBack">
         <v-icon start>mdi-arrow-left</v-icon>
         Back
@@ -120,7 +120,7 @@ const goAccount = () => router.push('/profileview')
 </template>
 
 <style scoped>
-.bot-nav {
+.bot-nav, .top-nav {
   background-color: #5ca3eb;
 }
 .messages-view {

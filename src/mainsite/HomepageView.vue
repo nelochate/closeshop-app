@@ -102,9 +102,7 @@ const handleLogout = async () => {
 </template>
 
 <style scoped>
-.top-nav {
-  background-color: #5ca3eb;
-}
+
 
 .bot-nav {
   background-color: #5ca3eb;
