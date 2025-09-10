@@ -123,6 +123,17 @@ const goCart = () => router.push('/cartview')
 const goChat = () => router.push('/messageview')
 const goMap = () => router.push('/mapsearch')
 const goAccount = () => router.push('/profileview')
+const authStore = useAuthUserStore()
+//handle logout
+const handleLogout = async () => {
+  try {
+    await authStore.signOut()
+    router.push({ name: 'login' }) // ✅ always go back to login
+  } catch (error) {
+    console.error('Logout failed:', error)
+    alert('Something went wrong while logging out.')
+  }
+}
 </script>
 
 <template>
@@ -133,6 +144,23 @@ const goAccount = () => router.push('/profileview')
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="text-h6"><strong>Profile</strong></v-toolbar-title>
+      <!-- Menu Button -->
+  <v-menu transition="fade-transition" offset-y>
+    <template #activator="{ props }">
+      <v-btn icon v-bind="props">
+        <v-icon>mdi-menu</v-icon>
+      </v-btn>
+    </template>
+
+    <v-list>
+      <v-list-item @click="handleLogout">
+        <v-list-item-title>
+          <v-icon start small>mdi-logout</v-icon>
+          Logout
+        </v-list-item-title>
+      </v-list-item>
+    </v-list>
+  </v-menu>
     </v-app-bar>
 
     <v-divider />
