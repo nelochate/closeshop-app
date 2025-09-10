@@ -43,60 +43,55 @@ const uploadAvatar = async (file: Blob) => {
   try {
     uploading.value = true
 
-    // 1. Generate unique filename
-    const fileName = `${Date.now()}.jpeg`
-    const filePath = `avatars/${fileName}`
+    // Detect extension from MIME type
+    const ext = file.type.split('/')[1] || 'jpeg'
+    const fileName = `${Date.now()}.${ext}`
 
-    // 2. Upload to Supabase storage
+    // Get logged-in user
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData?.user) {
+      console.error('No user logged in')
+      return
+    }
+
+    const userId = userData.user.id
+
+    // Store avatar under the user’s folder
+    const filePath = `${userId}/${fileName}`
+
+    // Upload
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(filePath, file, { upsert: true })
+      .upload(filePath, file, { upsert: true, contentType: file.type })
 
     if (uploadError) {
       console.error('Upload failed:', uploadError.message)
       return
     }
 
-    // 3. Get public URL
-    const { data: publicUrlData, error: publicUrlError } = supabase
-      .storage
-      .from('avatars')
-      .getPublicUrl(filePath)
+    // Get public URL
+    const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    const publicUrl = data.publicUrl
 
-    if (publicUrlError) {
-      console.error('Failed to get public URL:', publicUrlError.message)
-      return
-    }
-
-    const publicUrl = publicUrlData.publicUrl
-
-    // 4. Get current user
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-
-    if (userError || !userData?.user) {
-      console.error('No logged in user found:', userError?.message)
-      return
-    }
-
-    // 5. Update profile with avatar_url
+    // Save avatar URL to profile
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ avatar_url: publicUrl })
-      .eq('id', userData.user.id)
+      .eq('id', userId)
 
     if (updateError) {
       console.error('Profile update failed:', updateError.message)
       return
     }
 
-    // 6. Update local state
     avatarUrl.value = publicUrl
   } catch (err) {
     console.error('Unexpected error:', err)
   } finally {
     uploading.value = false
   }
-} 
+}
+
 
 
 
