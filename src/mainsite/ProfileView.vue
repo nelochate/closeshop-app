@@ -171,6 +171,7 @@ const goAccount = () => router.push('/profileview')
           <p class="sell-link" @click="$router.push('/shop-build')">
             <u>Click here to start selling</u>
           </p>
+          <v-btn to="\usershop">My shop</v-btn>
 
         </div>
 

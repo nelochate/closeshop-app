@@ -14,6 +14,7 @@ import AdminDashboard from '@/mainsite/AdminDashboard.vue'
 import ShopBuild from '@/mainsite/ShopBuild.vue'
 
 import { useAuthUserStore } from '@/stores/authUser'
+import UserShop from '@/mainsite/UserShop.vue'
 
 
 // ✅ Define routes
@@ -29,6 +30,7 @@ const routes = [
   { path: '/register-success', name: 'confirm-email', component: ConfirmEmail },
   { path: '/admin-dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
   { path: '/shop-build', name: 'shop-build', component: ShopBuild, meta: { requiresAuth: true } },
+  { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },//sakto ni
 
   // ✅ Catch-all route
   {
