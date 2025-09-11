@@ -25,12 +25,20 @@ const messages = ref([
     avatar: 'https://randomuser.me/api/portraits/men/2.jpg',
   },
 ])
+
+
+// Navigation functions
+const goHome = () => router.push('/homepage')
+const goCart = () => router.push('/cartview')
+const goChat = () => router.push('/messageview')
+const goMap = () => router.push('/mapsearch')
+const goAccount = () => router.push('/profileview')
 </script>
 
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat elevation="0" color="transparent">
+    <v-app-bar flat elevation="0" class="top-nav" color="#5ca3eb">
       <v-btn variant="text" @click="goBack">
         <v-icon start>mdi-arrow-left</v-icon>
         Back
@@ -86,10 +94,35 @@ const messages = ref([
         </v-list>
       </div>
     </v-main>
+       <!-- Bottom Navigation -->
+    <v-bottom-navigation class="bot-nav" height="64">
+      <v-btn value="home" @click="goHome">
+        <v-icon>mdi-home-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="cart" @click="goCart">
+        <v-icon>mdi-cart-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="map" @click="goMap">
+        <v-icon>mdi-search-web</v-icon>
+      </v-btn>
+
+      <v-btn value="chat" @click="goChat">
+        <v-icon>mdi-chat-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="account" @click="goAccount">
+        <v-icon>mdi-account-check-outline</v-icon>
+      </v-btn>
+      </v-bottom-navigation>
   </v-app>
 </template>
 
 <style scoped>
+.bot-nav, .top-nav {
+  background-color: #5ca3eb;
+}
 .messages-view {
   padding: 16px;
 }

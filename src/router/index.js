@@ -1,3 +1,6 @@
+import { createRouter, createWebHashHistory } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
+
 import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
 import HomepageView from '@/mainsite/HomepageView.vue'
@@ -8,132 +11,103 @@ import ProfileView from '@/mainsite/ProfileView.vue'
 import NotificationView from '@/mainsite/NotificationView.vue'
 import ConfirmEmail from '@/common/ConfirmEmail.vue'
 import AdminDashboard from '@/mainsite/AdminDashboard.vue'
-
-import { useAuthUserStore } from '@/stores/authUser'
-import { supabase } from '@/utils/supabase'
-import { createRouter, createWebHistory } from 'vue-router'
 import ShopBuild from '@/mainsite/ShopBuild.vue'
 
-// define all routes in one place
+import { useAuthUserStore } from '@/stores/authUser'
+import UserShop from '@/mainsite/UserShop.vue'
+import ProductListing from '@/mainsite/ProductListing.vue'
+import AddItem from '@/mainsite/AddItem.vue'
+
+
+// ✅ Define routes
 const routes = [
+  { path: '/', name: 'login', component: LoginView },
+  { path: '/register', name: 'register', component: RegisterView },
+  { path: '/homepage', name: 'homepage', component: HomepageView, meta: { requiresAuth: true } },
+  { path: '/mapsearch', name: 'mapsearch', component: MapSearch, meta: { requiresAuth: true } },
+  { path: '/cartview', name: 'cartview', component: CartView, meta: { requiresAuth: true } },
+  { path: '/messageview', name: 'messageview', component: MessageView, meta: { requiresAuth: true } },
+  { path: '/profileview', name: 'profileview', component: ProfileView, meta: { requiresAuth: true } },
+  { path: '/notificationview', name: 'notificationview', component: NotificationView, meta: { requiresAuth: true } },
+  { path: '/register-success', name: 'confirm-email', component: ConfirmEmail },
+  { path: '/admin-dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
+  { path: '/shop-build', name: 'shop-build', component: ShopBuild, meta: { requiresAuth: true } },
+  { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },//sakto ni
+    { path: '/productlist', name: 'productlist', component: ProductListing, meta: { requiresAuth: true } },//sakto ni
+      { path: '/additem', name: 'additem', component: AddItem, meta: { requiresAuth: true } },//sakto ni
+
+  // ✅ Catch-all route
   {
-    path: '/',
-    name: 'login',
-    component: LoginView
-  },
-  {
-    path: '/register',
-    name: 'register',
-    component: RegisterView
-  },
-  {
-    path: '/homepage',
-    name: 'homepage',
-    component: HomepageView,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/mapsearch',
-    name: 'mapsearch',
-    component: MapSearch,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/cartview',
-    name: 'cartview',
-    component: CartView,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/messageview',
-    name: 'messageview',
-    component: MessageView,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/profileview',
-    name: 'profileview',
-    component: ProfileView,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/notificationview',
-    name: 'notificationview',
-    component: NotificationView,
-    meta: { requiresAuth: true }
-  },
-  {
-  path: '/register-success',
-  name: 'cormfirm-email',
-  component: ConfirmEmail
-  },
-  {
-    path: '/admin-dashboard',
-    name: 'admin-dashboard',
-    component: AdminDashboard,
-    meta: { requiresAuth: true, requiresAdmin: true }
-  },
-  {
-    path: '/shop-build',
-    name: 'shop-build',
-    component: ShopBuild,
-   meta: { requiresAuth: true }// ikaw edit ani bep ug sakto bani murag kaw may nakasabot dri new ni
+    path: '/:pathMatch(.*)*',
+    redirect: '/'
   }
-
-
 ]
 
+// ✅ Use hash history to avoid server configuration issues
+const isCapacitor = Capacitor.isNativePlatform()
+const history = isCapacitor ? createWebHashHistory() : createWebHashHistory() // Force hash for now
+
 const router = createRouter({
-  history: createWebHistory(import.meta.env.BASE_URL),
+  history,
   routes,
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) {
+      return savedPosition
+    }
+    return { top: 0 }
+  }
 })
 
-// ✅ auth + admin guard
-router.beforeEach(async (to) => {
-  const authStore = useAuthUserStore()
-  const isLoggedIn = await authStore.isAuthenticated()
+// ✅ Track if auth has been initialized
+let authInitialized = false
 
-  // prevent logged-in users from returning to login/register
-  if (isLoggedIn && (to.path === '/' || to.path === '/register')) {
-    return { path: '/homepage' }
-  }
+router.beforeEach(async (to, from, next) => {
+  try {
+    const authStore = useAuthUserStore()
 
-  // protect authenticated routes
-  if (!isLoggedIn && to.meta.requiresAuth) {
-    return { path: '/' }
-  }
-
-  // protect admin routes
-  if (to.meta.requiresAdmin) {
-    // get current session (make sure session is available)
-    const { data } = await supabase.auth.getSession()
-    const session = data?.session
-
-    // if no session, force login
-    if (!session) return { path: '/' }
-
-    const userId = session.user.id
-
-    // fetch role from profiles
-    const { data: profile, error } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', userId)
-      .single()
-
-    if (error) {
-      console.error('Error fetching profile in route guard:', error)
-      // if profile can't be fetched, send to homepage (or login if you prefer)
-      return { path: '/' }
+    // ✅ Initialize auth if not done yet
+    if (!authInitialized) {
+      await authStore.hydrateFromSession()
+      authInitialized = true
     }
 
-    if (profile?.role !== 'admin') {
-      return { path: '/homepage' }
-    }
-  }
+    const isLoggedIn = authStore.isLoggedIn
 
-  // allow navigation
-  return true
+    console.log('Navigation:', to.path, 'Logged in:', isLoggedIn)
+
+    // ✅ Redirect authenticated users away from auth pages
+    if (isLoggedIn && (to.path === '/' || to.path === '/register')) {
+      return next({ path: '/homepage', replace: true })
+    }
+
+    // ✅ Redirect unauthenticated users from protected routes
+    if (!isLoggedIn && to.meta.requiresAuth) {
+      return next({ path: '/', replace: true })
+    }
+
+    // ✅ Handle admin routes
+    if (to.meta.requiresAdmin) {
+      if (!authStore.isAdmin) {
+        console.log('Admin access denied - redirecting to homepage')
+        return next({ path: '/homepage', replace: true })
+      }
+    }
+
+    // ✅ All checks passed
+    next()
+  } catch (error) {
+    console.error('Router navigation error:', error)
+    // ✅ On error, redirect to login but don't replace to avoid loops
+    next('/')
+  }
+})
+
+// ✅ Handle navigation errors
+router.onError((error, to) => {
+  console.error('Navigation error to:', to.fullPath, error)
+  if (error.message.includes('Failed to fetch dynamically imported module')) {
+    window.location.reload()
+  }
 })
 
 export default router

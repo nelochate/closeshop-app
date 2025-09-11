@@ -8,44 +8,94 @@ const router = useRouter()
 const avatarUrl = ref<string | null>(null)
 const uploading = ref(false)
 const showPicker = ref(false) // bottom sheet control
+import { useAuthUserStore } from '@/stores/authUser'
+
 
 const goBack = () => router.back()
 
 // Load profile
-const loadProfile = async () => {
-  const { data, error } = await supabase.from('profiles').select('avatar_url').single()
-  if (!error) avatarUrl.value = data?.avatar_url || null
+const user = ref<any>(null)
+const fullName = ref<string>('')
+
+const loadUser = async () => {
+  // 1. Get logged-in user from auth
+  const { data: userData, error } = await supabase.auth.getUser()
+
+  if (error || !userData?.user) {
+    console.error('No user found:', error?.message)
+    return
+  }
+
+  user.value = userData.user
+
+  // 2. Build full name from auth.user_metadata
+  const first = user.value.user_metadata?.first_name || ''
+  const last = user.value.user_metadata?.last_name || ''
+
+  fullName.value = `${first} ${last}`.trim()
 }
+
+onMounted(() => {
+  loadUser()
+})
+
 
 // Upload image to Supabase
 const uploadAvatar = async (file: Blob) => {
   try {
     uploading.value = true
-    const fileName = `${Date.now()}.jpeg`
-    const filePath = `avatars/${fileName}`
 
+    // Detect extension from MIME type
+    const ext = file.type.split('/')[1] || 'jpeg'
+    const fileName = `${Date.now()}.${ext}`
+
+    // Get logged-in user
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData?.user) {
+      console.error('No user logged in')
+      return
+    }
+
+    const userId = userData.user.id
+
+    // Store avatar under the user’s folder
+    const filePath = `${userId}/${fileName}`
+
+    // Upload
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(filePath, file, { upsert: true })
-    if (uploadError) throw uploadError
+      .upload(filePath, file, { upsert: true, contentType: file.type })
 
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    if (uploadError) {
+      console.error('Upload failed:', uploadError.message)
+      return
+    }
 
+    // Get public URL
+    const { data } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    const publicUrl = data.publicUrl
+
+    // Save avatar URL to profile
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ avatar_url: publicUrl })
-      .eq('id', (await supabase.auth.getUser()).data.user?.id)
-    if (updateError) throw updateError
+      .eq('id', userId)
+
+    if (updateError) {
+      console.error('Profile update failed:', updateError.message)
+      return
+    }
 
     avatarUrl.value = publicUrl
   } catch (err) {
-    console.error('Upload error:', err)
+    console.error('Unexpected error:', err)
   } finally {
     uploading.value = false
   }
 }
+
+
+
 
 // Pick image from camera/gallery
 const pickImage = async (source: 'camera' | 'gallery') => {
@@ -64,26 +114,55 @@ const pickImage = async (source: 'camera' | 'gallery') => {
   showPicker.value = false
 }
 
-onMounted(loadProfile)
 
 // purchase sections
 const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
 const selectedSection = ref(purchaseSections[0]) // default = "My purchases"
 
-// for navigatiom
-const goSell = () => {
-  router.push('/shop-build')
+// Navigation functions
+const goHome = () => router.push('/homepage')
+const goCart = () => router.push('/cartview')
+const goChat = () => router.push('/messageview')
+const goMap = () => router.push('/mapsearch')
+const goAccount = () => router.push('/profileview')
+const authStore = useAuthUserStore()
+//handle logout
+const handleLogout = async () => {
+  try {
+    await authStore.signOut()
+    router.push({ name: 'login' }) // ✅ always go back to login
+  } catch (error) {
+    console.error('Logout failed:', error)
+    alert('Something went wrong while logging out.')
+  }
 }
 </script>
 
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat color="transparent" density="comfortable">
+    <v-app-bar flat  density="comfortable" class="top-nav" color="#5ca3eb">
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="text-h6"><strong>Profile</strong></v-toolbar-title>
+      <!-- Menu Button -->
+  <v-menu transition="fade-transition" offset-y>
+    <template #activator="{ props }">
+      <v-btn icon v-bind="props">
+        <v-icon>mdi-menu</v-icon>
+      </v-btn>
+    </template>
+
+    <v-list>
+      <v-list-item @click="handleLogout">
+        <v-list-item-title>
+          <v-icon start small>mdi-logout</v-icon>
+          Logout
+        </v-list-item-title>
+      </v-list-item>
+    </v-list>
+  </v-menu>
     </v-app-bar>
 
     <v-divider />
@@ -99,37 +178,39 @@ const goSell = () => {
           </v-avatar>
 
           <!-- Floating Edit Button -->
-          <v-btn
-            class="edit-btn"
-            color="primary"
-            icon
-            elevation="4"
-            :loading="uploading"
-            @click="showPicker = true"
-          >
+          <v-btn class="edit-btn" color="primary" icon elevation="4" :loading="uploading" @click="showPicker = true">
             <v-icon class="camera-icon">mdi-camera</v-icon>
           </v-btn>
         </div>
 
         <!-- Profile Info -->
         <div class="profile-info">
-          <h2 class="name">Full Name</h2>
-          <v-btn variant="outlined" color="primary" size="small">Edit / Verify Profile</v-btn>
-          <p class="sell-link" @click="goSell">
+          <!-- Full name -->
+          <!-- Full name -->
+          <h2 class="name">
+            {{ fullName || 'Loading...' }}
+          </h2>
+
+          <!-- Email below -->
+          <p class="email">{{ user?.email || '...' }}</p>
+
+          <!-- Actions -->
+          <v-btn variant="outlined" color="primary" size="small">
+            Edit / Verify Profile
+          </v-btn>
+          <p class="sell-link" @click="$router.push('/shop-build')">
             <u>Click here to start selling</u>
           </p>
-        </div>
-      </div>
+          <v-btn to="/usershop">My shop</v-btn>
 
+        </div>
+
+
+      </div>
       <v-divider thickness="2" class="my-4"></v-divider>
       <!-- Dropdown for Sections -->
-      <v-select
-        v-model="selectedSection"
-        :items="purchaseSections"
-        label="Purchase Status"
-        variant="outlined"
-        density="comfortable"
-      />
+      <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
+        density="comfortable" />
 
       <!-- Show this when "My purchases" is chosen -->
       <v-expand-transition>
@@ -270,7 +351,28 @@ const goSell = () => {
           </v-card>
         </div>
       </v-expand-transition>
-    </v-main>
+    </v-main>   <!-- Bottom Navigation -->
+    <v-bottom-navigation class="bot-nav" height="64">
+      <v-btn value="home" @click="goHome">
+        <v-icon>mdi-home-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="cart" @click="goCart">
+        <v-icon>mdi-cart-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="map" @click="goMap">
+        <v-icon>mdi-search-web</v-icon>
+      </v-btn>
+
+      <v-btn value="chat" @click="goChat">
+        <v-icon>mdi-chat-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="account" @click="goAccount">
+        <v-icon>mdi-account-check-outline</v-icon>
+      </v-btn>
+      </v-bottom-navigation>
 
     <!-- Bottom Sheet for options -->
     <v-bottom-sheet v-model="showPicker">
@@ -294,6 +396,9 @@ const goSell = () => {
 </template>
 
 <style scoped>
+.bot-nav {
+  background-color: #5ca3eb;
+}
 /* Profile container */
 .acc-view {
   padding: 24px;
@@ -333,7 +438,7 @@ const goSell = () => {
   gap: 8px;
   min-width: 0;
   align-items: flex-start; /* keep left aligned */
-  text-align: left;
+ text-align: left;
 }
 
 .name {
@@ -403,9 +508,18 @@ const goSell = () => {
     flex: 1; /* take remaining width */
   }
 
-  .name {
-    font-size: 1rem;
-  }
+ .name {
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 600;
+}
+
+.email {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #555;
+}
+
 
   .v-card {
     flex-direction: row;

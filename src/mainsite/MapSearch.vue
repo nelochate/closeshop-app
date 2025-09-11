@@ -33,13 +33,6 @@ const onSearch = () => {
   console.log('Searching for:', search.value)
 }
 
-const goNotifications = () => {
-  router.push('/notifications')
-}
-
-const goBack = () => {
-  router.back()
-}
 
 onMounted(async () => {
   await requestPermission()
@@ -72,15 +65,22 @@ watch([latitude, longitude], ([lat, lng]) => {
 onUnmounted(() => {
   stopWatching()
 })
+
+
+// Navigation functions
+const goHome = () => router.push('/homepage')
+const goCart = () => router.push('/cartview')
+const goChat = () => router.push('/messageview')
+const goMap = () => router.push('/mapsearch')
+const goAccount = () => router.push('/profileview')
+const goNotifications = () => {
+  router.push('/notifications')
+}
 </script>
 
 <template>
   <v-app>
-    <v-app-bar color="primary" flat>
-      <!-- Back Button -->
-      <v-btn icon @click="goBack">
-        <v-icon>mdi-keyboard-backspace</v-icon>back
-      </v-btn>
+    <v-app-bar color="#5ca3eb" flat>
 
       <!-- Search -->
       <v-text-field
@@ -103,7 +103,8 @@ onUnmounted(() => {
       </v-text-field>
     </v-app-bar>
 
-    <!-- Map -->
+   <v-main>
+     <!-- Map -->
     <div id="map">
       <!-- Manual refresh -->
       <v-btn icon @click="getLocation" class="locate-btn">
@@ -114,10 +115,36 @@ onUnmounted(() => {
     <div>
       <h1><strong>Stores within your location</strong></h1>
     </div>
+   </v-main>
+     <!-- Bottom Navigation -->
+    <v-bottom-navigation class="bot-nav" height="64">
+      <v-btn value="home" @click="goHome">
+        <v-icon>mdi-home-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="cart" @click="goCart">
+        <v-icon>mdi-cart-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="map" @click="goMap">
+        <v-icon>mdi-search-web</v-icon>
+      </v-btn>
+
+      <v-btn value="chat" @click="goChat">
+        <v-icon>mdi-chat-outline</v-icon>
+      </v-btn>
+
+      <v-btn value="account" @click="goAccount">
+        <v-icon>mdi-account-check-outline</v-icon>
+      </v-btn>
+      </v-bottom-navigation>
   </v-app>
 </template>
 
 <style scoped>
+.bot-nav {
+  background-color: #5ca3eb;
+}
 #map {
   width: 100%;
   height: calc(100vh - 64px);
