@@ -277,8 +277,8 @@ onMounted(() => {
               <v-icon v-else size="60">mdi-account</v-icon>
             </v-avatar>
             <br>
-            <v-btn color="primary" @click="showPicker = true" :loading="uploading">
-              Change Picture
+            <v-btn color="primary darken-1 background" variant="outlined" @click="showPicker = true" :loading="uploading">
+              Edit
             </v-btn>
           </v-card-text>
         </v-card>
@@ -328,7 +328,7 @@ onMounted(() => {
                     color="primary"
                     size="large"
                   >
-                    <v-icon v-if="!isLoading" class="me-2">mdi-check</v-icon>
+                    <v-icon class="me-2">mdi-check</v-icon>
                     {{ isLoading ? 'Saved' : 'Save Changes' }}
                   </v-btn>
                 </v-col>
