@@ -7,6 +7,9 @@ import '@mdi/font/css/materialdesignicons.css'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 
+//import pwa elements
+import {defineCustomElements} from '@ionic/pwa-elements/loader';
+
 // Vuetify
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
@@ -23,6 +26,9 @@ const vuetify = createVuetify({
   components,
   directives,
 })
+
+//initialize pwa elements
+defineCustomElements(window);
 
 // ✅ Use plugins in correct order
 app.use(pinia)

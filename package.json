@@ -24,6 +24,7 @@
     "@capacitor/ios": "7.4.3",
     "@capacitor/keyboard": "7.0.2",
     "@capacitor/status-bar": "7.0.2",
+    "@ionic/pwa-elements": "^3.3.0",
     "@supabase/supabase-js": "^2.57.2",
     "leaflet": "^1.9.4",
     "leaflet-control-geocoder": "^3.3.0",
