@@ -1,6 +1,6 @@
 <script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, watch } from 'vue'
+import { useRouter,onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 
@@ -11,25 +11,47 @@ const avatarUrl = ref(null)
 const user = ref(null)
 const fullName = ref('')
 
-// Load user data
-const loadUser = async () => {
-  const { data: userData, error } = await supabase.auth.getUser()
-  if (error || !userData?.user) {
-    console.error('No user found:', error?.message)
-    return
-  }
-  user.value = userData.user
-
-  // Build full name from auth.user_metadata
-  const first = user.value.user_metadata?.first_name || ''
-  const last = user.value.user_metadata?.last_name || ''
-  fullName.value = `${first} ${last}`.trim()
-
-  // Load avatar if available
-  if (authStore.profile?.avatar_url) {
-    avatarUrl.value = authStore.profile.avatar_url
+const loadUser  = async () => {
+  if (authStore.userData && authStore.profile) {
+    user.value = authStore.userData
+   fullName.value = `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
+    avatarUrl.value = authStore.profile.avatar_url || null
+  } else {
+    // fallback: fetch user from supabase if store empty
+    const { data: userData, error } = await supabase.auth.getUser ()
+    if (error || !userData?.user) {
+      console.error('No user found:', error?.message)
+      return
+    }
+    user.value = userData.user
+    fullName.value = `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
+    avatarUrl.value = authStore.profile?.avatar_url || null
   }
 }
+
+onMounted(() => {
+  loadUser ()
+})
+
+// Reload user data when route query 'refreshed' changes
+watch(() => authStore.userData, (newUser ) => {
+  if (newUser ) {
+    fullName.value = `${newUser .user_metadata?.first_name || ''} ${newUser .user_metadata?.last_name || ''}`.trim()
+  }
+}, { immediate: true })
+
+// Also reload user data when route updates but component reused
+onBeforeRouteUpdate((to, from, next) => {
+  loadUser ()
+  next()
+})
+// Optional: watch authStore.profile to update avatar and fullName reactively
+watch(() => authStore.profile, (newProfile) => {
+  if (newProfile) {
+    fullName.value = `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
+    avatarUrl.value = newProfile.avatar_url || null
+  }
+}, { immediate: true })
 
 // Navigation functions
 const goBack = () => router.back()
@@ -50,10 +72,6 @@ const handleLogout = async () => {
   }
 }
 const goAccountSettings = () => router.push('/account-settings')
-
-onMounted(() => {
-  loadUser()
-})
 
 // Purchase sections
 const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
