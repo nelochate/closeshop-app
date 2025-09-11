@@ -1,4 +1,3 @@
-
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -90,15 +89,40 @@ const login = async () => {
   }
 }
 
-
-
-
 onMounted(async () => {
-  const { data: { session } } = await supabase.auth.getSession()
+  const {
+    data: { session },
+  } = await supabase.auth.getSession()
   if (session) {
     router.push('/homepage') // auto redirect if already logged in
   }
 })
+
+//try login with fb
+const loginWithFacebook = async () => {
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'facebook',
+      options: {
+        redirectTo: window.location.origin + '/homepage', // after login redirect
+      },
+    })
+
+    if (error) {
+      console.error('Facebook login failed:', error.message)
+      errorMessage.value = 'Facebook login failed: ' + error.message
+      showError.value = true
+      return
+    }
+
+    console.log('Redirecting to Facebook login...')
+  } catch (err) {
+    console.error('Unexpected error:', err)
+    errorMessage.value = 'Something went wrong with Facebook login.'
+    showError.value = true
+  }
+}
+
 </script>
 
 <template>
@@ -116,7 +140,6 @@ onMounted(async () => {
         <p class="login-subtitle">Use the account below to sign in</p>
       </div>
 
-
       <!-- Error & Success Messages -->
       <div v-if="showError" class="error-message">{{ errorMessage }}</div>
       <div v-if="showSuccess" class="success-message">{{ successMessage }}</div>
@@ -124,16 +147,36 @@ onMounted(async () => {
       <!-- Form Card -->
       <div class="login-card">
         <v-form @submit.prevent="login">
-          <v-text-field v-model="username" placeholder="Email" variant="outlined" density="comfortable"
-            class="login-input" :rules="[requiredValidator, emailValidator]" />
+          <v-text-field
+            v-model="username"
+            placeholder="Email"
+            variant="outlined"
+            density="comfortable"
+            class="login-input"
+            :rules="[requiredValidator, emailValidator]"
+          />
 
-          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" placeholder="Password"
-            variant="outlined" density="comfortable" class="login-input"
+          <v-text-field
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="Password"
+            variant="outlined"
+            density="comfortable"
+            class="login-input"
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword" :rules="[requiredValidator]" />
+            @click:append-inner="showPassword = !showPassword"
+            :rules="[requiredValidator]"
+          />
 
-          <v-btn type="submit" color="primary" block class="login-btn" :loading="isLoading" :disabled="isLoading"
-            prepend-icon="mdi-login">
+          <v-btn
+            type="submit"
+            color="primary"
+            block
+            class="login-btn"
+            :loading="isLoading"
+            :disabled="isLoading"
+            prepend-icon="mdi-login"
+          >
             Sign In
           </v-btn>
 
@@ -151,16 +194,27 @@ onMounted(async () => {
           </div>
 
           <!-- Social Buttons -->
-          <v-btn block outlined class="social-btn">
-            <img width="20" height="20" src="https://img.icons8.com/fluency/48/facebook-new.png" alt="facebook-new" class="mr-2"/>
+          <v-btn block outlined class="social-btn" @click="loginWithFacebook">
+            <img
+              width="20"
+              height="20"
+              src="https://img.icons8.com/fluency/48/facebook-new.png"
+              alt="facebook-new"
+              class="mr-2"
+            />
             Continue with Facebook
           </v-btn>
 
           <v-btn block outlined class="social-btn">
-            <img width="20" height="20" src="https://img.icons8.com/color/48/google-logo.png" alt="google-logo" class="mr-2" />
+            <img
+              width="20"
+              height="20"
+              src="https://img.icons8.com/color/48/google-logo.png"
+              alt="google-logo"
+              class="mr-2"
+            />
             Continue with Google
           </v-btn>
-
         </v-form>
       </div>
     </div>
@@ -177,7 +231,6 @@ onMounted(async () => {
   background: #f5f5f5; /* light background */
   padding: 0;
 }
-
 
 .login-header {
   background-color: #2e73b8; /* solid blue like your screenshot */
@@ -299,6 +352,4 @@ onMounted(async () => {
   background: #c8e6c9d4;
   color: #1b5e1fa8;
 }
-
 </style>
-
