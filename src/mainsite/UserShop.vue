@@ -75,11 +75,12 @@ const transactionOptions = ['Orders', 'Completed', 'Cancelled']
       <!-- Transaction Section -->
       <v-divider thickness="3">Transaction</v-divider>
 
-      <v-container class="py-4">
-        <v-btn color="primary" rounded="lg" prepend-icon="mdi-plus" class="mb-4">
-          Add Product
+      <v-container class="py-4 ">
+        <v-btn color="primary" rounded="lg"  class="mb-4" to="/productlist">
+          My Product
         </v-btn>
-
+        
+       
         <v-select
           v-model="transactionFilter"
           :items="transactionOptions"
