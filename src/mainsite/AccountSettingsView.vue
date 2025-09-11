@@ -185,7 +185,7 @@ const saveProfile = async () => {
     const { data: userData, error: getUserError } = await supabase.auth.getUser()
     if (getUserError || !userData?.user) throw getUserError || new Error('User not found')
 
-    // Update auth metadata
+    // Update auth metadata (first_name, last_name)
     const { error: metadataError } = await supabase.auth.updateUser({
       data: {
         first_name: formData.value.firstName,
@@ -194,13 +194,12 @@ const saveProfile = async () => {
     })
     if (metadataError) throw metadataError
 
-    // Update profile table
+    // Update profile table (phone, avatar_url)
     const updateData = {
       phone: formData.value.phone,
       updated_at: new Date().toISOString()
     }
 
-    // Only update avatar_url if it's a new URL (not a cached one)
     if (avatarUrl.value && !avatarUrl.value.includes('?')) {
       updateData.avatar_url = avatarUrl.value
     } else if (avatarUrl.value) {
@@ -214,23 +213,22 @@ const saveProfile = async () => {
 
     if (profileError) throw profileError
 
-    // Refresh store so ProfileView sees updated values
+    // Refresh auth store to reload user metadata and profile
     await authStore.hydrateFromSession()
 
-    // ✅ Success feedback with redirect
+    // Show success and redirect
     showSuccessAndRedirect('Profile updated successfully!')
-
-
 
   } catch (error) {
     console.error('Update error:', error)
     showSuccessMessage('Failed to update profile: ' + error.message)
   } finally {
     isLoading.value = false
-    router.push('/profileview')
+    // Removed the duplicate router.push('/profileview')
   }
-
 }
+
+
 
 // Navigation with refresh
 const goBack = () => {
