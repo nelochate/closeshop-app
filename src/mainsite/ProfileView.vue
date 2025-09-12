@@ -1,6 +1,6 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { useRouter,onBeforeRouteUpdate } from 'vue-router'
+import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 
@@ -11,47 +11,59 @@ const avatarUrl = ref(null)
 const user = ref(null)
 const fullName = ref('')
 
-const loadUser  = async () => {
+const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
     user.value = authStore.userData
-   fullName.value = `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
+    fullName.value =
+      `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
     avatarUrl.value = authStore.profile.avatar_url || null
   } else {
     // fallback: fetch user from supabase if store empty
-    const { data: userData, error } = await supabase.auth.getUser ()
+    const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
       console.error('No user found:', error?.message)
       return
     }
     user.value = userData.user
-    fullName.value = `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
+    fullName.value =
+      `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
     avatarUrl.value = authStore.profile?.avatar_url || null
   }
 }
 
 onMounted(() => {
-  loadUser ()
+  loadUser()
 })
 
 // Reload user data when route query 'refreshed' changes
-watch(() => authStore.userData, (newUser ) => {
-  if (newUser ) {
-    fullName.value = `${newUser .user_metadata?.first_name || ''} ${newUser .user_metadata?.last_name || ''}`.trim()
-  }
-}, { immediate: true })
+watch(
+  () => authStore.userData,
+  (newUser) => {
+    if (newUser) {
+      fullName.value =
+        `${newUser.user_metadata?.first_name || ''} ${newUser.user_metadata?.last_name || ''}`.trim()
+    }
+  },
+  { immediate: true },
+)
 
 // Also reload user data when route updates but component reused
 onBeforeRouteUpdate((to, from, next) => {
-  loadUser ()
+  loadUser()
   next()
 })
 // Optional: watch authStore.profile to update avatar and fullName reactively
-watch(() => authStore.profile, (newProfile) => {
-  if (newProfile) {
-    fullName.value = `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
-    avatarUrl.value = newProfile.avatar_url || null
-  }
-}, { immediate: true })
+watch(
+  () => authStore.profile,
+  (newProfile) => {
+    if (newProfile) {
+      fullName.value =
+        `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
+      avatarUrl.value = newProfile.avatar_url || null
+    }
+  },
+  { immediate: true },
+)
 
 // Navigation functions
 const goBack = () => router.back()
@@ -76,6 +88,31 @@ const goAccountSettings = () => router.push('/account-settings')
 // Purchase sections
 const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
 const selectedSection = ref(purchaseSections[0])
+
+//has shop or no shop
+const hasShop = ref(false)
+
+const checkUserShop = async () => {
+  if (!authStore.userData) return
+
+  const { data, error } = await supabase
+    .from('shops')
+    .select('id')
+    .eq('owner_id', authStore.userData.id)
+    .single()
+
+  if (error && error.code !== 'PGRST116') {
+    console.error('Error checking shop:', error.message)
+  }
+
+  hasShop.value = !!data
+}
+
+onMounted(async () => {
+  await loadUser()
+  await checkUserShop()
+})
+
 </script>
 
 <template>
@@ -87,22 +124,22 @@ const selectedSection = ref(purchaseSections[0])
       </v-btn>
       <v-toolbar-title class="text-h6"><strong>Profile</strong></v-toolbar-title>
       <!-- Menu Button -->
-  <v-menu transition="fade-transition" offset-y>
-    <template #activator="{ props }">
-      <v-btn icon v-bind="props">
-        <v-icon>mdi-menu</v-icon>
-      </v-btn>
-    </template>
+      <v-menu transition="fade-transition" offset-y>
+        <template #activator="{ props }">
+          <v-btn icon v-bind="props">
+            <v-icon>mdi-menu</v-icon>
+          </v-btn>
+        </template>
 
-    <v-list>
-      <v-list-item @click="handleLogout">
-        <v-list-item-title>
-          <v-icon start small>mdi-logout</v-icon>
-          Logout
-        </v-list-item-title>
-      </v-list-item>
-    </v-list>
-  </v-menu>
+        <v-list>
+          <v-list-item @click="handleLogout">
+            <v-list-item-title>
+              <v-icon start small>mdi-logout</v-icon>
+              Logout
+            </v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </v-menu>
     </v-app-bar>
     <v-divider />
 
@@ -131,19 +168,30 @@ const selectedSection = ref(purchaseSections[0])
           <p class="email">{{ user?.email || '...' }}</p>
 
           <!-- Actions -->
-          <p class="sell-link" @click="$router.push('/shop-build')">
-            <u>Click here to start selling</u>
-          </p>
+          <div class="actions">
+            <template v-if="!hasShop">
+              <p class="sell-link" @click="$router.push('/shop-build')">
+                <u>Click here to start selling</u>
+              </p>
+            </template>
 
-          <v-btn to="/usershop">My shop</v-btn>
+            <template v-else>
+              <v-btn to="/usershop">My shop</v-btn>
+            </template>
+          </div>
         </div>
       </div>
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
       <!-- Dropdown for Sections -->
-      <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
-        density="comfortable" />
+      <v-select
+        v-model="selectedSection"
+        :items="purchaseSections"
+        label="Purchase Status"
+        variant="outlined"
+        density="comfortable"
+      />
 
       <!-- Purchase sections content (unchanged) -->
       <v-expand-transition>
@@ -153,7 +201,6 @@ const selectedSection = ref(purchaseSections[0])
       </v-expand-transition>
 
       <!-- Other sections... -->
-
     </v-main>
 
     <!-- Bottom Navigation -->
@@ -242,7 +289,8 @@ const selectedSection = ref(purchaseSections[0])
   cursor: pointer;
   margin: 8px 0;
 }
-.bot-nav, .top-nav {
+.bot-nav,
+.top-nav {
   background-color: #5ca3eb;
 }
 
