@@ -5,10 +5,25 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const goBack = () => router.back()
 
-// sample product list (replace with API/Supabase later)
+// sample product list (with varieties now)
 const products = ref([
-  { id: 1, name: 'Sample Product 1', price: 199, description: 'Description here' },
-  { id: 2, name: 'Sample Product 2', price: 299, description: 'Another description' }
+  {
+    id: 1,
+    name: 'Sample Product 1',
+    price: 199,
+    description: 'Description here',
+    varieties: [
+      { id: 1, name: 'Small', price: 149, image: '' },
+      { id: 2, name: 'Large', price: 249, image: '' }
+    ]
+  },
+  {
+    id: 2,
+    name: 'Sample Product 2',
+    price: 299,
+    description: 'Another description',
+    varieties: []
+  }
 ])
 
 // delete product
@@ -16,11 +31,11 @@ const deleteProduct = (id: number) => {
   products.value = products.value.filter(p => p.id !== id)
 }
 
-// edit product (later redirect to form page)
+// edit product
 const editProduct = (id: number) => {
-  console.log('Edit product', id)
   router.push(`/products/edit/${id}`)
 }
+
 </script>
 
 <template>
@@ -30,7 +45,7 @@ const editProduct = (id: number) => {
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title class="text-h6">Add Product</v-toolbar-title>
+      <v-toolbar-title class="text-h6">Product List</v-toolbar-title>
     </v-app-bar>
 
     <v-main>
@@ -41,8 +56,7 @@ const editProduct = (id: number) => {
           rounded="lg"
           prepend-icon="mdi-plus"
           class="mb-6"
-          @click="router.push('/products/create')" 
-          to="/additem"
+          @click="router.push('/additem')" 
         >
           Add New Item
         </v-btn>
@@ -74,6 +88,8 @@ const editProduct = (id: number) => {
                 </v-btn>
               </v-card-actions>
             </v-card>
+
+            
           </v-col>
         </v-row>
       </v-container>
@@ -82,7 +98,7 @@ const editProduct = (id: number) => {
 </template>
 
 <style scoped>
-.item-display {
-  margin-top: 20px;
+.varieties {
+  margin-top: 16px;
 }
 </style>
