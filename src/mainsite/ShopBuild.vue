@@ -1,27 +1,35 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick } from 'vue'
+import { ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useGeolocation } from '@/composables/useGeolocation'
-import { useMap } from '@/composables/useMap'
 
-// router
 const router = useRouter()
+const goBack = () => router.back()
 
 // states
 const avatarUrl = ref<string | null>(null)
 const uploading = ref(false)
 const showPicker = ref(false)
 
-const businessName = ref('')
-const aboutUs = ref('')
+const { coords } = useGeolocation()
+const latitude = ref<number | null>(null)
+const longitude = ref<number | null>(null)
+
+// snackbar
+const snackbar = ref(false)
+const snackbarMessage = ref('')
+const snackbarColor = ref('success')
+const saving = ref(false)
+
+// shop info
+const shopName = ref('')
+const description = ref('')
 const openTime = ref('')
 const closeTime = ref('')
 
-const { latitude, longitude, getLocation } = useGeolocation()
-const { initMap, updateMapPosition, geocodeAddress, isMapReady } = useMap()
-
+// address
 const address = {
   building: ref(''),
   street: ref(''),
@@ -31,68 +39,12 @@ const address = {
   city: ref(''),
   province: ref(''),
   region: ref(''),
-  postal: ref('')
-}
-
-// helpers
-const goBack = () => router.back()
-
-const loadProfile = async () => {
-  const { data, error } = await supabase.from('profiles').select('avatar_url').single()
-  if (!error) avatarUrl.value = data?.avatar_url || null
-}
-
-const uploadAvatar = async (file: Blob) => {
-  try {
-    uploading.value = true
-    const fileName = `${Date.now()}.jpeg`
-    const filePath = `avatars/${fileName}`
-
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file, { upsert: true })
-    if (uploadError) throw uploadError
-
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
-
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ avatar_url: publicUrl })
-      .eq('id', (await supabase.auth.getUser()).data.user?.id)
-    if (updateError) throw updateError
-
-    avatarUrl.value = publicUrl
-  } catch (err) {
-    console.error('Upload error:', err)
-  } finally {
-    uploading.value = false
-  }
-}
-
-const pickImage = async (source: 'camera' | 'gallery') => {
-  try {
-    const photo = await Camera.getPhoto({
-      quality: 90,
-      allowEditing: true,
-      resultType: CameraResultType.Uri,
-      source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
-    })
-
-    if (photo.webPath) {
-      const response = await fetch(photo.webPath)
-      const blob = await response.blob()
-      await uploadAvatar(blob)
-    }
-  } catch (err) {
-    console.error('Error picking image:', err)
-  } finally {
-    showPicker.value = false
-  }
+  postal: ref(''),
 }
 
 // build full address string
-const fullAddress = () => {
-  return [
+const fullAddress = () =>
+  [
     address.building.value,
     address.street.value,
     address.purok.value,
@@ -101,31 +53,117 @@ const fullAddress = () => {
     address.city.value,
     address.province.value,
     address.region.value,
-    address.postal.value
+    address.postal.value,
   ].filter(Boolean).join(', ')
+
+// geocode mock
+const geocodeAddress = async (addr: string) => {
+  console.log('Geocoding address:', addr)
+  return { lat: 8.9489, lng: 125.5406 } // sample coords
 }
 
-// lifecycle
-onMounted(async () => {
-  await loadProfile()
-  await nextTick()
-  initMap('map')
+const updateMapPosition = (coords: { lat: number; lng: number }) => {
+  latitude.value = coords.lat
+  longitude.value = coords.lng
+}
 
-  // Try to get user’s current location
-  const pos = await getLocation()
-  if (pos) {
-    updateMapPosition([pos.coords.latitude, pos.coords.longitude])
+watch(
+  () => [
+    address.building.value,
+    address.street.value,
+    address.purok.value,
+    address.subdivision.value,
+    address.barangay.value,
+    address.city.value,
+    address.province.value,
+    address.region.value,
+    address.postal.value,
+  ],
+  async () => {
+    const addr = fullAddress()
+    if (!addr) return
+    const coords = await geocodeAddress(addr)
+    if (coords) updateMapPosition(coords)
   }
-})
+)
 
-// watch for address changes → geocode
-watch(Object.values(address), async () => {
-  const addr = fullAddress()
-  if (!addr) return
-  const coords = await geocodeAddress(addr)
-  if (coords) updateMapPosition(coords)
-})
+// image upload
+const uploadAvatar = async () => {
+  try {
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      allowEditing: false,
+      resultType: CameraResultType.DataUrl,
+      source: CameraSource.Prompt,
+    })
+
+    if (photo?.dataUrl) {
+      uploading.value = true
+      const { data, error } = await supabase.storage
+        .from('avatars')
+        .upload(`public/${Date.now()}.png`, dataURItoBlob(photo.dataUrl))
+
+      if (error) throw error
+      avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/avatars/${data?.path}`
+    }
+  } catch (error) {
+    console.error(error)
+    showSnackbar('Failed to upload image', 'error')
+  } finally {
+    uploading.value = false
+  }
+}
+
+function dataURItoBlob(dataURI: string) {
+  const byteString = atob(dataURI.split(',')[1])
+  const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0]
+  const ab = new ArrayBuffer(byteString.length)
+  const ia = new Uint8Array(ab)
+  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
+  return new Blob([ab], { type: mimeString })
+}
+
+function showSnackbar(message: string, color: string) {
+  snackbarMessage.value = message
+  snackbarColor.value = color
+  snackbar.value = true
+}
+
+// save shop
+const saveShop = async () => {
+  saving.value = true
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('User not found')
+
+    const shopData = {
+      id: user.id,
+      Business_name: shopName.value,
+      description: description.value,
+      logo_url: avatarUrl.value,
+      address: fullAddress(),
+      latitude: latitude.value,
+      longitude: longitude.value,
+      open_time: openTime.value,
+      close_time: closeTime.value,
+    }
+
+    const { error } = await supabase.from('shops').insert(shopData)
+    if (error) throw error
+
+    showSnackbar('Shop saved successfully!', 'success')
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to save shop', 'error')
+  } finally {
+    saving.value = false
+  }
+}
 </script>
+
 
 <template>
   <v-app>
@@ -160,13 +198,10 @@ watch(Object.values(address), async () => {
       </div>
 
       <v-text-field
-        v-model="businessName"
+        v-model="shopName"
         label="Business Name"
         placeholder="Enter your business name"
-        :rules="[
-          v => !!v || 'Business name is required',
-          v => (v && v.length >= 3) || 'At least 3 characters'
-        ]"
+        :rules="[v => !!v || 'Business name is required', v => (v && v.length >= 3) || 'At least 3 characters']"
         clearable
         outlined
         color="primary"
@@ -176,7 +211,7 @@ watch(Object.values(address), async () => {
       />
 
       <v-textarea
-        v-model="aboutUs"
+        v-model="description"
         label="About Us"
         placeholder="Write something about your business"
         outlined
@@ -196,14 +231,12 @@ watch(Object.values(address), async () => {
 
       <!-- Address Section -->
       <h2 class="section-title">Address</h2>
-      <v-text-field v-model="address.building.value" label="Building Name" outlined />
       <v-text-field v-model="address.street.value" label="Street Name" outlined />
       <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
       <v-text-field v-model="address.subdivision.value" label="Subdivision / Village / Compound" outlined />
       <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
       <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
       <v-text-field v-model="address.province.value" label="Province" outlined />
-      <v-text-field v-model="address.region.value" label="Region" outlined />
       <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
       <!-- Map -->
@@ -213,8 +246,15 @@ watch(Object.values(address), async () => {
       <div class="btns">
         <v-btn color="error" class="shop-btn">Delete Shop</v-btn>
         <v-btn color="secondary" class="shop-btn" @click="goBack">Back</v-btn>
-        <v-btn color="primary" class="shop-btn">Save</v-btn>
+        <v-btn color="primary" class="shop-btn" :loading="saving" :disabled="saving" @click="saveShop">
+          Save
+        </v-btn>
       </div>
+
+      <!-- Snackbar Alert -->
+      <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
+        {{ snackbarMessage }}
+      </v-snackbar>
 
       <!-- Image Picker Dialog -->
       <v-dialog v-model="showPicker" max-width="290">
