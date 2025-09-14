@@ -1,9 +1,8 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-import { useGeolocation } from '@/composables/useGeolocation'
 import * as L from 'leaflet'
 import 'leaflet.fullscreen'
 import 'leaflet.fullscreen/Control.FullScreen.css'
@@ -27,22 +26,108 @@ const description = ref('')
 const openTime = ref('')
 const closeTime = ref('')
 
-// Address info
+// Address info (Butuan City fixed)
 const address = {
-  region: ref(''),
-  province: ref(''),
-  city: ref(''),
-  building: ref(''),
   barangay: ref(''),
-  postal: ref(''),
+  building: ref(''),
   street: ref(''),
+  postal: ref(''),
   house_no: ref(''),
 }
 
-// Geolocation
-const { coords } = useGeolocation()
-const latitude = ref<number | null>(null)
-const longitude = ref<number | null>(null)
+// Butuan City barangays
+// Butuan City barangays
+const barangays = [
+  'Agusan Pequeño',
+  'Ambago',
+  'Amparo',
+  'Ampayon',
+  'Anticala',
+  'Antongalon',
+  'Aupagan',
+  'Baan KM 3',
+  'Baan Riverside Poblacion (Barangay 20)',
+  'Babag',
+  'Bading Poblacion (Barangay 22)',
+  'Bancasi',
+  'Banza',
+  'Baobaoan',
+  'Basag',
+  'Bayanihan Poblacion (Barangay 27)',
+  'Bilay',
+  'Bitan-agan',
+  'Bit-os',
+  'Bobon',
+  'Bonbon',
+  'Bugabus',
+  'Bugsukan',
+  'Buhangin Poblacion (Barangay 19)',
+  'Cabcabon',
+  'Camayahan',
+  'Dagohoy Poblacion (Barangay 7)',
+  'Dankias',
+  'De Oro',
+  'Diego Silang Poblacion (Barangay 6)',
+  'Don Francisco',
+  'Doongan',
+  'Dulag',
+  'Dumalagan',
+  'Florida',
+  'Golden Ribbon Poblacion (Barangay 2)',
+  'Holy Redeemer Poblacion (Barangay 23)',
+  'Humabon Poblacion (Barangay 11)',
+  'Imadejas Poblacion (Barangay 24)',
+  'Jose Rizal Poblacion (Barangay 25)',
+  'Kinamlutan',
+  'Lapu-Lapu Poblacion (Barangay 8)',
+  'Lemon',
+  'Leon Kilat Poblacion (Barangay 13)',
+  'Libertad',
+  'Limaha Poblacion (Barangay 14)',
+  'Los Angeles',
+  'Lumbocan',
+  'Maguinda',
+  'Mahay',
+  'Mahogany Poblacion (Barangay 21)',
+  'Maibu',
+  'Mandamo',
+  'Manila de Bugabus',
+  'Maon Poblacion (Barangay 1)',
+  'Masao',
+  'Maug',
+  'New Society Village Poblacion (Barangay 26)',
+  'Nong-Nong',
+  'Obrero Poblacion (Barangay 18)',
+  'Ong Yiu Poblacion (Barangay 16)',
+  'Pagatpatan',
+  'Pangabugan',
+  'Pianing',
+  'Pigdaulan',
+  'Pinamanculan',
+  'Port Poyohon Poblacion (Barangay 17, New Asia)',
+  'Rajah Soliman Poblacion (Barangay 4)',
+  'Salvacion',
+  'San Ignacio Poblacion (Barangay 15)',
+  'San Mateo',
+  'Santo Niño',
+  'San Vicente',
+  'Sikatuna Poblacion (Barangay 10)',
+  'Silongan Poblacion (Barangay 5)',
+  'Sumile',
+  'Sumilihon',
+  'Tagabaca',
+  'Taguibo',
+  'Taligaman',
+  'Tandang Sora Poblacion (Barangay 12)',
+  'Tiniwisan',
+  'Tungao',
+  'Urduja Poblacion (Barangay 9)',
+  'Villa Kananga',
+]
+
+// Location coordinates
+const latitude = ref<number | null>(8.9489) // default Butuan City center
+const longitude = ref<number | null>(125.5406)
 
 // -------------------- Map --------------------
 const map = ref<L.Map | null>(null)
@@ -52,7 +137,7 @@ const initMap = () => {
   if (map.value) return
 
   map.value = L.map('map', {
-    center: [latitude.value || 8.9489, longitude.value || 125.5406],
+    center: [latitude.value, longitude.value],
     zoom: 15,
     fullscreenControl: true,
     fullscreenControlOptions: { position: 'topleft' },
@@ -62,67 +147,31 @@ const initMap = () => {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  // Add marker if coordinates exist
-  if (latitude.value && longitude.value) {
-    shopMarker = L.marker([latitude.value, longitude.value]).addTo(map.value)
-  }
+  // Add draggable marker
+  shopMarker = L.marker([latitude.value, longitude.value], { draggable: true }).addTo(map.value)
+  shopMarker.on('dragend', (e) => {
+    const pos = (e.target as L.Marker).getLatLng()
+    latitude.value = pos.lat
+    longitude.value = pos.lng
+  })
 }
 
-watch([latitude, longitude], () => {
-  if (!map.value || !latitude.value || !longitude.value) return
-  map.value.setView([latitude.value, longitude.value], 15)
-  if (shopMarker) {
-    shopMarker.setLatLng([latitude.value, longitude.value])
-  } else {
-    shopMarker = L.marker([latitude.value, longitude.value]).addTo(map.value)
-  }
-})
-
-const toggleFullscreen = () => {
-  map.value?.toggleFullscreen()
-}
+const toggleFullscreen = () => map.value?.toggleFullscreen()
 
 // -------------------- Helpers --------------------
 const fullAddress = () =>
   [
-    address.street.value,
-    address.building.value,
-    address.barangay.value,
-    address.city.value,
-    address.province.value,
-    address.region.value,
-    address.postal.value,
     address.house_no.value,
+    address.building.value,
+    address.street.value,
+    address.barangay.value,
+    'Butuan City',
+    'Agusan del Norte',
+    'CARAGA',
+    address.postal.value,
   ]
     .filter(Boolean)
     .join(', ')
-
-const geocodeAddress = async (addr: string) => {
-  console.log('Geocoding address:', addr)
-  return { lat: 8.9489, lng: 125.5406 } // sample coords
-}
-
-watch(
-  () => [
-    address.street.value,
-    address.building.value,
-    address.barangay.value,
-    address.city.value,
-    address.province.value,
-    address.region.value,
-    address.postal.value,
-    address.house_no.value,
-  ],
-  async () => {
-    const addr = fullAddress()
-    if (!addr) return
-    const coords = await geocodeAddress(addr)
-    if (coords) {
-      latitude.value = coords.lat
-      longitude.value = coords.lng
-    }
-  },
-)
 
 // -------------------- Snackbar --------------------
 const showSnackbar = (message: string, color: string = 'success') => {
@@ -201,14 +250,14 @@ const saveShop = async () => {
       longitude: longitude.value,
       open_time: openTime.value,
       close_time: closeTime.value,
-      region: address.region.value,
-      province: address.province.value,
-      city: address.city.value,
-      building: address.building.value,
       barangay: address.barangay.value,
-      postal: address.postal.value,
+      building: address.building.value,
       street: address.street.value,
+      postal: address.postal.value,
       house_no: address.house_no.value,
+      city: 'Butuan City',
+      province: 'Agusan del Norte',
+      region: 'CARAGA',
     }
 
     const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'user_id' })
@@ -223,9 +272,12 @@ const saveShop = async () => {
   }
 }
 
-// -------------------- Load Shop Data and Init Map --------------------
+// -------------------- Load Shop Data --------------------
 onMounted(async () => {
   try {
+    await nextTick()
+    initMap()
+
     const {
       data: { user },
       error: userError,
@@ -241,81 +293,82 @@ onMounted(async () => {
     openTime.value = data.open_time || ''
     closeTime.value = data.close_time || ''
 
-    if (data.address) {
-      address.region.value = data.address.region || ''
-      address.province.value = data.address.province || ''
-      address.city.value = data.address.city || ''
-      address.building.value = data.address.building || ''
-      address.barangay.value = data.address.barangay || ''
-      address.postal.value = data.address.postal || ''
-      address.street.value = data.address.street || ''
-      address.house_no.value = data.address.house_no || ''
-    }
+    address.barangay.value = data.barangay || ''
+    address.building.value = data.building || ''
+    address.street.value = data.street || ''
+    address.postal.value = data.postal || ''
+    address.house_no.value = data.house_no || ''
 
-    // Set initial coords
     latitude.value = data.latitude || 8.9489
     longitude.value = data.longitude || 125.5406
 
-    // Initialize the map after coords
-    initMap()
+    // Update marker position
+    if (shopMarker) shopMarker.setLatLng([latitude.value, longitude.value])
   } catch (err) {
     console.error(err)
-    initMap() // fallback
   }
 })
 </script>
 
 <template>
   <v-app>
-    <v-app-bar flat elevation="0" color="transparent">
-      <v-btn variant="text" @click="goBack">
-        <v-icon start>mdi-arrow-left</v-icon> Back
-      </v-btn>
+    <v-app-bar flat color="transparent">
+      <v-btn variant="text" @click="goBack"> <v-icon start>mdi-arrow-left</v-icon> Back </v-btn>
     </v-app-bar>
 
-    <v-divider />
-
     <v-main>
-      <h2 class="section-title">Business Information</h2>
+      <h2>Business Information</h2>
+
       <div class="avatar-container">
         <v-avatar size="80" color="grey-lighten-3">
           <v-img v-if="avatarUrl" :src="avatarUrl" cover />
           <v-icon v-else size="60">mdi-store</v-icon>
         </v-avatar>
-        <v-btn class="edit-btn" color="primary" icon elevation="4" :loading="uploading" @click="showPicker = true">
+        <v-btn
+          icon
+          color="primary"
+          :loading="uploading"
+          @click="showPicker = true"
+          class="edit-btn"
+        >
           <v-icon>mdi-camera</v-icon>
         </v-btn>
       </div>
 
-      <v-text-field v-model="shopName" label="Business Name" outlined clearable />
+      <v-text-field v-model="shopName" label="Business Name" outlined />
       <v-textarea v-model="description" label="About Us" outlined auto-grow />
 
-      <h2 class="section-title">Operating Hours</h2>
+      <h2>Operating Hours</h2>
       <v-row>
-        <v-col cols="6"><v-text-field v-model="openTime" label="Opening Time" type="time" outlined /></v-col>
-        <v-col cols="6"><v-text-field v-model="closeTime" label="Closing Time" type="time" outlined /></v-col>
+        <v-col cols="6">
+          <v-text-field v-model="openTime" type="time" label="Opening Time" outlined />
+        </v-col>
+        <v-col cols="6">
+          <v-text-field v-model="closeTime" type="time" label="Closing Time" outlined />
+        </v-col>
       </v-row>
+      <h2>Address (Butuan City)</h2>
+        <!-- Fixed fields -->
+      <v-text-field label="City" value="Butuan City" readonly outlined />
+      <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
+      <v-text-field label="Region" value="CARAGA" readonly outlined />
+      <!-- Editable fields -->
 
-      <h2 class="section-title">Address</h2>
-      <v-text-field v-model="address.region.value" label="Region" outlined />
-      <v-text-field v-model="address.province.value" label="Province" outlined />
-      <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
+      <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" outlined />
       <v-text-field v-model="address.building.value" label="Building No." outlined />
-      <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
-      <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
       <v-text-field v-model="address.street.value" label="Street Name" outlined />
       <v-text-field v-model="address.house_no.value" label="House No." outlined />
+      <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
-      <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">Toggle Fullscreen</v-btn>
+    
+      <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">Toggle Map Fullscreen</v-btn>
       <div id="map" class="map"></div>
 
-      <div class="btns">
-        <v-btn color="primary" class="shop-btn" :loading="saving" :disabled="saving" @click="saveShop">
-          {{ saving ? 'Saving...' : 'Save' }}
-        </v-btn>
-      </div>
+      <v-btn color="primary" :loading="saving" @click="saveShop">
+        {{ saving ? 'Saving...' : 'Save Shop' }}
+      </v-btn>
 
-      <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
+      <v-snackbar v-model="snackbar" :color="snackbarColor" timeout="3000">
         {{ snackbarMessage }}
       </v-snackbar>
 
@@ -323,8 +376,8 @@ onMounted(async () => {
         <v-card>
           <v-card-title class="headline">Pick Image Source</v-card-title>
           <v-card-actions>
-            <v-btn @click="pickImage('camera')" color="primary">Use Camera</v-btn>
-            <v-btn @click="pickImage('gallery')" color="primary">Use Gallery</v-btn>
+            <v-btn color="primary" @click="pickImage('camera')">Use Camera</v-btn>
+            <v-btn color="primary" @click="pickImage('gallery')">Use Gallery</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -333,9 +386,23 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.section-title { margin-top: 20px; margin-bottom: 10px; font-weight: 600; }
-.avatar-container { display: flex; justify-content: center; align-items: center; position: relative; margin: 16px 0; }
-.edit-btn { position: absolute; bottom: -10px; right: -10px; border-radius: 50%; }
-.map { height: 400px; width: 100%; border-radius: 12px; margin-bottom: 16px; }
-.btns { display: flex; justify-content: space-between; margin: 20px 0; }
+.avatar-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  margin: 16px 0;
+}
+.edit-btn {
+  position: absolute;
+  bottom: -10px;
+  right: -10px;
+  border-radius: 50%;
+}
+.map {
+  height: 400px;
+  width: 100%;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
 </style>
