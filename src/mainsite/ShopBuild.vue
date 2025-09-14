@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch } from 'vue'
+import { ref, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
@@ -29,7 +29,7 @@ const description = ref('')
 const openTime = ref('')
 const closeTime = ref('')
 
-// address
+// address (still using refs)
 const address = {
   building: ref(''),
   street: ref(''),
@@ -69,14 +69,12 @@ const updateMapPosition = (coords: { lat: number; lng: number }) => {
 
 watch(
   () => [
-    address.building.value,
     address.street.value,
     address.purok.value,
     address.subdivision.value,
     address.barangay.value,
     address.city.value,
     address.province.value,
-    address.region.value,
     address.postal.value,
   ],
   async () => {
@@ -86,33 +84,6 @@ watch(
     if (coords) updateMapPosition(coords)
   }
 )
-
-// image upload
-const uploadAvatar = async () => {
-  try {
-    const photo = await Camera.getPhoto({
-      quality: 90,
-      allowEditing: false,
-      resultType: CameraResultType.DataUrl,
-      source: CameraSource.Prompt,
-    })
-
-    if (photo?.dataUrl) {
-      uploading.value = true
-      const { data, error } = await supabase.storage
-        .from('avatars')
-        .upload(`public/${Date.now()}.png`, dataURItoBlob(photo.dataUrl))
-
-      if (error) throw error
-      avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/avatars/${data?.path}`
-    }
-  } catch (error) {
-    console.error(error)
-    showSnackbar('Failed to upload image', 'error')
-  } finally {
-    uploading.value = false
-  }
-}
 
 function dataURItoBlob(dataURI: string) {
   const byteString = atob(dataURI.split(',')[1])
@@ -129,7 +100,40 @@ function showSnackbar(message: string, color: string) {
   snackbar.value = true
 }
 
-// save shop
+// 📸 NEW: pick image from camera or gallery
+const pickImage = async (source: 'camera' | 'gallery') => {
+  try {
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      allowEditing: false,
+      resultType: CameraResultType.DataUrl,
+      source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
+    })
+
+    if (photo?.dataUrl) {
+      uploading.value = true
+      const fileName = `public/${Date.now()}.png`
+      const { data, error } = await supabase.storage
+        .from('avatars')
+        .upload(fileName, dataURItoBlob(photo.dataUrl))
+
+      if (error) throw error
+
+      avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/avatars/${data?.path}`
+
+      showSnackbar('Image uploaded successfully', 'success')
+      showPicker.value = false
+    }
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to upload image', 'error')
+  } finally {
+    uploading.value = false
+  }
+}
+
+
+// 💾 Save shop data to DB
 const saveShop = async () => {
   saving.value = true
   try {
@@ -140,10 +144,10 @@ const saveShop = async () => {
     if (userError || !user) throw new Error('User not found')
 
     const shopData = {
-      id: user.id,
-      Business_name: shopName.value,
+      user_id: user.id,
+      business_name: shopName.value,
       description: description.value,
-      logo_url: avatarUrl.value,
+      logo_url: avatarUrl.value,   // ✅ now included
       address: fullAddress(),
       latitude: latitude.value,
       longitude: longitude.value,
@@ -151,7 +155,9 @@ const saveShop = async () => {
       close_time: closeTime.value,
     }
 
-    const { error } = await supabase.from('shops').insert(shopData)
+    const { error } = await supabase.from('shops').upsert(shopData, {
+      onConflict: 'user_id',
+    })
     if (error) throw error
 
     showSnackbar('Shop saved successfully!', 'success')
@@ -164,143 +170,142 @@ const saveShop = async () => {
 }
 </script>
 
+  <template>
+    <v-app>
+      <!-- Top Bar -->
+      <v-app-bar flat elevation="0" color="transparent">
+        <v-btn variant="text" @click="goBack">
+          <v-icon start>mdi-arrow-left</v-icon>
+          Back
+        </v-btn>
+      </v-app-bar>
 
-<template>
-  <v-app>
-    <!-- Top Bar -->
-    <v-app-bar flat elevation="0" color="transparent">
-      <v-btn variant="text" @click="goBack">
-        <v-icon start>mdi-arrow-left</v-icon>
-        Back
-      </v-btn>
-    </v-app-bar>
+      <v-divider />
 
-    <v-divider />
+      <v-main>
+        <!-- Business Info -->
+        <h2 class="section-title">Business Information</h2>
+        <div class="avatar-container">
+          <v-avatar size="80" color="grey-lighten-3">
+            <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+            <v-icon v-else size="60">mdi-store</v-icon>
+          </v-avatar>
+          <v-btn
+            class="edit-btn"
+            color="primary"
+            icon
+            elevation="4"
+            :loading="uploading"
+            @click="showPicker = true"
+          >
+            <v-icon>mdi-camera</v-icon>
+          </v-btn>
+        </div>
 
-    <v-main>
-      <!-- Business Info -->
-      <h2 class="section-title">Business Information</h2>
-      <div class="avatar-container">
-        <v-avatar size="80" color="grey-lighten-3">
-          <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-          <v-icon v-else size="60">mdi-store</v-icon>
-        </v-avatar>
-        <v-btn
-          class="edit-btn"
+        <v-text-field
+          v-model="shopName"
+          label="Business Name"
+          placeholder="Enter your business name"
+          :rules="[v => !!v || 'Business name is required', v => (v && v.length >= 3) || 'At least 3 characters']"
+          clearable
+          outlined
           color="primary"
-          icon
-          elevation="4"
-          :loading="uploading"
-          @click="showPicker = true"
-        >
-          <v-icon>mdi-camera</v-icon>
-        </v-btn>
-      </div>
+          prepend-inner-icon="mdi-store"
+          hint="This is your business's official name"
+          persistent-hint
+        />
 
-      <v-text-field
-        v-model="shopName"
-        label="Business Name"
-        placeholder="Enter your business name"
-        :rules="[v => !!v || 'Business name is required', v => (v && v.length >= 3) || 'At least 3 characters']"
-        clearable
-        outlined
-        color="primary"
-        prepend-inner-icon="mdi-store"
-        hint="This is your business's official name"
-        persistent-hint
-      />
+        <v-textarea
+          v-model="description"
+          label="About Us"
+          placeholder="Write something about your business"
+          outlined
+          auto-grow
+        />
 
-      <v-textarea
-        v-model="description"
-        label="About Us"
-        placeholder="Write something about your business"
-        outlined
-        auto-grow
-      />
+        <!-- Operating Hours -->
+        <h2 class="section-title">Operating Hours</h2>
+        <v-row>
+          <v-col cols="6">
+            <v-text-field v-model="openTime" label="Opening Time" type="time" outlined />
+          </v-col>
+          <v-col cols="6">
+            <v-text-field v-model="closeTime" label="Closing Time" type="time" outlined />
+          </v-col>
+        </v-row>
 
-      <!-- Operating Hours -->
-      <h2 class="section-title">Operating Hours</h2>
-      <v-row>
-        <v-col cols="6">
-          <v-text-field v-model="openTime" label="Opening Time" type="time" outlined />
-        </v-col>
-        <v-col cols="6">
-          <v-text-field v-model="closeTime" label="Closing Time" type="time" outlined />
-        </v-col>
-      </v-row>
+        <!-- Address Section -->
+        <h2 class="section-title">Address</h2>
+        <v-text-field v-model="address.street.value" label="Street Name" outlined />
+        <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
+        <v-text-field v-model="address.subdivision.value" label="Subdivision / Village / Compound" outlined />
+        <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
+        <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
+        <v-text-field v-model="address.province.value" label="Province" outlined />
+        <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
-      <!-- Address Section -->
-      <h2 class="section-title">Address</h2>
-      <v-text-field v-model="address.street.value" label="Street Name" outlined />
-      <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
-      <v-text-field v-model="address.subdivision.value" label="Subdivision / Village / Compound" outlined />
-      <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
-      <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
-      <v-text-field v-model="address.province.value" label="Province" outlined />
-      <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
+        <!-- Map -->
+        <div id="map" class="map"></div>
 
-      <!-- Map -->
-      <div id="map" class="map"></div>
+        <!-- Action Buttons -->
+        <div class="btns">
+          <v-btn color="error" class="shop-btn">Delete Shop</v-btn>
+          <v-btn color="secondary" class="shop-btn" @click="goBack">Back</v-btn>
+          <v-btn color="primary" class="shop-btn" :loading="saving" :disabled="saving" @click="saveShop">
+            Save
+          </v-btn>
+        </div>
 
-      <!-- Action Buttons -->
-      <div class="btns">
-        <v-btn color="error" class="shop-btn">Delete Shop</v-btn>
-        <v-btn color="secondary" class="shop-btn" @click="goBack">Back</v-btn>
-        <v-btn color="primary" class="shop-btn" :loading="saving" :disabled="saving" @click="saveShop">
-          Save
-        </v-btn>
-      </div>
+        <!-- Snackbar Alert -->
+        <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
+          {{ snackbarMessage }}
+        </v-snackbar>
 
-      <!-- Snackbar Alert -->
-      <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
-        {{ snackbarMessage }}
-      </v-snackbar>
+        <!-- Image Picker Dialog -->
+        <v-dialog v-model="showPicker" max-width="290">
+          <v-card>
+            <v-card-title class="headline">Pick Image Source</v-card-title>
+            <v-card-actions>
+              <v-btn @click="pickImage('camera')" color="primary">Use Camera</v-btn>
+              <v-btn @click="pickImage('gallery')" color="primary">Use Gallery</v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+      </v-main>
+    </v-app>
+  </template>
 
-      <!-- Image Picker Dialog -->
-      <v-dialog v-model="showPicker" max-width="290">
-        <v-card>
-          <v-card-title class="headline">Pick Image Source</v-card-title>
-          <v-card-actions>
-            <v-btn @click="pickImage('camera')" color="primary">Use Camera</v-btn>
-            <v-btn @click="pickImage('gallery')" color="primary">Use Gallery</v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-    </v-main>
-  </v-app>
-</template>
+  <style scoped>
+  .section-title {
+    margin-top: 20px;
+    margin-bottom: 10px;
+    font-weight: 600;
+  }
 
-<style scoped>
-.section-title {
-  margin-top: 20px;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
+  .avatar-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    position: relative;
+    margin: 16px 0;
+  }
 
-.avatar-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  position: relative;
-  margin: 16px 0;
-}
+  .edit-btn {
+    position: absolute;
+    bottom: -10px;
+    right: -10px;
+    border-radius: 50%;
+  }
 
-.edit-btn {
-  position: absolute;
-  bottom: -10px;
-  right: -10px;
-  border-radius: 50%;
-}
+  .map {
+    margin-top: 16px;
+    height: 300px;
+    border-radius: 12px;
+  }
 
-.map {
-  margin-top: 16px;
-  height: 300px;
-  border-radius: 12px;
-}
-
-.btns {
-  display: flex;
-  justify-content: space-between;
-  margin: 20px 0;
-}
-</style>
+  .btns {
+    display: flex;
+    justify-content: space-between;
+    margin: 20px 0;
+  }
+  </style>
