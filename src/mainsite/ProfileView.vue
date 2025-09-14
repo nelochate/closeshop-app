@@ -93,25 +93,38 @@ const selectedSection = ref(purchaseSections[0])
 const hasShop = ref(false)
 
 const checkUserShop = async () => {
-  if (!authStore.userData) return
+  if (!user.value?.id) return
 
-  const { data, error } = await supabase
-    .from('shops')
-    .select('id')
-    .eq('owner_id', authStore.userData.id)
-    .single()
+  try {
+    const { data, error } = await supabase
+      .from('shops')
+      .select('id')
+      .eq('owner_id', user.value.id)
+      .single()
 
-  if (error && error.code !== 'PGRST116') {
-    console.error('Error checking shop:', error.message)
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error checking shop:', error.message)
+    }
+
+    hasShop.value = !!data
+  } catch (err) {
+    console.error('Error checking shop:', err)
   }
-
-  hasShop.value = !!data
 }
 
 onMounted(async () => {
-  await loadUser()
-  await checkUserShop()
+  await loadUser() // Load user first
+  await checkUserShop() // Then check if they have a shop
 })
+
+//function click
+const goShopOrBuild = () => {
+  if (hasShop.value) {
+    router.push('/usershop')      // Go to shop view
+  } else {
+    router.push('/shop-build')    // Go to create shop
+  }
+}
 
 </script>
 
@@ -169,15 +182,9 @@ onMounted(async () => {
 
           <!-- Actions -->
           <div class="actions">
-            <template v-if="!hasShop">
-              <p class="sell-link" @click="$router.push('/shop-build')">
-                <u>Click here to start selling</u>
-              </p>
-            </template>
-
-            <template v-else>
-              <v-btn to="/usershop">My shop</v-btn>
-            </template>
+            <v-btn color="primary" @click="goShopOrBuild">
+              {{ hasShop ? 'My shop' : 'Click here to start selling' }}
+            </v-btn>
           </div>
         </div>
       </div>
