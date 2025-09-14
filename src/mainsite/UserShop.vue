@@ -1,23 +1,61 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { supabase } from '@/utils/supabase'
 
-// router
 const router = useRouter()
 const goBack = () => router.back()
 
-// dummy data (replace later with props or API)
+// state
 const businessAvatar = ref('')
-const businessName = ref('My Business Name')
-const description = ref('We provide quality services at affordable prices.')
-const timeOpen = ref('8:00 AM')
-const timeClose = ref('9:00 PM')
-const isOpen = ref(true)
-const address = ref('123 Main Street, Butuan City')
+const businessName = ref('')
+const description = ref('')
+const timeOpen = ref('')
+const timeClose = ref('')
+const isOpen = ref(false)
+const address = ref('')
 
-// select state
+// transactions
 const transactionFilter = ref('Orders')
 const transactionOptions = ['Orders', 'Completed', 'Cancelled']
+
+// fetch shop data
+const fetchShopData = async () => {
+  try {
+    // get current user
+    const {
+      data: { user },
+      error: userError
+    } = await supabase.auth.getUser()
+
+    if (userError || !user) throw new Error('User not logged in')
+
+    // fetch shop info
+    const { data, error } = await supabase
+      .from('shops')
+      .select('business_name, description, logo_url, open_time, close_time, address')
+      .eq('id', user.id)
+      .maybeSingle() // ✅ safer than .single()
+
+    if (error) throw error
+
+    console.log('Shop info:', data)
+
+    // assign values to display
+    businessName.value = data?.business_name || 'No name'
+    description.value = data?.description || 'No description provided'
+    timeOpen.value = data?.open_time || 'N/A'
+    timeClose.value = data?.close_time || 'N/A'
+    address.value = data?.address || 'No address set'
+    businessAvatar.value = data?.logo_url || ''
+    isOpen.value = true
+  } catch (err: any) {
+    console.error('Error loading shop info:', err.message, err)
+  }
+}
+
+
+onMounted(fetchShopData)
 </script>
 
 <template>
@@ -36,8 +74,9 @@ const transactionOptions = ['Orders', 'Completed', 'Cancelled']
         <v-sheet rounded="xl" elevation="4" class="pa-6 text-center">
           <!-- Avatar with edit button -->
           <div class="relative inline-block">
-            <v-avatar size="96" :image="businessAvatar">
-              <v-icon v-if="!businessAvatar">mdi-store</v-icon>
+            <v-avatar size="96">
+              <v-img v-if="businessAvatar" :src="businessAvatar" cover />
+              <v-icon v-else size="48">mdi-store</v-icon>
             </v-avatar>
             <v-btn
               icon
@@ -75,12 +114,11 @@ const transactionOptions = ['Orders', 'Completed', 'Cancelled']
       <!-- Transaction Section -->
       <v-divider thickness="3">Transaction</v-divider>
 
-      <v-container class="py-4 ">
-        <v-btn color="primary" rounded="lg"  class="mb-4" to="/productlist">
+      <v-container class="py-4">
+        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist">
           My Product
         </v-btn>
-        
-       
+
         <v-select
           v-model="transactionFilter"
           :items="transactionOptions"
