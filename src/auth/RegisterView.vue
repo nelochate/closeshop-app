@@ -91,11 +91,7 @@ const onFormSubmit = () => {
         <div class="circle-deco"></div>
 
         <!-- Logo -->
-        <v-img
-          src="/images/logo.png"
-          max-width="100"
-          class="logo"
-        ></v-img>
+        <v-img src="/images/logo.png" max-width="100" class="logo" />
 
         <!-- Title + Subtitle -->
         <h2 class="login-title">Create Account</h2>
@@ -115,54 +111,65 @@ const onFormSubmit = () => {
         <v-form ref="refVform" @submit.prevent="onFormSubmit">
           <v-text-field
             v-model="formData.firstName"
-            placeholder="First Name"
+            label="First Name"
+            placeholder="Enter your first name"
             prepend-inner-icon="mdi-account"
-            class="login-input"
-            :rules="[requiredValidator]"
+            variant="outlined"
             density="comfortable"
+            class="form-input"
+            :rules="[requiredValidator]"
           />
           <v-text-field
             v-model="formData.lastName"
-            placeholder="Last Name"
+            label="Last Name"
+            placeholder="Enter your last name"
             prepend-inner-icon="mdi-account"
-            class="login-input"
-            :rules="[requiredValidator]"
+            variant="outlined"
             density="comfortable"
+            class="form-input"
+            :rules="[requiredValidator]"
           />
           <v-text-field
             v-model="formData.email"
-            placeholder="Email"
+            label="Email"
+            placeholder="Enter your email"
             prepend-inner-icon="mdi-email"
-            class="login-input"
-            :rules="[requiredValidator, emailValidator]"
+            variant="outlined"
             density="comfortable"
+            class="form-input"
+            :rules="[requiredValidator, emailValidator]"
           />
           <v-text-field
             v-model="formData.password"
             :type="showPassword ? 'text' : 'password'"
-            placeholder="Password"
+            label="Password"
+            placeholder="Enter your password"
             prepend-inner-icon="mdi-key-variant"
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
             @click:append-inner="showPassword = !showPassword"
-            class="login-input"
-            :rules="[requiredValidator, passwordValidator]"
+            variant="outlined"
             density="comfortable"
+            class="form-input"
+            :rules="[requiredValidator, passwordValidator]"
           />
           <v-text-field
             v-model="formData.confirmPassword"
             :type="showConfirmPassword ? 'text' : 'password'"
-            placeholder="Confirm Password"
+            label="Confirm Password"
+            placeholder="Re-enter your password"
             prepend-inner-icon="mdi-key-variant"
             :append-inner-icon="showConfirmPassword ? 'mdi-eye-off' : 'mdi-eye'"
             @click:append-inner="showConfirmPassword = !showConfirmPassword"
-            class="login-input"
+            variant="outlined"
+            density="comfortable"
+            class="form-input"
             :rules="[
               requiredValidator,
               () => confirmedValidator(formData.confirmPassword, formData.password),
             ]"
-            density="comfortable"
           />
 
+          <!-- Register Button -->
           <v-btn
             type="submit"
             color="primary"
@@ -175,8 +182,10 @@ const onFormSubmit = () => {
             Register
           </v-btn>
 
+          <!-- Link to Login -->
           <p class="register-link">
-            Already have an account? <RouterLink to="/">Login</RouterLink>
+            Already have an account?
+            <RouterLink to="/">Login</RouterLink>
           </p>
         </v-form>
       </div>
@@ -186,6 +195,10 @@ const onFormSubmit = () => {
 
 <style scoped>
 /* 🔹 Reuse styles from login */
+.form-input {
+  margin-bottom: 16px;
+}
+
 .login-container {
   position: relative;
   display: flex;
@@ -200,7 +213,7 @@ const onFormSubmit = () => {
   background-color: #2e73b8;
   color: #fff;
   width: 100%;
-  height: 30%;
+  height: 29%;
   padding: 3rem 2rem 5rem 2rem;
   position: relative;
   border-bottom-left-radius: 40px;
