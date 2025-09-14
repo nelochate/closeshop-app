@@ -276,7 +276,7 @@ onMounted(() => {
             </v-avatar>
             <br>
             <v-btn color="primary darken-1 background" variant="outlined" @click="showPicker = true" :loading="uploading">
-              Edit
+              <v-icon>mdi-camera</v-icon>
             </v-btn>
           </v-card-text>
         </v-card>
