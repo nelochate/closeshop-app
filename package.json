@@ -30,6 +30,7 @@
     "leaflet-control-geocoder": "^3.3.0",
     "leaflet-geosearch": "^4.2.1",
     "leaflet.fullscreen": "^4.0.0",
+    "lodash": "^4.17.21",
     "pinia": "^3.0.3",
     "vue": "^3.5.18",
     "vue-router": "^4.5.1",
