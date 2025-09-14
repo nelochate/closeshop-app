@@ -45,16 +45,16 @@ const address = {
 // build full address string
 const fullAddress = () =>
   [
-    address.building.value,
     address.street.value,
     address.purok.value,
     address.subdivision.value,
     address.barangay.value,
     address.city.value,
     address.province.value,
-    address.region.value,
     address.postal.value,
-  ].filter(Boolean).join(', ')
+  ]
+    .filter(Boolean)
+    .join(', ')
 
 // geocode mock
 const geocodeAddress = async (addr: string) => {
@@ -82,7 +82,7 @@ watch(
     if (!addr) return
     const coords = await geocodeAddress(addr)
     if (coords) updateMapPosition(coords)
-  }
+  },
 )
 
 function dataURItoBlob(dataURI: string) {
@@ -103,6 +103,15 @@ function showSnackbar(message: string, color: string) {
 // 📸 NEW: pick image from camera or gallery
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
+    // Get logged-in user
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+
+    if (userError || !user) throw new Error('User not found')
+
+    // Pick photo from camera or gallery
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false,
@@ -112,14 +121,21 @@ const pickImage = async (source: 'camera' | 'gallery') => {
 
     if (photo?.dataUrl) {
       uploading.value = true
-      const fileName = `public/${Date.now()}.png`
+
+      // Use user's id as folder
+      const fileName = `${user.id}/${Date.now()}.png`
+
       const { data, error } = await supabase.storage
-        .from('avatars')
-        .upload(fileName, dataURItoBlob(photo.dataUrl))
+        .from('Profile')
+        .upload(fileName, dataURItoBlob(photo.dataUrl), {
+          cacheControl: '3600',
+          upsert: true, // overwrite if same name
+        })
 
       if (error) throw error
 
-      avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/avatars/${data?.path}`
+      // Generate public URL
+      avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
 
       showSnackbar('Image uploaded successfully', 'success')
       showPicker.value = false
@@ -131,7 +147,6 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     uploading.value = false
   }
 }
-
 
 // 💾 Save shop data to DB
 const saveShop = async () => {
@@ -147,8 +162,7 @@ const saveShop = async () => {
       user_id: user.id,
       business_name: shopName.value,
       description: description.value,
-      logo_url: avatarUrl.value,   // ✅ now included
-      address: fullAddress(),
+      logo_url: avatarUrl.value, // ✅ now included
       latitude: latitude.value,
       longitude: longitude.value,
       open_time: openTime.value,
@@ -170,142 +184,156 @@ const saveShop = async () => {
 }
 </script>
 
-  <template>
-    <v-app>
-      <!-- Top Bar -->
-      <v-app-bar flat elevation="0" color="transparent">
-        <v-btn variant="text" @click="goBack">
-          <v-icon start>mdi-arrow-left</v-icon>
-          Back
-        </v-btn>
-      </v-app-bar>
+<template>
+  <v-app>
+    <!-- Top Bar -->
+    <v-app-bar flat elevation="0" color="transparent">
+      <v-btn variant="text" @click="goBack">
+        <v-icon start>mdi-arrow-left</v-icon>
+        Back
+      </v-btn>
+    </v-app-bar>
 
-      <v-divider />
+    <v-divider />
 
-      <v-main>
-        <!-- Business Info -->
-        <h2 class="section-title">Business Information</h2>
-        <div class="avatar-container">
-          <v-avatar size="80" color="grey-lighten-3">
-            <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-            <v-icon v-else size="60">mdi-store</v-icon>
-          </v-avatar>
-          <v-btn
-            class="edit-btn"
-            color="primary"
-            icon
-            elevation="4"
-            :loading="uploading"
-            @click="showPicker = true"
-          >
-            <v-icon>mdi-camera</v-icon>
-          </v-btn>
-        </div>
+    <v-main>
+      <!-- Business Info -->
+      <h2 class="section-title">Business Information</h2>
+      <div class="avatar-container">
+        <v-avatar size="80" color="grey-lighten-3">
+          <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+          <v-icon v-else size="60">mdi-store</v-icon>
+        </v-avatar>
 
-        <v-text-field
-          v-model="shopName"
-          label="Business Name"
-          placeholder="Enter your business name"
-          :rules="[v => !!v || 'Business name is required', v => (v && v.length >= 3) || 'At least 3 characters']"
-          clearable
-          outlined
+        <v-btn
+          class="edit-btn"
           color="primary"
-          prepend-inner-icon="mdi-store"
-          hint="This is your business's official name"
-          persistent-hint
-        />
+          icon
+          elevation="4"
+          :loading="uploading"
+          @click="showPicker = true"
+        >
+          <v-icon>mdi-camera</v-icon>
+        </v-btn>
+      </div>
 
-        <v-textarea
-          v-model="description"
-          label="About Us"
-          placeholder="Write something about your business"
-          outlined
-          auto-grow
-        />
+      <v-text-field
+        v-model="shopName"
+        label="Business Name"
+        placeholder="Enter your business name"
+        :rules="[
+          (v) => !!v || 'Business name is required',
+          (v) => (v && v.length >= 3) || 'At least 3 characters',
+        ]"
+        clearable
+        outlined
+        color="primary"
+        prepend-inner-icon="mdi-store"
+        hint="This is your business's official name"
+        persistent-hint
+      />
 
-        <!-- Operating Hours -->
-        <h2 class="section-title">Operating Hours</h2>
-        <v-row>
-          <v-col cols="6">
-            <v-text-field v-model="openTime" label="Opening Time" type="time" outlined />
-          </v-col>
-          <v-col cols="6">
-            <v-text-field v-model="closeTime" label="Closing Time" type="time" outlined />
-          </v-col>
-        </v-row>
+      <v-textarea
+        v-model="description"
+        label="About Us"
+        placeholder="Write something about your business"
+        outlined
+        auto-grow
+      />
 
-        <!-- Address Section -->
-        <h2 class="section-title">Address</h2>
-        <v-text-field v-model="address.street.value" label="Street Name" outlined />
-        <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
-        <v-text-field v-model="address.subdivision.value" label="Subdivision / Village / Compound" outlined />
-        <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
-        <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
-        <v-text-field v-model="address.province.value" label="Province" outlined />
-        <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
+      <!-- Operating Hours -->
+      <h2 class="section-title">Operating Hours</h2>
+      <v-row>
+        <v-col cols="6">
+          <v-text-field v-model="openTime" label="Opening Time" type="time" outlined />
+        </v-col>
+        <v-col cols="6">
+          <v-text-field v-model="closeTime" label="Closing Time" type="time" outlined />
+        </v-col>
+      </v-row>
 
-        <!-- Map -->
-        <div id="map" class="map"></div>
+      <!-- Address Section -->
+      <h2 class="section-title">Address</h2>
+      <v-text-field v-model="address.street.value" label="Street Name" outlined />
+      <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
+      <v-text-field
+        v-model="address.subdivision.value"
+        label="Subdivision / Village / Compound"
+        outlined
+      />
+      <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
+      <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
+      <v-text-field v-model="address.province.value" label="Province" outlined />
+      <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
-        <!-- Action Buttons -->
-        <div class="btns">
-          <v-btn color="error" class="shop-btn">Delete Shop</v-btn>
-          <v-btn color="secondary" class="shop-btn" @click="goBack">Back</v-btn>
-          <v-btn color="primary" class="shop-btn" :loading="saving" :disabled="saving" @click="saveShop">
-            Save
-          </v-btn>
-        </div>
+      <!-- Map -->
+      <div id="map" class="map"></div>
 
-        <!-- Snackbar Alert -->
-        <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
-          {{ snackbarMessage }}
-        </v-snackbar>
+      <!-- Action Buttons -->
+      <div class="btns">
+        <v-btn color="error" class="shop-btn">Delete Shop</v-btn>
+        <v-btn color="secondary" class="shop-btn" @click="goBack">Back</v-btn>
+        <v-btn
+          color="primary"
+          class="shop-btn"
+          :loading="saving"
+          :disabled="saving"
+          @click="saveShop"
+        >
+          Save
+        </v-btn>
+      </div>
 
-        <!-- Image Picker Dialog -->
-        <v-dialog v-model="showPicker" max-width="290">
-          <v-card>
-            <v-card-title class="headline">Pick Image Source</v-card-title>
-            <v-card-actions>
-              <v-btn @click="pickImage('camera')" color="primary">Use Camera</v-btn>
-              <v-btn @click="pickImage('gallery')" color="primary">Use Gallery</v-btn>
-            </v-card-actions>
-          </v-card>
-        </v-dialog>
-      </v-main>
-    </v-app>
-  </template>
+      <!-- Snackbar Alert -->
+      <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
+        {{ snackbarMessage }}
+      </v-snackbar>
 
-  <style scoped>
-  .section-title {
-    margin-top: 20px;
-    margin-bottom: 10px;
-    font-weight: 600;
-  }
+      <!-- Image Picker Dialog -->
+      <v-dialog v-model="showPicker" max-width="290">
+        <v-card>
+          <v-card-title class="headline">Pick Image Source</v-card-title>
+          <v-card-actions>
+            <v-btn @click="pickImage('camera')" color="primary">Use Camera</v-btn>
+            <v-btn @click="pickImage('gallery')" color="primary">Use Gallery</v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+    </v-main>
+  </v-app>
+</template>
 
-  .avatar-container {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    position: relative;
-    margin: 16px 0;
-  }
+<style scoped>
+.section-title {
+  margin-top: 20px;
+  margin-bottom: 10px;
+  font-weight: 600;
+}
 
-  .edit-btn {
-    position: absolute;
-    bottom: -10px;
-    right: -10px;
-    border-radius: 50%;
-  }
+.avatar-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  position: relative;
+  margin: 16px 0;
+}
 
-  .map {
-    margin-top: 16px;
-    height: 300px;
-    border-radius: 12px;
-  }
+.edit-btn {
+  position: absolute;
+  bottom: -10px;
+  right: -10px;
+  border-radius: 50%;
+}
 
-  .btns {
-    display: flex;
-    justify-content: space-between;
-    margin: 20px 0;
-  }
-  </style>
+.map {
+  margin-top: 16px;
+  height: 300px;
+  border-radius: 12px;
+}
+
+.btns {
+  display: flex;
+  justify-content: space-between;
+  margin: 20px 0;
+}
+</style>
