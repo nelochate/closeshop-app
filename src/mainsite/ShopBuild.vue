@@ -149,10 +149,11 @@ const initMap = () => {
 
   // Add draggable marker
   shopMarker = L.marker([latitude.value, longitude.value], { draggable: true }).addTo(map.value)
-  shopMarker.on('dragend', (e) => {
+  shopMarker.on('dragend', async (e) => {
     const pos = (e.target as L.Marker).getLatLng()
     latitude.value = pos.lat
     longitude.value = pos.lng
+    await saveCoordinates(pos.lat, pos.lng)
   })
 }
 
@@ -228,6 +229,65 @@ const pickImage = async (source: 'camera' | 'gallery') => {
   } finally {
     uploading.value = false
   }
+}
+//for saving coordinates
+const saveCoordinates = async (lat: number, lng: number) => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('User not found')
+
+    const { error } = await supabase
+      .from('shops')
+      .update({ latitude: lat, longitude: lng })
+      .eq('user_id', user.id)
+
+    if (error) throw error
+    showSnackbar('Location updated successfully!', 'success')
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to update location', 'error')
+  }
+}
+// for the map icon reload
+const getLocation = () => {
+  if (!navigator.geolocation) {
+    showSnackbar('Geolocation is not supported by this browser', 'error')
+    return
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const lat = position.coords.latitude
+      const lng = position.coords.longitude
+
+      latitude.value = lat
+      longitude.value = lng
+
+      if (map.value) {
+        map.value.setView([lat, lng], 17)
+      }
+
+      if (shopMarker) {
+        shopMarker.setLatLng([lat, lng])
+      }
+
+      try {
+        await saveCoordinates(lat, lng)
+        showSnackbar('Location detected!', 'success')
+      } catch (err) {
+        console.error(err)
+        showSnackbar('Failed to save coordinates', 'error')
+      }
+    },
+    (error) => {
+      console.error(error)
+      showSnackbar('Failed to get location', 'error')
+    },
+    { enableHighAccuracy: true, timeout: 10000 },
+  )
 }
 
 // -------------------- Save Shop --------------------
@@ -348,7 +408,7 @@ onMounted(async () => {
         </v-col>
       </v-row>
       <h2>Address (Butuan City)</h2>
-        <!-- Fixed fields -->
+      <!-- Fixed fields -->
       <v-text-field label="City" value="Butuan City" readonly outlined />
       <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
       <v-text-field label="Region" value="CARAGA" readonly outlined />
@@ -360,9 +420,12 @@ onMounted(async () => {
       <v-text-field v-model="address.house_no.value" label="House No." outlined />
       <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
-    
       <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">Toggle Map Fullscreen</v-btn>
-      <div id="map" class="map"></div>
+      <div id="map" class="map">
+        <v-btn icon @click="getLocation" class="locate-btn">
+          <v-icon>mdi-crosshairs-gps</v-icon>
+        </v-btn>
+      </div>
 
       <v-btn color="primary" :loading="saving" @click="saveShop">
         {{ saving ? 'Saving...' : 'Save Shop' }}
@@ -404,5 +467,13 @@ onMounted(async () => {
   width: 100%;
   border-radius: 12px;
   margin-bottom: 16px;
+}
+.locate-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
 }
 </style>
