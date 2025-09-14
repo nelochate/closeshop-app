@@ -56,6 +56,38 @@ const fetchShopData = async () => {
 
 
 onMounted(fetchShopData)
+
+//delete shop btn
+const deleteShop = async () => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('User not found')
+
+    // Delete shop from DB
+    const { error } = await supabase.from('shops').delete().eq('user_id', user.id)
+    if (error) throw error
+
+    // Optionally, delete the logo image
+    if (avatarUrl.value) {
+      const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
+      if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
+    }
+
+    // Reset form
+    avatarUrl.value = null
+    shopName.value = ''
+    description.value = ''
+    openTime.value = ''
+    closeTime.value = ''
+    showSnackbar('Shop deleted successfully', 'success')
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to delete shop', 'error')
+  }
+}
 </script>
 
 <template>
@@ -66,6 +98,11 @@ onMounted(fetchShopData)
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="text-h6">Business Profile</v-toolbar-title>
+
+      <div float="end">
+                <v-btn color="error" class="shop-btn" @click="deleteShop"> Delete Shop </v-btn>
+
+      </div>
     </v-app-bar>
 
     <v-main>
