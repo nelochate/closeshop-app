@@ -190,7 +190,6 @@ const dataURItoBlob = (dataURI: string) => {
   for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
   return new Blob([ab], { type: mimeString })
 }
-
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
     const {
@@ -209,6 +208,7 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     if (!photo?.dataUrl) return
     uploading.value = true
 
+    // remove old image if exists
     if (avatarUrl.value) {
       const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
       if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
@@ -220,7 +220,17 @@ const pickImage = async (source: 'camera' | 'gallery') => {
       .upload(fileName, dataURItoBlob(photo.dataUrl), { cacheControl: '3600', upsert: true })
     if (error) throw error
 
-    avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
+    const newUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
+    avatarUrl.value = newUrl
+
+    // ✅ Save to DB
+    const { error: dbError } = await supabase
+      .from('shops')
+      .update({ logo_url: newUrl })
+      .eq('user_id', user.id)
+
+    if (dbError) throw dbError
+
     showSnackbar('Image uploaded successfully', 'success')
     showPicker.value = false
   } catch (err) {
@@ -230,6 +240,7 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     uploading.value = false
   }
 }
+
 //for saving coordinates
 const saveCoordinates = async (lat: number, lng: number) => {
   try {
