@@ -1,35 +1,30 @@
 <script setup lang="ts">
-import { ref, reactive, watch } from 'vue'
+import { ref, watch, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { useGeolocation } from '@/composables/useGeolocation'
 
+// -------------------- Router --------------------
 const router = useRouter()
 const goBack = () => router.back()
 
-// states
+// -------------------- States --------------------
 const avatarUrl = ref<string | null>(null)
 const uploading = ref(false)
 const showPicker = ref(false)
-
-const { coords } = useGeolocation()
-const latitude = ref<number | null>(null)
-const longitude = ref<number | null>(null)
-
-// snackbar
+const saving = ref(false)
 const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref('success')
-const saving = ref(false)
 
-// shop info
+// Shop info
 const shopName = ref('')
 const description = ref('')
 const openTime = ref('')
 const closeTime = ref('')
 
-// address (still using refs)
+// Address info
 const address = {
   building: ref(''),
   street: ref(''),
@@ -42,7 +37,14 @@ const address = {
   postal: ref(''),
 }
 
-// build full address string
+// Geolocation
+const { coords } = useGeolocation()
+const latitude = ref<number | null>(null)
+const longitude = ref<number | null>(null)
+
+// -------------------- Helpers --------------------
+
+// Build full address string
 const fullAddress = () =>
   [
     address.street.value,
@@ -56,17 +58,19 @@ const fullAddress = () =>
     .filter(Boolean)
     .join(', ')
 
-// geocode mock
+// Mock geocoding function
 const geocodeAddress = async (addr: string) => {
   console.log('Geocoding address:', addr)
   return { lat: 8.9489, lng: 125.5406 } // sample coords
 }
 
+// Update coordinates
 const updateMapPosition = (coords: { lat: number; lng: number }) => {
   latitude.value = coords.lat
   longitude.value = coords.lng
 }
 
+// Watch address fields to update map
 watch(
   () => [
     address.street.value,
@@ -85,7 +89,8 @@ watch(
   },
 )
 
-function dataURItoBlob(dataURI: string) {
+// Convert DataURL to Blob
+const dataURItoBlob = (dataURI: string) => {
   const byteString = atob(dataURI.split(',')[1])
   const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0]
   const ab = new ArrayBuffer(byteString.length)
@@ -94,24 +99,22 @@ function dataURItoBlob(dataURI: string) {
   return new Blob([ab], { type: mimeString })
 }
 
-function showSnackbar(message: string, color: string) {
+// Show snackbar message
+const showSnackbar = (message: string, color: string = 'success') => {
   snackbarMessage.value = message
   snackbarColor.value = color
   snackbar.value = true
 }
 
-// 📸 NEW: pick image from camera or gallery
+// -------------------- Image Picker --------------------
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
-    // Get logged-in user
     const {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser()
-
     if (userError || !user) throw new Error('User not found')
 
-    // Pick photo from camera or gallery
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false,
@@ -119,27 +122,27 @@ const pickImage = async (source: 'camera' | 'gallery') => {
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
 
-    if (photo?.dataUrl) {
-      uploading.value = true
+    if (!photo?.dataUrl) return
 
-      // Use user's id as folder
-      const fileName = `${user.id}/${Date.now()}.png`
+    uploading.value = true
 
-      const { data, error } = await supabase.storage
-        .from('Profile')
-        .upload(fileName, dataURItoBlob(photo.dataUrl), {
-          cacheControl: '3600',
-          upsert: true, // overwrite if same name
-        })
-
-      if (error) throw error
-
-      // Generate public URL
-      avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
-
-      showSnackbar('Image uploaded successfully', 'success')
-      showPicker.value = false
+    // Delete previous image if exists
+    if (avatarUrl.value) {
+      const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
+      if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
     }
+
+    // Upload new image
+    const fileName = `${user.id}/${Date.now()}.png`
+    const { data, error } = await supabase.storage
+      .from('Profile')
+      .upload(fileName, dataURItoBlob(photo.dataUrl), { cacheControl: '3600', upsert: true })
+    if (error) throw error
+
+    // Update avatar URL
+    avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
+    showSnackbar('Image uploaded successfully', 'success')
+    showPicker.value = false
   } catch (err) {
     console.error(err)
     showSnackbar('Failed to upload image', 'error')
@@ -148,7 +151,7 @@ const pickImage = async (source: 'camera' | 'gallery') => {
   }
 }
 
-// 💾 Save shop data to DB
+// -------------------- Save Shop --------------------
 const saveShop = async () => {
   saving.value = true
   try {
@@ -162,16 +165,14 @@ const saveShop = async () => {
       user_id: user.id,
       business_name: shopName.value,
       description: description.value,
-      logo_url: avatarUrl.value, // ✅ now included
+      logo_url: avatarUrl.value,
       latitude: latitude.value,
       longitude: longitude.value,
       open_time: openTime.value,
       close_time: closeTime.value,
     }
 
-    const { error } = await supabase.from('shops').upsert(shopData, {
-      onConflict: 'user_id',
-    })
+    const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'user_id' })
     if (error) throw error
 
     showSnackbar('Shop saved successfully!', 'success')
@@ -180,6 +181,61 @@ const saveShop = async () => {
     showSnackbar('Failed to save shop', 'error')
   } finally {
     saving.value = false
+  }
+}
+
+// -------------------- Load Shop Data on Mount --------------------
+onMounted(async () => {
+  const {
+    data: { user },
+    error: userError,
+  } = await supabase.auth.getUser()
+  if (userError || !user) return
+
+  const { data, error } = await supabase
+    .from('shops')
+    .select('logo_url, business_name, description, open_time, close_time')
+    .eq('user_id', user.id)
+    .single()
+
+  if (!error && data) {
+    avatarUrl.value = data.logo_url
+    shopName.value = data.business_name || ''
+    description.value = data.description || ''
+    openTime.value = data.open_time || ''
+    closeTime.value = data.close_time || ''
+  }
+})
+
+//delete shop btn
+const deleteShop = async () => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('User not found')
+
+    // Delete shop from DB
+    const { error } = await supabase.from('shops').delete().eq('user_id', user.id)
+    if (error) throw error
+
+    // Optionally, delete the logo image
+    if (avatarUrl.value) {
+      const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
+      if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
+    }
+
+    // Reset form
+    avatarUrl.value = null
+    shopName.value = ''
+    description.value = ''
+    openTime.value = ''
+    closeTime.value = ''
+    showSnackbar('Shop deleted successfully', 'success')
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to delete shop', 'error')
   }
 }
 </script>
@@ -271,8 +327,7 @@ const saveShop = async () => {
 
       <!-- Action Buttons -->
       <div class="btns">
-        <v-btn color="error" class="shop-btn">Delete Shop</v-btn>
-        <v-btn color="secondary" class="shop-btn" @click="goBack">Back</v-btn>
+        <v-btn color="error" class="shop-btn" @click="deleteShop"> Delete Shop </v-btn>
         <v-btn
           color="primary"
           class="shop-btn"
