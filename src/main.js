@@ -9,7 +9,8 @@ import { useAuthUserStore } from '@/stores/authUser'
 
 //import pwa elements
 import {defineCustomElements} from '@ionic/pwa-elements/loader';
-
+//initialize pwa elements
+defineCustomElements(window)
 // Vuetify
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
@@ -27,8 +28,8 @@ const vuetify = createVuetify({
   directives,
 })
 
-//initialize pwa elements
-defineCustomElements(window);
+
+
 
 // ✅ Use plugins in correct order
 app.use(pinia)
