@@ -4,21 +4,26 @@ import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 
+// Router and store
 const router = useRouter()
 const authStore = useAuthUserStore()
 
-const avatarUrl = ref(null)
-const user = ref(null)
-const fullName = ref('')
+// Reactive state
+const avatarUrl = ref(null)   // User avatar image URL
+const user = ref(null)        // Authenticated user object
+const fullName = ref('')      // Full name string
+const hasShop = ref(false)    // Boolean: does the user own a shop?
 
+// Load the user info
 const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
+    // ✅ Use store data if already available
     user.value = authStore.userData
     fullName.value =
       `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
     avatarUrl.value = authStore.profile.avatar_url || null
   } else {
-    // fallback: fetch user from supabase if store empty
+    // ✅ Fallback: fetch directly from Supabase if store empty
     const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
       console.error('No user found:', error?.message)
@@ -31,11 +36,47 @@ const loadUser = async () => {
   }
 }
 
-onMounted(() => {
-  loadUser()
+// Check if user already has a shop in Supabase
+const checkUserShop = async () => {
+  if (!user.value?.id) return
+
+  try {
+    const { data, error } = await supabase
+      .from('shops')
+      .select('user_id')
+      .eq('user_id', user.value.id)  // ✅ use user_id, not owner_id
+      .maybeSingle()
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error checking shop:', error.message)
+    }
+
+    hasShop.value = !!data
+    console.log('Shop lookup:', data, 'hasShop:', hasShop.value)
+  } catch (err) {
+    console.error('Error checking shop:', err)
+  }
+}
+
+// --------- REACTIVITY (watchers & lifecycle) ---------
+
+// Run when component mounts
+onMounted(async () => {
+  await loadUser()       // Load user info
+  await checkUserShop()  // Then check shop status
 })
 
-// Reload user data when route query 'refreshed' changes
+// Watch for user changes → re-check shop ownership
+watch(
+  () => user.value?.id,
+  async (newId) => {
+    if (newId) {
+      await checkUserShop()
+    }
+  },
+)
+
+// Watch for store userData changes → update name
 watch(
   () => authStore.userData,
   (newUser) => {
@@ -47,12 +88,7 @@ watch(
   { immediate: true },
 )
 
-// Also reload user data when route updates but component reused
-onBeforeRouteUpdate((to, from, next) => {
-  loadUser()
-  next()
-})
-// Optional: watch authStore.profile to update avatar and fullName reactively
+// Watch for profile changes → update avatar and name
 watch(
   () => authStore.profile,
   (newProfile) => {
@@ -65,67 +101,45 @@ watch(
   { immediate: true },
 )
 
-// Navigation functions
+// Reload user if route changes but component is reused
+onBeforeRouteUpdate((to, from, next) => {
+  loadUser()
+  next()
+})
+
+// --------- NAVIGATION FUNCTIONS ---------
+
 const goBack = () => router.back()
 const goHome = () => router.push('/homepage')
 const goCart = () => router.push('/cartview')
 const goChat = () => router.push('/messageview')
 const goMap = () => router.push('/mapsearch')
 const goAccount = () => router.push('/profileview')
+const goAccountSettings = () => router.push('/account-settings')
 
-//handle logout
+// Logout handler
 const handleLogout = async () => {
   try {
     await authStore.signOut()
-    router.push({ name: 'login' }) // ✅ always go back to login
+    router.push({ name: 'login' }) // ✅ redirect back to login page
   } catch (error) {
     console.error('Logout failed:', error)
     alert('Something went wrong while logging out.')
   }
 }
-const goAccountSettings = () => router.push('/account-settings')
 
-// Purchase sections
-const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
-const selectedSection = ref(purchaseSections[0])
-
-//has shop or no shop
-const hasShop = ref(false)
-
-const checkUserShop = async () => {
-  if (!user.value?.id) return
-
-  try {
-    const { data, error } = await supabase
-      .from('shops')
-      .select('id')
-      .eq('owner_id', user.value.id)
-      .single()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error checking shop:', error.message)
-    }
-
-    hasShop.value = !!data
-  } catch (err) {
-    console.error('Error checking shop:', err)
-  }
-}
-
-onMounted(async () => {
-  await loadUser() // Load user first
-  await checkUserShop() // Then check if they have a shop
-})
-
-//function click
+// Shop button logic → one button with 2 states
 const goShopOrBuild = () => {
   if (hasShop.value) {
-    router.push('/usershop')      // Go to shop view
+    router.push('/usershop')    // ✅ Go to existing shop
   } else {
-    router.push('/shop-build')    // Go to create shop
+    router.push('/shop-build')  // ✅ Go to create new shop
   }
 }
 
+// Purchase sections (dropdown menu)
+const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
+const selectedSection = ref(purchaseSections[0])
 </script>
 
 <template>
