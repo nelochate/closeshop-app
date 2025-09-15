@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-import { useGeolocation } from '@/composables/useGeolocation'
+import * as L from 'leaflet'
+import 'leaflet.fullscreen'
+import 'leaflet.fullscreen/Control.FullScreen.css'
 
 // -------------------- Router --------------------
 const router = useRouter()
@@ -24,72 +26,162 @@ const description = ref('')
 const openTime = ref('')
 const closeTime = ref('')
 
-// Address info
+// Address info (Butuan City fixed)
 const address = {
+  barangay: ref(''),
   building: ref(''),
   street: ref(''),
-  purok: ref(''),
-  subdivision: ref(''),
-  barangay: ref(''),
-  city: ref(''),
-  province: ref(''),
-  region: ref(''),
   postal: ref(''),
+  house_no: ref(''),
 }
 
-// Geolocation
-const { coords } = useGeolocation()
-const latitude = ref<number | null>(null)
-const longitude = ref<number | null>(null)
+// Butuan City barangays
+// Butuan City barangays
+const barangays = [
+  'Agusan Pequeño',
+  'Ambago',
+  'Amparo',
+  'Ampayon',
+  'Anticala',
+  'Antongalon',
+  'Aupagan',
+  'Baan KM 3',
+  'Baan Riverside Poblacion (Barangay 20)',
+  'Babag',
+  'Bading Poblacion (Barangay 22)',
+  'Bancasi',
+  'Banza',
+  'Baobaoan',
+  'Basag',
+  'Bayanihan Poblacion (Barangay 27)',
+  'Bilay',
+  'Bitan-agan',
+  'Bit-os',
+  'Bobon',
+  'Bonbon',
+  'Bugabus',
+  'Bugsukan',
+  'Buhangin Poblacion (Barangay 19)',
+  'Cabcabon',
+  'Camayahan',
+  'Dagohoy Poblacion (Barangay 7)',
+  'Dankias',
+  'De Oro',
+  'Diego Silang Poblacion (Barangay 6)',
+  'Don Francisco',
+  'Doongan',
+  'Dulag',
+  'Dumalagan',
+  'Florida',
+  'Golden Ribbon Poblacion (Barangay 2)',
+  'Holy Redeemer Poblacion (Barangay 23)',
+  'Humabon Poblacion (Barangay 11)',
+  'Imadejas Poblacion (Barangay 24)',
+  'Jose Rizal Poblacion (Barangay 25)',
+  'Kinamlutan',
+  'Lapu-Lapu Poblacion (Barangay 8)',
+  'Lemon',
+  'Leon Kilat Poblacion (Barangay 13)',
+  'Libertad',
+  'Limaha Poblacion (Barangay 14)',
+  'Los Angeles',
+  'Lumbocan',
+  'Maguinda',
+  'Mahay',
+  'Mahogany Poblacion (Barangay 21)',
+  'Maibu',
+  'Mandamo',
+  'Manila de Bugabus',
+  'Maon Poblacion (Barangay 1)',
+  'Masao',
+  'Maug',
+  'New Society Village Poblacion (Barangay 26)',
+  'Nong-Nong',
+  'Obrero Poblacion (Barangay 18)',
+  'Ong Yiu Poblacion (Barangay 16)',
+  'Pagatpatan',
+  'Pangabugan',
+  'Pianing',
+  'Pigdaulan',
+  'Pinamanculan',
+  'Port Poyohon Poblacion (Barangay 17, New Asia)',
+  'Rajah Soliman Poblacion (Barangay 4)',
+  'Salvacion',
+  'San Ignacio Poblacion (Barangay 15)',
+  'San Mateo',
+  'Santo Niño',
+  'San Vicente',
+  'Sikatuna Poblacion (Barangay 10)',
+  'Silongan Poblacion (Barangay 5)',
+  'Sumile',
+  'Sumilihon',
+  'Tagabaca',
+  'Taguibo',
+  'Taligaman',
+  'Tandang Sora Poblacion (Barangay 12)',
+  'Tiniwisan',
+  'Tungao',
+  'Urduja Poblacion (Barangay 9)',
+  'Villa Kananga',
+]
+
+// Location coordinates
+const latitude = ref<number | null>(8.9489) // default Butuan City center
+const longitude = ref<number | null>(125.5406)
+
+// -------------------- Map --------------------
+const map = ref<L.Map | null>(null)
+let shopMarker: L.Marker | null = null
+
+const initMap = () => {
+  if (map.value) return
+
+  map.value = L.map('map', {
+    center: [latitude.value, longitude.value],
+    zoom: 15,
+    fullscreenControl: true,
+    fullscreenControlOptions: { position: 'topleft' },
+  })
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+  }).addTo(map.value)
+
+  // Add draggable marker
+  shopMarker = L.marker([latitude.value, longitude.value], { draggable: true }).addTo(map.value)
+  shopMarker.on('dragend', async (e) => {
+    const pos = (e.target as L.Marker).getLatLng()
+    latitude.value = pos.lat
+    longitude.value = pos.lng
+    await saveCoordinates(pos.lat, pos.lng)
+  })
+}
+
+const toggleFullscreen = () => map.value?.toggleFullscreen()
 
 // -------------------- Helpers --------------------
-
-// Build full address string
 const fullAddress = () =>
   [
+    address.house_no.value,
+    address.building.value,
     address.street.value,
-    address.purok.value,
-    address.subdivision.value,
     address.barangay.value,
-    address.city.value,
-    address.province.value,
+    'Butuan City',
+    'Agusan del Norte',
+    'CARAGA',
     address.postal.value,
   ]
     .filter(Boolean)
     .join(', ')
 
-// Mock geocoding function
-const geocodeAddress = async (addr: string) => {
-  console.log('Geocoding address:', addr)
-  return { lat: 8.9489, lng: 125.5406 } // sample coords
+// -------------------- Snackbar --------------------
+const showSnackbar = (message: string, color: string = 'success') => {
+  snackbarMessage.value = message
+  snackbarColor.value = color
+  snackbar.value = true
 }
 
-// Update coordinates
-const updateMapPosition = (coords: { lat: number; lng: number }) => {
-  latitude.value = coords.lat
-  longitude.value = coords.lng
-}
-
-// Watch address fields to update map
-watch(
-  () => [
-    address.street.value,
-    address.purok.value,
-    address.subdivision.value,
-    address.barangay.value,
-    address.city.value,
-    address.province.value,
-    address.postal.value,
-  ],
-  async () => {
-    const addr = fullAddress()
-    if (!addr) return
-    const coords = await geocodeAddress(addr)
-    if (coords) updateMapPosition(coords)
-  },
-)
-
-// Convert DataURL to Blob
+// -------------------- Image Picker --------------------
 const dataURItoBlob = (dataURI: string) => {
   const byteString = atob(dataURI.split(',')[1])
   const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0]
@@ -98,15 +190,6 @@ const dataURItoBlob = (dataURI: string) => {
   for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
   return new Blob([ab], { type: mimeString })
 }
-
-// Show snackbar message
-const showSnackbar = (message: string, color: string = 'success') => {
-  snackbarMessage.value = message
-  snackbarColor.value = color
-  snackbar.value = true
-}
-
-// -------------------- Image Picker --------------------
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
     const {
@@ -123,24 +206,31 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     })
 
     if (!photo?.dataUrl) return
-
     uploading.value = true
 
-    // Delete previous image if exists
+    // remove old image if exists
     if (avatarUrl.value) {
       const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
       if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
     }
 
-    // Upload new image
     const fileName = `${user.id}/${Date.now()}.png`
     const { data, error } = await supabase.storage
       .from('Profile')
       .upload(fileName, dataURItoBlob(photo.dataUrl), { cacheControl: '3600', upsert: true })
     if (error) throw error
 
-    // Update avatar URL
-    avatarUrl.value = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
+    const newUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
+    avatarUrl.value = newUrl
+
+    // ✅ Save to DB
+    const { error: dbError } = await supabase
+      .from('shops')
+      .update({ logo_url: newUrl })
+      .eq('user_id', user.id)
+
+    if (dbError) throw dbError
+
     showSnackbar('Image uploaded successfully', 'success')
     showPicker.value = false
   } catch (err) {
@@ -151,8 +241,69 @@ const pickImage = async (source: 'camera' | 'gallery') => {
   }
 }
 
+//for saving coordinates
+const saveCoordinates = async (lat: number, lng: number) => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('User not found')
+
+    const { error } = await supabase
+      .from('shops')
+      .update({ latitude: lat, longitude: lng })
+      .eq('user_id', user.id)
+
+    if (error) throw error
+    showSnackbar('Location updated successfully!', 'success')
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to update location', 'error')
+  }
+}
+// for the map icon reload
+const getLocation = () => {
+  if (!navigator.geolocation) {
+    showSnackbar('Geolocation is not supported by this browser', 'error')
+    return
+  }
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      const lat = position.coords.latitude
+      const lng = position.coords.longitude
+
+      latitude.value = lat
+      longitude.value = lng
+
+      if (map.value) {
+        map.value.setView([lat, lng], 17)
+      }
+
+      if (shopMarker) {
+        shopMarker.setLatLng([lat, lng])
+      }
+
+      try {
+        await saveCoordinates(lat, lng)
+        showSnackbar('Location detected!', 'success')
+      } catch (err) {
+        console.error(err)
+        showSnackbar('Failed to save coordinates', 'error')
+      }
+    },
+    (error) => {
+      console.error(error)
+      showSnackbar('Failed to get location', 'error')
+    },
+    { enableHighAccuracy: true, timeout: 10000 },
+  )
+}
+
 // -------------------- Save Shop --------------------
 const saveShop = async () => {
+  if (saving.value) return
   saving.value = true
   try {
     const {
@@ -170,6 +321,14 @@ const saveShop = async () => {
       longitude: longitude.value,
       open_time: openTime.value,
       close_time: closeTime.value,
+      barangay: address.barangay.value,
+      building: address.building.value,
+      street: address.street.value,
+      postal: address.postal.value,
+      house_no: address.house_no.value,
+      city: 'Butuan City',
+      province: 'Agusan del Norte',
+      region: 'CARAGA',
     }
 
     const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'user_id' })
@@ -184,173 +343,115 @@ const saveShop = async () => {
   }
 }
 
-// -------------------- Load Shop Data on Mount --------------------
+// -------------------- Load Shop Data --------------------
 onMounted(async () => {
-  const {
-    data: { user },
-    error: userError,
-  } = await supabase.auth.getUser()
-  if (userError || !user) return
-
-  const { data, error } = await supabase
-    .from('shops')
-    .select('logo_url, business_name, description, open_time, close_time')
-    .eq('user_id', user.id)
-    .single()
-
-  if (!error && data) {
-    avatarUrl.value = data.logo_url
-    shopName.value = data.business_name || ''
-    description.value = data.description || ''
-    openTime.value = data.open_time || ''
-    closeTime.value = data.close_time || ''
-  }
-})
-
-//delete shop btn
-const deleteShop = async () => {
   try {
+    await nextTick()
+    initMap()
+
     const {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser()
-    if (userError || !user) throw new Error('User not found')
+    if (userError || !user) return
 
-    // Delete shop from DB
-    const { error } = await supabase.from('shops').delete().eq('user_id', user.id)
-    if (error) throw error
+    const { data, error } = await supabase.from('shops').select('*').eq('user_id', user.id).single()
+    if (error || !data) return
 
-    // Optionally, delete the logo image
-    if (avatarUrl.value) {
-      const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
-      if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
-    }
+    avatarUrl.value = data.logo_url || null
+    shopName.value = data.business_name || ''
+    description.value = data.description || ''
+    openTime.value = data.open_time || ''
+    closeTime.value = data.close_time || ''
 
-    // Reset form
-    avatarUrl.value = null
-    shopName.value = ''
-    description.value = ''
-    openTime.value = ''
-    closeTime.value = ''
-    showSnackbar('Shop deleted successfully', 'success')
+    address.barangay.value = data.barangay || ''
+    address.building.value = data.building || ''
+    address.street.value = data.street || ''
+    address.postal.value = data.postal || ''
+    address.house_no.value = data.house_no || ''
+
+    latitude.value = data.latitude || 8.9489
+    longitude.value = data.longitude || 125.5406
+
+    // Update marker position
+    if (shopMarker) shopMarker.setLatLng([latitude.value, longitude.value])
   } catch (err) {
     console.error(err)
-    showSnackbar('Failed to delete shop', 'error')
   }
-}
+})
 </script>
 
 <template>
   <v-app>
-    <!-- Top Bar -->
-    <v-app-bar flat elevation="0" color="transparent">
-      <v-btn variant="text" @click="goBack">
-        <v-icon start>mdi-arrow-left</v-icon>
-        Back
-      </v-btn>
+    <v-app-bar flat color="transparent">
+      <v-btn variant="text" @click="goBack"> <v-icon start>mdi-arrow-left</v-icon> Back </v-btn>
     </v-app-bar>
 
-    <v-divider />
-
     <v-main>
-      <!-- Business Info -->
-      <h2 class="section-title">Business Information</h2>
+      <h2>Business Information</h2>
+
       <div class="avatar-container">
         <v-avatar size="80" color="grey-lighten-3">
           <v-img v-if="avatarUrl" :src="avatarUrl" cover />
           <v-icon v-else size="60">mdi-store</v-icon>
         </v-avatar>
-
         <v-btn
-          class="edit-btn"
-          color="primary"
           icon
-          elevation="4"
+          color="primary"
           :loading="uploading"
           @click="showPicker = true"
+          class="edit-btn"
         >
           <v-icon>mdi-camera</v-icon>
         </v-btn>
       </div>
 
-      <v-text-field
-        v-model="shopName"
-        label="Business Name"
-        placeholder="Enter your business name"
-        :rules="[
-          (v) => !!v || 'Business name is required',
-          (v) => (v && v.length >= 3) || 'At least 3 characters',
-        ]"
-        clearable
-        outlined
-        color="primary"
-        prepend-inner-icon="mdi-store"
-        hint="This is your business's official name"
-        persistent-hint
-      />
+      <v-text-field v-model="shopName" label="Business Name" outlined />
+      <v-textarea v-model="description" label="About Us" outlined auto-grow />
 
-      <v-textarea
-        v-model="description"
-        label="About Us"
-        placeholder="Write something about your business"
-        outlined
-        auto-grow
-      />
-
-      <!-- Operating Hours -->
-      <h2 class="section-title">Operating Hours</h2>
+      <h2>Operating Hours</h2>
       <v-row>
         <v-col cols="6">
-          <v-text-field v-model="openTime" label="Opening Time" type="time" outlined />
+          <v-text-field v-model="openTime" type="time" label="Opening Time" outlined />
         </v-col>
         <v-col cols="6">
-          <v-text-field v-model="closeTime" label="Closing Time" type="time" outlined />
+          <v-text-field v-model="closeTime" type="time" label="Closing Time" outlined />
         </v-col>
       </v-row>
+      <h2>Address (Butuan City)</h2>
+      <!-- Fixed fields -->
+      <v-text-field label="City" value="Butuan City" readonly outlined />
+      <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
+      <v-text-field label="Region" value="CARAGA" readonly outlined />
+      <!-- Editable fields -->
 
-      <!-- Address Section -->
-      <h2 class="section-title">Address</h2>
+      <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" outlined />
+      <v-text-field v-model="address.building.value" label="Building No." outlined />
       <v-text-field v-model="address.street.value" label="Street Name" outlined />
-      <v-text-field v-model="address.purok.value" label="Purok / Block / Lot No." outlined />
-      <v-text-field
-        v-model="address.subdivision.value"
-        label="Subdivision / Village / Compound"
-        outlined
-      />
-      <v-text-field v-model="address.barangay.value" label="Barangay" outlined />
-      <v-text-field v-model="address.city.value" label="City / Municipality" outlined />
-      <v-text-field v-model="address.province.value" label="Province" outlined />
+      <v-text-field v-model="address.house_no.value" label="House No." outlined />
       <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
-      <!-- Map -->
-      <div id="map" class="map"></div>
-
-      <!-- Action Buttons -->
-      <div class="btns">
-        <v-btn color="error" class="shop-btn" @click="deleteShop"> Delete Shop </v-btn>
-        <v-btn
-          color="primary"
-          class="shop-btn"
-          :loading="saving"
-          :disabled="saving"
-          @click="saveShop"
-        >
-          Save
+      <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">Toggle Map Fullscreen</v-btn>
+      <div id="map" class="map">
+        <v-btn icon @click="getLocation" class="locate-btn">
+          <v-icon>mdi-crosshairs-gps</v-icon>
         </v-btn>
       </div>
 
-      <!-- Snackbar Alert -->
-      <v-snackbar v-model="snackbar" timeout="3000" color="primary" rounded="pill">
+      <v-btn color="primary" :loading="saving" @click="saveShop">
+        {{ saving ? 'Saving...' : 'Save Shop' }}
+      </v-btn>
+
+      <v-snackbar v-model="snackbar" :color="snackbarColor" timeout="3000">
         {{ snackbarMessage }}
       </v-snackbar>
 
-      <!-- Image Picker Dialog -->
       <v-dialog v-model="showPicker" max-width="290">
         <v-card>
           <v-card-title class="headline">Pick Image Source</v-card-title>
           <v-card-actions>
-            <v-btn @click="pickImage('camera')" color="primary">Use Camera</v-btn>
-            <v-btn @click="pickImage('gallery')" color="primary">Use Gallery</v-btn>
+            <v-btn color="primary" @click="pickImage('camera')">Use Camera</v-btn>
+            <v-btn color="primary" @click="pickImage('gallery')">Use Gallery</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -359,12 +460,6 @@ const deleteShop = async () => {
 </template>
 
 <style scoped>
-.section-title {
-  margin-top: 20px;
-  margin-bottom: 10px;
-  font-weight: 600;
-}
-
 .avatar-container {
   display: flex;
   justify-content: center;
@@ -372,23 +467,24 @@ const deleteShop = async () => {
   position: relative;
   margin: 16px 0;
 }
-
 .edit-btn {
   position: absolute;
   bottom: -10px;
   right: -10px;
   border-radius: 50%;
 }
-
 .map {
-  margin-top: 16px;
-  height: 300px;
+  height: 400px;
+  width: 100%;
   border-radius: 12px;
+  margin-bottom: 16px;
 }
-
-.btns {
-  display: flex;
-  justify-content: space-between;
-  margin: 20px 0;
+.locate-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
 }
 </style>
