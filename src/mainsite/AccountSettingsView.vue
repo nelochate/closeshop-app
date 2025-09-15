@@ -14,6 +14,19 @@ const avatarUrl = ref(null)
 const showSuccess = ref(false)
 const successMessage = ref('')
 const isLoading = ref(false)
+const mapMessage = ref("Map preview will go here")
+const address = ref({
+  region: '',
+  province: '',
+  city: '',
+  barangay: '',
+  building: '',
+  street: '',
+  house_no: '',
+  postal: ''
+})
+
+
 
 // Form data
 const formData = ref({
@@ -193,9 +206,17 @@ const saveProfile = async () => {
     })
     if (metadataError) throw metadataError
 
-    // Update profile table (phone, avatar_url)
+    // Build profile update object
     const updateData = {
       phone: formData.value.phone,
+      region: address.value.region,
+      province: address.value.province,
+      city: address.value.city,
+      barangay: address.value.barangay,
+      building: address.value.building,
+      street: address.value.street,
+      house_no: address.value.house_no,
+      postal: address.value.postal,
       updated_at: new Date().toISOString(),
     }
 
@@ -205,6 +226,7 @@ const saveProfile = async () => {
       updateData.avatar_url = avatarUrl.value.split('?')[0]
     }
 
+    // Update profile table
     const { error: profileError } = await supabase
       .from('profiles')
       .update(updateData)
@@ -212,7 +234,7 @@ const saveProfile = async () => {
 
     if (profileError) throw profileError
 
-    // Refresh auth store to reload user metadata and profile
+    // Refresh auth store
     await authStore.hydrateFromSession()
 
     // Show success and redirect
@@ -222,9 +244,9 @@ const saveProfile = async () => {
     showSuccessMessage('Failed to update profile: ' + error.message)
   } finally {
     isLoading.value = false
-    // Removed the duplicate router.push('/profileview')
   }
 }
+
 
 // Navigation with refresh
 const goBack = () => {
@@ -372,7 +394,7 @@ onMounted(() => {
                 </v-col>
 
                 <!--display here using the map of leaflet-->
-                <span>{{ paste here }}</span>
+                <span>{{ mapMessage }}</span>
                 <v-col cols="12" class="text-right">
                   <v-btn type="submit" color="primary" size="large">
                     <v-icon class="me-2">mdi-check</v-icon>
