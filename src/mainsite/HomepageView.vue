@@ -30,17 +30,6 @@ onMounted(async () => {
   await requestPermission()
   await getLocation()
 })
-/*
-const handleLogout = async () => {
-  try {
-    await authStore.signOut()
-    router.push({ name: 'login' }) // ✅ always go back to login
-  } catch (error) {
-    console.error('Logout failed:', error)
-    alert('Something went wrong while logging out.')
-  }
-}
-  */
 </script>
 
 <template>
@@ -71,10 +60,15 @@ const handleLogout = async () => {
 
     <!-- Main Content -->
     <v-main class="app-main">
-      <v-card class="mx-auto my-8 pa-6" color="primary" elevation="2" max-width="400">
-        <h1 class="text-h4 text-center text-white font-weight-bold">testing 2.0</h1>
-      </v-card>
-     <!-- <v-btn color="error" @click="handleLogout">Logout</v-btn>-->
+      <h3>
+        <strong><u> Popular item </u></strong>
+      </h3>
+      <h3>
+        <strong><u> see more </u></strong>
+      </h3>
+      <h3>
+        <strong><u> Shops Near You </u></strong>
+      </h3>
     </v-main>
 
     <!-- Bottom Navigation -->
@@ -103,8 +97,6 @@ const handleLogout = async () => {
 </template>
 
 <style scoped>
-
-
 .bot-nav {
   background-color: #5ca3eb;
 }
