@@ -1,5 +1,5 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
-import { Capacitor } from '@capacitor/core'
+import { createRouter, createWebHistory } from 'vue-router' // Changed to createWebHistory
+
 
 import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
@@ -12,12 +12,12 @@ import NotificationView from '@/mainsite/NotificationView.vue'
 import ConfirmEmail from '@/common/ConfirmEmail.vue'
 import AdminDashboard from '@/mainsite/AdminDashboard.vue'
 import ShopBuild from '@/mainsite/ShopBuild.vue'
-
+import ForgotPasswordView from '@/mainsite/ForgotPasswordView.vue'
+import UpdatePasswordView from '@/mainsite/UpdatePasswordView.vue'
 import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import AddItem from '@/mainsite/AddItem.vue'
-
 
 // ✅ Define routes
 const routes = [
@@ -26,36 +26,75 @@ const routes = [
   { path: '/homepage', name: 'homepage', component: HomepageView, meta: { requiresAuth: true } },
   { path: '/mapsearch', name: 'mapsearch', component: MapSearch, meta: { requiresAuth: true } },
   { path: '/cartview', name: 'cartview', component: CartView, meta: { requiresAuth: true } },
-  { path: '/messageview', name: 'messageview', component: MessageView, meta: { requiresAuth: true } },
-  { path: '/profileview', name: 'profileview', component: ProfileView, meta: { requiresAuth: true } },
-  { path: '/notificationview', name: 'notificationview', component: NotificationView, meta: { requiresAuth: true } },
+  {
+    path: '/messageview',
+    name: 'messageview',
+    component: MessageView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/profileview',
+    name: 'profileview',
+    component: ProfileView,
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/notificationview',
+    name: 'notificationview',
+    component: NotificationView,
+    meta: { requiresAuth: true },
+  },
   { path: '/register-success', name: 'confirm-email', component: ConfirmEmail },
-  { path: '/admin-dashboard', name: 'admin-dashboard', component: AdminDashboard, meta: { requiresAuth: true, requiresAdmin: true } },
+  {
+    path: '/admin-dashboard',
+    name: 'admin-dashboard',
+    component: AdminDashboard,
+    meta: { requiresAuth: true, requiresAdmin: true },
+  },
   { path: '/shop-build', name: 'shop-build', component: ShopBuild, meta: { requiresAuth: true } },
-  { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },//sakto ni
-    { path: '/productlist', name: 'productlist', component: ProductListing, meta: { requiresAuth: true } },//sakto ni
-      { path: '/additem', name: 'additem', component: AddItem, meta: { requiresAuth: true } },//sakto ni
+  { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },
+  {
+    path: '/productlist',
+    name: 'productlist',
+    component: ProductListing,
+    meta: { requiresAuth: true },
+  },
+  { path: '/additem', name: 'additem', component: AddItem, meta: { requiresAuth: true } },
 
-{
-  path: '/account-settings',
-  name: 'account-settings',
-  component: () => import('@/mainsite/AccountSettingsView.vue'),
-  meta: { requiresAuth: true }
-},
+  // ✅ Allow unauthenticated access to update-password
+  {
+    path: '/forgot-password',
+    name: 'forgot-password',
+    component: ForgotPasswordView,
+    meta: { requiresAuth: false },
+  },
+
+  {
+    path: '/update-password',
+    name: 'update-password',
+    component: UpdatePasswordView,
+    meta: { requiresAuth: false },
+  },
+
+  {
+    path: '/account-settings',
+    name: 'account-settings',
+    component: () => import('@/mainsite/AccountSettingsView.vue'),
+    meta: { requiresAuth: true },
+  },
 
   // ✅ Catch-all route
   {
     path: '/:pathMatch(.*)*',
-    redirect: '/'
-  }
+    redirect: '/',
+  },
 ]
 
-// ✅ Use hash history to avoid server configuration issues
-const isCapacitor = Capacitor.isNativePlatform()
-const history = isCapacitor ? createWebHashHistory() : createWebHashHistory() // Force hash for now
+// ✅ Use HISTORY mode instead of hash mode
+const history = createWebHistory() // Changed from createWebHashHistory()
 
 const router = createRouter({
-  history,
+  history, // Now using history mode
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
@@ -80,7 +119,12 @@ router.beforeEach(async (to, from, next) => {
 
     const isLoggedIn = authStore.isLoggedIn
 
-    console.log('Navigation:', to.path, 'Logged in:', isLoggedIn)
+    console.log('Navigation:', to.path, 'Logged in:', isLoggedIn, 'Requires auth:', to.meta.requiresAuth)
+
+    // ✅ Skip auth check for routes that explicitly allow unauthenticated access
+    if (to.meta.requiresAuth === false) {
+      return next() // Allow access to routes like update-password
+    }
 
     // ✅ Redirect authenticated users away from auth pages
     if (isLoggedIn && (to.path === '/' || to.path === '/register')) {
@@ -104,19 +148,8 @@ router.beforeEach(async (to, from, next) => {
     next()
   } catch (error) {
     console.error('Router navigation error:', error)
-    // ✅ On error, redirect to login but don't replace to avoid loops
     next('/')
   }
 })
-
-// ✅ Handle navigation errors
-/*
-router.onError((error, to) => {
-  console.error('Navigation error to:', to.fullPath, error)
-  if (error.message.includes('Failed to fetch dynamically imported module')) {
-    window.location.reload()
-  }
-})
-*/
 
 export default router
