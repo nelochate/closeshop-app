@@ -33,9 +33,11 @@ const fetchShopData = async () => {
     // fetch shop info
     const { data, error } = await supabase
       .from('shops')
-      .select('business_name, description, logo_url, open_time, close_time, address')
-      .eq('id', user.id)
-      .maybeSingle() // ✅ safer than .single()
+      .select(
+        'business_name, description, logo_url, open_time, close_time, barangay, building, street, house_no, postal'
+      )
+      .eq('user_id', user.id) // ✅ correct column
+      .maybeSingle()
 
     if (error) throw error
 
@@ -46,16 +48,64 @@ const fetchShopData = async () => {
     description.value = data?.description || 'No description provided'
     timeOpen.value = data?.open_time || 'N/A'
     timeClose.value = data?.close_time || 'N/A'
-    address.value = data?.address || 'No address set'
     businessAvatar.value = data?.logo_url || ''
+
+    // build full address string
+    address.value = [
+      data?.house_no,
+      data?.building,
+      data?.street,
+      data?.barangay,
+      'Butuan City',
+      'Agusan del Norte',
+      'CARAGA',
+      data?.postal
+    ]
+      .filter(Boolean)
+      .join(', ')
+
     isOpen.value = true
   } catch (err: any) {
     console.error('Error loading shop info:', err.message, err)
   }
 }
 
-
 onMounted(fetchShopData)
+
+// delete shop btn
+const deleteShop = async () => {
+  try {
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('User not found')
+
+    // Delete shop from DB
+    const { error } = await supabase.from('shops').delete().eq('user_id', user.id)
+    if (error) throw error
+
+    // Optionally, delete the logo image
+    if (businessAvatar.value) {
+      const oldPath = businessAvatar.value.split('/storage/v1/object/public/Profile/')[1]
+      if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
+    }
+
+    // Reset state
+    businessAvatar.value = ''
+    businessName.value = ''
+    description.value = ''
+    timeOpen.value = ''
+    timeClose.value = ''
+    address.value = ''
+    isOpen.value = false
+
+    alert('Shop deleted successfully')
+  } catch (err) {
+    console.error(err)
+    alert('Failed to delete shop')
+  }
+}
 </script>
 
 <template>
@@ -66,26 +116,22 @@ onMounted(fetchShopData)
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="text-h6">Business Profile</v-toolbar-title>
+
+      <div float="end">
+        <v-btn color="error" class="shop-btn" @click="deleteShop"> Delete Shop </v-btn>
+      </div>
     </v-app-bar>
 
     <v-main>
       <!-- Business Info Section -->
       <v-container class="py-6">
         <v-sheet rounded="xl" elevation="4" class="pa-6 text-center">
-          <!-- Avatar with edit button -->
+          <!-- Avatar -->
           <div class="relative inline-block">
             <v-avatar size="96">
               <v-img v-if="businessAvatar" :src="businessAvatar" cover />
               <v-icon v-else size="48">mdi-store</v-icon>
             </v-avatar>
-            <v-btn
-              icon
-              size="small"
-              color="primary"
-              class="absolute bottom-0 right-0"
-            >
-              <v-icon>mdi-camera</v-icon>
-            </v-btn>
           </div>
 
           <h2 class="text-h6 mt-4">{{ businessName }}</h2>

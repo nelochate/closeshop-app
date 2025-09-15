@@ -14,13 +14,26 @@ const avatarUrl = ref(null)
 const showSuccess = ref(false)
 const successMessage = ref('')
 const isLoading = ref(false)
+const mapMessage = ref("Map preview will go here")
+const address = ref({
+  region: '',
+  province: '',
+  city: '',
+  barangay: '',
+  building: '',
+  street: '',
+  house_no: '',
+  postal: ''
+})
+
+
 
 // Form data
 const formData = ref({
   firstName: '',
   lastName: '',
   phone: '',
-  email: ''
+  email: '',
 })
 
 // Show success message and redirect
@@ -32,7 +45,7 @@ const showSuccessAndRedirect = (message) => {
     // Force refresh by using replace with a query parameter
     router.replace({
       name: 'profileview',
-      query: { refreshed: Date.now() }
+      query: { refreshed: Date.now() },
     })
   }, 2000)
 }
@@ -67,80 +80,80 @@ const loadUserData = async () => {
 // Upload avatar function
 async function uploadAvatar(file) {
   if (!file) {
-    console.error('No file selected.');
-    return;
+    console.error('No file selected.')
+    return
   }
 
   try {
     uploading.value = true
     // Get the current user
-    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
 
     if (userError || !user) {
-      console.error('No authenticated user found:', userError?.message);
-      return;
+      console.error('No authenticated user found:', userError?.message)
+      return
     }
 
     // Handle both File objects and Blob objects
-    let fileExt = 'jpg';
+    let fileExt = 'jpg'
 
     if (file.name) {
-      fileExt = file.name.split('.').pop() || 'jpg';
+      fileExt = file.name.split('.').pop() || 'jpg'
     } else if (file.type) {
       const mimeToExt = {
         'image/jpeg': 'jpg',
         'image/jpg': 'jpg',
         'image/png': 'png',
         'image/gif': 'gif',
-        'image/webp': 'webp'
-      };
-      fileExt = mimeToExt[file.type] || 'jpg';
+        'image/webp': 'webp',
+      }
+      fileExt = mimeToExt[file.type] || 'jpg'
     }
 
-    const fileName = `${Date.now()}.${fileExt}`;
-    const filePath = `${user.id}/${fileName}`;
+    const fileName = `${Date.now()}.${fileExt}`
+    const filePath = `${user.id}/${fileName}`
 
-    const { error: uploadError } = await supabase.storage
-      .from('avatars')
-      .upload(filePath, file, {
-        cacheControl: '3600',
-        upsert: true,
-      });
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
+      cacheControl: '3600',
+      upsert: true,
+    })
 
     if (uploadError) {
-      throw uploadError;
+      throw uploadError
     }
 
     // Get the public URL
-    const { data: { publicUrl } } = supabase.storage
-      .from('avatars')
-      .getPublicUrl(filePath);
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('avatars').getPublicUrl(filePath)
 
     // Update user profile
     const { error: updateError } = await supabase
       .from('profiles')
       .update({ avatar_url: publicUrl })
-      .eq('id', user.id);
+      .eq('id', user.id)
 
-    if (updateError) throw updateError;
+    if (updateError) throw updateError
 
-    console.log('Avatar uploaded successfully! URL:', publicUrl);
+    console.log('Avatar uploaded successfully! URL:', publicUrl)
 
     // Update the local avatar URL with cache busting
-    avatarUrl.value = `${publicUrl}?t=${Date.now()}`;
+    avatarUrl.value = `${publicUrl}?t=${Date.now()}`
 
     // Update the auth store with the new avatar URL
     if (authStore.profile) {
-      authStore.profile.avatar_url = publicUrl;
+      authStore.profile.avatar_url = publicUrl
     }
 
     showSuccessMessage('Profile picture updated successfully!')
-    return publicUrl;
-
+    return publicUrl
   } catch (error) {
-    console.error('Error uploading avatar:', error.message);
+    console.error('Error uploading avatar:', error.message)
     showSuccessMessage('Failed to upload profile picture')
-    throw error;
+    throw error
   } finally {
     uploading.value = false
   }
@@ -163,17 +176,16 @@ const pickImage = async (source) => {
       allowEditing: true,
       resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
-    });
+    })
 
     if (photo.webPath) {
-      const response = await fetch(photo.webPath);
-      const blob = await response.blob();
-      await uploadAvatar(blob);
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      await uploadAvatar(blob)
     }
-    showPicker.value = false;
-
+    showPicker.value = false
   } catch (error) {
-    console.error('Error picking image:', error);
+    console.error('Error picking image:', error)
     showSuccessMessage('Failed to select image')
   }
 }
@@ -189,15 +201,23 @@ const saveProfile = async () => {
     const { error: metadataError } = await supabase.auth.updateUser({
       data: {
         first_name: formData.value.firstName,
-        last_name: formData.value.lastName
-      }
+        last_name: formData.value.lastName,
+      },
     })
     if (metadataError) throw metadataError
 
-    // Update profile table (phone, avatar_url)
+    // Build profile update object
     const updateData = {
       phone: formData.value.phone,
-      updated_at: new Date().toISOString()
+      region: address.value.region,
+      province: address.value.province,
+      city: address.value.city,
+      barangay: address.value.barangay,
+      building: address.value.building,
+      street: address.value.street,
+      house_no: address.value.house_no,
+      postal: address.value.postal,
+      updated_at: new Date().toISOString(),
     }
 
     if (avatarUrl.value && !avatarUrl.value.includes('?')) {
@@ -206,6 +226,7 @@ const saveProfile = async () => {
       updateData.avatar_url = avatarUrl.value.split('?')[0]
     }
 
+    // Update profile table
     const { error: profileError } = await supabase
       .from('profiles')
       .update(updateData)
@@ -213,21 +234,18 @@ const saveProfile = async () => {
 
     if (profileError) throw profileError
 
-    // Refresh auth store to reload user metadata and profile
+    // Refresh auth store
     await authStore.hydrateFromSession()
 
     // Show success and redirect
     showSuccessAndRedirect('Profile updated successfully!')
-
   } catch (error) {
     console.error('Update error:', error)
     showSuccessMessage('Failed to update profile: ' + error.message)
   } finally {
     isLoading.value = false
-    // Removed the duplicate router.push('/profileview')
   }
 }
-
 
 
 // Navigation with refresh
@@ -235,7 +253,7 @@ const goBack = () => {
   // Use replace to force a fresh navigation to profileview
   router.replace({
     name: 'profileview',
-    query: { refreshed: Date.now() }
+    query: { refreshed: Date.now() },
   })
 }
 
@@ -259,9 +277,7 @@ onMounted(() => {
       <v-snackbar v-model="showSuccess" :timeout="3000" color="success" location="top">
         {{ successMessage }}
         <template v-slot:actions>
-          <v-btn color="white" variant="text" @click="showSuccess = false">
-            Close
-          </v-btn>
+          <v-btn color="white" variant="text" @click="showSuccess = false"> Close </v-btn>
         </template>
       </v-snackbar>
 
@@ -274,8 +290,13 @@ onMounted(() => {
               <v-img v-if="avatarUrl" :src="avatarUrl" cover />
               <v-icon v-else size="60">mdi-account</v-icon>
             </v-avatar>
-            <br>
-            <v-btn color="primary darken-1 background" variant="outlined" @click="showPicker = true" :loading="uploading">
+            <br />
+            <v-btn
+              color="primary darken-1 background"
+              variant="outlined"
+              @click="showPicker = true"
+              :loading="uploading"
+            >
               <v-icon>mdi-camera</v-icon>
             </v-btn>
           </v-card-text>
@@ -320,12 +341,62 @@ onMounted(() => {
                     placeholder="+63 XXX XXX XXXX"
                   />
                 </v-col>
+                <!--address-->
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.region"
+                    label="Region"
+                    variant="outlined"
+                    placeholder="CARAGA"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.province"
+                    label="Province"
+                    variant="outlined"
+                    placeholder="Agusan del Norte"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.city"
+                    label="City"
+                    variant="outlined"
+                    placeholder="Butuan City"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field v-model="address.barangay" label="Barangay" variant="outlined" />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.building"
+                    label="Building No."
+                    variant="outlined"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field v-model="address.street" label="Street Name" variant="outlined" />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field v-model="address.house_no" label="House No." variant="outlined" />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field v-model="address.postal" label="Postal Code" variant="outlined" />
+                </v-col>
+
+                <!--display here using the map of leaflet-->
+                <span>{{ mapMessage }}</span>
                 <v-col cols="12" class="text-right">
-                  <v-btn
-                    type="submit"
-                    color="primary"
-                    size="large"
-                  >
+                  <v-btn type="submit" color="primary" size="large">
                     <v-icon class="me-2">mdi-check</v-icon>
                     {{ isLoading ? 'Saved' : 'Save Changes' }}
                   </v-btn>
