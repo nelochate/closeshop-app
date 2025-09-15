@@ -19,6 +19,8 @@ const showSuccess = ref(false) // Controls the visibility of the success message
 
 const isLoading = ref()
 
+
+
 // Login function using Supabase
 const login = async () => {
   isLoading.value = true
@@ -137,7 +139,8 @@ onMounted(async () => {
             Sign In
           </v-btn>
 
-          <p class="forgot-link">Forgot Password</p>
+          <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
+
 
           <p class="register-link">
             Don’t have an account? <RouterLink to="/register">Register</RouterLink>
@@ -235,17 +238,19 @@ onMounted(async () => {
 }
 
 .forgot-link {
+  margin: 1rem 0;
+  font-size: 14px;
+  text-align: center;
+  color: #2e73b8;
+   font-weight: 200;
+}
+
+.register-link {
   margin-top: 0.8rem;
   font-size: 13px;
   color: #666;
   text-align: center;
   cursor: pointer;
-}
-
-.register-link {
-  margin: 1rem 0;
-  font-size: 14px;
-  text-align: center;
 }
 
 .divider {
