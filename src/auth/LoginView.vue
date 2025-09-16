@@ -239,10 +239,10 @@ onMounted(async () => {
 
 .forgot-link {
   margin: 1rem 0;
-  font-size: 14px;
+  font-size: 15px;
   text-align: center;
-  color: #2e73b8;
-   font-weight: 200;
+  color: #2e73b8f5;
+  font-weight: 580;
 }
 
 .register-link {
@@ -306,4 +306,3 @@ onMounted(async () => {
 }
 
 </style>
-
