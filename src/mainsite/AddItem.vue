@@ -29,7 +29,7 @@ const addVariety = () => {
   varieties.value.push({
     id: Date.now(),
     name: `New Variety ${varieties.value.length + 1}`,
-    price: 0
+    price: 0,
   })
 }
 
@@ -43,7 +43,7 @@ const submitForm = () => {
     category: category.value,
     sizes: selectedSizes.value,
     image: productImage.value,
-    varieties: varieties.value
+    varieties: varieties.value,
   })
 
   // TODO: Send to Supabase
@@ -64,29 +64,43 @@ const submitForm = () => {
     <v-main>
       <v-container class="py-6">
         <v-form @submit.prevent="submitForm">
+          <!--add product photo can add multiple or 5 piccture can zoom in and out each one-->
+          <v-img></v-img>
           <!-- Product Info -->
           <v-text-field v-model="productName" label="Product Name" variant="outlined" required />
           <v-textarea v-model="description" label="Description" variant="outlined" rows="3" />
-          <v-text-field v-model="price" label="Price" type="number" prefix="₱" variant="outlined" required />
+          <v-text-field
+            v-model="price"
+            label="Price"
+            type="number"
+            prefix="₱"
+            variant="outlined"
+            required
+          />
+
           <v-text-field v-model="stock" label="Stock Quantity" type="number" variant="outlined" />
-          <v-select v-model="category" :items="categories" label="Category" variant="outlined" required />
+          <v-select
+            v-model="category"
+            :items="categories"
+            label="Category"
+            variant="outlined"
+            required
+          />
+          
+          
 
           <!-- Sizes -->
           <v-label class="mt-4 mb-2 font-medium">Available Sizes</v-label>
           <v-row>
             <v-col v-for="size in availableSizes" :key="size" cols="6" sm="4" md="2">
-              <v-checkbox v-model="selectedSizes" :label="size" :value="size" density="comfortable" />
+              <v-checkbox
+                v-model="selectedSizes"
+                :label="size"
+                :value="size"
+                density="comfortable"
+              />
             </v-col>
           </v-row>
-
-          <!-- Image Upload -->
-          <v-file-input
-            v-model="productImage"
-            label="Upload Product Image"
-            accept="image/*"
-            variant="outlined"
-            prepend-icon="mdi-image"
-          />
 
           <!-- Varieties Section -->
           <v-card class="mt-6" rounded="xl" elevation="2">
@@ -107,16 +121,25 @@ const submitForm = () => {
               <v-row v-else>
                 <v-col v-for="variety in varieties" :key="variety.id" cols="12" sm="6" md="4">
                   <v-card class="pa-3" rounded="lg" elevation="1">
-                    <v-text-field
-                      v-model="variety.name"
-                      label="Variety Name"
+                    <!-- Image Upload -->
+                    <v-file-input
+                      v-model="productImage"
+                      label="Upload Product Image"
+                      accept="image/*"
+                      variant="outlined"
+                      prepend-icon="mdi-image"
+                    />
+                    
+                     <v-text-area v-model="variety.price"
+                      label="Description"
+                      type="text"
+                      prefix="₱"
                       variant="outlined"
                       density="comfortable"
-                      hide-details
-                      class="mb-2"
-                    />
-                   <!--
-                     <v-text-field
+                      hide-details>
+                      
+                    </v-text-area>
+                    <v-text-field
                       v-model="variety.price"
                       label="Price"
                       type="number"
@@ -124,7 +147,7 @@ const submitForm = () => {
                       variant="outlined"
                       density="comfortable"
                       hide-details
-                    />-->
+                    />
                   </v-card>
                 </v-col>
               </v-row>
@@ -132,7 +155,13 @@ const submitForm = () => {
           </v-card>
 
           <!-- Submit -->
-          <v-btn type="submit" color="primary" rounded="lg" prepend-icon="mdi-content-save" class="mt-4">
+          <v-btn
+            type="submit"
+            color="primary"
+            rounded="lg"
+            prepend-icon="mdi-content-save"
+            class="mt-4"
+          >
             Save Product
           </v-btn>
         </v-form>
