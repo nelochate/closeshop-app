@@ -414,7 +414,7 @@ onMounted(async () => {
             class="mt-4"
             block
           >
-            Save Product
+            Add Product
           </v-btn>
         </v-form>
 
