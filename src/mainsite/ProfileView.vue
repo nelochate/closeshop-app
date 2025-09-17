@@ -3,6 +3,8 @@ import { ref, onMounted, watch } from 'vue'
 import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
+import BottomNav from '@/common/layout/BottomNav.vue'
+const activeTab = ref('account')
 
 // Router and store
 const router = useRouter()
@@ -107,15 +109,6 @@ onBeforeRouteUpdate((to, from, next) => {
   next()
 })
 
-// --------- NAVIGATION FUNCTIONS ---------
-
-const goBack = () => router.back()
-const goHome = () => router.push('/homepage')
-const goCart = () => router.push('/cartview')
-const goChat = () => router.push('/messageview')
-const goMap = () => router.push('/mapsearch')
-const goAccount = () => router.push('/profileview')
-const goAccountSettings = () => router.push('/account-settings')
 
 // Logout handler
 const handleLogout = async () => {
@@ -181,7 +174,7 @@ const selectedSection = ref(purchaseSections[0])
           </v-avatar>
 
           <!-- Floating Edit Button - Redirects to Account Settings -->
-          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="goAccountSettings">
+          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/account-settings')">
             <v-icon class="edit-icon">mdi-pencil</v-icon>
           </v-btn>
         </div>
@@ -224,24 +217,8 @@ const selectedSection = ref(purchaseSections[0])
       <!-- Other sections... -->
     </v-main>
 
-    <!-- Bottom Navigation -->
-    <v-bottom-navigation class="bot-nav" height="64">
-      <v-btn value="home" @click="goHome">
-        <v-icon>mdi-home-outline</v-icon>
-      </v-btn>
-      <v-btn value="cart" @click="goCart">
-        <v-icon>mdi-cart-outline</v-icon>
-      </v-btn>
-      <v-btn value="map" @click="goMap">
-        <v-icon>mdi-search-web</v-icon>
-      </v-btn>
-      <v-btn value="chat" @click="goChat">
-        <v-icon>mdi-chat-outline</v-icon>
-      </v-btn>
-      <v-btn value="account" @click="goAccount">
-        <v-icon>mdi-account-check-outline</v-icon>
-      </v-btn>
-    </v-bottom-navigation>
+    <!-- Reusable BottomNav -->
+    <BottomNav v-model="activeTab" />
   </v-app>
 </template>
 
