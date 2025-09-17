@@ -201,11 +201,11 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false,
-      resultType: CameraResultType.DataUrl,
+      resultType: CameraResultType.Uri, // ✅ use URI for mobile
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
 
-    if (!photo?.dataUrl) return
+    if (!photo?.webPath) return
     uploading.value = true
 
     // remove old image if exists
@@ -214,10 +214,15 @@ const pickImage = async (source: 'camera' | 'gallery') => {
       if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
     }
 
+    // ✅ Convert webPath → File
+    const response = await fetch(photo.webPath)
+    const blob = await response.blob()
+    const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+
     const fileName = `${user.id}/${Date.now()}.png`
     const { data, error } = await supabase.storage
       .from('Profile')
-      .upload(fileName, dataURItoBlob(photo.dataUrl), { cacheControl: '3600', upsert: true })
+      .upload(fileName, file, { cacheControl: '3600', upsert: true })
     if (error) throw error
 
     const newUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
