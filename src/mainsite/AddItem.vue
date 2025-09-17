@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { createClient } from '@supabase/supabase-js'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 
@@ -11,25 +11,50 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 
 // Router
 const router = useRouter()
+const route = useRoute()
 const goBack = () => router.back()
+
+// Mode check
+const isEditMode = ref(false)
+const productId = ref<number | null>(null)
 
 // Form state
 const productName = ref('')
 const description = ref('')
 const price = ref<number | null>(null)
 const stock = ref<number | null>(null)
-
-// Sizes (optional)
 const availableSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 const selectedSizes = ref<string[]>([])
 
-// -------------------- Main Product Photos --------------------
+// Main images
 const mainProductImages = ref<File[]>([])
 const mainImagePreviews = ref<string[]>([])
 const mainPreviewDialog = ref(false)
 const selectedMainImage = ref<string | null>(null)
 const showPhotoPicker = ref(false)
 
+// Varieties
+type Variety = {
+  id: number
+  name: string
+  price: number
+  images: File[] | string[] // can be File[] (new) or string[] (existing)
+  previews: string[]
+}
+const varieties = ref<Variety[]>([])
+
+// Snackbar
+const snackbar = ref(false)
+const snackbarMessage = ref('')
+const snackbarColor = ref<'success' | 'error'>('success')
+
+const showSnackbar = (message: string, type: 'success' | 'error') => {
+  snackbarMessage.value = message
+  snackbarColor.value = type
+  snackbar.value = true
+}
+
+// -------------------- Image helpers --------------------
 const dataURItoBlob = (dataURI: string) => {
   const byteString = atob(dataURI.split(',')[1])
   const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0]
@@ -43,7 +68,6 @@ const pickProductImage = async (source: 'camera' | 'gallery') => {
   try {
     const photo = await Camera.getPhoto({
       quality: 90,
-      allowEditing: false,
       resultType: CameraResultType.DataUrl,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
@@ -76,17 +100,7 @@ const removeMainImage = (index: number) => {
   mainImagePreviews.value.splice(index, 1)
 }
 
-// -------------------- Varieties --------------------
-type Variety = {
-  id: number
-  name: string
-  price: number
-  images: File[]
-  previews: string[]
-}
-
-const varieties = ref<Variety[]>([])
-
+// Varieties handling
 const addVariety = () => {
   varieties.value.push({
     id: Date.now(),
@@ -101,7 +115,6 @@ const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') 
   try {
     const photo = await Camera.getPhoto({
       quality: 85,
-      allowEditing: false,
       resultType: CameraResultType.DataUrl,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
@@ -115,7 +128,7 @@ const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') 
     const blob = dataURItoBlob(photo.dataUrl)
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
 
-    variety.images.push(file)
+    ;(variety.images as File[]).push(file)
     variety.previews.push(URL.createObjectURL(file))
   } catch (err) {
     console.error(err)
@@ -124,7 +137,7 @@ const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') 
 
 const removeVarietyImage = (variety: Variety, index: number) => {
   URL.revokeObjectURL(variety.previews[index])
-  variety.images.splice(index, 1)
+  ;(variety.images as File[]).splice(index, 1)
   variety.previews.splice(index, 1)
 }
 
@@ -147,67 +160,100 @@ const uploadImages = async (files: File[], folder = 'products', shopId: string) 
 // -------------------- Submit --------------------
 const submitForm = async () => {
   try {
-    // ✅ get user
+    // get user
     const {
       data: { user },
       error: userError,
     } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('No user logged in')
 
-    // ✅ upload main product images
-    const imageUrls = await uploadImages(mainProductImages.value, 'main', user.id)
+    // upload main images if new
+    const newImageUrls = mainProductImages.value.length
+      ? await uploadImages(mainProductImages.value, 'main', user.id)
+      : []
+    const finalImageUrls = newImageUrls.length ? newImageUrls : mainImagePreviews.value
 
-    // ✅ upload for each variety
+    // varieties
     const varietyData = []
     for (const v of varieties.value) {
-      const urls = await uploadImages(v.images, 'varieties', user.id)
-      varietyData.push({
-        name: v.name,
-        price: v.price,
-        images: urls,
-      })
+      let urls: string[] = []
+      if (Array.isArray(v.images) && v.images.length && v.images[0] instanceof File) {
+        urls = await uploadImages(v.images as File[], 'varieties', user.id)
+      } else if (Array.isArray(v.images)) {
+        urls = v.images as string[]
+      }
+      varietyData.push({ name: v.name, price: v.price, images: urls })
     }
 
-    // ✅ insert product
-    const { error } = await supabase.from('products').insert([
-      {
-        shop_id: user.id,
-        prod_name: productName.value,
-        prod_description: description.value,
-        price: price.value,
-        stock: stock.value,
-        main_img_urls: imageUrls, // jsonb
-        sizes: selectedSizes.value, // jsonb
-        varieties: varietyData, // jsonb
-      },
-    ])
+    if (isEditMode.value && productId.value) {
+      // UPDATE
+      const { error } = await supabase
+        .from('products')
+        .update({
+          prod_name: productName.value,
+          prod_description: description.value,
+          price: price.value,
+          stock: stock.value,
+          main_img_urls: finalImageUrls,
+          sizes: selectedSizes.value,
+          varieties: varietyData,
+        })
+        .eq('id', productId.value)
 
-    if (error) {
-      showSnackbar('❌ Failed to save product. Please try again.', 'error')
-      throw error
+      if (error) throw error
+      showSnackbar('✅ Product updated successfully!', 'success')
+    } else {
+      // INSERT
+      const { error } = await supabase.from('products').insert([
+        {
+          shop_id: user.id,
+          prod_name: productName.value,
+          prod_description: description.value,
+          price: price.value,
+          stock: stock.value,
+          main_img_urls: finalImageUrls,
+          sizes: selectedSizes.value,
+          varieties: varietyData,
+        },
+      ])
+      if (error) throw error
+      showSnackbar('✅ Product added successfully!', 'success')
     }
 
-    // ✅ success
-    showSnackbar('✅ Product saved successfully!', 'success')
-    console.log('✅ Product saved!')
     router.push('/products')
-
   } catch (err: any) {
     console.error('❌ Error saving product:', err.message)
     showSnackbar('❌ Something went wrong. Please try again.', 'error')
   }
 }
 
-// for snackbar notifications // Snackbar state
-const snackbar = ref(false)
-const snackbarMessage = ref('')
-const snackbarColor = ref<'success' | 'error'>('success')
+// -------------------- Prefill if editing --------------------
+onMounted(async () => {
+  if (route.params.id) {
+    isEditMode.value = true
+    productId.value = Number(route.params.id)
 
-const showSnackbar = (message: string, type: 'success' | 'error') => {
-  snackbarMessage.value = message
-  snackbarColor.value = type
-  snackbar.value = true
-}
+    const { data, error } = await supabase.from('products').select('*').eq('id', productId.value).single()
+    if (error) {
+      console.error('❌ Error fetching product:', error.message)
+      return
+    }
+
+    productName.value = data.prod_name
+    description.value = data.prod_description
+    price.value = data.price
+    stock.value = data.stock
+    selectedSizes.value = data.sizes || []
+    mainImagePreviews.value = data.main_img_urls || []
+    varieties.value = (data.varieties || []).map((v: any, idx: number) => ({
+      id: idx,
+      name: v.name,
+      price: v.price,
+      images: v.images || [],
+      previews: v.images || [],
+    }))
+  }
+})
 </script>
 
 <template>
