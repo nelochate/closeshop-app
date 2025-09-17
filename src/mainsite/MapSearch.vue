@@ -3,6 +3,8 @@ import { ref, onMounted, watch, onUnmounted } from 'vue'
 import L from 'leaflet'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@/composables/useGeolocation'
+import BottomNav from '@/common/layout/BottomNav.vue'
+const activeTab = ref('map')
 
 // Fix marker icons (otherwise they don’t show in build)
 import iconUrl from 'leaflet/dist/images/marker-icon.png'
@@ -28,6 +30,7 @@ const router = useRouter()
 const search = ref('')
 const map = ref<L.Map | null>(null)
 let userMarker: L.Marker | null = null
+
 
 const onSearch = () => {
   console.log('Searching for:', search.value)
@@ -65,17 +68,6 @@ watch([latitude, longitude], ([lat, lng]) => {
 onUnmounted(() => {
   stopWatching()
 })
-
-
-// Navigation functions
-const goHome = () => router.push('/homepage')
-const goCart = () => router.push('/cartview')
-const goChat = () => router.push('/messageview')
-const goMap = () => router.push('/mapsearch')
-const goAccount = () => router.push('/profileview')
-const goNotifications = () => {
-  router.push('/notifications')
-}
 </script>
 
 <template>
@@ -116,28 +108,8 @@ const goNotifications = () => {
       <h1><strong>Stores within your location</strong></h1>
     </div>
    </v-main>
-     <!-- Bottom Navigation -->
-    <v-bottom-navigation class="bot-nav" height="64">
-      <v-btn value="home" @click="goHome">
-        <v-icon>mdi-home-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="cart" @click="goCart">
-        <v-icon>mdi-cart-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="map" @click="goMap">
-        <v-icon>mdi-search-web</v-icon>
-      </v-btn>
-
-      <v-btn value="chat" @click="goChat">
-        <v-icon>mdi-chat-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="account" @click="goAccount">
-        <v-icon>mdi-account-check-outline</v-icon>
-      </v-btn>
-      </v-bottom-navigation>
+    <!-- Reusable BottomNav -->
+    <BottomNav v-model="activeTab" />
   </v-app>
 </template>
 
