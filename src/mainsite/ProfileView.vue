@@ -174,7 +174,7 @@ const selectedSection = ref(purchaseSections[0])
           </v-avatar>
 
           <!-- Floating Edit Button - Redirects to Account Settings -->
-          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="goAccountSettings">
+          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/account-settings')">
             <v-icon class="edit-icon">mdi-pencil</v-icon>
           </v-btn>
         </div>
