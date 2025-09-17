@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import BottomNav from '@/common/layout/BottomNav.vue'
+const activeTab = ref('chat')
 
 // router instance
 const router = useRouter()
@@ -26,13 +28,6 @@ const messages = ref([
   },
 ])
 
-
-// Navigation functions
-const goHome = () => router.push('/homepage')
-const goCart = () => router.push('/cartview')
-const goChat = () => router.push('/messageview')
-const goMap = () => router.push('/mapsearch')
-const goAccount = () => router.push('/profileview')
 </script>
 
 <template>
@@ -94,28 +89,8 @@ const goAccount = () => router.push('/profileview')
         </v-list>
       </div>
     </v-main>
-       <!-- Bottom Navigation -->
-    <v-bottom-navigation class="bot-nav" height="64">
-      <v-btn value="home" @click="goHome">
-        <v-icon>mdi-home-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="cart" @click="goCart">
-        <v-icon>mdi-cart-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="map" @click="goMap">
-        <v-icon>mdi-search-web</v-icon>
-      </v-btn>
-
-      <v-btn value="chat" @click="goChat">
-        <v-icon>mdi-chat-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="account" @click="goAccount">
-        <v-icon>mdi-account-check-outline</v-icon>
-      </v-btn>
-      </v-bottom-navigation>
+    <!-- Reusable BottomNav -->
+    <BottomNav v-model="activeTab" />
   </v-app>
 </template>
 
