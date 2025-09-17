@@ -379,6 +379,22 @@ onMounted(async () => {
     console.error(err)
   }
 })
+
+// Categories with subcategories
+const categories = {
+  Food: ['Restaurant', 'Cafe', 'Bakery', 'Fast Food'],
+  Retail: ['Clothing', 'Electronics', 'Groceries', 'Furniture'],
+}
+
+const category = ref('')
+const subcategory = ref('')
+const subcategories = ref<string[]>([])
+
+// Watch for category changes
+watch(category, (newCategory) => {
+  subcategories.value = categories[newCategory] || []
+  subcategory.value = '' // reset subcategory when category changes
+})
 </script>
 
 <template>
@@ -407,6 +423,22 @@ onMounted(async () => {
       </div>
 
       <v-text-field v-model="shopName" label="Business Name" outlined />
+ <!-- Category -->
+  <v-select
+    v-model="category"
+    :items="Object.keys(categories)"
+    label="Category"
+    outlined
+  />
+
+  <!-- Subcategory -->
+  <v-select
+    v-model="subcategory"
+    :items="subcategories"
+    label="Subcategory"
+    outlined
+    :disabled="!category"
+  />
       <v-textarea v-model="description" label="About Us" outlined auto-grow />
 
       <h2>Operating Hours</h2>
