@@ -36,7 +36,7 @@ const fetchShopData = async () => {
       .select(
         'business_name, description, logo_url, open_time, close_time, barangay, building, street, house_no, postal'
       )
-      .eq('user_id', user.id) // ✅ correct column
+      .eq('id', user.id) // ✅ correct column
       .maybeSingle()
 
     if (error) throw error
@@ -82,7 +82,7 @@ const deleteShop = async () => {
     if (userError || !user) throw new Error('User not found')
 
     // Delete shop from DB
-    const { error } = await supabase.from('shops').delete().eq('user_id', user.id)
+    const { error } = await supabase.from('shops').delete().eq('id', user.id)
     if (error) throw error
 
     // Optionally, delete the logo image

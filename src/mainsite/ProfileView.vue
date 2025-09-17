@@ -43,8 +43,8 @@ const checkUserShop = async () => {
   try {
     const { data, error } = await supabase
       .from('shops')
-      .select('user_id')
-      .eq('user_id', user.value.id)  // ✅ use user_id, not owner_id
+      .select('id')
+      .eq('id', user.value.id)  // ✅ use id, not owner_id
       .maybeSingle()
 
     if (error && error.code !== 'PGRST116') {

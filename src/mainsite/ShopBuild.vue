@@ -227,7 +227,7 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     const { error: dbError } = await supabase
       .from('shops')
       .update({ logo_url: newUrl })
-      .eq('user_id', user.id)
+      .eq('id', user.id)
 
     if (dbError) throw dbError
 
@@ -253,7 +253,7 @@ const saveCoordinates = async (lat: number, lng: number) => {
     const { error } = await supabase
       .from('shops')
       .update({ latitude: lat, longitude: lng })
-      .eq('user_id', user.id)
+      .eq('id', user.id)
 
     if (error) throw error
     showSnackbar('Location updated successfully!', 'success')
@@ -313,7 +313,7 @@ const saveShop = async () => {
     if (userError || !user) throw new Error('User not found')
 
     const shopData = {
-      user_id: user.id,
+      id: user.id,
       business_name: shopName.value,
       description: description.value,
       logo_url: avatarUrl.value,
@@ -331,7 +331,7 @@ const saveShop = async () => {
       region: 'CARAGA',
     }
 
-    const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'user_id' })
+    const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'id' })
     if (error) throw error
 
     showSnackbar('Shop saved successfully!', 'success')
@@ -355,7 +355,7 @@ onMounted(async () => {
     } = await supabase.auth.getUser()
     if (userError || !user) return
 
-    const { data, error } = await supabase.from('shops').select('*').eq('user_id', user.id).single()
+    const { data, error } = await supabase.from('shops').select('*').eq('id', user.id).single()
     if (error || !data) return
 
     avatarUrl.value = data.logo_url || null
