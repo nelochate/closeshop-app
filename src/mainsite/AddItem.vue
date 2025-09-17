@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { createClient } from '@supabase/supabase-js'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { Capacitor } from '@capacitor/core'
 
 // --- Supabase client
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
@@ -63,26 +64,27 @@ const dataURItoBlob = (dataURI: string) => {
   for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
   return new Blob([ab], { type: mimeString })
 }
-
 const pickProductImage = async (source: 'camera' | 'gallery') => {
   try {
     const photo = await Camera.getPhoto({
       quality: 90,
-      resultType: CameraResultType.DataUrl,
+      resultType: CameraResultType.Uri, // ✅ Use URI for mobile
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
 
-    if (!photo?.dataUrl) return
+    if (!photo?.webPath) return
     if (mainProductImages.value.length >= 5) {
       alert('Max 5 images allowed')
       return
     }
 
-    const blob = dataURItoBlob(photo.dataUrl)
+    // ✅ fetch the image file
+    const response = await fetch(photo.webPath)
+    const blob = await response.blob()
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
 
     mainProductImages.value.push(file)
-    mainImagePreviews.value.push(URL.createObjectURL(file))
+    mainImagePreviews.value.push(photo.webPath) // use native preview path
     showPhotoPicker.value = false
   } catch (err) {
     console.error(err)
@@ -110,30 +112,31 @@ const addVariety = () => {
     previews: [],
   })
 }
-
 const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') => {
   try {
     const photo = await Camera.getPhoto({
       quality: 85,
-      resultType: CameraResultType.DataUrl,
+      resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
 
-    if (!photo?.dataUrl) return
+    if (!photo?.webPath) return
     if (variety.images.length >= 3) {
       alert('Max 3 images per variety')
       return
     }
 
-    const blob = dataURItoBlob(photo.dataUrl)
+    const response = await fetch(photo.webPath)
+    const blob = await response.blob()
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
 
     ;(variety.images as File[]).push(file)
-    variety.previews.push(URL.createObjectURL(file))
+    variety.previews.push(photo.webPath)
   } catch (err) {
     console.error(err)
   }
 }
+
 
 const removeVarietyImage = (variety: Variety, index: number) => {
   URL.revokeObjectURL(variety.previews[index])
@@ -220,7 +223,7 @@ const submitForm = async () => {
       showSnackbar('✅ Product added successfully!', 'success')
     }
 
-    router.push('/products')
+   // router.push('/products')
   } catch (err: any) {
     console.error('❌ Error saving product:', err.message)
     showSnackbar('❌ Something went wrong. Please try again.', 'error')
