@@ -1,38 +1,60 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { createClient } from '@supabase/supabase-js'
+
+// --- Supabase client
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const supabase = createClient(supabaseUrl, supabaseKey)
 
 const router = useRouter()
 const goBack = () => router.back()
 
-// ✅ Single products ref with showVarieties and image
-const products = ref([
-  {
-    id: 1,
-    name: 'Sample Product 1',
-    price: 199,
-    description: 'Description here',
-    image: 'https://via.placeholder.com/300', // main product image
-    showVarieties: false, // toggling state
-    varieties: [
-      { id: 1, name: 'Small', price: 149, image: '' },
-      { id: 2, name: 'Large', price: 249, image: '' }
-    ]
-  },
-  {
-    id: 2,
-    name: 'Sample Product 2',
-    price: 299,
-    description: 'Another description',
-    image: 'https://via.placeholder.com/300',
-    showVarieties: false,
-    varieties: []
+// products state
+type Product = {
+  id: number
+  prod_name: string
+  prod_description: string
+  price: number
+  stock: number
+  main_img_urls: string[]   // stored as jsonb
+  sizes: string[]           // stored as jsonb
+  varieties: any[]          // stored as jsonb
+  showVarieties: boolean
+}
+
+const products = ref<Product[]>([])
+const loading = ref(true)
+
+// fetch products from Supabase
+const fetchProducts = async () => {
+  loading.value = true
+  const { data, error } = await supabase
+    .from('products')
+    .select('id, prod_name, prod_description, price, stock, main_img_urls, sizes, varieties')
+
+  if (error) {
+    console.error('❌ Error fetching products:', error.message)
+  } else {
+    products.value = (data || []).map((p: any) => ({
+      ...p,
+      image: p.main_img_urls?.[0] || 'https://via.placeholder.com/300', // use first image or fallback
+      showVarieties: false,
+      varieties: p.varieties || [] // ensure array
+    }))
   }
-])
+  loading.value = false
+}
 
 // delete product
-const deleteProduct = (id: number) => {
-  products.value = products.value.filter(p => p.id !== id)
+const deleteProduct = async (id: number) => {
+  const { error } = await supabase.from('products').delete().eq('id', id)
+  if (error) {
+    console.error('❌ Error deleting product:', error.message)
+  } else {
+    products.value = products.value.filter(p => p.id !== id)
+  }
 }
 
 // edit product
@@ -41,16 +63,19 @@ const editProduct = (id: number) => {
 }
 
 // choose main product
-const chooseProduct = (product: any) => {
+const chooseProduct = (product: Product) => {
   console.log('Chosen product:', product)
-  // later -> router.push(`/checkout/${product.id}`)
+  // example: router.push(`/checkout/${product.id}`)
 }
 
 // choose a variety
-const chooseVariety = (product: any, variety: any) => {
-  console.log(`Chosen variety: ${variety.name} of product: ${product.name}`)
-  // later -> router.push(`/checkout/${product.id}?variety=${variety.id}`)
+const chooseVariety = (product: Product, variety: any) => {
+  console.log(`Chosen variety: ${variety.name} of product: ${product.prod_name}`)
+  // example: router.push(`/checkout/${product.id}?variety=${variety.id}`)
 }
+
+// load products when component mounts
+onMounted(fetchProducts)
 </script>
 
 <template>
@@ -76,8 +101,13 @@ const chooseVariety = (product: any, variety: any) => {
           Add New Item
         </v-btn>
 
+        <!-- Loading state -->
+        <div v-if="loading" class="text-center py-6">
+          <v-progress-circular indeterminate color="primary"></v-progress-circular>
+        </div>
+
         <!-- Product List -->
-        <v-row>
+        <v-row v-else>
           <v-col
             v-for="product in products"
             :key="product.id"
@@ -111,12 +141,12 @@ const chooseVariety = (product: any, variety: any) => {
               </v-img>
 
               <!-- Product Info -->
-              <v-card-title class="text-h6">{{ product.name }}</v-card-title>
+              <v-card-title class="text-h6">{{ product.prod_name }}</v-card-title>
               <v-card-subtitle class="text-body-2">
                 ₱{{ product.price }}
               </v-card-subtitle>
               <v-card-text class="text-body-2">
-                {{ product.description }}
+                {{ product.prod_description }}
               </v-card-text>
 
               <!-- Main Product Buy Button -->
@@ -136,8 +166,8 @@ const chooseVariety = (product: any, variety: any) => {
                   <h4 class="text-subtitle-2 mb-2">Varieties</h4>
                   <v-row dense>
                     <v-col
-                      v-for="variety in product.varieties"
-                      :key="variety.id"
+                      v-for="(variety, idx) in product.varieties"
+                      :key="idx"
                       cols="12"
                       sm="6"
                     >
@@ -151,8 +181,8 @@ const chooseVariety = (product: any, variety: any) => {
                           ₱{{ variety.price }}
                         </v-card-subtitle>
                         <v-img
-                          v-if="variety.image"
-                          :src="variety.image"
+                          v-if="variety.images && variety.images[0]"
+                          :src="variety.images[0]"
                           aspect-ratio="1"
                           class="rounded-lg mt-2"
                           cover
