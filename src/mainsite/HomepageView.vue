@@ -35,29 +35,37 @@ const onSearch = () => {
 }
 const seeMoreRecommended = () => router.push('/popular')
 const seeMoreNearby = () => router.push('/mapsearch')
+const goNotifications = () => router.push('/notificationview')
 </script>
 
 <template>
   <v-app>
     <v-main class="page">
       <v-container class="py-4" style="max-width: 720px">
-        <!-- HERO: search + banner in a light-blue panel -->
+        <!-- HERO: search + notification + banner -->
         <v-sheet class="hero pa-4">
-          <v-text-field
-            v-model="search"
-            class="search-field"
-            variant="solo"
-            rounded="pill"
-            hide-details
-            clearable
-            density="comfortable"
-            :placeholder="'Looking for something specific?'"
-            label="Search"
-            prepend-inner-icon="mdi-magnify"
-            append-inner-icon="mdi-earth"
-            @keyup.enter="onSearch"
-            @click:prepend-inner="onSearch"
-          />
+          <div class="hero-row">
+            <v-text-field
+              v-model="search"
+              class="search-field"
+              variant="solo"
+              rounded="pill"
+              hide-details
+              clearable
+              density="comfortable"
+              :placeholder="'Looking for something specific?'"
+              label="Search"
+              prepend-inner-icon="mdi-magnify"
+              append-inner-icon="mdi-earth"
+              @keyup.enter="onSearch"
+              @click:prepend-inner="onSearch"
+            />
+            <!-- NEW: Notification button beside the search -->
+            <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
+              <v-icon size="22">mdi-bell-outline</v-icon>
+            </v-btn>
+          </div>
+
           <v-img
             class="hero-banner mt-4"
             src="https://picsum.photos/seed/promo/960/420"
@@ -100,7 +108,7 @@ const seeMoreNearby = () => router.push('/mapsearch')
       </v-container>
     </v-main>
 
-    <!-- Bottom Navigation (your shared, styled pill nav) -->
+    <!-- Bottom Navigation -->
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
@@ -117,6 +125,16 @@ const seeMoreNearby = () => router.push('/mapsearch')
   border-radius: 14px;
 }
 
+/* Row so search and bell sit side-by-side */
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Search field takes the width, bell stays compact */
+.search-field { flex: 1; }
+
 .search-field :deep(.v-field) {
   background: #ffffff !important;
   box-shadow: 0 6px 20px rgba(0,0,0,.06);
@@ -125,6 +143,17 @@ const seeMoreNearby = () => router.push('/mapsearch')
 .search-field :deep(input) {
   font-size: 14px;
 }
+
+/* Circular white notification button */
+.notif-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 9999px;
+  background: #ffffff !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,.06);
+}
+.notif-btn :deep(.v-icon) { color: #111827; }
 
 .hero-banner {
   border-radius: 10px;
@@ -164,7 +193,7 @@ const seeMoreNearby = () => router.push('/mapsearch')
 /* ---- Card ---- */
 .item-card {
   position: relative;
-  width: 124px;                  /* close to the mock proportions */
+  width: 124px;
   height: 124px;
   border-radius: 12px;
   overflow: hidden;
@@ -172,17 +201,14 @@ const seeMoreNearby = () => router.push('/mapsearch')
   background: #fff;
   scroll-snap-align: start;
 }
-.item-img {
-  width: 100%;
-  height: 100%;
-}
+.item-img { width: 100%; height: 100%; }
 
 /* Blue footer strip like the mock */
 .item-footer {
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 24px;
-  background: #5ca3eb;     /* same brand blue used across app */
+  background: #5ca3eb;
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
 }
