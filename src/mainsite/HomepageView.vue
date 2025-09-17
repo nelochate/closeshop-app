@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@/composables/useGeolocation'
 import { useCartStore } from '@/stores/cart'
+import BottomNav from '@/common/layout/BottomNav.vue'
 
 // ---------------------------
 // Router & state
@@ -53,6 +54,7 @@ const nearbyShops = computed(() => {
   const origin = (latitude.value && longitude.value)
     ? { lat: latitude.value, lng: longitude.value }
     : BUTUAN_CENTER
+
   return shops
     .map(s => ({ ...s, distanceKm: Math.round(haversineKm(origin, { lat: s.lat, lng: s.lng }) * 10) / 10 }))
     .sort((a, b) => (a.distanceKm ?? 0) - (b.distanceKm ?? 0))
@@ -94,14 +96,10 @@ const addToCart = (p) => {
 }
 
 // ---------------------------
-// Navigation fns
+// Navigation helpers
 // ---------------------------
-const goHome          = () => router.push('/homepage')
-const goCart          = () => router.push('/cartview')
-const goChat          = () => router.push('/messageview')
-const goMap           = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
-const goAccount       = () => router.push('/profileview')
+const goMap = () => router.push('/mapsearch')
 
 // ---------------------------
 // Lifecycle
@@ -212,28 +210,12 @@ onMounted(async () => {
       </v-list>
     </v-main>
 
-    <!-- Bottom Navigation -->
-    <v-bottom-navigation class="bot-nav" height="64" v-model="activeTab">
-      <v-btn value="home" @click="goHome"><v-icon>mdi-home-outline</v-icon></v-btn>
-
-      <v-btn value="cart" @click="goCart">
-        <v-badge v-if="cart.count" :content="cart.count" floating>
-          <v-icon>mdi-cart-outline</v-icon>
-        </v-badge>
-        <template v-else>
-          <v-icon>mdi-cart-outline</v-icon>
-        </template>
-      </v-btn>
-
-      <v-btn value="map"  @click="goMap"><v-icon>mdi-search-web</v-icon></v-btn>
-      <v-btn value="chat" @click="goChat"><v-icon>mdi-chat-outline</v-icon></v-btn>
-      <v-btn value="account" @click="goAccount"><v-icon>mdi-account-check-outline</v-icon></v-btn>
-    </v-bottom-navigation>
+    <!-- Bottom Navigation (shared component) -->
+    <BottomNav v-model="activeTab" />
   </v-app>
 </template>
 
 <style scoped>
-.bot-nav { background-color: #5ca3eb; }
 .search-bar { max-width: 600px; flex: 1; }
-.app-main { padding: 16px; margin-bottom: 64px; }
+.app-main { padding: 16px; margin-bottom: 64px; } /* keep space for the bottom nav */
 </style>
