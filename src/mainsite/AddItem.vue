@@ -18,8 +18,6 @@ const productName = ref('')
 const description = ref('')
 const price = ref<number | null>(null)
 const stock = ref<number | null>(null)
-const category = ref('')
-const categories = ['Clothing', 'Food', 'Electronics', 'Accessories']
 
 // Sizes (optional)
 const availableSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
@@ -131,16 +129,16 @@ const removeVarietyImage = (variety: Variety, index: number) => {
 }
 
 // -------------------- Upload images --------------------
-const uploadImages = async (files: File[], folder = 'products') => {
+const uploadImages = async (files: File[], folder = 'products', shopId: string) => {
   const urls: string[] = []
   for (const file of files) {
-    const filePath = `${folder}/${Date.now()}-${file.name}`
-    const { error } = await supabase.storage.from('product-images').upload(filePath, file)
+    const filePath = `${shopId}/${folder}/${Date.now()}-${file.name}`
+    const { error } = await supabase.storage.from('product_lists').upload(filePath, file)
     if (error) {
       console.error('Upload failed:', error.message)
       continue
     }
-    const { data } = supabase.storage.from('product-images').getPublicUrl(filePath)
+    const { data } = supabase.storage.from('product_lists').getPublicUrl(filePath)
     urls.push(data.publicUrl)
   }
   return urls
@@ -149,12 +147,20 @@ const uploadImages = async (files: File[], folder = 'products') => {
 // -------------------- Submit --------------------
 const submitForm = async () => {
   try {
-    const imageUrls = await uploadImages(mainProductImages.value)
+    // ✅ get user
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    if (userError || !user) throw new Error('No user logged in')
 
-    // upload for each variety
+    // ✅ upload main product images
+    const imageUrls = await uploadImages(mainProductImages.value, 'main', user.id)
+
+    // ✅ upload for each variety
     const varietyData = []
     for (const v of varieties.value) {
-      const urls = await uploadImages(v.images, 'varieties')
+      const urls = await uploadImages(v.images, 'varieties', user.id)
       varietyData.push({
         name: v.name,
         price: v.price,
@@ -162,25 +168,45 @@ const submitForm = async () => {
       })
     }
 
+    // ✅ insert product
     const { error } = await supabase.from('products').insert([
       {
+        shop_id: user.id,
         prod_name: productName.value,
         prod_description: description.value,
         price: price.value,
         stock: stock.value,
-        category: category.value,
-        image_urls: imageUrls,
-        sizes: selectedSizes.value,
-        varieties: varietyData, // JSONB
+        main_img_urls: imageUrls, // jsonb
+        sizes: selectedSizes.value, // jsonb
+        varieties: varietyData, // jsonb
       },
     ])
-    if (error) throw error
 
-    console.log('Product saved!')
+    if (error) {
+      showSnackbar('❌ Failed to save product. Please try again.', 'error')
+      throw error
+    }
+
+    // ✅ success
+    showSnackbar('✅ Product saved successfully!', 'success')
+    console.log('✅ Product saved!')
     router.push('/products')
+
   } catch (err: any) {
-    console.error('Error saving product:', err.message)
+    console.error('❌ Error saving product:', err.message)
+    showSnackbar('❌ Something went wrong. Please try again.', 'error')
   }
+}
+
+// for snackbar notifications // Snackbar state
+const snackbar = ref(false)
+const snackbarMessage = ref('')
+const snackbarColor = ref<'success' | 'error'>('success')
+
+const showSnackbar = (message: string, type: 'success' | 'error') => {
+  snackbarMessage.value = message
+  snackbarColor.value = type
+  snackbar.value = true
 }
 </script>
 
@@ -248,15 +274,6 @@ const submitForm = async () => {
             required
           />
           <v-text-field v-model="stock" label="Stock / Quantity" type="number" variant="outlined" />
-          <v-select
-            v-model="category"
-            :items="categories"
-            label="Category"
-            variant="outlined"
-            required
-          />
-
-          <!-- Sizes -->
           <!-- Sizes -->
           <v-label class="mt-4 mb-2 font-medium">
             Available Sizes (buyers will only see the sizes you check)
@@ -354,6 +371,18 @@ const submitForm = async () => {
             Save Product
           </v-btn>
         </v-form>
+
+        <!--for alert
+        -->
+        <v-snackbar
+          v-model="snackbar"
+          :color="snackbarColor"
+          timeout="3000"
+          location="bottom right"
+          rounded="lg"
+        >
+          {{ snackbarMessage }}
+        </v-snackbar>
       </v-container>
     </v-main>
   </v-app>

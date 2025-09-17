@@ -5,13 +5,15 @@ import { useRouter } from 'vue-router'
 const router = useRouter()
 const goBack = () => router.back()
 
-// sample product list (with varieties now)
+// ✅ Single products ref with showVarieties and image
 const products = ref([
   {
     id: 1,
     name: 'Sample Product 1',
     price: 199,
     description: 'Description here',
+    image: 'https://via.placeholder.com/300', // main product image
+    showVarieties: false, // toggling state
     varieties: [
       { id: 1, name: 'Small', price: 149, image: '' },
       { id: 2, name: 'Large', price: 249, image: '' }
@@ -22,6 +24,8 @@ const products = ref([
     name: 'Sample Product 2',
     price: 299,
     description: 'Another description',
+    image: 'https://via.placeholder.com/300',
+    showVarieties: false,
     varieties: []
   }
 ])
@@ -36,6 +40,17 @@ const editProduct = (id: number) => {
   router.push(`/products/edit/${id}`)
 }
 
+// choose main product
+const chooseProduct = (product: any) => {
+  console.log('Chosen product:', product)
+  // later -> router.push(`/checkout/${product.id}`)
+}
+
+// choose a variety
+const chooseVariety = (product: any, variety: any) => {
+  console.log(`Chosen variety: ${variety.name} of product: ${product.name}`)
+  // later -> router.push(`/checkout/${product.id}?variety=${variety.id}`)
+}
 </script>
 
 <template>
@@ -70,7 +85,32 @@ const editProduct = (id: number) => {
             sm="6"
             md="4"
           >
-            <v-card rounded="xl" elevation="3">
+            <v-card rounded="xl" elevation="3" class="mb-4">
+              <!-- Main Product Image -->
+              <v-img
+                v-if="product.image"
+                :src="product.image"
+                aspect-ratio="1"
+                class="rounded-t-xl"
+                cover
+              >
+                <!-- Expand Button Overlay -->
+                <template #append>
+                  <v-btn
+                    icon
+                    variant="tonal"
+                    color="primary"
+                    class="ma-2"
+                    @click="product.showVarieties = !product.showVarieties"
+                  >
+                    <v-icon>
+                      {{ product.showVarieties ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+                    </v-icon>
+                  </v-btn>
+                </template>
+              </v-img>
+
+              <!-- Product Info -->
               <v-card-title class="text-h6">{{ product.name }}</v-card-title>
               <v-card-subtitle class="text-body-2">
                 ₱{{ product.price }}
@@ -79,6 +119,60 @@ const editProduct = (id: number) => {
                 {{ product.description }}
               </v-card-text>
 
+              <!-- Main Product Buy Button -->
+              <v-card-actions>
+                <v-btn
+                  color="primary"
+                  prepend-icon="mdi-cart"
+                  @click="chooseProduct(product)"
+                >
+                  Choose Product
+                </v-btn>
+              </v-card-actions>
+
+              <!-- Varieties Section (collapsible) -->
+              <v-expand-transition>
+                <div v-show="product.showVarieties" class="pa-3">
+                  <h4 class="text-subtitle-2 mb-2">Varieties</h4>
+                  <v-row dense>
+                    <v-col
+                      v-for="variety in product.varieties"
+                      :key="variety.id"
+                      cols="12"
+                      sm="6"
+                    >
+                      <v-card
+                        rounded="lg"
+                        elevation="1"
+                        class="pa-2 hover:bg-grey-lighten-4"
+                      >
+                        <v-card-title class="text-body-2">{{ variety.name }}</v-card-title>
+                        <v-card-subtitle class="text-body-2">
+                          ₱{{ variety.price }}
+                        </v-card-subtitle>
+                        <v-img
+                          v-if="variety.image"
+                          :src="variety.image"
+                          aspect-ratio="1"
+                          class="rounded-lg mt-2"
+                          cover
+                        />
+                        <v-btn
+                          color="secondary"
+                          prepend-icon="mdi-cart"
+                          size="small"
+                          class="mt-2"
+                          @click="chooseVariety(product, variety)"
+                        >
+                          Choose {{ variety.name }}
+                        </v-btn>
+                      </v-card>
+                    </v-col>
+                  </v-row>
+                </div>
+              </v-expand-transition>
+
+              <!-- Admin Actions -->
               <v-card-actions>
                 <v-btn color="blue" variant="text" @click="editProduct(product.id)">
                   <v-icon start>mdi-pencil</v-icon>Edit
@@ -88,8 +182,6 @@ const editProduct = (id: number) => {
                 </v-btn>
               </v-card-actions>
             </v-card>
-
-            
           </v-col>
         </v-row>
       </v-container>
