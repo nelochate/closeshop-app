@@ -13,7 +13,7 @@ const goBack = () => router.back()
 
 // products state
 type Product = {
-  id: string   // 👈 fix: uuid is string, not number
+  id: string   // 👈 uuid = string
   prod_name: string
   prod_description: string
   price: number
@@ -32,6 +32,17 @@ const loading = ref(true)
 const confirmDialog = ref(false)
 const productToDelete = ref<Product | null>(null)
 
+// snackbar state
+const snackbar = ref(false)
+const snackbarMessage = ref('')
+const snackbarColor = ref<'success' | 'error'>('success')
+
+const showSnackbar = (message: string, type: 'success' | 'error') => {
+  snackbarMessage.value = message
+  snackbarColor.value = type
+  snackbar.value = true
+}
+
 // fetch products from Supabase (only current user's products)
 const fetchProducts = async () => {
   loading.value = true
@@ -49,10 +60,11 @@ const fetchProducts = async () => {
   const { data, error } = await supabase
     .from('products')
     .select('id, prod_name, prod_description, price, stock, main_img_urls, sizes, varieties')
-    .eq('shop_id', user.id)   // 👈 only fetch current user’s products
+    .eq('shop_id', user.id)
 
   if (error) {
     console.error('❌ Error fetching products:', error.message)
+    showSnackbar('❌ Failed to load products', 'error')
   } else {
     products.value = (data || []).map((p: any) => ({
       ...p,
@@ -76,7 +88,7 @@ const deleteProductConfirmed = async () => {
   const id = productToDelete.value.id
 
   try {
-    // cleanup images
+    // 🔹 fetch product for cleanup
     const { data: product, error: fetchError } = await supabase
       .from('products')
       .select('main_img_urls, varieties')
@@ -105,16 +117,19 @@ const deleteProductConfirmed = async () => {
       }
     }
 
-    // delete row
+    // 🔹 delete row
     const { error } = await supabase.from('products').delete().eq('id', id)
     if (error) {
       console.error('❌ Error deleting product:', error.message)
+      showSnackbar('❌ Failed to delete product', 'error')
     } else {
       products.value = products.value.filter((p) => p.id !== id)
       console.log('✅ Product deleted successfully')
+      showSnackbar('✅ Product deleted successfully', 'success')
     }
   } catch (err: any) {
     console.error('❌ Unexpected error deleting product:', err.message)
+    showSnackbar('❌ Unexpected error deleting product', 'error')
   } finally {
     confirmDialog.value = false
     productToDelete.value = null
@@ -200,6 +215,17 @@ onMounted(fetchProducts)
             </v-card-actions>
           </v-card>
         </v-dialog>
+
+        <!-- Snackbar -->
+        <v-snackbar
+          v-model="snackbar"
+          :color="snackbarColor"
+          timeout="3000"
+          location="bottom right"
+          rounded="lg"
+        >
+          {{ snackbarMessage }}
+        </v-snackbar>
       </v-container>
     </v-main>
   </v-app>
