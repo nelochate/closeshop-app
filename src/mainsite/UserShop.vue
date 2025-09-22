@@ -25,7 +25,7 @@ const fetchShopData = async () => {
     // get current user
     const {
       data: { user },
-      error: userError
+      error: userError,
     } = await supabase.auth.getUser()
 
     if (userError || !user) throw new Error('User not logged in')
@@ -34,7 +34,7 @@ const fetchShopData = async () => {
     const { data, error } = await supabase
       .from('shops')
       .select(
-        'business_name, description, logo_url, open_time, close_time, barangay, building, street, house_no, postal'
+        'business_name, description, logo_url, open_time, close_time, barangay, building, street, house_no, postal',
       )
       .eq('id', user.id) // ✅ correct column
       .maybeSingle()
@@ -59,7 +59,7 @@ const fetchShopData = async () => {
       'Butuan City',
       'Agusan del Norte',
       'CARAGA',
-      data?.postal
+      data?.postal,
     ]
       .filter(Boolean)
       .join(', ')
@@ -117,9 +117,30 @@ const deleteShop = async () => {
       </v-btn>
       <v-toolbar-title class="text-h6">Business Profile</v-toolbar-title>
 
-      <div float="end">
-        <v-btn color="error" class="shop-btn" @click="deleteShop"> Delete Shop </v-btn>
-      </div>
+      <!-- Dropdown menu -->
+      <v-menu>
+        <template #activator="{ props }">
+          <v-btn icon v-bind="props">
+            <v-icon>mdi-menu</v-icon>
+          </v-btn>
+        </template>
+
+        <v-list>
+          <v-list-item to="/edit-shop">
+            <v-list-item-title>
+              <v-icon start small>mdi-pencil</v-icon>
+              Edit Shop
+            </v-list-item-title>
+          </v-list-item>
+
+          <v-list-item @click="deleteShop">
+            <v-list-item-title>
+              <v-icon start small>mdi-delete</v-icon>
+              Delete Shop
+            </v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </v-menu>
     </v-app-bar>
 
     <v-main>
@@ -151,9 +172,7 @@ const deleteShop = async () => {
             </v-btn>
           </div>
 
-          <p class="mt-2 text-body-2">
-            <v-icon start small>mdi-map-marker</v-icon> {{ address }}
-          </p>
+          <p class="mt-2 text-body-2"><v-icon start small>mdi-map-marker</v-icon> {{ address }}</p>
         </v-sheet>
       </v-container>
 
@@ -161,9 +180,7 @@ const deleteShop = async () => {
       <v-divider thickness="3">Transaction</v-divider>
 
       <v-container class="py-4">
-        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist">
-          My Product
-        </v-btn>
+        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist"> My Product </v-btn>
 
         <v-select
           v-model="transactionFilter"
