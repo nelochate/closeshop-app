@@ -88,6 +88,14 @@ const routes = [
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
+
+  {
+  path: '/product/:id',
+  name: 'product-detail',
+  component: () => import('@/mainsite/ProductDetailView.vue'),
+  props: true
+}
+
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
