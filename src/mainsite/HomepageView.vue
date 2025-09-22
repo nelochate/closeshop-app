@@ -114,9 +114,9 @@ const goNotifications = () => router.push('/notificationview')
           />
         </v-sheet>
 
-        <!-- Recommended -->
+        <!-- Nearby Stores -->
         <div class="section-header mt-6">
-          <h3 class="section-title">Recommended</h3>
+          <h3 class="section-title">Nearby Stores</h3>
           <button class="see-more" @click="seeMoreRecommended">See more</button>
         </div>
 
@@ -150,9 +150,9 @@ const goNotifications = () => router.push('/notificationview')
           </template>
         </div>
 
-        <!-- Nearby Stores -->
+        <!-- All Stores -->
         <div class="section-header mt-6">
-          <h3 class="section-title">Nearby Stores</h3>
+          <h3 class="section-title">Browse Stores</h3>
           <button class="see-more" @click="seeMoreNearby">See more</button>
         </div>
 

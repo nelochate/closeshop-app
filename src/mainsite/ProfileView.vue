@@ -287,7 +287,7 @@ const selectedSection = ref(purchaseSections[0])
   cursor: pointer;
   margin: 8px 0;
 }
-.bot-nav,
+
 .top-nav {
   background-color: #5ca3eb;
 }
