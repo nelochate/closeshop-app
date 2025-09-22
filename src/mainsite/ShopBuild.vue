@@ -334,6 +334,10 @@ const saveShop = async () => {
       city: 'Butuan City',
       province: 'Agusan del Norte',
       region: 'CARAGA',
+
+      // ✅ New delivery data
+      delivery_options: deliveryOptions.value,  // store as array
+      meetup_details: meetUpDetails.value || null,
     }
 
     const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'id' })
@@ -347,6 +351,7 @@ const saveShop = async () => {
     saving.value = false
   }
 }
+
 
 // -------------------- Load Shop Data --------------------
 onMounted(async () => {
@@ -400,6 +405,11 @@ watch(category, (newCategory) => {
   subcategories.value = categories[newCategory] || []
   subcategory.value = '' // reset subcategory when category changes
 })
+
+//for delivery
+// Delivery options
+const deliveryOptions = ref<string[]>([]) // will store ["courier", "pickup", ...]
+const meetUpDetails = ref('')
 </script>
 
 <template>
@@ -428,22 +438,17 @@ watch(category, (newCategory) => {
       </div>
 
       <v-text-field v-model="shopName" label="Business Name" outlined />
- <!-- Category -->
-  <v-select
-    v-model="category"
-    :items="Object.keys(categories)"
-    label="Category"
-    outlined
-  />
+      <!-- Category -->
+      <v-select v-model="category" :items="Object.keys(categories)" label="Category" outlined />
 
-  <!-- Subcategory -->
-  <v-select
-    v-model="subcategory"
-    :items="subcategories"
-    label="Subcategory"
-    outlined
-    :disabled="!category"
-  />
+      <!-- Subcategory -->
+      <v-select
+        v-model="subcategory"
+        :items="subcategories"
+        label="Subcategory"
+        outlined
+        :disabled="!category"
+      />
       <v-textarea v-model="description" label="About Us" outlined auto-grow />
 
       <h2>Operating Hours</h2>
@@ -455,6 +460,19 @@ watch(category, (newCategory) => {
           <v-text-field v-model="closeTime" type="time" label="Closing Time" outlined />
         </v-col>
       </v-row>
+      <h2>Delivery Options</h2>
+
+      <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
+      <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
+      <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
+
+      <!-- Extra details if meet-up is selected -->
+      <v-text-field
+        v-if="deliveryOptions.includes('meetup')"
+        v-model="meetUpDetails"
+        label="Meet-up details (location, day, time, etc.)"
+        outlined
+      />
       <h2>Address (Butuan City)</h2>
       <!-- Fixed fields -->
       <v-text-field label="City" value="Butuan City" readonly outlined />
