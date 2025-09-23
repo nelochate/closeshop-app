@@ -67,7 +67,7 @@ const fetchShopData = async () => {
       .join(', ')
 
     isOpen.value = true
-  } catch (err: any) {
+  } catch (err) {
     console.error('Error loading shop info:', err.message, err)
   }
 }
