@@ -93,6 +93,7 @@ const onSearch = () => {
 const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
+const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
 </script>
 
 <template>
@@ -129,7 +130,7 @@ const goToProduct = (id) => router.push({ name: 'product-detail', params: { id }
             </div>
           </template>
           <template v-else>
-            <div v-for="item in nearby" :key="item.id" class="item-card">
+            <div v-for="item in nearby" :key="item.id" class="item-card" @click="goToShop(item.id)">
               <v-img :src="item.img" cover class="item-img" />
               <div class="item-footer"></div>
               <v-avatar class="avatar-badge" size="20">

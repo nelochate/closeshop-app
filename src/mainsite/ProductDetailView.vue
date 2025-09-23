@@ -67,6 +67,7 @@ const shareProduct = async () => alert('Share product!')
       <v-btn icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
+       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn icon @click="addToCart">
         <v-icon>mdi-cart-outline</v-icon>
@@ -152,6 +153,12 @@ const shareProduct = async () => alert('Share product!')
   background-color: #f5f7fa;
   min-height: 100vh;
   padding-bottom: 70px; /* space for bottom nav */
+}
+
+.top-text {
+  font-size: 16px;
+  font-weight: 400;
+  margin-left: -5px;
 }
 
 .product-sheet {
