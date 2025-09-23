@@ -83,19 +83,25 @@ const routes = [
     meta: { requiresAuth: true },
   },
 
+    {
+  path: '/product/:id',
+  name: 'product-detail',
+  component: () => import('@/mainsite/ProductDetailView.vue'),
+  props: true
+  },
+
+  {
+  path: '/shop/:id',
+  name: 'shop-view',
+  component: () => import('@/mainsite/ShopView.vue'),
+  props: true
+  },
+
   // ✅ Catch-all route
   {
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
-
-  {
-  path: '/product/:id',
-  name: 'product-detail',
-  component: () => import('@/mainsite/ProductDetailView.vue'),
-  props: true
-}
-
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
