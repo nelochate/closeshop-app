@@ -132,14 +132,16 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
           <template v-else>
             <div v-for="item in nearby" :key="item.id" class="item-card" @click="goToShop(item.id)">
               <v-img :src="item.img" cover class="item-img" />
-              <div class="item-footer"></div>
-              <v-avatar class="avatar-badge" size="20">
-                <v-img :src="item.logo || PLACEHOLDER_IMG" />
-              </v-avatar>
-              <div class="item-meta">
+
+              <!-- footer now contains meta -->
+              <div class="item-footer">
+                <v-avatar class="avatar-badge" size="20">
+                  <v-img :src="item.logo || PLACEHOLDER_IMG" />
+                </v-avatar>
                 <div class="item-title">{{ item.title }}</div>
               </div>
             </div>
+
           </template>
         </div>
 
@@ -261,37 +263,54 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
 
 .item-card {
   position: relative;
-  width: 124px;
-  height: 124px;
+  flex: 0 0 calc(33.333% - 12px);
+  height: 140px;
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
   background: #fff;
   scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* push footer to bottom */
 }
 
 .item-img {
   width: 100%;
   height: 100%;
+  object-fit: cover;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
 }
 
 .item-footer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: 30px;
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
   background: #5ca3eb;
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
+  z-index: 1;
 }
 
 .avatar-badge {
-  position: absolute;
-  left: 8px;
-  bottom: 8px;
   border: 2px solid #fff;
   box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+  flex-shrink: 0;
+}
+
+.item-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis; /* ✅ prevent overlap */
+  flex: 1;
 }
 
 .item-meta {
@@ -300,12 +319,6 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
   right: 8px;
   bottom: 6px;
   color: #fff;
-}
-
-.item-title {
-  font-size: 12px;
-  font-weight: 700;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
 }
 
 .item-sub {
