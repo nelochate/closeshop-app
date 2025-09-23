@@ -38,19 +38,16 @@ function go(key) {
 <template>
   <!-- Wrapper gives the rounded “pill” with side margins like the screenshot -->
   <div class="nav-wrapper">
-    <v-bottom-navigation
-      class="bot-nav"
-      height="64"
-      v-model="value"
-      mode="shift"
-    >
-      <v-btn :class="{ 'is-active': value === 'home' }" value="home" @click="go('home')" aria-label="Home" variant="text">
+    <v-bottom-navigation class="bot-nav" height="64" v-model="value" mode="shift">
+      <v-btn :class="{ 'is-active': value === 'home' }" value="home" @click="go('home')" aria-label="Home"
+        variant="text">
         <v-icon size="26">mdi-home-outline</v-icon>
       </v-btn>
 
-      <v-btn :class="{ 'is-active': value === 'cart' }" value="cart" @click="go('cart')" aria-label="Cart" variant="text">
+      <v-btn :class="{ 'is-active': value === 'cart' }" value="cart" @click="go('cart')" aria-label="Cart"
+        variant="text">
         <!-- dot badge to mimic the minimal white dot look -->
-        <v-badge v-if="cart.count" dot floating>
+        <v-badge v-if="cart.count" :content="cart.count" color="red" floating>
           <v-icon size="26">mdi-cart-outline</v-icon>
         </v-badge>
         <template v-else>
@@ -58,15 +55,18 @@ function go(key) {
         </template>
       </v-btn>
 
-      <v-btn :class="{ 'is-active': value === 'map' }" value="map" @click="go('map')" aria-label="Map/Search" variant="text">
+      <v-btn :class="{ 'is-active': value === 'map' }" value="map" @click="go('map')" aria-label="Map/Search"
+        variant="text">
         <v-icon size="26">mdi-map-marker-outline</v-icon>
       </v-btn>
 
-      <v-btn :class="{ 'is-active': value === 'chat' }" value="chat" @click="go('chat')" aria-label="Chat" variant="text">
+      <v-btn :class="{ 'is-active': value === 'chat' }" value="chat" @click="go('chat')" aria-label="Chat"
+        variant="text">
         <v-icon size="26">mdi-chat-outline</v-icon>
       </v-btn>
 
-      <v-btn :class="{ 'is-active': value === 'account' }" value="account" @click="go('account')" aria-label="Account" variant="text">
+      <v-btn :class="{ 'is-active': value === 'account' }" value="account" @click="go('account')" aria-label="Account"
+        variant="text">
         <v-icon size="26">mdi-account-check-outline</v-icon>
       </v-btn>
     </v-bottom-navigation>

@@ -1,26 +1,40 @@
-<script setup lang="ts">
+<script setup lang="js">
 import { ref, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { useCartStore } from '@/stores/cart'
 
+const cart = useCartStore()
 const route = useRoute()
 const router = useRouter()
-const productId = route.params.id as string
+const productId = route.params.id
 
-const product = ref<any>(null)
+const product = ref(null)
 const loading = ref(true)
-const error = ref<string | null>(null)
+const error = ref(null)
+
+const showAddToCart = ref(false)
+const quantity = ref(1)
+const selectedSize = ref(null)
+const selectedVariety = ref(null)
+
+// DOM refs
+const productImgRef = ref(null)
+const cartIconRef = ref(null)
 
 // Get the main image
-const mainImage = (imgs: string[] | string | null) => {
+const mainImage = (imgs) => {
   if (!imgs) return '/placeholder.png'
   if (Array.isArray(imgs)) return imgs[0] || '/placeholder.png'
   try {
     const parsed = JSON.parse(imgs)
     if (Array.isArray(parsed)) return parsed[0] || '/placeholder.png'
-  } catch {}
+  } catch {
+    // ignore JSON parse errors
+  }
   return imgs
 }
+
 
 // Fetch product + shop
 onMounted(async () => {
@@ -46,18 +60,80 @@ onMounted(async () => {
       .single()
     if (err) throw err
     product.value = data
-  } catch (e: any) {
+  } catch (e) {
     error.value = e.message || 'Failed to load product'
   } finally {
     loading.value = false
   }
 })
 
-// Handlers
-const addToCart = async () => alert('Added to cart!')
+const confirmAddToCart = async () => {
+  if (!product.value) return
+  try {
+    await cart.addToCart(product.value.id, quantity.value)
+    animateToCart()
+    showAddToCart.value = false
+    quantity.value = 1
+    selectedSize.value = null
+    selectedVariety.value = null
+  } catch (err) {
+    console.error('confirmAddToCart error:', err)
+    alert('❌ Failed to add to cart')
+  }
+}
+
+const goToCart = async () => {
+  if (!product.value) return
+  try {
+    await cart.addToCart(product.value.id, 1)
+    router.push('/cartview')
+  } catch (err) {
+    console.error('addToCart error:', err)
+  }
+}
+
 const checkoutNow = async () => alert('Proceed to checkout!')
 const chatNow = async () => alert('Chat with seller!')
 const shareProduct = async () => alert('Share product!')
+
+// Animation
+const animateToCart = () => {
+  if (!productImgRef.value || !cartIconRef.value) return
+
+  const imgEl = productImgRef.value.$el || productImgRef.value
+  const cartEl = cartIconRef.value.$el || cartIconRef.value
+
+  const imgRect = imgEl.getBoundingClientRect()
+  const cartRect = cartEl.getBoundingClientRect()
+
+  const clone = imgEl.cloneNode(true)
+  clone.style.position = 'fixed'
+  clone.style.left = `${imgRect.left}px`
+  clone.style.top = `${imgRect.top}px`
+  clone.style.width = `${imgRect.width}px`
+  clone.style.height = `${imgRect.height}px`
+  clone.style.zIndex = '2000'
+  clone.style.transition =
+    'all 0.8s cubic-bezier(0.65, -0.1, 0.25, 1.5), opacity 0.8s'
+
+  document.body.appendChild(clone)
+  void clone.offsetWidth // reflow
+
+  // Animate to cart
+  clone.style.left = `${cartRect.left + cartRect.width / 2 - imgRect.width / 4}px`
+  clone.style.top = `${cartRect.top + cartRect.height / 2 - imgRect.height / 4}px`
+  clone.style.width = `${imgRect.width / 2}px`
+  clone.style.height = `${imgRect.height / 2}px`
+  clone.style.opacity = '0.2'
+
+  setTimeout(() => {
+    clone.remove()
+    // 👇 Bounce cart icon
+    cartEl.classList.add('cart-bounce')
+    setTimeout(() => cartEl.classList.remove('cart-bounce'), 400)
+  }, 800)
+}
+
 </script>
 
 <template>
@@ -67,11 +143,25 @@ const shareProduct = async () => alert('Share product!')
       <v-btn icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
+      <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
-      <v-btn icon @click="addToCart">
-        <v-icon>mdi-cart-outline</v-icon>
-      </v-btn>
+<v-btn icon ref="cartIconRef" @click="goToCart">
+  <v-badge
+    v-if="cart.count"
+    :content="cart.count"
+    color="red"
+    offset-x="-7"
+    offset-y="-3"
+
+  >
+    <v-icon size="28">mdi-cart-outline</v-icon>
+  </v-badge>
+  <template v-else>
+    <v-icon size="28">mdi-cart-outline</v-icon>
+  </template>
+</v-btn>
+
+
       <v-btn icon @click="shareProduct">
         <v-icon>mdi-share-variant-outline</v-icon>
       </v-btn>
@@ -89,11 +179,7 @@ const shareProduct = async () => alert('Share product!')
       <!-- Product Details -->
       <v-sheet v-else class="product-sheet pa-4">
         <!-- Single Product Image -->
-        <v-img
-          :src="mainImage(product.main_img_urls)"
-          class="product-img mb-4"
-          contain
-        />
+        <v-img ref="productImgRef" :src="mainImage(product.main_img_urls)" class="product-img mb-4" contain />
 
         <!-- Product Info -->
         <div class="product-info mb-4">
@@ -128,11 +214,84 @@ const shareProduct = async () => alert('Share product!')
 
         <!-- Add to Cart -->
         <v-col cols="3.5" class="pa-0">
-          <v-btn block class="bottom-btn cart-btn" @click="addToCart">
+          <v-btn block class="bottom-btn cart-btn" @click="showAddToCart = true">
             <v-icon left size="20">mdi-cart-outline</v-icon>
             Add to Cart
           </v-btn>
         </v-col>
+
+
+        <!-- Add to Cart Dialog -->
+        <v-dialog v-model="showAddToCart" max-width="500" transition="dialog-bottom-transition">
+          <v-card>
+            <!-- Header with product image + name -->
+            <v-card-title class="d-flex align-center">
+              <v-avatar size="56" class="mr-3">
+                <v-img :src="mainImage(product.main_img_urls)" />
+              </v-avatar>
+              <div>
+                <div class="text-subtitle-1 font-weight-bold">{{ product.prod_name }}</div>
+                <div class="text-subtitle-2 text-red">₱{{ product.price }}</div>
+              </div>
+            </v-card-title>
+
+            <v-divider />
+
+            <v-card-text>
+              <!-- Sizes -->
+              <div v-if="product.sizes && product.sizes.length" class="mb-4">
+                <p class="font-weight-medium mb-2">Choose Size:</p>
+                <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap">
+                  <v-btn v-for="size in product.sizes" :key="size" :value="size" variant="outlined"
+                    class="ma-1 rounded-pill">
+                    {{ size }}
+                  </v-btn>
+                </v-btn-toggle>
+              </div>
+
+              <!-- Varieties -->
+              <div v-if="product.varieties && product.varieties.length" class="mb-4">
+                <p class="font-weight-medium mb-2">Choose Variety:</p>
+                <v-btn-toggle v-model="selectedVariety" mandatory class="flex-wrap">
+                  <v-btn v-for="variety in product.varieties" :key="variety" :value="variety" variant="outlined"
+                    class="ma-1 rounded-pill">
+                    {{ variety }}
+                  </v-btn>
+                </v-btn-toggle>
+              </div>
+
+              <!-- Quantity -->
+              <div class="mt-2">
+                <p class="font-weight-medium mb-2">Quantity:</p>
+                <div class="d-flex align-center">
+                  <v-btn icon variant="tonal" color="grey" size="small" @click="quantity = Math.max(1, quantity - 1)">
+                    <v-icon>mdi-minus</v-icon>
+                  </v-btn>
+
+                  <v-text-field v-model.number="quantity" type="number" min="1" :max="product.stock" density="compact"
+                    variant="outlined" class="mx-2" style="max-width: 80px; text-align: center" />
+
+                  <v-btn icon variant="tonal" color="grey" size="small"
+                    @click="quantity = Math.min(product.stock, quantity + 1)">
+                    <v-icon>mdi-plus</v-icon>
+                  </v-btn>
+                </div>
+                <p class="text-caption mt-1 grey--text">Available stock: {{ product.stock }}</p>
+              </div>
+            </v-card-text>
+
+            <v-divider />
+
+            <v-card-actions class="pa-4">
+              <v-btn block color="primary" class="rounded-lg" @click="confirmAddToCart">
+                <v-icon left>mdi-cart-plus</v-icon>
+                Add to Cart
+              </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+
 
         <!-- Buy Now -->
         <v-col cols="5" class="pa-0">
@@ -152,7 +311,8 @@ const shareProduct = async () => alert('Share product!')
   margin: 0;
   background-color: #f5f7fa;
   min-height: 100vh;
-  padding-bottom: 70px; /* space for bottom nav */
+  padding-bottom: 70px;
+  /* space for bottom nav */
 }
 
 .top-text {
@@ -163,7 +323,8 @@ const shareProduct = async () => alert('Share product!')
 
 .product-sheet {
   width: 100%;
-  max-width: 900px; /* center for desktop */
+  max-width: 900px;
+  /* center for desktop */
   margin: 0 auto;
   border-radius: 0;
   box-shadow: none;
@@ -209,7 +370,7 @@ const shareProduct = async () => alert('Share product!')
   margin: 0 16px;
   border-radius: 8px;
   background: #fff;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
 }
 
 .shop-name {
@@ -242,7 +403,7 @@ const shareProduct = async () => alert('Share product!')
   justify-content: center;
   gap: 4px;
   font-size: 0.9rem;
-  border-radius:0px;
+  border-radius: 0px;
   transition: transform 0.1s ease-in-out;
 }
 
@@ -263,22 +424,87 @@ const shareProduct = async () => alert('Share product!')
   font-size: 13px;
 }
 
+/* smooth scaling when flying */
+.fly-clone {
+  border-radius: 8px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+/* Bounce animation for cart icon */
+@keyframes bounce {
+  0% {
+    transform: scale(1);
+  }
+
+  30% {
+    transform: scale(1.3);
+  }
+
+  60% {
+    transform: scale(0.9);
+  }
+
+  100% {
+    transform: scale(1);
+  }
+}
+
+.cart-bounce {
+  animation: bounce 0.4s ease;
+}
+
 /* Responsive */
 @media (max-width: 1024px) {
-  .product-title { font-size: 1.1rem; }
-  .product-price { font-size: 1rem; }
-  .product-description { font-size: 0.85rem; }
-  .product-meta { font-size: 0.75rem; }
-  .shop-name { font-size: 0.95rem; }
-  .bottom-btn { font-size: 0.85rem; }
+  .product-title {
+    font-size: 1.1rem;
+  }
+
+  .product-price {
+    font-size: 1rem;
+  }
+
+  .product-description {
+    font-size: 0.85rem;
+  }
+
+  .product-meta {
+    font-size: 0.75rem;
+  }
+
+  .shop-name {
+    font-size: 0.95rem;
+  }
+
+  .bottom-btn {
+    font-size: 0.85rem;
+  }
 }
 
 @media (max-width: 600px) {
-  .product-title { font-size: 1rem; }
-  .product-price { font-size: 0.95rem; }
-  .product-description { font-size: 0.8rem; }
-  .product-meta { font-size: 0.7rem; }
-  .shop-name { font-size: 0.9rem; }
-  .bottom-btn { font-size: 0.8rem; gap: 2px; }
+  .product-title {
+    font-size: 1rem;
+  }
+
+  .product-price {
+    font-size: 0.95rem;
+  }
+
+  .product-description {
+    font-size: 0.8rem;
+  }
+
+  .product-meta {
+    font-size: 0.7rem;
+  }
+
+  .shop-name {
+    font-size: 0.9rem;
+  }
+
+  .bottom-btn {
+    font-size: 0.8rem;
+    gap: 2px;
+  }
 }
 </style>
