@@ -12,13 +12,15 @@ const router = useRouter()
 const goBack = () => router.back()
 
 // -------------------- States --------------------
-const avatarUrl = ref<string | null>(null)
+const avatarUrl = ref<string | null>(null) // logo
+const physicalUrl = ref<string | null>(null) // physical store image
 const uploading = ref(false)
+const pickerTarget = ref<'logo' | 'physical' | null>(null) // track image target
 const showPicker = ref(false)
 const saving = ref(false)
 const snackbar = ref(false)
 const snackbarMessage = ref('')
-const snackbarColor = ref('success')
+const snackbarColor = ref<'success' | 'error'>('success')
 
 // Shop info
 const shopName = ref('')
@@ -35,119 +37,45 @@ const address = {
   house_no: ref(''),
 }
 
-// Butuan City barangays
-// Butuan City barangays
+// Barangays list
 const barangays = [
-  'Agusan Pequeño',
-  'Ambago',
-  'Amparo',
-  'Ampayon',
-  'Anticala',
-  'Antongalon',
-  'Aupagan',
-  'Baan KM 3',
-  'Baan Riverside Poblacion (Barangay 20)',
-  'Babag',
-  'Bading Poblacion (Barangay 22)',
-  'Bancasi',
-  'Banza',
-  'Baobaoan',
-  'Basag',
-  'Bayanihan Poblacion (Barangay 27)',
-  'Bilay',
-  'Bitan-agan',
-  'Bit-os',
-  'Bobon',
-  'Bonbon',
-  'Bugabus',
-  'Bugsukan',
-  'Buhangin Poblacion (Barangay 19)',
-  'Cabcabon',
-  'Camayahan',
-  'Dagohoy Poblacion (Barangay 7)',
-  'Dankias',
-  'De Oro',
-  'Diego Silang Poblacion (Barangay 6)',
-  'Don Francisco',
-  'Doongan',
-  'Dulag',
-  'Dumalagan',
-  'Florida',
-  'Golden Ribbon Poblacion (Barangay 2)',
-  'Holy Redeemer Poblacion (Barangay 23)',
-  'Humabon Poblacion (Barangay 11)',
-  'Imadejas Poblacion (Barangay 24)',
-  'Jose Rizal Poblacion (Barangay 25)',
-  'Kinamlutan',
-  'Lapu-Lapu Poblacion (Barangay 8)',
-  'Lemon',
-  'Leon Kilat Poblacion (Barangay 13)',
-  'Libertad',
-  'Limaha Poblacion (Barangay 14)',
-  'Los Angeles',
-  'Lumbocan',
-  'Maguinda',
-  'Mahay',
-  'Mahogany Poblacion (Barangay 21)',
-  'Maibu',
-  'Mandamo',
-  'Manila de Bugabus',
-  'Maon Poblacion (Barangay 1)',
-  'Masao',
-  'Maug',
-  'New Society Village Poblacion (Barangay 26)',
-  'Nong-Nong',
-  'Obrero Poblacion (Barangay 18)',
-  'Ong Yiu Poblacion (Barangay 16)',
-  'Pagatpatan',
-  'Pangabugan',
-  'Pianing',
-  'Pigdaulan',
-  'Pinamanculan',
-  'Port Poyohon Poblacion (Barangay 17, New Asia)',
-  'Rajah Soliman Poblacion (Barangay 4)',
-  'Salvacion',
-  'San Ignacio Poblacion (Barangay 15)',
-  'San Mateo',
-  'Santo Niño',
-  'San Vicente',
-  'Sikatuna Poblacion (Barangay 10)',
-  'Silongan Poblacion (Barangay 5)',
-  'Sumile',
-  'Sumilihon',
-  'Tagabaca',
-  'Taguibo',
-  'Taligaman',
-  'Tandang Sora Poblacion (Barangay 12)',
-  'Tiniwisan',
-  'Tungao',
-  'Urduja Poblacion (Barangay 9)',
-  'Villa Kananga',
+  'Agusan Pequeño','Ambago','Amparo','Ampayon','Anticala','Antongalon','Aupagan','Baan KM 3',
+  'Baan Riverside Poblacion (Barangay 20)','Babag','Bading Poblacion (Barangay 22)','Bancasi',
+  'Banza','Baobaoan','Basag','Bayanihan Poblacion (Barangay 27)','Bilay','Bitan-agan','Bit-os',
+  'Bobon','Bonbon','Bugabus','Bugsukan','Buhangin Poblacion (Barangay 19)','Cabcabon','Camayahan',
+  'Dagohoy Poblacion (Barangay 7)','Dankias','De Oro','Diego Silang Poblacion (Barangay 6)',
+  'Don Francisco','Doongan','Dulag','Dumalagan','Florida','Golden Ribbon Poblacion (Barangay 2)',
+  'Holy Redeemer Poblacion (Barangay 23)','Humabon Poblacion (Barangay 11)','Imadejas Poblacion (Barangay 24)',
+  'Jose Rizal Poblacion (Barangay 25)','Kinamlutan','Lapu-Lapu Poblacion (Barangay 8)','Lemon',
+  'Leon Kilat Poblacion (Barangay 13)','Libertad','Limaha Poblacion (Barangay 14)','Los Angeles',
+  'Lumbocan','Maguinda','Mahay','Mahogany Poblacion (Barangay 21)','Maibu','Mandamo','Manila de Bugabus',
+  'Maon Poblacion (Barangay 1)','Masao','Maug','New Society Village Poblacion (Barangay 26)',
+  'Nong-Nong','Obrero Poblacion (Barangay 18)','Ong Yiu Poblacion (Barangay 16)','Pagatpatan',
+  'Pangabugan','Pianing','Pigdaulan','Pinamanculan','Port Poyohon Poblacion (Barangay 17, New Asia)',
+  'Rajah Soliman Poblacion (Barangay 4)','Salvacion','San Ignacio Poblacion (Barangay 15)','San Mateo',
+  'Santo Niño','San Vicente','Sikatuna Poblacion (Barangay 10)','Silongan Poblacion (Barangay 5)',
+  'Sumile','Sumilihon','Tagabaca','Taguibo','Taligaman','Tandang Sora Poblacion (Barangay 12)',
+  'Tiniwisan','Tungao','Urduja Poblacion (Barangay 9)','Villa Kananga'
 ]
 
-// Location coordinates
-const latitude = ref<number | null>(8.9489) // default Butuan City center
-const longitude = ref<number | null>(125.5406)
-
 // -------------------- Map --------------------
+const latitude = ref<number | null>(8.9489)
+const longitude = ref<number | null>(125.5406)
 const map = ref<L.Map | null>(null)
 let shopMarker: L.Marker | null = null
 
 const initMap = () => {
   if (map.value) return
-
   map.value = L.map('map', {
     center: [latitude.value, longitude.value],
     zoom: 15,
     fullscreenControl: true,
     fullscreenControlOptions: { position: 'topleft' },
   })
-
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  // Add draggable marker
   shopMarker = L.marker([latitude.value, longitude.value], { draggable: true }).addTo(map.value)
   shopMarker.on('dragend', async (e) => {
     const pos = (e.target as L.Marker).getLatLng()
@@ -159,82 +87,50 @@ const initMap = () => {
 
 const toggleFullscreen = () => map.value?.toggleFullscreen()
 
-// -------------------- Helpers --------------------
-const fullAddress = () =>
-  [
-    address.house_no.value,
-    address.building.value,
-    address.street.value,
-    address.barangay.value,
-    'Butuan City',
-    'Agusan del Norte',
-    'CARAGA',
-    address.postal.value,
-  ]
-    .filter(Boolean)
-    .join(', ')
-
 // -------------------- Snackbar --------------------
-const showSnackbar = (message: string, color: string = 'success') => {
+const showSnackbar = (message: string, color: 'success' | 'error' = 'success') => {
   snackbarMessage.value = message
   snackbarColor.value = color
   snackbar.value = true
 }
 
 // -------------------- Image Picker --------------------
-const dataURItoBlob = (dataURI: string) => {
-  const byteString = atob(dataURI.split(',')[1])
-  const mimeString = dataURI.split(',')[0].split(':')[1].split(';')[0]
-  const ab = new ArrayBuffer(byteString.length)
-  const ia = new Uint8Array(ab)
-  for (let i = 0; i < byteString.length; i++) ia[i] = byteString.charCodeAt(i)
-  return new Blob([ab], { type: mimeString })
-}
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false,
-      resultType: CameraResultType.Uri, // ✅ use URI for mobile
+      resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
-
     if (!photo?.webPath) return
     uploading.value = true
 
-    // remove old image if exists
-    if (avatarUrl.value) {
-      const oldPath = avatarUrl.value.split('/storage/v1/object/public/Profile/')[1]
-      if (oldPath) await supabase.storage.from('Profile').remove([oldPath])
-    }
-
-    // ✅ Convert webPath → File
     const response = await fetch(photo.webPath)
     const blob = await response.blob()
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
 
+    // Pick correct bucket
+    const bucket = pickerTarget.value === 'physical' ? 'physical_store' : 'Profile'
     const fileName = `${user.id}/${Date.now()}.png`
+
     const { data, error } = await supabase.storage
-      .from('Profile')
+      .from(bucket)
       .upload(fileName, file, { cacheControl: '3600', upsert: true })
     if (error) throw error
 
-    const newUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/Profile/${data?.path}`
-    avatarUrl.value = newUrl
+    const newUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`
 
-    // ✅ Save to DB
-    const { error: dbError } = await supabase
-      .from('shops')
-      .update({ logo_url: newUrl })
-      .eq('id', user.id)
-
-    if (dbError) throw dbError
+    if (pickerTarget.value === 'physical') {
+      physicalUrl.value = newUrl
+      await supabase.from('shops').update({ physical_store: newUrl }).eq('id', user.id)
+    } else {
+      avatarUrl.value = newUrl
+      await supabase.from('shops').update({ logo_url: newUrl }).eq('id', user.id)
+    }
 
     showSnackbar('Image uploaded successfully', 'success')
     showPicker.value = false
@@ -243,23 +139,16 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     showSnackbar('Failed to upload image', 'error')
   } finally {
     uploading.value = false
+    pickerTarget.value = null
   }
 }
 
-//for saving coordinates
+// -------------------- Coordinates --------------------
 const saveCoordinates = async (lat: number, lng: number) => {
   try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
-
-    const { error } = await supabase
-      .from('shops')
-      .update({ latitude: lat, longitude: lng })
-      .eq('id', user.id)
-
+    const { error } = await supabase.from('shops').update({ latitude: lat, longitude: lng }).eq('id', user.id)
     if (error) throw error
     showSnackbar('Location updated successfully!', 'success')
   } catch (err) {
@@ -267,54 +156,37 @@ const saveCoordinates = async (lat: number, lng: number) => {
     showSnackbar('Failed to update location', 'error')
   }
 }
-// for the map icon reload
+
 const getLocation = () => {
   if (!navigator.geolocation) {
-    showSnackbar('Geolocation is not supported by this browser', 'error')
+    showSnackbar('Geolocation not supported', 'error')
     return
   }
-
   navigator.geolocation.getCurrentPosition(
-    async (position) => {
-      const lat = position.coords.latitude
-      const lng = position.coords.longitude
-
-      latitude.value = lat
-      longitude.value = lng
-
-      if (map.value) {
-        map.value.setView([lat, lng], 17)
-      }
-
-      if (shopMarker) {
-        shopMarker.setLatLng([lat, lng])
-      }
-
-      try {
-        await saveCoordinates(lat, lng)
-        showSnackbar('Location detected!', 'success')
-      } catch (err) {
-        console.error(err)
-        showSnackbar('Failed to save coordinates', 'error')
-      }
+    async (pos) => {
+      latitude.value = pos.coords.latitude
+      longitude.value = pos.coords.longitude
+      map.value?.setView([latitude.value, longitude.value], 17)
+      shopMarker?.setLatLng([latitude.value, longitude.value])
+      await saveCoordinates(latitude.value, longitude.value)
     },
-    (error) => {
-      console.error(error)
+    (err) => {
+      console.error(err)
       showSnackbar('Failed to get location', 'error')
     },
-    { enableHighAccuracy: true, timeout: 10000 },
+    { enableHighAccuracy: true, timeout: 10000 }
   )
 }
 
 // -------------------- Save Shop --------------------
+const deliveryOptions = ref<string[]>([])
+const meetUpDetails = ref('')
+
 const saveShop = async () => {
   if (saving.value) return
   saving.value = true
   try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
     const shopData = {
@@ -322,6 +194,7 @@ const saveShop = async () => {
       business_name: shopName.value,
       description: description.value,
       logo_url: avatarUrl.value,
+      physical_store: physicalUrl.value,
       latitude: latitude.value,
       longitude: longitude.value,
       open_time: openTime.value,
@@ -334,15 +207,12 @@ const saveShop = async () => {
       city: 'Butuan City',
       province: 'Agusan del Norte',
       region: 'CARAGA',
-
-      // ✅ New delivery data
-      delivery_options: deliveryOptions.value,  // store as array
+      delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
     }
 
     const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'id' })
     if (error) throw error
-
     showSnackbar('Shop saved successfully!', 'success')
   } catch (err) {
     console.error(err)
@@ -352,75 +222,45 @@ const saveShop = async () => {
   }
 }
 
-
-// -------------------- Load Shop Data --------------------
+// -------------------- Load Shop --------------------
 onMounted(async () => {
-  try {
-    await nextTick()
-    initMap()
+  await nextTick()
+  initMap()
+  const { data: { user }, error: userError } = await supabase.auth.getUser()
+  if (userError || !user) return
 
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
-    if (userError || !user) return
+  const { data, error } = await supabase.from('shops').select('*').eq('id', user.id).single()
+  if (error || !data) return
 
-    const { data, error } = await supabase.from('shops').select('*').eq('id', user.id).single()
-    if (error || !data) return
-
-    avatarUrl.value = data.logo_url || null
-    shopName.value = data.business_name || ''
-    description.value = data.description || ''
-    openTime.value = data.open_time || ''
-    closeTime.value = data.close_time || ''
-
-    address.barangay.value = data.barangay || ''
-    address.building.value = data.building || ''
-    address.street.value = data.street || ''
-    address.postal.value = data.postal || ''
-    address.house_no.value = data.house_no || ''
-
-    latitude.value = data.latitude || 8.9489
-    longitude.value = data.longitude || 125.5406
-
-    // Update marker position
-    if (shopMarker) shopMarker.setLatLng([latitude.value, longitude.value])
-  } catch (err) {
-    console.error(err)
-  }
+  avatarUrl.value = data.logo_url || null
+  physicalUrl.value = data.physical_store || null
+  shopName.value = data.business_name || ''
+  description.value = data.description || ''
+  openTime.value = data.open_time || ''
+  closeTime.value = data.close_time || ''
+  address.barangay.value = data.barangay || ''
+  address.building.value = data.building || ''
+  address.street.value = data.street || ''
+  address.postal.value = data.postal || ''
+  address.house_no.value = data.house_no || ''
+  latitude.value = data.latitude || 8.9489
+  longitude.value = data.longitude || 125.5406
+  shopMarker?.setLatLng([latitude.value, longitude.value])
 })
-
-// Categories with subcategories
-const categories = {
-  Food: ['Restaurant', 'Cafe', 'Bakery', 'Fast Food'],
-  Retail: ['Clothing', 'Electronics', 'Groceries', 'Furniture'],
-}
-
-const category = ref('')
-const subcategory = ref('')
-const subcategories = ref<string[]>([])
-
-// Watch for category changes
-watch(category, (newCategory) => {
-  subcategories.value = categories[newCategory] || []
-  subcategory.value = '' // reset subcategory when category changes
-})
-
-//for delivery
-// Delivery options
-const deliveryOptions = ref<string[]>([]) // will store ["courier", "pickup", ...]
-const meetUpDetails = ref('')
 </script>
 
 <template>
   <v-app>
     <v-app-bar flat color="transparent">
-      <v-btn variant="text" @click="goBack"> <v-icon start>mdi-arrow-left</v-icon> Back </v-btn>
+      <v-btn variant="text" @click="goBack">
+        <v-icon start>mdi-arrow-left</v-icon> Back
+      </v-btn>
     </v-app-bar>
 
     <v-main>
       <h2>Business Information</h2>
 
+      <!-- Logo -->
       <div class="avatar-container">
         <v-avatar size="80" color="grey-lighten-3">
           <v-img v-if="avatarUrl" :src="avatarUrl" cover />
@@ -430,7 +270,24 @@ const meetUpDetails = ref('')
           icon
           color="primary"
           :loading="uploading"
-          @click="showPicker = true"
+          @click="() => { pickerTarget = 'logo'; showPicker = true }"
+          class="edit-btn"
+        >
+          <v-icon>mdi-camera</v-icon>
+        </v-btn>
+      </div>
+
+      <!-- Physical Store -->
+      <div class="avatar-container">
+        <v-avatar size="80" color="grey-lighten-3">
+          <v-img v-if="physicalUrl" :src="physicalUrl" cover />
+          <v-icon v-else size="60">mdi-image</v-icon>
+        </v-avatar>
+        <v-btn
+          icon
+          color="primary"
+          :loading="uploading"
+          @click="() => { pickerTarget = 'physical'; showPicker = true }"
           class="edit-btn"
         >
           <v-icon>mdi-camera</v-icon>
@@ -438,17 +295,6 @@ const meetUpDetails = ref('')
       </div>
 
       <v-text-field v-model="shopName" label="Business Name" outlined />
-      <!-- Category -->
-      <v-select v-model="category" :items="Object.keys(categories)" label="Category" outlined />
-
-      <!-- Subcategory -->
-      <v-select
-        v-model="subcategory"
-        :items="subcategories"
-        label="Subcategory"
-        outlined
-        :disabled="!category"
-      />
       <v-textarea v-model="description" label="About Us" outlined auto-grow />
 
       <h2>Operating Hours</h2>
@@ -460,26 +306,22 @@ const meetUpDetails = ref('')
           <v-text-field v-model="closeTime" type="time" label="Closing Time" outlined />
         </v-col>
       </v-row>
-      <h2>Delivery Options</h2>
 
+      <h2>Delivery Options</h2>
       <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
       <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
       <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
-
-      <!-- Extra details if meet-up is selected -->
       <v-text-field
         v-if="deliveryOptions.includes('meetup')"
         v-model="meetUpDetails"
-        label="Meet-up details (location, day, time, etc.)"
+        label="Meet-up details"
         outlined
       />
+
       <h2>Address (Butuan City)</h2>
-      <!-- Fixed fields -->
       <v-text-field label="City" value="Butuan City" readonly outlined />
       <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
       <v-text-field label="Region" value="CARAGA" readonly outlined />
-      <!-- Editable fields -->
-
       <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" outlined />
       <v-text-field v-model="address.building.value" label="Building No." outlined />
       <v-text-field v-model="address.street.value" label="Street Name" outlined />
@@ -533,6 +375,7 @@ const meetUpDetails = ref('')
   width: 100%;
   border-radius: 12px;
   margin-bottom: 16px;
+  position: relative;
 }
 .locate-btn {
   position: absolute;
