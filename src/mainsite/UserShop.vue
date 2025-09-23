@@ -8,6 +8,7 @@ const goBack = () => router.back()
 
 // state
 const businessAvatar = ref('')
+const coverPhoto = ref('')
 const businessName = ref('')
 const description = ref('')
 const timeOpen = ref('')
@@ -34,9 +35,9 @@ const fetchShopData = async () => {
     const { data, error } = await supabase
       .from('shops')
       .select(
-        'business_name, description, logo_url, open_time, close_time, barangay, building, street, house_no, postal',
+        'business_name, description, logo_url, physical_store, open_time, close_time, barangay, building, street, house_no, postal',
       )
-      .eq('id', user.id) // ✅ correct column
+      .eq('id', user.id)
       .maybeSingle()
 
     if (error) throw error
@@ -49,6 +50,7 @@ const fetchShopData = async () => {
     timeOpen.value = data?.open_time || 'N/A'
     timeClose.value = data?.close_time || 'N/A'
     businessAvatar.value = data?.logo_url || ''
+    coverPhoto.value = data?.physical_store || ''
 
     // build full address string
     address.value = [
@@ -93,6 +95,7 @@ const deleteShop = async () => {
 
     // Reset state
     businessAvatar.value = ''
+    coverPhoto.value = ''
     businessName.value = ''
     description.value = ''
     timeOpen.value = ''
@@ -144,17 +147,30 @@ const deleteShop = async () => {
     </v-app-bar>
 
     <v-main>
+      <!-- Cover + Logo -->
+      <v-container class="pa-0">
+        <!-- Cover Photo -->
+        <v-img
+          v-if="coverPhoto"
+          :src="coverPhoto"
+          height="180"
+          cover
+          class="cover-photo"
+        />
+        <div v-else class="cover-placeholder"></div>
+
+        <!-- Avatar overlapping cover -->
+        <div class="avatar-wrapper">
+          <v-avatar size="96" class="avatar-border">
+            <v-img v-if="businessAvatar" :src="businessAvatar" cover />
+            <v-icon v-else size="48">mdi-store</v-icon>
+          </v-avatar>
+        </div>
+      </v-container>
+
       <!-- Business Info Section -->
       <v-container class="py-6">
         <v-sheet rounded="xl" elevation="4" class="pa-6 text-center">
-          <!-- Avatar -->
-          <div class="relative inline-block">
-            <v-avatar size="96">
-              <v-img v-if="businessAvatar" :src="businessAvatar" cover />
-              <v-icon v-else size="48">mdi-store</v-icon>
-            </v-avatar>
-          </div>
-
           <h2 class="text-h6 mt-4">{{ businessName }}</h2>
           <p class="text-body-2 text-medium-emphasis">{{ description }}</p>
 
@@ -172,7 +188,10 @@ const deleteShop = async () => {
             </v-btn>
           </div>
 
-          <p class="mt-2 text-body-2"><v-icon start small>mdi-map-marker</v-icon> {{ address }}</p>
+          <p class="mt-2 text-body-2">
+            <v-icon start small>mdi-map-marker</v-icon>
+            {{ address }}
+          </p>
         </v-sheet>
       </v-container>
 
@@ -180,7 +199,9 @@ const deleteShop = async () => {
       <v-divider thickness="3">Transaction</v-divider>
 
       <v-container class="py-4">
-        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist"> My Product </v-btn>
+        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist">
+          My Product
+        </v-btn>
 
         <v-select
           v-model="transactionFilter"
@@ -195,19 +216,27 @@ const deleteShop = async () => {
 </template>
 
 <style scoped>
-.relative {
-  position: relative;
+.cover-photo {
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
-.inline-block {
-  display: inline-block;
+
+.cover-placeholder {
+  height: 180px;
+  background: linear-gradient(135deg, #e5e7eb, #d1d5db);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
 }
-.absolute {
-  position: absolute;
+
+.avatar-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: -48px; /* pull avatar over cover */
 }
-.bottom-0 {
-  bottom: 0;
-}
-.right-0 {
-  right: 0;
+
+.avatar-border {
+  border: 4px solid #fff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  background: #fff;
 }
 </style>

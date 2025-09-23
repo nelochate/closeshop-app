@@ -35,7 +35,7 @@ async function fetchShops() {
   try {
     const { data, error } = await supabase
       .from('shops')
-      .select('id, business_name, description, logo_url, building, street, barangay, city, province, region')
+      .select('id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region')
       .order('business_name')
 
     if (error) throw error
@@ -43,7 +43,7 @@ async function fetchShops() {
     nearby.value = (data || []).map(s => ({
       id: s.id,
       title: s.business_name,
-      img: s.logo_url || PLACEHOLDER_IMG,
+      img: s.physical_store || PLACEHOLDER_IMG,
       logo: s.logo_url,
       address: [s.building, s.street, s.barangay, s.city, s.province, s.region].filter(Boolean).join(', ')
     }))
@@ -103,20 +103,9 @@ const goToProduct = (id) => router.push({ name: 'product-detail', params: { id }
         <!-- 🔎 Search + Notification -->
         <v-sheet class="hero pa-4">
           <div class="hero-row">
-            <v-text-field
-              v-model="search"
-              class="search-field"
-              variant="solo"
-              rounded="pill"
-              hide-details
-              clearable
-              density="comfortable"
-              placeholder="Looking for something specific?"
-              prepend-inner-icon="mdi-magnify"
-              append-inner-icon="mdi-earth"
-              @keyup.enter="onSearch"
-              @click:prepend-inner="onSearch"
-            />
+            <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
+              density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
+              append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
             <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
               <v-icon size="22">mdi-bell-outline</v-icon>
             </v-btn>
@@ -148,7 +137,6 @@ const goToProduct = (id) => router.push({ name: 'product-detail', params: { id }
               </v-avatar>
               <div class="item-meta">
                 <div class="item-title">{{ item.title }}</div>
-                <div class="item-sub">{{ item.address }}</div>
               </div>
             </div>
           </template>
@@ -156,7 +144,7 @@ const goToProduct = (id) => router.push({ name: 'product-detail', params: { id }
 
         <!-- 🛒 Products -->
         <div class="section-header mt-6">
-          <h3 class="section-title">Products</h3>
+          <h3 class="section-title">Browse Products</h3>
         </div>
 
         <template v-if="loading">
@@ -196,41 +184,218 @@ const goToProduct = (id) => router.push({ name: 'product-detail', params: { id }
 </template>
 
 <style scoped>
-.page { background: #f5f7fa; padding-bottom: 96px; }
-.hero { background: #e5f1f8; border-radius: 14px; }
-.hero-row { display: flex; align-items: center; gap: 10px; }
-.search-field { flex: 1; }
-.search-field :deep(.v-field) { background: #fff !important; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
-.search-field :deep(input) { font-size: 14px; }
-.notif-btn { width: 44px; height: 44px; min-width: 44px; border-radius: 9999px; background: #fff !important; box-shadow: 0 6px 20px rgba(0,0,0,.06); }
-.notif-btn :deep(.v-icon) { color: #111827; }
+.page {
+  background: #f5f7fa;
+  padding-bottom: 96px;
+}
 
-.section-header { display: flex; align-items: center; justify-content: space-between; }
-.section-title { font-size: 16px; font-weight: 700; color: #1f2937; }
-.see-more { background: transparent; border: 0; color: #6b7280; font-weight: 600; cursor: pointer; }
+.hero {
+  background: #e5f1f8;
+  border-radius: 14px;
+}
 
-.scroll-row { display: flex; gap: 12px; overflow-x: auto; padding: 10px 2px 2px; scroll-snap-type: x mandatory; }
-.scroll-row::-webkit-scrollbar { display: none; }
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
 
-.item-card { position: relative; width: 124px; height: 124px; border-radius: 12px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,.06); background: #fff; scroll-snap-align: start; }
-.item-img { width: 100%; height: 100%; }
-.item-footer { position: absolute; left: 0; right: 0; bottom: 0; height: 24px; background: #5ca3eb; border-bottom-left-radius: 12px; border-bottom-right-radius: 12px; }
-.avatar-badge { position: absolute; left: 8px; bottom: 8px; border: 2px solid #fff; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
-.item-meta { position: absolute; left: 36px; right: 8px; bottom: 6px; color: #fff; }
-.item-title { font-size: 12px; font-weight: 700; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
-.item-sub { font-size: 10px; opacity: .9; text-shadow: 0 1px 2px rgba(0,0,0,.35); }
+.search-field {
+  flex: 1;
+}
 
-.empty-card { width: 240px; height: 124px; border-radius: 12px; background: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.06); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 12px; }
-.empty-title { font-weight: 700; color: #1f2937; }
-.empty-sub { font-size: 12px; color: #6b7280; }
-.mt-6 { margin-top: 24px; }
+.search-field :deep(.v-field) {
+  background: #fff !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+}
 
-.product-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; margin-top: 12px; }
-.product-card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,.05); display: flex; flex-direction: column; transition: transform 0.15s ease; cursor: pointer; }
-.product-card:hover { transform: translateY(-2px); }
-.product-img { width: 100%; height: 160px; object-fit: cover; }
-.product-info { padding: 8px; display: flex; flex-direction: column; gap: 2px; }
-.product-title { font-size: 13px; font-weight: 500; color: #111827; line-height: 1.3; height: 32px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.product-price { font-size: 14px; font-weight: 700; color: #e53935; }
-.product-sold { font-size: 12px; color: #6b7280; }
+.search-field :deep(input) {
+  font-size: 14px;
+}
+
+.notif-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 9999px;
+  background: #fff !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+}
+
+.notif-btn :deep(.v-icon) {
+  color: #111827;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.see-more {
+  background: transparent;
+  border: 0;
+  color: #6b7280;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scroll-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 10px 2px 2px;
+  scroll-snap-type: x mandatory;
+}
+
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}
+
+.item-card {
+  position: relative;
+  width: 124px;
+  height: 124px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  background: #fff;
+  scroll-snap-align: start;
+}
+
+.item-img {
+  width: 100%;
+  height: 100%;
+}
+
+.item-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30px;
+  background: #5ca3eb;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.avatar-badge {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+}
+
+.item-meta {
+  position: absolute;
+  left: 36px;
+  right: 8px;
+  bottom: 6px;
+  color: #fff;
+}
+
+.item-title {
+  font-size: 12px;
+  font-weight: 700;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+.item-sub {
+  font-size: 10px;
+  opacity: .9;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+.empty-card {
+  width: 240px;
+  height: 124px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+}
+
+.empty-title {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.empty-sub {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.mt-6 {
+  margin-top: 24px;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.product-card {
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+
+.product-card:hover {
+  transform: translateY(-2px);
+}
+
+.product-img {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+
+.product-info {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.product-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  line-height: 1.3;
+  height: 32px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.product-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e53935;
+}
+
+.product-sold {
+  font-size: 12px;
+  color: #6b7280;
+}
 </style>
