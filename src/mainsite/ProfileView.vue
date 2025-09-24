@@ -127,58 +127,65 @@ const selectedSection = ref(purchaseSections[0])
   <v-app>
     <!-- Main Profile Content -->
     <v-main>
-      <!-- Settings Icon -->
+      <!-- Shop Button - Top Left -->
+      <div class="shop-btn-container">
+        <v-btn @click="goShopOrBuild" class="shop-btn" size="large">
+          <v-icon start size="25">mdi-storefront-outline</v-icon>
+          {{ hasShop ? 'View Shop' : 'Create Shop' }}
+        </v-btn>
+      </div>
+
+      <!-- Settings Icon - Top Right -->
       <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
-        <v-icon size="26">mdi-cog-outline</v-icon>
+        <v-icon size="29">mdi-cog-outline</v-icon>
       </v-btn>
 
       <!-- Profile Header -->
-      <div class="profile-header">
-        <div class="avatar-container">
-          <!-- Avatar -->
-          <v-avatar size="80" color="grey-lighten-3">
-            <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-            <v-icon v-else size="40">mdi-account</v-icon>
-          </v-avatar>
+<!-- Profile Header -->
+<div class="profile-header">
+  <!-- ONE ROW: avatar | (name over email) -->
+  <div class="profile-inline">
+    <div class="avatar-container">
+      <v-avatar size="80" color="grey-lighten-3">
+        <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+        <v-icon v-else size="40">mdi-account</v-icon>
+      </v-avatar>
 
-          <!-- Floating Edit Button - Redirects to Account Settings -->
-          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
-            <v-icon class="edit-icon">mdi-pencil</v-icon>
-          </v-btn>
-        </div>
+      <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
+        <v-icon class="edit-icon">mdi-pencil</v-icon>
+      </v-btn>
+    </div>
 
-        <!-- Profile Info -->
-        <div class="profile-info">
-          <!-- Full name -->
-          <h2 class="name">{{ fullName || 'Loading...' }}</h2>
+    <!-- Name above Email (stacked), but both stay to the RIGHT of avatar -->
+    <div class="info-block">
+      <h2 class="name-row">{{ fullName || 'Loading...' }}</h2>
+      <p class="email-row">{{ user?.email || '...' }}</p>
+    </div>
+  </div>
+</div>
 
-          <!-- Email below -->
-          <p class="email">{{ user?.email || '...' }}</p>
-
-          <!-- Actions -->
-          <div class="actions">
-            <v-btn @click="goShopOrBuild">
-              <v-icon start size="25">mdi-storefront-outline</v-icon>
-              {{ hasShop ? 'View Shop ' : 'Create Shop ' }}
-            </v-btn>
-          </div>
-        </div>
-      </div>
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
       <!-- Dropdown for Sections -->
-      <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
-        density="comfortable" />
+      <div class="content-section">
+        <v-select
+          v-model="selectedSection"
+          :items="purchaseSections"
+          label="Purchase Status"
+          variant="outlined"
+          density="comfortable"
+        />
 
-      <!-- Purchase sections content (unchanged) -->
-      <v-expand-transition>
-        <div v-if="selectedSection === 'My purchases'" class="mypurchases">
-          <!-- Your purchase cards here -->
-        </div>
-      </v-expand-transition>
+        <!-- Purchase sections content -->
+        <v-expand-transition>
+          <div v-if="selectedSection === 'My purchases'" class="mypurchases">
+            <!-- Your purchase cards here -->
+          </div>
+        </v-expand-transition>
 
-      <!-- Other sections... -->
+        <!-- Other sections... -->
+      </div>
     </v-main>
 
     <!-- Reusable BottomNav -->
@@ -192,18 +199,49 @@ const selectedSection = ref(purchaseSections[0])
   font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
 
-.settings-btn {
+/* Shop Button Container - Top Left */
+.shop-btn-container {
+  padding-top: 15px;
   position: absolute;
-  top: 16px;
-  right: 16px;
+  top: 20px;
+  left: 16px;
   z-index: 1200;
-  color: #fff; /* visible on gradient header */
-  min-width: auto; /* shrink to icon only */
-  padding: 0;      /* no padding around */
 }
 
+.shop-btn {
+  text-transform: none;
+  border-top-right-radius: 20px;
+  border-bottom-right-radius: 20px;
+  box-shadow: 0 4px 12px rgba(23, 101, 179, 0.3);
+  transition: all 0.3s ease;
+  background: linear-gradient(135deg, #ffffff, #f8f9fa) !important;
+  color: #464749 !important;
+  font-weight: 600;
+  font-size: 0.95rem;
+  border: 2px solid #1765b3;
+  padding: 8px 20px;
+  height: 42px !important;
+  margin-left: -14px;
+  max-width: 200px;
+}
+
+/* Settings Button - Top Right */
+.settings-btn {
+  padding-top: 25px;
+  position: absolute;
+  top: 20px;
+  right: 16px;
+  z-index: 1200;
+  color: #ffffff;
+  border-radius: 50%;
+  width: 48px;
+  height: 48px;
+}
+
+/* Profile Header */
 .profile-header {
-  padding-top: 60px !important;
+  padding-top: 80px !important;
+  padding-bottom: 30px !important;
   display: flex;
   align-items: flex-start;
   gap: 20px;
@@ -211,6 +249,7 @@ const selectedSection = ref(purchaseSections[0])
   background: linear-gradient(135deg, #034688, #1366b9, #3886d3, #56a4f3, #5ca5e9);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   color: #fff;
+  margin-top: 0px !important;
 }
 
 .avatar-container {
@@ -227,15 +266,12 @@ const selectedSection = ref(purchaseSections[0])
   border: 2px solid white;
   border-radius: 50%;
   transition: all 0.25s ease-in-out;
-  max-width: 28px;
-  max-height: 28px;
+  width: 25px !important;
+  height: 25px !important;
   background-color: #5ca3eb;
   color: white;
 }
-.edit-btn:hover {
-  transform: translate(30%, 30%) scale(1.1);
-  background-color: #1765b3;
-}
+
 .edit-icon {
   font-size: 16px;
 }
@@ -264,55 +300,9 @@ const selectedSection = ref(purchaseSections[0])
   font-weight: 400;
 }
 
-/* Shop Area */
-.actions .v-btn {
-  text-transform: none;
-  border-top-right-radius: 50px;
-  border-bottom-right-radius: 50px;
-  box-shadow: 0 3px 10px rgba(23, 101, 179, 0.25);
-  transition: all 0.2s ease;
-  margin-top: 20px;
-  margin-left: -110px;
-  border: 1px solid white;
-
-  /* Layout control */
-  display: flex;
-  justify-content: flex-start; /* Align text to the left */
-  align-items: center;
-  padding-left: 20px;
-  width: 200px;  /* default width for desktop */
-  height: 40px;
-
-  background-color: rgba(236, 231, 231, 0.9) !important;
-  color: rgb(70, 69, 69) !important;
-  font-weight: 600;
-  font-size: 0.95rem;
-}
-
-.actions .v-btn:hover {
-  background-color: #1765b3 !important;
-  color: #fff !important;
-}
-
-/* Tablet view */
-@media (max-width: 1024px) {
-  .actions .v-btn {
-    width: 160px;  /* smaller background */
-    padding-left: 16px;
-    font-size: 0.9rem;
-  }
-}
-
-/* Mobile view */
-@media (max-width: 600px) {
-  .actions .v-btn {
-    width: auto;
-    min-width: 120px;
-    padding: 0 16px;
-    margin-left: -100px;
-    font-size: 0.85rem;
-    max-width: 150px;
-  }
+/* Content Section */
+.content-section {
+  padding: 0 16px 16px 16px;
 }
 
 /* v-select styling */
@@ -324,10 +314,34 @@ const selectedSection = ref(purchaseSections[0])
 }
 
 /* Responsive styles */
+@media (max-width: 1024px) {
+  .shop-btn {
+    font-size: 0.9rem;
+    padding: 6px 18px;
+    height: 44px;
+  }
+
+  .settings-btn {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 @media (max-width: 768px) {
+  .shop-btn-container {
+    top: 16px;
+    left: 12px;
+  }
+
+  .settings-btn {
+    top: 16px;
+    right: 12px;
+  }
+
   .profile-header {
-    padding: 18px;
+    padding: 70px 18px 18px 18px;
     gap: 16px;
+    margin-top: 15px;
   }
 
   .v-avatar {
@@ -336,38 +350,111 @@ const selectedSection = ref(purchaseSections[0])
   }
 
   .name {
-    font-size: 1.3rem;
+    font-size: 1.4rem;
   }
 
   .email {
     font-size: 0.9rem;
   }
+
+  .shop-btn {
+    font-size: 0.85rem;
+    padding: 5px 16px;
+    height: 40px;
+  }
 }
 
-@media (max-width: 480px) {
+@media (max-width: 600px) {
+  .shop-btn-container {
+    top: 12px;
+    left: 8px;
+  }
+
+  .settings-btn {
+    top: 12px;
+    right: 8px;
+    width: 40px;
+    height: 40px;
+  }
+
   .profile-header {
-    flex-direction: row;
-    align-items: flex-start;
-    padding: 16px;
+    padding: 60px 16px 16px 16px;
+    flex-direction: column;
+    gap: 12px;
+    margin-top: 10px;
   }
 
-  .v-avatar {
-    width: 60px !important;
-    height: 60px !important;
+  .shop-btn {
+    font-size: 0.8rem;
+    padding: 4px 14px;
+    height: 36px;
+    min-width: 120px;
   }
 
-  .name {
-    font-size: 1.2rem;
+  .shop-btn .v-icon {
+    margin-right: 4px;
   }
+}
 
-  .email {
-    font-size: 0.85rem;
-  }
+/* More responsive styles for avatar and profile info */
 
-  .profile-info :deep(.v-btn) {
-    width: 100%;
-    margin-bottom: 8px;
-  }
+/* Animation for buttons */
+.shop-btn, .settings-btn, .edit-btn {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Ensure proper spacing for main content */
+.v-main {
+  position: relative;
+}
+
+/* Keep avatar + info in one horizontal row */
+.profile-inline {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: nowrap;
+
+}
+
+/* Right side: vertical stack (name over email) that never leaves avatar's row */
+.info-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 auto;
+}
+
+/* Name on one line with ellipsis */
+.name-row {
+  margin: 0;
+  font-size: 1.6rem;
+  font-weight: 200;
+  letter-spacing: 0.3px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Email on one line with ellipsis, below name */
+.email-row {
+  margin: 0;
+  font-size: 0.95rem;
+  color: #e0e7ef;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Responsive font tweaks */
+@media (max-width: 1024px) {
+  .name-row { font-size: 1.4rem; }
+}
+
+@media (max-width: 600px) {
+  .name-row { font-size: 1.1rem; }
+  .email-row { font-size: 0.85rem; }
 }
 
 </style>
