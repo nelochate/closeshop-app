@@ -291,7 +291,7 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
   align-items: center;
   gap: 6px;
   padding: 4px 8px;
-  background: #5ca3eb;
+  background: #4490dd;
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
   z-index: 1;
@@ -309,7 +309,7 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
   color: #fff;
   white-space: nowrap;
   overflow: hidden;
-  text-overflow: ellipsis; /* ✅ prevent overlap */
+  text-overflow: ellipsis;
   flex: 1;
 }
 

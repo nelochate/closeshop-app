@@ -77,7 +77,7 @@ function go(key) {
 
 .v-bottom-navigation {
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
-  background: #438fda;
+  background: #3f83c7;
   border-top-left-radius: 15px;
   border-top-right-radius: 15px;
 }

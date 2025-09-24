@@ -79,7 +79,7 @@ const routes = [
   {
     path: '/edit-profile',
     name: 'edit-profile',
-    component: () => import('@/mainsite/EditProfileview.vue'),
+    component:() => import('@/mainsite/EditProfileview.vue'),
     meta: { requiresAuth: true },
   },
 
@@ -102,6 +102,34 @@ const routes = [
     component: () => import('@/mainsite/SettingsView.vue'),
     meta: { requiresAuth: true },
   },
+
+  {
+    path: '/edit-email',
+    name: 'edit-email',
+    component: () => import('@/mainsite/edit/EditEmailView.vue'),
+    meta: { requiresAuth: true },
+  },
+
+  {
+    path: '/edit-name',
+    name: 'edit-name',
+    component: () => import('@/mainsite/edit/EditNameView.vue'),
+    meta: { requiresAuth: true },
+  },
+
+  {
+    path: '/edit-phone', // Updated path
+    name: 'edit-phone',
+    component: () => import('@/mainsite/edit/EditPhoneView.vue'),
+    meta: { requiresAuth: true },
+  },
+
+  {
+  path: '/edit-address',
+  name: 'edit-address',
+  component: () => import('@/mainsite/edit/EditAddressView.vue')
+  },
+
 
   // ✅ Catch-all route
   {

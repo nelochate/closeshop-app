@@ -72,7 +72,7 @@ onUnmounted(() => {
 
 <template>
   <v-app>
-    <v-app-bar color="#5ca3eb" flat>
+    <v-app-bar color="#3f83c7" flat>
 
       <!-- Search -->
       <v-text-field

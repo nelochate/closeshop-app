@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
@@ -14,19 +14,6 @@ const avatarUrl = ref(null)
 const showSuccess = ref(false)
 const successMessage = ref('')
 const isLoading = ref(false)
-const mapMessage = ref("Map preview will go here")
-const address = ref({
-  region: '',
-  province: '',
-  city: '',
-  barangay: '',
-  building: '',
-  street: '',
-  house_no: '',
-  postal: ''
-})
-
-
 
 // Form data
 const formData = ref({
@@ -36,13 +23,12 @@ const formData = ref({
   email: '',
 })
 
-// Show success message and redirect
+// Success message
 const showSuccessAndRedirect = (message) => {
   successMessage.value = message
   showSuccess.value = true
   setTimeout(() => {
     showSuccess.value = false
-    // Force refresh by using replace with a query parameter
     router.replace({
       name: 'profileview',
       query: { refreshed: Date.now() },
@@ -56,18 +42,10 @@ const loadUserData = async () => {
     const { data: userData } = await supabase.auth.getUser()
     if (userData?.user) {
       formData.value.email = userData.user.email || ''
-
-      // Load from user_metadata or profile
       const metadata = userData.user.user_metadata || {}
       formData.value.firstName = metadata.first_name || ''
       formData.value.lastName = metadata.last_name || ''
-
-      // Load phone from profile if available
-      if (authStore.profile?.phone) {
-        formData.value.phone = authStore.profile.phone
-      }
-
-      // Load avatar with cache busting
+      if (authStore.profile?.phone) formData.value.phone = authStore.profile.phone
       if (authStore.profile?.avatar_url) {
         avatarUrl.value = `${authStore.profile.avatar_url}?t=${Date.now()}`
       }
@@ -77,98 +55,43 @@ const loadUserData = async () => {
   }
 }
 
-// Upload avatar function
+// Upload avatar
 async function uploadAvatar(file) {
-  if (!file) {
-    console.error('No file selected.')
-    return
-  }
-
+  if (!file) return
   try {
     uploading.value = true
-    // Get the current user
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('No authenticated user found')
 
-    if (userError || !user) {
-      console.error('No authenticated user found:', userError?.message)
-      return
-    }
-
-    // Handle both File objects and Blob objects
-    let fileExt = 'jpg'
-
-    if (file.name) {
-      fileExt = file.name.split('.').pop() || 'jpg'
-    } else if (file.type) {
-      const mimeToExt = {
-        'image/jpeg': 'jpg',
-        'image/jpg': 'jpg',
-        'image/png': 'png',
-        'image/gif': 'gif',
-        'image/webp': 'webp',
-      }
-      fileExt = mimeToExt[file.type] || 'jpg'
-    }
-
+    let fileExt = file.name ? file.name.split('.').pop() : 'jpg'
     const fileName = `${Date.now()}.${fileExt}`
     const filePath = `${user.id}/${fileName}`
 
-    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, {
-      cacheControl: '3600',
-      upsert: true,
-    })
+    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true })
+    if (uploadError) throw uploadError
 
-    if (uploadError) {
-      throw uploadError
-    }
+    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
 
-    // Get the public URL
-    const {
-      data: { publicUrl },
-    } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id)
 
-    // Update user profile
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ avatar_url: publicUrl })
-      .eq('id', user.id)
-
-    if (updateError) throw updateError
-
-    console.log('Avatar uploaded successfully! URL:', publicUrl)
-
-    // Update the local avatar URL with cache busting
     avatarUrl.value = `${publicUrl}?t=${Date.now()}`
-
-    // Update the auth store with the new avatar URL
-    if (authStore.profile) {
-      authStore.profile.avatar_url = publicUrl
-    }
-
+    if (authStore.profile) authStore.profile.avatar_url = publicUrl
     showSuccessMessage('Profile picture updated successfully!')
-    return publicUrl
   } catch (error) {
-    console.error('Error uploading avatar:', error.message)
+    console.error(error)
     showSuccessMessage('Failed to upload profile picture')
-    throw error
   } finally {
     uploading.value = false
   }
 }
 
-// Show success message only (without redirect)
 const showSuccessMessage = (message) => {
   successMessage.value = message
   showSuccess.value = true
-  setTimeout(() => {
-    showSuccess.value = false
-  }, 3000)
+  setTimeout(() => (showSuccess.value = false), 3000)
 }
 
-// Pick image function
+// Pick image
 const pickImage = async (source) => {
   try {
     const photo = await Camera.getPhoto({
@@ -177,7 +100,6 @@ const pickImage = async (source) => {
       resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
-
     if (photo.webPath) {
       const response = await fetch(photo.webPath)
       const blob = await response.blob()
@@ -185,201 +107,157 @@ const pickImage = async (source) => {
     }
     showPicker.value = false
   } catch (error) {
-    console.error('Error picking image:', error)
+    console.error(error)
     showSuccessMessage('Failed to select image')
   }
 }
 
-// Save profile changes
+// Save profile
 const saveProfile = async () => {
   try {
     isLoading.value = true
-    const { data: userData, error: getUserError } = await supabase.auth.getUser()
-    if (getUserError || !userData?.user) throw getUserError || new Error('User not found')
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData?.user) throw new Error('User not found')
 
-    // Update auth metadata (first_name, last_name)
-    const { error: metadataError } = await supabase.auth.updateUser({
+    await supabase.auth.updateUser({
       data: {
         first_name: formData.value.firstName,
         last_name: formData.value.lastName,
       },
     })
-    if (metadataError) throw metadataError
 
-    // Build profile update object
-    const updateData = {
+    await supabase.from('profiles').update({
       phone: formData.value.phone,
-      region: address.value.region,
-      province: address.value.province,
-      city: address.value.city,
-      barangay: address.value.barangay,
-      building: address.value.building,
-      street: address.value.street,
-      house_no: address.value.house_no,
-      postal: address.value.postal,
       updated_at: new Date().toISOString(),
-    }
+    }).eq('id', userData.user.id)
 
-    if (avatarUrl.value && !avatarUrl.value.includes('?')) {
-      updateData.avatar_url = avatarUrl.value
-    } else if (avatarUrl.value) {
-      updateData.avatar_url = avatarUrl.value.split('?')[0]
-    }
-
-    // Update profile table
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update(updateData)
-      .eq('id', userData.user.id)
-
-    if (profileError) throw profileError
-
-    // Refresh auth store
     await authStore.hydrateFromSession()
-
-    // Show success and redirect
     showSuccessAndRedirect('Profile updated successfully!')
   } catch (error) {
-    console.error('Update error:', error)
+    console.error(error)
     showSuccessMessage('Failed to update profile: ' + error.message)
   } finally {
     isLoading.value = false
   }
 }
 
-
-// Navigation with refresh
 const goBack = () => {
-  // Use replace to force a fresh navigation to profileview
-  router.replace({
-    name: 'profileview',
-    query: { refreshed: Date.now() },
-  })
+  router.replace({ name: 'profileview', query: { refreshed: Date.now() } })
 }
 
-onMounted(() => {
-  loadUserData()
+onMounted(loadUserData)
+
+const fullName = computed(() => {
+  const first = formData.value.firstName || ''
+  const last = formData.value.lastName || ''
+  return `${first} ${last}`.trim()
 })
 
-// Barangays list
-const barangays = [
-  'Agusan Pequeño','Ambago','Amparo','Ampayon','Anticala','Antongalon','Aupagan','Baan KM 3',
-  'Baan Riverside Poblacion (Barangay 20)','Babag','Bading Poblacion (Barangay 22)','Bancasi',
-  'Banza','Baobaoan','Basag','Bayanihan Poblacion (Barangay 27)','Bilay','Bitan-agan','Bit-os',
-  'Bobon','Bonbon','Bugabus','Bugsukan','Buhangin Poblacion (Barangay 19)','Cabcabon','Camayahan',
-  'Dagohoy Poblacion (Barangay 7)','Dankias','De Oro','Diego Silang Poblacion (Barangay 6)',
-  'Don Francisco','Doongan','Dulag','Dumalagan','Florida','Golden Ribbon Poblacion (Barangay 2)',
-  'Holy Redeemer Poblacion (Barangay 23)','Humabon Poblacion (Barangay 11)','Imadejas Poblacion (Barangay 24)',
-  'Jose Rizal Poblacion (Barangay 25)','Kinamlutan','Lapu-Lapu Poblacion (Barangay 8)','Lemon',
-  'Leon Kilat Poblacion (Barangay 13)','Libertad','Limaha Poblacion (Barangay 14)','Los Angeles',
-  'Lumbocan','Maguinda','Mahay','Mahogany Poblacion (Barangay 21)','Maibu','Mandamo','Manila de Bugabus',
-  'Maon Poblacion (Barangay 1)','Masao','Maug','New Society Village Poblacion (Barangay 26)',
-  'Nong-Nong','Obrero Poblacion (Barangay 18)','Ong Yiu Poblacion (Barangay 16)','Pagatpatan',
-  'Pangabugan','Pianing','Pigdaulan','Pinamanculan','Port Poyohon Poblacion (Barangay 17, New Asia)',
-  'Rajah Soliman Poblacion (Barangay 4)','Salvacion','San Ignacio Poblacion (Barangay 15)','San Mateo',
-  'Santo Niño','San Vicente','Sikatuna Poblacion (Barangay 10)','Silongan Poblacion (Barangay 5)',
-  'Sumile','Sumilihon','Tagabaca','Taguibo','Taligaman','Tandang Sora Poblacion (Barangay 12)',
-  'Tiniwisan','Tungao','Urduja Poblacion (Barangay 9)','Villa Kananga'
-]
+// Mask phone (show only last 2 digits)
+const maskedPhone = computed(() => {
+  if (!formData.value.phone) return ''
+  const phone = formData.value.phone
+  return phone.replace(/.(?=.{2})/g, '*')  // keep last 2 digits
+})
+
+// Mask email (show first & last char + domain)
+const maskedEmail = computed(() => {
+  if (!formData.value.email) return ''
+  const [local, domain] = formData.value.email.split('@')
+  if (!local || !domain) return formData.value.email
+  return (
+    local[0] +
+    '*****' +
+    local[local.length - 1] +
+    '@' +
+    domain
+  )
+})
 </script>
 
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat density="comfortable" color="#5ca3eb">
-      <v-btn icon @click="goBack">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
-      <v-toolbar-title class="text-h6"><strong>Edit Profile</strong></v-toolbar-title>
+    <v-app-bar flat density="comfortable" color="#3f83c7" class="app-bar">
+      <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
+      <v-toolbar-title class="text-h6 font-bold">Edit Profile</v-toolbar-title>
     </v-app-bar>
 
-    <v-main>
+    <v-main class="modern-font">
       <!-- Success Snackbar -->
       <v-snackbar v-model="showSuccess" :timeout="3000" color="success" location="top">
         {{ successMessage }}
         <template v-slot:actions>
-          <v-btn color="white" variant="text" @click="showSuccess = false"> Close </v-btn>
+          <v-btn color="white" variant="text" @click="showSuccess = false">Close</v-btn>
         </template>
       </v-snackbar>
 
       <v-container>
-<!-- Profile Picture Section -->
-<v-card class="mb-5 pa-4" flat>
-  <v-card-title class="text-h6 mb-2">Profile Picture</v-card-title>
+        <!-- Avatar Section -->
+        <v-card class="mb-5 pa-4 avatar-card" flat>
+          <v-card-text class="d-flex justify-center">
+            <div class="avatar-container">
+              <v-avatar size="120" class="elevation-3" color="grey-lighten-3">
+                <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+                <v-icon v-else size="60" color="grey-darken-2">mdi-account</v-icon>
+              </v-avatar>
+              <v-btn icon size="small" color="primary" class="edit-btn" elevation="4"
+                @click="showPicker = true" :loading="uploading">
+                <v-icon size="18">mdi-pencil</v-icon>
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
 
-  <v-card-text class="d-flex justify-center">
-    <div class="avatar-container">
-      <!-- Avatar -->
-      <v-avatar size="120" color="grey-lighten-3">
-        <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-        <v-icon v-else size="60">mdi-account</v-icon>
-      </v-avatar>
-
-      <!-- Small Edit Button -->
-      <v-btn
-        icon
-        size="small"
-        color="primary"
-        class="edit-btn"
-        elevation="2"
-        @click="showPicker = true"
-        :loading="uploading"
-      >
-        <v-icon size="18">mdi-pencil</v-icon>
-      </v-btn>
-    </div>
-  </v-card-text>
-</v-card>
-
-
-        <!-- Profile Information Form -->
-        <v-card>
-          <v-card-title>Profile Information</v-card-title>
+        <!-- Profile Information -->
+        <v-card class="info-card elevation-2">
+          <v-card-title class="font-bold">Profile Information</v-card-title>
           <v-card-text>
             <v-form @submit.prevent="saveProfile">
               <v-row>
-                <v-col cols="12" md="6">
-                  <v-text-field v-model="formData.firstName" label="First Name" variant="outlined" required />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-text-field v-model="formData.lastName" label="Last Name" variant="outlined" required />
-                </v-col>
                 <v-col cols="12">
-                  <v-text-field v-model="formData.email" label="Email" type="email" variant="outlined" disabled />
-                </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="formData.phone" label="Phone Number" variant="outlined"
-                    placeholder="+63 XXX XXX XXXX" />
+                  <v-card flat class="mt-2 list-card">
+                    <v-list>
+                      <!-- Name -->
+                      <v-list-item class="list-item" @click="router.push({ name: 'edit-name' })">
+                        <v-list-item-title class="font-medium">Name</v-list-item-title>
+                        <v-list-item-subtitle>{{ fullName }}</v-list-item-subtitle>
+                        <template #append>
+                          <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
+                        </template>
+                      </v-list-item>
+
+                      <v-divider />
+
+                      <!-- Phone -->
+                      <v-list-item class="list-item" @click="router.push({ name: 'edit-phone' })">
+                        <v-list-item-title class="font-medium">Phone</v-list-item-title>
+                        <v-list-item-subtitle>{{ maskedPhone }}</v-list-item-subtitle>
+                        <template #append>
+                          <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
+                        </template>
+                      </v-list-item>
+
+                      <v-divider />
+
+                      <!-- Email -->
+                      <v-list-item class="list-item" @click="router.push({ name: 'edit-email' })">
+                        <v-list-item-title class="font-medium">Email</v-list-item-title>
+                        <v-list-item-subtitle>{{ maskedEmail }}</v-list-item-subtitle>
+                        <template #append>
+                          <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
+                        </template>
+                      </v-list-item>
+                    </v-list>
+                  </v-card>
                 </v-col>
 
-                <!--address-->
-                <v-col cols="12">
-                  <v-text-field v-model="address.purok" label="Purok" variant="outlined" />
-                </v-col>
-
-                <v-col cols="12">
-                  <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" variant="outlined" />
-                </v-col>
-
-                <v-col cols="12">
-                  <v-text-field v-model="address.building" label="Building No." variant="outlined" />
-                </v-col>
-
-                <v-col cols="12">
-                  <v-text-field v-model="address.street" label="Street Name" variant="outlined" />
-                </v-col>
-
-                <v-col cols="12">
-                  <v-text-field v-model="address.house_no" label="House No." variant="outlined" />
-                </v-col>
-
-
-                <!--display here using the map of leaflet-->
-                <span>{{ mapMessage }}</span>
-                <v-col cols="12" class="text-right">
-                  <v-btn type="submit" color="primary" size="large">
-                    <v-icon class="me-2">mdi-check</v-icon>
-                    {{ isLoading ? 'Saved' : 'Save Changes' }}
+                <!-- Redirect to Edit Address -->
+                <v-col cols="12" class="mt-4">
+                  <v-btn block color="indigo-darken-3" class="rounded-lg text-white font-medium"
+                    @click="router.push({ name: 'edit-address' })">
+                    <v-icon class="me-2">mdi-map-marker</v-icon>
+                    Edit Address
                   </v-btn>
                 </v-col>
               </v-row>
@@ -389,14 +267,13 @@ const barangays = [
       </v-container>
     </v-main>
 
-    <!-- Bottom Sheet for image picker -->
+    <!-- Bottom Sheet for Image Picker -->
     <v-bottom-sheet v-model="showPicker">
       <v-list>
         <v-list-item @click="pickImage('camera')">
           <v-icon icon="mdi-camera" class="me-3"></v-icon>
           <v-list-item-title>Take Photo</v-list-item-title>
         </v-list-item>
-
         <v-list-item @click="pickImage('gallery')">
           <v-icon icon="mdi-image" class="me-3"></v-icon>
           <v-list-item-title>Choose from Gallery</v-list-item-title>
@@ -407,15 +284,29 @@ const barangays = [
 </template>
 
 <style scoped>
+/* Modern font */
+.modern-font {
+  font-family: 'Inter', 'Roboto', 'Helvetica Neue', sans-serif;
+}
+
+/* Cards */
 .v-card {
   margin-bottom: 20px;
+  border-radius: 14px;
 }
 
-/* Success message animation */
-.v-snackbar {
-  z-index: 1000;
+.avatar-card {
+  background: linear-gradient(135deg, #5276b0, #354d7c);
+  color: white;
+  border-radius: 16px;
 }
 
+.info-card {
+  border-radius: 16px;
+  background-color: #fafafa;
+}
+
+/* Avatar */
 .avatar-container {
   position: relative;
   display: inline-block;
@@ -427,5 +318,31 @@ const barangays = [
   right: -5px;
   border: 2px solid white;
   border-radius: 50%;
+  transition: transform 0.2s ease;
+}
+
+.edit-btn:hover {
+  transform: scale(1.1);
+}
+
+/* List Items */
+.list-card {
+  background-color: #fff;
+  border-radius: 12px;
+}
+
+.list-item {
+  padding-top: 14px;
+  padding-bottom: 14px;
+}
+
+.v-list-item-title {
+  font-weight: 500;
+  font-size: 15px;
+}
+
+.v-list-item-subtitle {
+  font-size: 14px;
+  color: #555;
 }
 </style>

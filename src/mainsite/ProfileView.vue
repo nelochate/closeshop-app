@@ -135,47 +135,43 @@ const selectedSection = ref(purchaseSections[0])
         </v-btn>
       </div>
 
+
       <!-- Settings Icon - Top Right -->
       <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
         <v-icon size="29">mdi-cog-outline</v-icon>
       </v-btn>
 
       <!-- Profile Header -->
-<!-- Profile Header -->
-<div class="profile-header">
-  <!-- ONE ROW: avatar | (name over email) -->
-  <div class="profile-inline">
-    <div class="avatar-container">
-      <v-avatar size="80" color="grey-lighten-3">
-        <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-        <v-icon v-else size="40">mdi-account</v-icon>
-      </v-avatar>
+      <!-- Profile Header -->
+      <div class="profile-header">
+        <!-- ONE ROW: avatar | (name over email) -->
+        <div class="profile-inline">
+          <div class="avatar-container">
+            <v-avatar size="80" color="grey-lighten-3">
+              <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+              <v-icon v-else size="40">mdi-account</v-icon>
+            </v-avatar>
 
-      <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
-        <v-icon class="edit-icon">mdi-pencil</v-icon>
-      </v-btn>
-    </div>
+            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
+              <v-icon class="edit-icon">mdi-pencil</v-icon>
+            </v-btn>
+          </div>
 
-    <!-- Name above Email (stacked), but both stay to the RIGHT of avatar -->
-    <div class="info-block">
-      <h2 class="name-row">{{ fullName || 'Loading...' }}</h2>
-      <p class="email-row">{{ user?.email || '...' }}</p>
-    </div>
-  </div>
-</div>
+          <!-- Name above Email (stacked), but both stay to the RIGHT of avatar -->
+          <div class="info-block">
+            <h2 class="name-row">{{ fullName || 'Loading...' }}</h2>
+            <p class="email-row">{{ user?.email || '...' }}</p>
+          </div>
+        </div>
+      </div>
 
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
       <!-- Dropdown for Sections -->
       <div class="content-section">
-        <v-select
-          v-model="selectedSection"
-          :items="purchaseSections"
-          label="Purchase Status"
-          variant="outlined"
-          density="comfortable"
-        />
+        <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
+          density="comfortable" />
 
         <!-- Purchase sections content -->
         <v-expand-transition>
@@ -214,11 +210,11 @@ const selectedSection = ref(purchaseSections[0])
   border-bottom-right-radius: 20px;
   box-shadow: 0 4px 12px rgba(23, 101, 179, 0.3);
   transition: all 0.3s ease;
-  background: linear-gradient(135deg, #ffffff, #f8f9fa) !important;
+  background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
   color: #464749 !important;
   font-weight: 600;
   font-size: 0.95rem;
-  border: 2px solid #1765b3;
+  border: 2px solid #5e6e7e;
   padding: 8px 20px;
   height: 42px !important;
   margin-left: -14px;
@@ -246,10 +242,11 @@ const selectedSection = ref(purchaseSections[0])
   align-items: flex-start;
   gap: 20px;
   flex-wrap: wrap;
-  background: linear-gradient(135deg, #034688, #1366b9, #3886d3, #56a4f3, #5ca5e9);
+  background: linear-gradient(135deg, #354d7c, #5276b0, #354d7c);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   color: #fff;
   margin-top: 0px !important;
+  border-bottom-left-radius: 12px;
 }
 
 .avatar-container {
@@ -399,7 +396,9 @@ const selectedSection = ref(purchaseSections[0])
 /* More responsive styles for avatar and profile info */
 
 /* Animation for buttons */
-.shop-btn, .settings-btn, .edit-btn {
+.shop-btn,
+.settings-btn,
+.edit-btn {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -449,12 +448,18 @@ const selectedSection = ref(purchaseSections[0])
 
 /* Responsive font tweaks */
 @media (max-width: 1024px) {
-  .name-row { font-size: 1.4rem; }
+  .name-row {
+    font-size: 1.4rem;
+  }
 }
 
 @media (max-width: 600px) {
-  .name-row { font-size: 1.1rem; }
-  .email-row { font-size: 0.85rem; }
-}
+  .name-row {
+    font-size: 1.1rem;
+  }
 
+  .email-row {
+    font-size: 0.85rem;
+  }
+}
 </style>

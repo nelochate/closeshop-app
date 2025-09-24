@@ -74,7 +74,7 @@ onMounted(() => {
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat elevation="0" class="top-nav" color="#5ca3eb">
+    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
       <v-btn variant="text" @click="goBack">
         <v-icon start>mdi-arrow-left</v-icon>
         Back
