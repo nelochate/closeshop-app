@@ -64,7 +64,7 @@ const checkoutSelected = () => {
 <template>
   <v-app>
     <!-- Header -->
-    <v-app-bar flat color="#5ca3eb" dark>
+    <v-app-bar flat color="#3f83c7" dark>
       <v-toolbar-title><strong>Cart</strong></v-toolbar-title>
     </v-app-bar>
 
