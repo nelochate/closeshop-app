@@ -77,13 +77,13 @@ const routes = [
   },
 
   {
-    path: '/account-settings',
-    name: 'account-settings',
-    component: () => import('@/mainsite/AccountSettingsView.vue'),
+    path: '/edit-profile',
+    name: 'edit-profile',
+    component: () => import('@/mainsite/EditProfileview.vue'),
     meta: { requiresAuth: true },
   },
 
-    {
+  {
   path: '/product/:id',
   name: 'product-detail',
   component: () => import('@/mainsite/ProductDetailView.vue'),
@@ -95,6 +95,12 @@ const routes = [
   name: 'shop-view',
   component: () => import('@/mainsite/ShopView.vue'),
   props: true
+  },
+  {
+    path:'/settings',
+    name:'settings',
+    component: () => import('@/mainsite/SettingsView.vue'),
+    meta: { requiresAuth: true },
   },
 
   // ✅ Catch-all route

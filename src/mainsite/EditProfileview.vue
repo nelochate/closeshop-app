@@ -260,6 +260,27 @@ const goBack = () => {
 onMounted(() => {
   loadUserData()
 })
+
+// Barangays list
+const barangays = [
+  'Agusan Pequeño','Ambago','Amparo','Ampayon','Anticala','Antongalon','Aupagan','Baan KM 3',
+  'Baan Riverside Poblacion (Barangay 20)','Babag','Bading Poblacion (Barangay 22)','Bancasi',
+  'Banza','Baobaoan','Basag','Bayanihan Poblacion (Barangay 27)','Bilay','Bitan-agan','Bit-os',
+  'Bobon','Bonbon','Bugabus','Bugsukan','Buhangin Poblacion (Barangay 19)','Cabcabon','Camayahan',
+  'Dagohoy Poblacion (Barangay 7)','Dankias','De Oro','Diego Silang Poblacion (Barangay 6)',
+  'Don Francisco','Doongan','Dulag','Dumalagan','Florida','Golden Ribbon Poblacion (Barangay 2)',
+  'Holy Redeemer Poblacion (Barangay 23)','Humabon Poblacion (Barangay 11)','Imadejas Poblacion (Barangay 24)',
+  'Jose Rizal Poblacion (Barangay 25)','Kinamlutan','Lapu-Lapu Poblacion (Barangay 8)','Lemon',
+  'Leon Kilat Poblacion (Barangay 13)','Libertad','Limaha Poblacion (Barangay 14)','Los Angeles',
+  'Lumbocan','Maguinda','Mahay','Mahogany Poblacion (Barangay 21)','Maibu','Mandamo','Manila de Bugabus',
+  'Maon Poblacion (Barangay 1)','Masao','Maug','New Society Village Poblacion (Barangay 26)',
+  'Nong-Nong','Obrero Poblacion (Barangay 18)','Ong Yiu Poblacion (Barangay 16)','Pagatpatan',
+  'Pangabugan','Pianing','Pigdaulan','Pinamanculan','Port Poyohon Poblacion (Barangay 17, New Asia)',
+  'Rajah Soliman Poblacion (Barangay 4)','Salvacion','San Ignacio Poblacion (Barangay 15)','San Mateo',
+  'Santo Niño','San Vicente','Sikatuna Poblacion (Barangay 10)','Silongan Poblacion (Barangay 5)',
+  'Sumile','Sumilihon','Tagabaca','Taguibo','Taligaman','Tandang Sora Poblacion (Barangay 12)',
+  'Tiniwisan','Tungao','Urduja Poblacion (Barangay 9)','Villa Kananga'
+]
 </script>
 
 <template>
@@ -269,7 +290,7 @@ onMounted(() => {
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title class="text-h6"><strong>Account Settings</strong></v-toolbar-title>
+      <v-toolbar-title class="text-h6"><strong>Edit Profile</strong></v-toolbar-title>
     </v-app-bar>
 
     <v-main>
@@ -282,25 +303,34 @@ onMounted(() => {
       </v-snackbar>
 
       <v-container>
-        <!-- Profile Picture Section -->
-        <v-card class="mb-5">
-          <v-card-title>Profile Picture</v-card-title>
-          <v-card-text class="text-center">
-            <v-avatar size="120" color="grey-lighten-3" class="mb-4">
-              <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-              <v-icon v-else size="60">mdi-account</v-icon>
-            </v-avatar>
-            <br />
-            <v-btn
-              color="primary darken-1 background"
-              variant="outlined"
-              @click="showPicker = true"
-              :loading="uploading"
-            >
-              <v-icon>mdi-camera</v-icon>
-            </v-btn>
-          </v-card-text>
-        </v-card>
+<!-- Profile Picture Section -->
+<v-card class="mb-5 pa-4" flat>
+  <v-card-title class="text-h6 mb-2">Profile Picture</v-card-title>
+
+  <v-card-text class="d-flex justify-center">
+    <div class="avatar-container">
+      <!-- Avatar -->
+      <v-avatar size="120" color="grey-lighten-3">
+        <v-img v-if="avatarUrl" :src="avatarUrl" cover />
+        <v-icon v-else size="60">mdi-account</v-icon>
+      </v-avatar>
+
+      <!-- Small Edit Button -->
+      <v-btn
+        icon
+        size="small"
+        color="primary"
+        class="edit-btn"
+        elevation="2"
+        @click="showPicker = true"
+        :loading="uploading"
+      >
+        <v-icon size="18">mdi-pencil</v-icon>
+      </v-btn>
+    </div>
+  </v-card-text>
+</v-card>
+
 
         <!-- Profile Information Form -->
         <v-card>
@@ -309,76 +339,30 @@ onMounted(() => {
             <v-form @submit.prevent="saveProfile">
               <v-row>
                 <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="formData.firstName"
-                    label="First Name"
-                    variant="outlined"
-                    required
-                  />
+                  <v-text-field v-model="formData.firstName" label="First Name" variant="outlined" required />
                 </v-col>
                 <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="formData.lastName"
-                    label="Last Name"
-                    variant="outlined"
-                    required
-                  />
+                  <v-text-field v-model="formData.lastName" label="Last Name" variant="outlined" required />
                 </v-col>
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="formData.email"
-                    label="Email"
-                    type="email"
-                    variant="outlined"
-                    disabled
-                  />
+                  <v-text-field v-model="formData.email" label="Email" type="email" variant="outlined" disabled />
                 </v-col>
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="formData.phone"
-                    label="Phone Number"
-                    variant="outlined"
-                    placeholder="+63 XXX XXX XXXX"
-                  />
+                  <v-text-field v-model="formData.phone" label="Phone Number" variant="outlined"
+                    placeholder="+63 XXX XXX XXXX" />
                 </v-col>
+
                 <!--address-->
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="address.region"
-                    label="Region"
-                    variant="outlined"
-                    placeholder="CARAGA"
-                  />
+                  <v-text-field v-model="address.purok" label="Purok" variant="outlined" />
                 </v-col>
 
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="address.province"
-                    label="Province"
-                    variant="outlined"
-                    placeholder="Agusan del Norte"
-                  />
+                  <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" variant="outlined" />
                 </v-col>
 
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="address.city"
-                    label="City"
-                    variant="outlined"
-                    placeholder="Butuan City"
-                  />
-                </v-col>
-
-                <v-col cols="12">
-                  <v-text-field v-model="address.barangay" label="Barangay" variant="outlined" />
-                </v-col>
-
-                <v-col cols="12">
-                  <v-text-field
-                    v-model="address.building"
-                    label="Building No."
-                    variant="outlined"
-                  />
+                  <v-text-field v-model="address.building" label="Building No." variant="outlined" />
                 </v-col>
 
                 <v-col cols="12">
@@ -389,9 +373,6 @@ onMounted(() => {
                   <v-text-field v-model="address.house_no" label="House No." variant="outlined" />
                 </v-col>
 
-                <v-col cols="12">
-                  <v-text-field v-model="address.postal" label="Postal Code" variant="outlined" />
-                </v-col>
 
                 <!--display here using the map of leaflet-->
                 <span>{{ mapMessage }}</span>
@@ -433,5 +414,18 @@ onMounted(() => {
 /* Success message animation */
 .v-snackbar {
   z-index: 1000;
+}
+
+.avatar-container {
+  position: relative;
+  display: inline-block;
+}
+
+.edit-btn {
+  position: absolute;
+  bottom: -5px;
+  right: -5px;
+  border: 2px solid white;
+  border-radius: 50%;
 }
 </style>

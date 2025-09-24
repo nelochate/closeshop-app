@@ -109,18 +109,6 @@ onBeforeRouteUpdate((to, from, next) => {
   next()
 })
 
-
-// Logout handler
-const handleLogout = async () => {
-  try {
-    await authStore.signOut()
-    router.push({ name: 'login' }) // ✅ redirect back to login page
-  } catch (error) {
-    console.error('Logout failed:', error)
-    alert('Something went wrong while logging out.')
-  }
-}
-
 // Shop button logic → one button with 2 states
 const goShopOrBuild = () => {
   if (hasShop.value) {
@@ -137,34 +125,14 @@ const selectedSection = ref(purchaseSections[0])
 
 <template>
   <v-app>
-    <!-- Top App Bar -->
-    <v-app-bar flat density="comfortable" class="top-nav" color="#5ca3eb">
-      <v-btn icon @click="goBack">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
-      <v-toolbar-title class="text-h6"><strong>Profile</strong></v-toolbar-title>
-      <!-- Menu Button -->
-      <v-menu transition="fade-transition" offset-y>
-        <template #activator="{ props }">
-          <v-btn icon v-bind="props">
-            <v-icon>mdi-menu</v-icon>
-          </v-btn>
-        </template>
-
-        <v-list>
-          <v-list-item @click="handleLogout">
-            <v-list-item-title>
-              <v-icon start small>mdi-logout</v-icon>
-              Logout
-            </v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
-    </v-app-bar>
-    <v-divider />
-
     <!-- Main Profile Content -->
     <v-main>
+      <!-- Settings Icon -->
+      <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
+        <v-icon size="26">mdi-cog-outline</v-icon>
+      </v-btn>
+
+      <!-- Profile Header -->
       <div class="profile-header">
         <div class="avatar-container">
           <!-- Avatar -->
@@ -174,7 +142,7 @@ const selectedSection = ref(purchaseSections[0])
           </v-avatar>
 
           <!-- Floating Edit Button - Redirects to Account Settings -->
-          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/account-settings')">
+          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
             <v-icon class="edit-icon">mdi-pencil</v-icon>
           </v-btn>
         </div>
@@ -189,8 +157,9 @@ const selectedSection = ref(purchaseSections[0])
 
           <!-- Actions -->
           <div class="actions">
-            <v-btn color="primary" @click="goShopOrBuild">
-              {{ hasShop ? 'My shop' : 'Click here to start selling' }}
+            <v-btn @click="goShopOrBuild">
+              <v-icon start size="25">mdi-storefront-outline</v-icon>
+              {{ hasShop ? 'View Shop ' : 'Create Shop ' }}
             </v-btn>
           </div>
         </div>
@@ -199,13 +168,8 @@ const selectedSection = ref(purchaseSections[0])
       <v-divider thickness="2" class="my-4"></v-divider>
 
       <!-- Dropdown for Sections -->
-      <v-select
-        v-model="selectedSection"
-        :items="purchaseSections"
-        label="Purchase Status"
-        variant="outlined"
-        density="comfortable"
-      />
+      <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
+        density="comfortable" />
 
       <!-- Purchase sections content (unchanged) -->
       <v-expand-transition>
@@ -223,14 +187,30 @@ const selectedSection = ref(purchaseSections[0])
 </template>
 
 <style scoped>
-/* Profile header container */
+/* Global font style */
+:root {
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
+}
+
+.settings-btn {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 1200;
+  color: #fff; /* visible on gradient header */
+  min-width: auto; /* shrink to icon only */
+  padding: 0;      /* no padding around */
+}
+
 .profile-header {
-  padding: 24px;
+  padding-top: 60px !important;
   display: flex;
-  align-items: flex-start; /* Align items to the top */
-  gap: 20px; /* Space between avatar and info */
-  background: linear-gradient(to bottom, #5ca3eb 0%, #ffffff 100%);
+  align-items: flex-start;
+  gap: 20px;
   flex-wrap: wrap;
+  background: linear-gradient(135deg, #034688, #1366b9, #3886d3, #56a4f3, #5ca5e9);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
+  color: #fff;
 }
 
 .avatar-container {
@@ -246,57 +226,129 @@ const selectedSection = ref(purchaseSections[0])
   transform: translate(30%, 30%);
   border: 2px solid white;
   border-radius: 50%;
-  transition: all 0.2s ease-in-out;
-  max-width: 25px;
-  max-height: 25px;
+  transition: all 0.25s ease-in-out;
+  max-width: 28px;
+  max-height: 28px;
+  background-color: #5ca3eb;
+  color: white;
+}
+.edit-btn:hover {
+  transform: translate(30%, 30%) scale(1.1);
+  background-color: #1765b3;
 }
 .edit-icon {
   font-size: 16px;
 }
 
-.edit-btn:hover {
-  transform: translate(30%, 30%) scale(1.1);
-}
-
 .profile-info {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
-  align-items: flex-start;
   text-align: left;
-  flex: 1; /* Take remaining space */
+  flex: 1;
 }
 
 .name {
   margin: 0;
-  font-size: 1.5rem;
-  font-weight: 600;
-  color: #333;
+  font-size: 1.6rem;
+  font-weight: 100;
+  color: #ffffff;
+  letter-spacing: 0.5px;
 }
 
 .email {
   margin: 0;
-  font-size: 1rem;
-  color: #666;
+  font-size: 0.95rem;
+  color: #e0e7ef;
+  font-weight: 400;
 }
 
-.sell-link {
-  font-size: 0.9rem;
-  color: #1976d2;
-  cursor: pointer;
-  margin: 8px 0;
+/* Shop Area */
+.actions .v-btn {
+  text-transform: none;
+  border-top-right-radius: 50px;
+  border-bottom-right-radius: 50px;
+  box-shadow: 0 3px 10px rgba(23, 101, 179, 0.25);
+  transition: all 0.2s ease;
+  margin-top: 20px;
+  margin-left: -110px;
+  border: 1px solid white;
+
+  /* Layout control */
+  display: flex;
+  justify-content: flex-start; /* Align text to the left */
+  align-items: center;
+  padding-left: 20px;
+  width: 200px;  /* default width for desktop */
+  height: 40px;
+
+  background-color: rgba(236, 231, 231, 0.9) !important;
+  color: rgb(70, 69, 69) !important;
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 
-.top-nav {
-  background-color: #5ca3eb;
+.actions .v-btn:hover {
+  background-color: #1765b3 !important;
+  color: #fff !important;
+}
+
+/* Tablet view */
+@media (max-width: 1024px) {
+  .actions .v-btn {
+    width: 160px;  /* smaller background */
+    padding-left: 16px;
+    font-size: 0.9rem;
+  }
+}
+
+/* Mobile view */
+@media (max-width: 600px) {
+  .actions .v-btn {
+    width: auto;
+    min-width: 120px;
+    padding: 0 16px;
+    margin-left: -100px;
+    font-size: 0.85rem;
+    max-width: 150px;
+  }
+}
+
+/* v-select styling */
+:deep(.v-select) {
+  border-radius: 10px;
+  font-weight: 500;
+  font-size: 0.95rem;
+  color: #333;
 }
 
 /* Responsive styles */
 @media (max-width: 768px) {
   .profile-header {
-    padding: 16px;
+    padding: 18px;
     gap: 16px;
+  }
+
+  .v-avatar {
+    width: 70px !important;
+    height: 70px !important;
+  }
+
+  .name {
+    font-size: 1.3rem;
+  }
+
+  .email {
+    font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .profile-header {
+    flex-direction: row;
+    align-items: flex-start;
+    padding: 16px;
   }
 
   .v-avatar {
@@ -305,33 +357,17 @@ const selectedSection = ref(purchaseSections[0])
   }
 
   .name {
-    font-size: 1.3rem;
-  }
-}
-
-@media (max-width: 480px) {
-  .profile-header {
-    flex-direction: row; /* Keep side by side even on mobile */
-    align-items: flex-start;
-  }
-
-  .v-avatar {
-    width: 50px !important;
-    height: 50px !important;
-  }
-
-  .name {
     font-size: 1.2rem;
   }
 
   .email {
-    font-size: 0.9rem;
+    font-size: 0.85rem;
   }
 
-  /* Stack buttons vertically on very small screens */
   .profile-info :deep(.v-btn) {
     width: 100%;
     margin-bottom: 8px;
   }
 }
+
 </style>
