@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, watch, onMounted, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import * as L from 'leaflet'
@@ -11,11 +11,15 @@ import 'leaflet.fullscreen/Control.FullScreen.css'
 const router = useRouter()
 const goBack = () => router.back()
 
+const route = useRoute()
+const shopId = ref<string | null>(route.params.id as string || null)
+
 // -------------------- States --------------------
+const currentShopId = ref<string | null>(null)
 const avatarUrl = ref<string | null>(null) // logo
 const physicalUrl = ref<string | null>(null) // physical store image
 const uploading = ref(false)
-const pickerTarget = ref<'logo' | 'physical' | null>(null) // track image target
+const pickerTarget = ref<'logo' | 'physical' | null>(null)
 const showPicker = ref(false)
 const saving = ref(false)
 const snackbar = ref(false)
@@ -67,7 +71,7 @@ let shopMarker: L.Marker | null = null
 const initMap = () => {
   if (map.value) return
   map.value = L.map('map', {
-    center: [latitude.value, longitude.value],
+    center: [latitude.value ?? 8.9489, longitude.value ?? 125.5406],
     zoom: 15,
     fullscreenControl: true,
     fullscreenControlOptions: { position: 'topleft' },
@@ -76,7 +80,7 @@ const initMap = () => {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  shopMarker = L.marker([latitude.value, longitude.value], { draggable: true }).addTo(map.value)
+  shopMarker = L.marker([latitude.value ?? 8.9489, longitude.value ?? 125.5406], { draggable: true }).addTo(map.value)
   shopMarker.on('dragend', async (e) => {
     const pos = (e.target as L.Marker).getLatLng()
     latitude.value = pos.lat
@@ -113,7 +117,6 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     const blob = await response.blob()
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
 
-    // Pick correct bucket
     const bucket = pickerTarget.value === 'physical' ? 'physical_store' : 'Profile'
     const fileName = `${user.id}/${Date.now()}.png`
 
@@ -126,10 +129,14 @@ const pickImage = async (source: 'camera' | 'gallery') => {
 
     if (pickerTarget.value === 'physical') {
       physicalUrl.value = newUrl
-      await supabase.from('shops').update({ physical_store: newUrl }).eq('id', user.id)
+      if (currentShopId.value) {
+        await supabase.from('shops').update({ physical_store: newUrl }).eq('id', currentShopId.value)
+      }
     } else {
       avatarUrl.value = newUrl
-      await supabase.from('shops').update({ logo_url: newUrl }).eq('id', user.id)
+      if (currentShopId.value) {
+        await supabase.from('shops').update({ logo_url: newUrl }).eq('id', currentShopId.value)
+      }
     }
 
     showSnackbar('Image uploaded successfully', 'success')
@@ -146,9 +153,11 @@ const pickImage = async (source: 'camera' | 'gallery') => {
 // -------------------- Coordinates --------------------
 const saveCoordinates = async (lat: number, lng: number) => {
   try {
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) throw new Error('User not found')
-    const { error } = await supabase.from('shops').update({ latitude: lat, longitude: lng }).eq('id', user.id)
+    if (!currentShopId.value) return
+    const { error } = await supabase
+      .from('shops')
+      .update({ latitude: lat, longitude: lng })
+      .eq('id', currentShopId.value)
     if (error) throw error
     showSnackbar('Location updated successfully!', 'success')
   } catch (err) {
@@ -189,14 +198,17 @@ const saveShop = async () => {
     const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
+    const lat = latitude.value ?? 8.9489
+    const lng = longitude.value ?? 125.5406
+
     const shopData = {
-      id: user.id,
+      owner_id: user.id,
       business_name: shopName.value,
       description: description.value,
       logo_url: avatarUrl.value,
       physical_store: physicalUrl.value,
-      latitude: latitude.value,
-      longitude: longitude.value,
+      latitude: lat,
+      longitude: lng,
       open_time: openTime.value,
       close_time: closeTime.value,
       barangay: address.barangay.value,
@@ -211,9 +223,34 @@ const saveShop = async () => {
       meetup_details: meetUpDetails.value || null,
     }
 
-    const { error } = await supabase.from('shops').upsert(shopData, { onConflict: 'id' })
-    if (error) throw error
-    showSnackbar('Shop saved successfully!', 'success')
+    let result
+    if (!currentShopId.value) {
+      const { data, error } = await supabase
+        .from('shops')
+        .insert(shopData)
+        .select()
+        .single()
+      if (error) throw error
+      currentShopId.value = data.id
+      result = data
+
+      showSnackbar('Shop created successfully!', 'success')
+      router.push(`/shop/${data.id}`)
+    } else {
+      const { data, error } = await supabase
+        .from('shops')
+        .update(shopData)
+        .eq('id', currentShopId.value)
+        .select()
+        .single()
+      if (error) throw error
+      result = data
+
+      showSnackbar('Shop updated successfully!', 'success')
+      router.push(`/shop/${data.id}`)
+    }
+
+    console.log('Saved shop:', result)
   } catch (err) {
     console.error(err)
     showSnackbar('Failed to save shop', 'error')
@@ -226,26 +263,43 @@ const saveShop = async () => {
 onMounted(async () => {
   await nextTick()
   initMap()
-  const { data: { user }, error: userError } = await supabase.auth.getUser()
-  if (userError || !user) return
 
-  const { data, error } = await supabase.from('shops').select('*').eq('id', user.id).single()
-  if (error || !data) return
+  if (shopId.value) {
+    const { data, error } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('id', shopId.value)
+      .single()
 
-  avatarUrl.value = data.logo_url || null
-  physicalUrl.value = data.physical_store || null
-  shopName.value = data.business_name || ''
-  description.value = data.description || ''
-  openTime.value = data.open_time || ''
-  closeTime.value = data.close_time || ''
-  address.barangay.value = data.barangay || ''
-  address.building.value = data.building || ''
-  address.street.value = data.street || ''
-  address.postal.value = data.postal || ''
-  address.house_no.value = data.house_no || ''
-  latitude.value = data.latitude || 8.9489
-  longitude.value = data.longitude || 125.5406
-  shopMarker?.setLatLng([latitude.value, longitude.value])
+    if (error || !data) return
+
+    currentShopId.value = data.id
+    avatarUrl.value = data.logo_url || null
+    physicalUrl.value = data.physical_store || null
+    shopName.value = data.business_name || ''
+    description.value = data.description || ''
+    openTime.value = data.open_time || ''
+    closeTime.value = data.close_time || ''
+    address.barangay.value = data.barangay || ''
+    address.building.value = data.building || ''
+    address.street.value = data.street || ''
+    address.postal.value = data.postal || ''
+    address.house_no.value = data.house_no || ''
+    latitude.value = data.latitude || 8.9489
+    longitude.value = data.longitude || 125.5406
+    shopMarker?.setLatLng([latitude.value, longitude.value])
+  } else {
+    currentShopId.value = null
+    // Auto-detect user location on create
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        latitude.value = pos.coords.latitude
+        longitude.value = pos.coords.longitude
+        map.value?.setView([latitude.value, longitude.value], 17)
+        shopMarker?.setLatLng([latitude.value, longitude.value])
+      })
+    }
+  }
 })
 </script>
 

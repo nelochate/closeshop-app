@@ -16,32 +16,42 @@ const successMessage = ref('')
 const saveName = async () => {
   try {
     isLoading.value = true
-    const { data: userData } = await supabase.auth.getUser()
-    if (!userData?.user) throw new Error('User not found')
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (userError) throw userError
+    if (!user) throw new Error('No logged-in user')
 
     // Update Supabase auth metadata
-    await supabase.auth.updateUser({
+    const { error: authError } = await supabase.auth.updateUser({
       data: { first_name: firstName.value, last_name: lastName.value }
     })
+    if (authError) throw authError
 
-    // Update profile table
-    await supabase.from('profiles').update({
-      first_name: firstName.value,
-      last_name: lastName.value,
-      updated_at: new Date().toISOString()
-    }).eq('id', userData.user.id)
+    // Update profiles table (make sure RLS policy exists!)
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        first_name: firstName.value,
+        last_name: lastName.value,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', user.id)
+
+    if (profileError) throw profileError
 
     await authStore.hydrateFromSession()
+
     successMessage.value = 'Name updated successfully!'
     showSuccess.value = true
     setTimeout(() => router.replace({ name: 'profileview', query: { refreshed: Date.now() } }), 2000)
   } catch (e) {
+    console.error('Save name failed:', e)
     successMessage.value = 'Failed: ' + e.message
     showSuccess.value = true
   } finally {
     isLoading.value = false
   }
 }
+
 </script>
 
 <template>
