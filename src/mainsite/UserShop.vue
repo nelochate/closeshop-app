@@ -37,7 +37,7 @@ const fetchShopData = async () => {
       .select(
         'business_name, description, logo_url, physical_store, open_time, close_time, barangay, building, street, house_no, postal',
       )
-      .eq('id', user.id)
+      .eq('owner_id', user.id)
       .maybeSingle()
 
     if (error) throw error

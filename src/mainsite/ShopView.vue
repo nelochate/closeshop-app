@@ -3,7 +3,9 @@ import { ref, onMounted } from "vue"
 import { useRoute, useRouter } from "vue-router"
 import { supabase } from "@/utils/supabase"
 import BottomNav from "@/common/layout/BottomNav.vue"
+import * as L from "leaflet"
 
+// route + router
 const route = useRoute()
 const router = useRouter()
 const shopId = route.params.id as string
@@ -17,7 +19,7 @@ const errorMsg = ref("")
 
 const PLACEHOLDER_IMG = "https://picsum.photos/seed/shop/640/360"
 
-// fetch shop + products
+// fetch shop
 const fetchShop = async () => {
   try {
     const { data, error } = await supabase
@@ -34,6 +36,7 @@ const fetchShop = async () => {
   }
 }
 
+// fetch products
 const fetchProducts = async () => {
   try {
     const { data, error } = await supabase
@@ -70,11 +73,52 @@ function extractImage(main_img_urls: any) {
   return PLACEHOLDER_IMG
 }
 
+// share shop
+const shareProduct = () => {
+  if (navigator.share) {
+    navigator
+      .share({
+        title: shop.value?.business_name || "Shop",
+        text: "Check out this shop on our app!",
+        url: window.location.href,
+      })
+      .catch((err) => console.error("Share failed:", err))
+  } else {
+    alert("Sharing is not supported on this device.")
+  }
+}
+
+// map setup
+let map: L.Map | null = null
+let shopMarker: L.Marker | null = null
+
+const initMap = () => {
+  if (!shop.value?.latitude || !shop.value?.longitude) return
+
+  // destroy old map if exists
+  if (map) {
+    map.remove()
+    map = null
+  }
+
+  map = L.map("shop-map").setView([shop.value.latitude, shop.value.longitude], 16)
+
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    attribution: "© OpenStreetMap contributors",
+  }).addTo(map)
+
+  shopMarker = L.marker([shop.value.latitude, shop.value.longitude]).addTo(map)
+  shopMarker.bindPopup(shop.value.business_name || "Shop").openPopup()
+}
+
 onMounted(async () => {
   loading.value = true
   await fetchShop()
   await fetchProducts()
   loading.value = false
+
+  // initialize map after shop is loaded
+  initMap()
 })
 </script>
 
@@ -95,7 +139,16 @@ onMounted(async () => {
     <v-main>
       <v-container class="py-0 px-0">
         <!-- Cover -->
-        <v-img :src="shop?.physical_store || PLACEHOLDER_IMG" height="200" cover class="cover-photo" />
+        <v-img
+          :src="shop?.physical_store || PLACEHOLDER_IMG"
+          height="200"
+          cover
+          class="cover-photo"
+        >
+          <template #placeholder>
+            <v-skeleton-loader type="image" height="200" />
+          </template>
+        </v-img>
 
         <!-- Avatar + Info -->
         <div class="avatar-wrapper">
@@ -116,13 +169,18 @@ onMounted(async () => {
             <p>
               <v-icon small start>mdi-map-marker</v-icon>
               {{
-              [shop?.house_no, shop?.building, shop?.street, shop?.barangay, shop?.city, shop?.province, shop?.region,
-              shop?.postal]
-              .filter(Boolean)
-              .join(", ")
+                [shop?.house_no, shop?.building, shop?.street, shop?.barangay, shop?.city, shop?.province, shop?.region, shop?.postal]
+                  .filter(Boolean)
+                  .join(", ")
               }}
             </p>
           </div>
+        </v-container>
+
+        <!-- Mini Map -->
+        <v-container>
+          <h3 class="text-h6 mb-2">Location</h3>
+          <div id="shop-map"></div>
         </v-container>
 
         <!-- Products -->
@@ -143,7 +201,12 @@ onMounted(async () => {
 
           <template v-else>
             <div class="product-grid">
-              <div v-for="item in products" :key="item.id" class="product-card">
+              <div
+                v-for="item in products"
+                :key="item.id"
+                class="product-card"
+                @click="router.push(`/product/${item.id}`)"
+              >
                 <v-img :src="item.img" height="140" cover />
                 <div class="product-info">
                   <div class="product-title">{{ item.title }}</div>
@@ -160,13 +223,13 @@ onMounted(async () => {
         </v-alert>
       </v-container>
     </v-main>
-        <!-- Bottom Navigation -->
+
+    <!-- Bottom Navigation -->
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
 
 <style scoped>
-
 .top-text {
   font-size: 19px;
   font-weight: 400;
@@ -186,6 +249,12 @@ onMounted(async () => {
   box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   background: #fff;
 }
+#shop-map {
+  width: 100%;
+  height: 250px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+}
 .product-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
@@ -196,6 +265,11 @@ onMounted(async () => {
   border-radius: 8px;
   overflow: hidden;
   box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  cursor: pointer;
+  transition: transform 0.2s;
+}
+.product-card:hover {
+  transform: translateY(-2px);
 }
 .product-info {
   padding: 8px;
