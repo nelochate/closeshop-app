@@ -59,7 +59,7 @@ const routes = [
     component: ProductListing,
     meta: { requiresAuth: true },
   },
-  { path: '/additem', name: 'additem', component: AddItem, meta: { requiresAuth: true } },
+  { path: '/additem/:id?', name: 'additem', component: AddItem, meta: { requiresAuth: true } },
 
   // ✅ Allow unauthenticated access to update-password
   {
