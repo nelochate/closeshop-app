@@ -1,77 +1,169 @@
-<script setup>
-import { ref } from "vue";
-import { useRouter } from "vue-router";
 
-const username = ref("");
-const password = ref("");
-const router = useRouter();
+<script setup lang="ts">
+import { ref } from 'vue'
+import { useRouter } from 'vue-router'
+import { supabase } from '@/utils/supabase'
+import { requiredValidator, emailValidator } from '@/utils/validators'
+import { onMounted } from 'vue'
 
-const login = () => {
-  console.log("Logging in with:", username.value, password.value);
-  // TODO: Add your API call for login
-};
+const username = ref('')
+const password = ref('')
+const showPassword = ref(false)
+const router = useRouter()
 
-const forgotPassword = () => {
-  router.push("/forgot-password");
-};
+// Reactive variable for error/success message
+const errorMessage = ref('') // Stores the error message
+const showError = ref(false) // Controls the visibility of the error message
+const successMessage = ref('') // Stores the success message
+const showSuccess = ref(false) // Controls the visibility of the success message
 
-const register = () => {
-  router.push("/register");
-};
+const isLoading = ref()
+
+
+
+// Login function using Supabase
+const login = async () => {
+  isLoading.value = true
+  try {
+    const { data, error } = await supabase.auth.signInWithPassword({
+      email: username.value,
+      password: password.value,
+    })
+
+    if (error) {
+      console.error('', error.message)
+      errorMessage.value = '' + error.message
+      showError.value = true
+
+      setTimeout(() => {
+        showError.value = false
+      }, 3000)
+      return
+    }
+
+    const user = data.user
+    console.log('Login success:', user)
+
+    // ✅ Check profile role
+    let { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, role')
+      .eq('id', user.id)
+      .single()
+
+    if (profileError && profileError.code === 'PGRST116') {
+      // No profile found → create one
+      const { error: insertError } = await supabase.from('profiles').insert([
+        {
+          id: user.id,
+          role: 'customer', // default role
+        },
+      ])
+      if (insertError) {
+        console.error('Failed to auto-create profile:', insertError.message)
+      }
+      profile = { id: user.id, role: 'customer' } // fallback
+    }
+
+    // ✅ Redirect based on role
+    let redirectPath = '/homepage'
+    if (profile?.role === 'admin') {
+      redirectPath = '/admin-dashboard'
+    }
+
+    // Show success message
+    successMessage.value = 'Redirecting...'
+    showSuccess.value = true
+
+    setTimeout(() => {
+      showSuccess.value = false
+      router.push(redirectPath)
+    }, 2000)
+  } catch (err) {
+    console.error('Unexpected error:', err)
+    errorMessage.value = 'Something went wrong, please try again.'
+    showError.value = true
+
+    setTimeout(() => {
+      showError.value = false
+    }, 3000)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+
+
+
+onMounted(async () => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session) {
+    router.push('/homepage') // auto redirect if already logged in
+  }
+})
 </script>
 
 <template>
-  <v-app>
-    <div class="container">
-      <!-- Header Section -->
-      <div class="header">
-        <div class="circle"></div>
-        <h1>Login</h1>
-        <p>Sign in to your account</p>
+  <v-app class="main-bg">
+    <div class="login-container">
+      <!-- Logo + Title -->
+      <div class="login-header d-flex flex-column align-center">
+        <div class="circle-deco"></div>
+
+        <!-- Logo -->
+        <v-img src="/images/logo.png" max-width="100" class="logo"></v-img>
+
+        <!-- Title + Subtitle -->
+        <h2 class="login-title">CloseShop</h2>
+        <p class="login-subtitle">Use the account below to sign in</p>
       </div>
 
-      <!-- Form Section -->
-      <div class="form">
-        <v-form @submit.prevent="login" class="login-form w-100" style="max-width: 320px;">
-          <!-- Username -->
-          <v-text-field
-            v-model="username"
-            label="Username"
-            prepend-inner-icon="mdi-account"
-            required
-            variant="outlined"
-            class="mb-3"
-          />
 
-          <!-- Password -->
-          <v-text-field
-            v-model="password"
-            label="Password"
-            type="password"
-            prepend-inner-icon="mdi-key-variant"
-            required
-            variant="outlined"
-            class="mb-3"
-          />
+      <!-- Error & Success Messages -->
+      <div v-if="showError" class="error-message">{{ errorMessage }}</div>
+      <div v-if="showSuccess" class="success-message">{{ successMessage }}</div>
 
-          <!-- Login Button -->
-          <v-btn type="submit" color="primary" block class="mb-3">
-            Login
+      <!-- Form Card -->
+      <div class="login-card">
+        <v-form @submit.prevent="login">
+          <v-text-field v-model="username" placeholder="Email" variant="outlined" density="comfortable"
+            class="login-input" :rules="[requiredValidator, emailValidator]" />
+
+          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" placeholder="Password"
+            variant="outlined" density="comfortable" class="login-input"
+            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+            @click:append-inner="showPassword = !showPassword" :rules="[requiredValidator]" />
+
+          <v-btn type="submit" color="primary" block class="login-btn" :loading="isLoading" :disabled="isLoading"
+            prepend-icon="mdi-login">
+            Sign In
           </v-btn>
 
-          <!-- Forgot password -->
-          <p
-            class="text-center text-medium-emphasis text-caption mb-3"
-            @click="forgotPassword"
-            style="cursor: pointer"
-          >
-            I forgot my password. Click here to reset
+          <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
+
+
+          <p class="register-link">
+            Don’t have an account? <RouterLink to="/register">Register</RouterLink>
           </p>
 
-          <!-- Register Button -->
-          <v-btn color="secondary" variant="outlined" block @click="register">
-            Register New Account
+          <!-- Divider -->
+          <div class="divider">
+            <span></span>
+            <p>Or sign up with</p>
+            <span></span>
+          </div>
+
+          <!-- Social Buttons -->
+          <v-btn block outlined class="social-btn">
+            <img width="20" height="20" src="https://img.icons8.com/fluency/48/facebook-new.png" alt="facebook-new" class="mr-2"/>
+            Continue with Facebook
           </v-btn>
+
+          <v-btn block outlined class="social-btn">
+            <img width="20" height="20" src="https://img.icons8.com/color/48/google-logo.png" alt="google-logo" class="mr-2" />
+            Continue with Google
+          </v-btn>
+
         </v-form>
       </div>
     </div>
@@ -79,52 +171,138 @@ const register = () => {
 </template>
 
 <style scoped>
-.container {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  background: #ffffff;
-  font-family: Arial, sans-serif;
-}
-
-/* Header */
-.header {
-  background: #2f6db2;
-  height: 200px;
-  color: white;
-  padding: 20px;
+.login-container {
   position: relative;
   display: flex;
   flex-direction: column;
-  justify-content: center;
-  overflow: hidden;
-}
-.header h1 {
-  font-size: 32px;
-  font-weight: bold;
-  margin: 0;
-  margin-top: 8px;
-}
-.header p {
-  font-size: 14px;
-  margin-top: 4px;
-}
-.header .circle {
-  width: 215px;
-  height: 200px;
-  background: #deeff5;
-  border-radius: 50%;
-  position: absolute;
-  top: -40px;
-  right: -60px;
+  align-items: center;
+  min-height: 100vh;
+  background: #f5f5f5;
+  padding: 0;
 }
 
-/* Form */
-.form {
-  flex: 1;
-  display: flex;
-  justify-content: center;
-  margin-top: 30px;
-  padding: 0 20px;
+
+.login-header {
+  background-color: #2e73b8;
+  color: #fff;
+  width: 100%;
+  height: 30%;
+  padding: 3rem 2rem 5rem 2rem;
+  position: relative;
+  border-bottom-left-radius: 40px;
+  overflow: hidden;
+  margin-bottom: 50px;
 }
+
+.circle-deco {
+  position: absolute;
+  top: -40px;
+  right: -40px;
+  width: 155px;
+  height: 148px;
+  background-color: rgba(255, 255, 255, 0.252);
+  border-radius: 50%;
+}
+
+.login-title {
+  font-size: 28px;
+  font-weight: bold;
+  margin-bottom: 0.5rem;
+}
+
+.login-subtitle {
+  font-size: 14px;
+  opacity: 0.9;
+}
+
+.login-card {
+  background: #fff;
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.08);
+  padding: 2rem;
+  width: 100%;
+  max-width: 400px;
+  margin-top: -60px;
+}
+
+.login-input {
+  margin-bottom: 1rem;
+  border-radius: 10px;
+}
+
+.login-btn {
+  margin-top: 1rem;
+  font-weight: 600;
+  border-radius: 10px;
+  height: 45px;
+}
+
+.forgot-link {
+  margin: 1rem 0;
+  font-size: 15px;
+  text-align: center;
+  color: #2e73b8f5;
+  font-weight: 580;
+}
+
+.register-link {
+  margin-top: 0.8rem;
+  font-size: 13px;
+  color: #666;
+  text-align: center;
+  cursor: pointer;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+.divider span {
+  flex: 1;
+  height: 1px;
+  background: #ddd;
+}
+
+.divider p {
+  margin: 0 10px;
+  font-size: 13px;
+  color: #777;
+}
+
+.social-btn {
+  margin-top: 0.6rem;
+  border-radius: 10px;
+  font-weight: 500;
+  text-transform: none;
+}
+.logo {
+  width: 80px;
+}
+
+.error-message,
+.success-message {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  z-index: 10;
+}
+
+.error-message {
+  background: #ffcdd2cf;
+  color: #b71c1c;
+}
+
+.success-message {
+  background: #c8e6c9d4;
+  color: #1b5e1fa8;
+}
+
 </style>

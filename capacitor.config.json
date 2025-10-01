@@ -1,0 +1,6 @@
+{
+  "appId": "closeshop.dev",
+  "appName": "closeshop-dev",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
