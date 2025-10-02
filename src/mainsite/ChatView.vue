@@ -1,55 +1,89 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted } from "vue"
+import { useRouter, useRoute } from "vue-router"
+import { supabase } from "@/utils/supabase"
+import { db, auth } from "@/utils/firebase"
+import { collection, addDoc, query, orderBy, onSnapshot } from "firebase/firestore"
 
 const router = useRouter()
-const messages = ref([
-  { id: 1, sender: 'me', text: 'Hey! How are you?', time: '10:30 AM' },
-  { id: 2, sender: 'other', text: 'I’m good, thanks! You?', time: '10:31 AM' },
-  { id: 3, sender: 'me', text: 'Doing great 🚀 Working on my project.', time: '10:32 AM' },
-])
+const route = useRoute()
 
-const newMessage = ref('')
+// Current logged-in user (Supabase auth for now)
+const userId = ref<string | null>(null)
+const otherUserId = route.params.id as string
+
+const messages = ref<any[]>([])
+const newMessage = ref("")
+
+// Firestore chatId (combine both IDs sorted)
+const chatId = ref("")
+const currentUser = auth.currentUser
+
+onMounted(async () => {
+  // Get current Supabase user
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+  userId.value = user.id
+  chatId.value = [user.id, otherUserId].sort().join("_")
+
+  // Subscribe to Firestore messages in this chat
+  const q = query(
+    collection(db, "chats", chatId.value, "messages"),
+    orderBy("createdAt", "asc")
+  )
+  onSnapshot(q, (snapshot) => {
+    messages.value = snapshot.docs.map((doc) => doc.data())
+  })
+})
+
+const sendMessage = async () => {
+  if (!newMessage.value.trim() || !userId.value) return
+
+  const msgData = {
+    senderId: userId.value,
+    receiverId: otherUserId,
+    text: newMessage.value,
+    createdAt: new Date(),
+    isRead: false,
+  }
+
+  // 1️⃣ Save to Supabase
+  await supabase.from("messages").insert({
+    sender_id: msgData.senderId,
+    receiver_id: msgData.receiverId,
+    content: msgData.text,
+    is_read: msgData.isRead,
+  })
+
+  // 2️⃣ Save to Firestore
+  await addDoc(collection(db, "chats", chatId.value, "messages"), msgData)
+
+  newMessage.value = ""
+}
 
 const goBack = () => router.back()
-
-const sendMessage = () => {
-  if (!newMessage.value.trim()) return
-  messages.value.push({
-    id: Date.now(),
-    sender: 'me',
-    text: newMessage.value,
-    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-  })
-  newMessage.value = ''
-}
 </script>
 
 <template>
   <v-app>
-    <!-- Top Bar -->
     <v-app-bar flat color="primary" dark>
-      <v-btn icon @click="goBack">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
+      <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title class="text-h6">Chat</v-toolbar-title>
     </v-app-bar>
 
-    <!-- Messages -->
     <v-main>
       <div class="chat-container">
         <div
-          v-for="msg in messages"
-          :key="msg.id"
-          :class="['message-bubble', msg.sender === 'me' ? 'me' : 'other']"
+          v-for="(msg, index) in messages"
+          :key="index"
+          :class="['message-bubble', msg.senderId === userId ? 'me' : 'other']"
         >
           <p class="text">{{ msg.text }}</p>
-          <span class="time">{{ msg.time }}</span>
+          <span class="time">{{ new Date(msg.createdAt.seconds ? msg.createdAt.seconds * 1000 : msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
         </div>
       </div>
     </v-main>
 
-    <!-- Bottom Input -->
     <v-footer app absolute class="pa-2" color="white">
       <v-text-field
         v-model="newMessage"
@@ -74,7 +108,6 @@ const sendMessage = () => {
   padding: 16px;
   gap: 12px;
 }
-
 .message-bubble {
   max-width: 70%;
   padding: 10px 14px;
@@ -83,21 +116,18 @@ const sendMessage = () => {
   display: flex;
   flex-direction: column;
 }
-
 .message-bubble.me {
   align-self: flex-end;
   background: #1976d2;
   color: white;
   border-bottom-right-radius: 4px;
 }
-
 .message-bubble.other {
   align-self: flex-start;
   background: #f1f1f1;
   color: #000;
   border-bottom-left-radius: 4px;
 }
-
 .time {
   font-size: 0.7rem;
   opacity: 0.7;
