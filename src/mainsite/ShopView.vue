@@ -154,7 +154,7 @@ const isOwner = computed(() => {
       <v-toolbar-title class="top-text"><strong>Shop Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn icon v-if="!isOwner" @click="router.push('/chatview')">
-        <v-icon>mdi-chat</v-icon>
+        <v-icon>mdi-message-text</v-icon>
       </v-btn>
 
       <v-btn icon @click="shareProduct">
