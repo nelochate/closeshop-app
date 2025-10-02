@@ -12,7 +12,7 @@ const router = useRouter()
 const goBack = () => router.back()
 
 const route = useRoute()
-const shopId = ref<string | null>(route.params.id as string || null)
+const shopId = ref<string | null>((route.params.id as string) || null)
 
 // -------------------- States --------------------
 const currentShopId = ref<string | null>(null)
@@ -25,6 +25,9 @@ const saving = ref(false)
 const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref<'success' | 'error'>('success')
+
+//for set my location
+const fullAddress = ref('')
 
 // Shop info
 const shopName = ref('')
@@ -43,23 +46,91 @@ const address = {
 
 // Barangays list
 const barangays = [
-  'Agusan Pequeño','Ambago','Amparo','Ampayon','Anticala','Antongalon','Aupagan','Baan KM 3',
-  'Baan Riverside Poblacion (Barangay 20)','Babag','Bading Poblacion (Barangay 22)','Bancasi',
-  'Banza','Baobaoan','Basag','Bayanihan Poblacion (Barangay 27)','Bilay','Bitan-agan','Bit-os',
-  'Bobon','Bonbon','Bugabus','Bugsukan','Buhangin Poblacion (Barangay 19)','Cabcabon','Camayahan',
-  'Dagohoy Poblacion (Barangay 7)','Dankias','De Oro','Diego Silang Poblacion (Barangay 6)',
-  'Don Francisco','Doongan','Dulag','Dumalagan','Florida','Golden Ribbon Poblacion (Barangay 2)',
-  'Holy Redeemer Poblacion (Barangay 23)','Humabon Poblacion (Barangay 11)','Imadejas Poblacion (Barangay 24)',
-  'Jose Rizal Poblacion (Barangay 25)','Kinamlutan','Lapu-Lapu Poblacion (Barangay 8)','Lemon',
-  'Leon Kilat Poblacion (Barangay 13)','Libertad','Limaha Poblacion (Barangay 14)','Los Angeles',
-  'Lumbocan','Maguinda','Mahay','Mahogany Poblacion (Barangay 21)','Maibu','Mandamo','Manila de Bugabus',
-  'Maon Poblacion (Barangay 1)','Masao','Maug','New Society Village Poblacion (Barangay 26)',
-  'Nong-Nong','Obrero Poblacion (Barangay 18)','Ong Yiu Poblacion (Barangay 16)','Pagatpatan',
-  'Pangabugan','Pianing','Pigdaulan','Pinamanculan','Port Poyohon Poblacion (Barangay 17, New Asia)',
-  'Rajah Soliman Poblacion (Barangay 4)','Salvacion','San Ignacio Poblacion (Barangay 15)','San Mateo',
-  'Santo Niño','San Vicente','Sikatuna Poblacion (Barangay 10)','Silongan Poblacion (Barangay 5)',
-  'Sumile','Sumilihon','Tagabaca','Taguibo','Taligaman','Tandang Sora Poblacion (Barangay 12)',
-  'Tiniwisan','Tungao','Urduja Poblacion (Barangay 9)','Villa Kananga'
+  'Agusan Pequeño',
+  'Ambago',
+  'Amparo',
+  'Ampayon',
+  'Anticala',
+  'Antongalon',
+  'Aupagan',
+  'Baan KM 3',
+  'Baan Riverside Poblacion (Barangay 20)',
+  'Babag',
+  'Bading Poblacion (Barangay 22)',
+  'Bancasi',
+  'Banza',
+  'Baobaoan',
+  'Basag',
+  'Bayanihan Poblacion (Barangay 27)',
+  'Bilay',
+  'Bitan-agan',
+  'Bit-os',
+  'Bobon',
+  'Bonbon',
+  'Bugabus',
+  'Bugsukan',
+  'Buhangin Poblacion (Barangay 19)',
+  'Cabcabon',
+  'Camayahan',
+  'Dagohoy Poblacion (Barangay 7)',
+  'Dankias',
+  'De Oro',
+  'Diego Silang Poblacion (Barangay 6)',
+  'Don Francisco',
+  'Doongan',
+  'Dulag',
+  'Dumalagan',
+  'Florida',
+  'Golden Ribbon Poblacion (Barangay 2)',
+  'Holy Redeemer Poblacion (Barangay 23)',
+  'Humabon Poblacion (Barangay 11)',
+  'Imadejas Poblacion (Barangay 24)',
+  'Jose Rizal Poblacion (Barangay 25)',
+  'Kinamlutan',
+  'Lapu-Lapu Poblacion (Barangay 8)',
+  'Lemon',
+  'Leon Kilat Poblacion (Barangay 13)',
+  'Libertad',
+  'Limaha Poblacion (Barangay 14)',
+  'Los Angeles',
+  'Lumbocan',
+  'Maguinda',
+  'Mahay',
+  'Mahogany Poblacion (Barangay 21)',
+  'Maibu',
+  'Mandamo',
+  'Manila de Bugabus',
+  'Maon Poblacion (Barangay 1)',
+  'Masao',
+  'Maug',
+  'New Society Village Poblacion (Barangay 26)',
+  'Nong-Nong',
+  'Obrero Poblacion (Barangay 18)',
+  'Ong Yiu Poblacion (Barangay 16)',
+  'Pagatpatan',
+  'Pangabugan',
+  'Pianing',
+  'Pigdaulan',
+  'Pinamanculan',
+  'Port Poyohon Poblacion (Barangay 17, New Asia)',
+  'Rajah Soliman Poblacion (Barangay 4)',
+  'Salvacion',
+  'San Ignacio Poblacion (Barangay 15)',
+  'San Mateo',
+  'Santo Niño',
+  'San Vicente',
+  'Sikatuna Poblacion (Barangay 10)',
+  'Silongan Poblacion (Barangay 5)',
+  'Sumile',
+  'Sumilihon',
+  'Tagabaca',
+  'Taguibo',
+  'Taligaman',
+  'Tandang Sora Poblacion (Barangay 12)',
+  'Tiniwisan',
+  'Tungao',
+  'Urduja Poblacion (Barangay 9)',
+  'Villa Kananga',
 ]
 
 // -------------------- Map --------------------
@@ -80,12 +151,28 @@ const initMap = () => {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  shopMarker = L.marker([latitude.value ?? 8.9489, longitude.value ?? 125.5406], { draggable: true }).addTo(map.value)
+  // Initial marker
+  shopMarker = L.marker([latitude.value ?? 8.9489, longitude.value ?? 125.5406], {
+    draggable: true,
+  }).addTo(map.value)
+
+  // Drag event
   shopMarker.on('dragend', async (e) => {
     const pos = (e.target as L.Marker).getLatLng()
     latitude.value = pos.lat
     longitude.value = pos.lng
     await saveCoordinates(pos.lat, pos.lng)
+    await reverseGeocode(pos.lat, pos.lng)
+  })
+
+  // 👇 Add map click event
+  map.value.on('click', async (e: L.LeafletMouseEvent) => {
+    const { lat, lng } = e.latlng
+    latitude.value = lat
+    longitude.value = lng
+    shopMarker?.setLatLng([lat, lng]) // move marker
+    await saveCoordinates(lat, lng)
+    await reverseGeocode(lat, lng) // auto-fill address fields
   })
 }
 
@@ -101,7 +188,10 @@ const showSnackbar = (message: string, color: 'success' | 'error' = 'success') =
 // -------------------- Image Picker --------------------
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
     const photo = await Camera.getPhoto({
@@ -130,7 +220,10 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     if (pickerTarget.value === 'physical') {
       physicalUrl.value = newUrl
       if (currentShopId.value) {
-        await supabase.from('shops').update({ physical_store: newUrl }).eq('id', currentShopId.value)
+        await supabase
+          .from('shops')
+          .update({ physical_store: newUrl })
+          .eq('id', currentShopId.value)
       }
     } else {
       avatarUrl.value = newUrl
@@ -165,7 +258,6 @@ const saveCoordinates = async (lat: number, lng: number) => {
     showSnackbar('Failed to update location', 'error')
   }
 }
-
 const getLocation = () => {
   if (!navigator.geolocation) {
     showSnackbar('Geolocation not supported', 'error')
@@ -178,12 +270,13 @@ const getLocation = () => {
       map.value?.setView([latitude.value, longitude.value], 17)
       shopMarker?.setLatLng([latitude.value, longitude.value])
       await saveCoordinates(latitude.value, longitude.value)
+      await reverseGeocode(latitude.value, longitude.value) // this will update the text fields
     },
     (err) => {
       console.error(err)
       showSnackbar('Failed to get location', 'error')
     },
-    { enableHighAccuracy: true, timeout: 10000 }
+    { enableHighAccuracy: true, timeout: 10000 },
   )
 }
 
@@ -193,13 +286,23 @@ const meetUpDetails = ref('')
 
 const saveShop = async () => {
   if (saving.value) return
+
+  // Force user to set location if they typed address
+  if (!latitude.value || !longitude.value) {
+    showSnackbar('Please drag/tap on the map to set your shop location', 'error')
+    return
+  }
+
   saving.value = true
   try {
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
-    const lat = latitude.value ?? 8.9489
-    const lng = longitude.value ?? 125.5406
+    const lat = latitude.value
+    const lng = longitude.value
 
     const shopData = {
       owner_id: user.id,
@@ -221,15 +324,11 @@ const saveShop = async () => {
       region: 'CARAGA',
       delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
+      detected_address: fullAddress.value || null
     }
-
     let result
     if (!currentShopId.value) {
-      const { data, error } = await supabase
-        .from('shops')
-        .insert(shopData)
-        .select()
-        .single()
+      const { data, error } = await supabase.from('shops').insert(shopData).select().single()
       if (error) throw error
       currentShopId.value = data.id
       result = data
@@ -265,11 +364,7 @@ onMounted(async () => {
   initMap()
 
   if (shopId.value) {
-    const { data, error } = await supabase
-      .from('shops')
-      .select('*')
-      .eq('id', shopId.value)
-      .single()
+    const { data, error } = await supabase.from('shops').select('*').eq('id', shopId.value).single()
 
     if (error || !data) return
 
@@ -301,14 +396,67 @@ onMounted(async () => {
     }
   }
 })
+
+//for search function
+const searchQuery = ref('')
+
+const searchPlace = async () => {
+  if (!searchQuery.value) return
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery.value)}`,
+    )
+    const results = await res.json()
+    if (results.length > 0) {
+      const { lat, lon, display_name } = results[0]
+      latitude.value = parseFloat(lat)
+      longitude.value = parseFloat(lon)
+      map.value?.setView([latitude.value, longitude.value], 17)
+      shopMarker?.setLatLng([latitude.value, longitude.value])
+      showSnackbar(`Found: ${display_name}`, 'success')
+    } else {
+      showSnackbar('No results found', 'error')
+    }
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Search failed', 'error')
+  }
+}
+
+// a revere geocode function
+const reverseGeocode = async (lat: number, lng: number) => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
+    )
+    const data = await res.json()
+    if (data && data.address) {
+      // Fill separate fields
+      address.street.value = data.address.road || ''
+      address.house_no.value = data.address.house_number || ''
+      address.postal.value = data.address.postcode || ''
+      address.building.value = data.address.building || ''
+      address.barangay.value =
+        data.address.suburb || data.address.village || data.address.neighbourhood || ''
+
+      // Store full display name
+      fullAddress.value = data.display_name || ''
+
+      // ✅ Snackbar with detected address
+      showSnackbar(`Detected address: ${fullAddress.value}`, 'success')
+    }
+  } catch (err) {
+    console.error(err)
+    showSnackbar('Failed to fetch address', 'error')
+  }
+}
+
 </script>
 
 <template>
   <v-app>
     <v-app-bar flat color="transparent">
-      <v-btn variant="text" @click="goBack">
-        <v-icon start>mdi-arrow-left</v-icon> Back
-      </v-btn>
+      <v-btn variant="text" @click="goBack"> <v-icon start>mdi-arrow-left</v-icon> Back </v-btn>
     </v-app-bar>
 
     <v-main>
@@ -324,7 +472,12 @@ onMounted(async () => {
           icon
           color="primary"
           :loading="uploading"
-          @click="() => { pickerTarget = 'logo'; showPicker = true }"
+          @click="
+            () => {
+              pickerTarget = 'logo'
+              showPicker = true
+            }
+          "
           class="edit-btn"
         >
           <v-icon>mdi-camera</v-icon>
@@ -341,7 +494,12 @@ onMounted(async () => {
           icon
           color="primary"
           :loading="uploading"
-          @click="() => { pickerTarget = 'physical'; showPicker = true }"
+          @click="
+            () => {
+              pickerTarget = 'physical'
+              showPicker = true
+            }
+          "
           class="edit-btn"
         >
           <v-icon>mdi-camera</v-icon>
@@ -382,13 +540,36 @@ onMounted(async () => {
       <v-text-field v-model="address.house_no.value" label="House No." outlined />
       <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
+      <v-divider>or</v-divider>
+<h4>Please drag/tap your location in the map to ensure accurate display</h4>
       <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">Toggle Map Fullscreen</v-btn>
+      <v-text-field
+        v-model="searchQuery"
+        label="Search place"
+        outlined
+        append-inner-icon="mdi-magnify"
+        @keyup.enter="searchPlace"
+      />
+      <v-btn color="primary" @click="searchPlace">Search</v-btn>
       <div id="map" class="map">
         <v-btn icon @click="getLocation" class="locate-btn">
           <v-icon>mdi-crosshairs-gps</v-icon>
         </v-btn>
-      </div>
 
+        <v-btn color="secondary" @click="() => saveCoordinates(latitude.value!, longitude.value!)">
+          Save this location
+        </v-btn>
+      </div>
+      <v-btn color="primary" @click="getLocation">Set my location as shop address</v-btn>
+
+      <!-- New field to display full address -->
+      <v-text-field
+        v-if="fullAddress"
+        v-model="fullAddress"
+        label="Detected Address"
+        outlined
+        readonly
+      />
       <v-btn color="primary" :loading="saving" @click="saveShop">
         {{ saving ? 'Saving...' : 'Save Shop' }}
       </v-btn>
