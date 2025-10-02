@@ -8,15 +8,7 @@ const activeTab = ref('account')
 
 // Router and store
 const router = useRouter()
-<<<<<<< HEAD
-const avatarUrl = ref<string | null>(null)
-const uploading = ref(false)
-const showPicker = ref(false) // bottom sheet control
-import { useAuthUserStore } from '@/stores/authUser'
-
-=======
 const authStore = useAuthUserStore()
->>>>>>> dev-api
 
 // Reactive state
 const avatarUrl = ref(null)   // User avatar image URL
@@ -286,13 +278,8 @@ const selectedSection = ref(purchaseSections[0])
   flex-direction: column;
   gap: 6px;
   min-width: 0;
-<<<<<<< HEAD
-  align-items: flex-start; /* keep left aligned */
- text-align: left;
-=======
   text-align: left;
   flex: 1;
->>>>>>> dev-api
 }
 
 .name {
