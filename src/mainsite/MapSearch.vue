@@ -9,7 +9,7 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 
 const activeTab = ref('map')
 
-// Fix marker icons (otherwise they don’t show in build)
+// ✅ Fix Leaflet marker icons
 import iconUrl from 'leaflet/dist/images/marker-icon.png'
 import iconRetinaUrl from 'leaflet/dist/images/marker-icon-2x.png'
 import shadowUrl from 'leaflet/dist/images/marker-shadow.png'
@@ -43,15 +43,14 @@ const onSearch = () => {
 }
 
 /**
- * Fetch shops from Supabase near the user’s location
- * This example fetches all shops and you can later filter by distance
+ * Fetch shops from Supabase
  */
 const fetchShops = async () => {
   try {
     loading.value = true
     const { data, error } = await supabase
       .from('shops')
-      .select('id, business_name, latitude, longitude, logo_url')
+      .select('id, business_name, latitude, longitude, physical_store') // 👈 use physical_store not logo
 
     if (error) throw error
     shops.value = data || []
@@ -70,19 +69,25 @@ const fetchShops = async () => {
 const plotShops = () => {
   if (!map.value) return
 
-  // Clear old markers
-  shopMarkers.forEach((m) => m.remove())
+  // Clear old markers safely
+  shopMarkers.forEach((m) => {
+    if (map.value?.hasLayer(m)) {
+      map.value.removeLayer(m)  // safer than m.remove()
+    }
+  })
   shopMarkers = []
 
   shops.value.forEach((shop) => {
     if (!shop.latitude || !shop.longitude) return
 
+    const imageUrl = shop.physical_store || shop.logo_url || 'https://via.placeholder.com/80'
+
     const marker = L.marker([shop.latitude, shop.longitude])
       .addTo(map.value!)
       .bindPopup(`
         <div style="text-align:center;">
-          <img src="${shop.logo_url || 'https://via.placeholder.com/80'}"
-               alt="logo" width="60" height="60" style="border-radius:50%;" />
+          <img src="${imageUrl}"
+               alt="shop image" width="80" height="80" style="border-radius:8px; object-fit:cover;" />
           <p style="margin:5px 0;"><strong>${shop.business_name}</strong></p>
           <button id="view-${shop.id}"
                   style="padding:6px 12px; background:#438fda; color:#fff; border:none; border-radius:6px; cursor:pointer;">
@@ -91,13 +96,13 @@ const plotShops = () => {
         </div>
       `)
 
-    // Handle button click inside popup
+    // ✅ Re-bind event when popup opens
     marker.on('popupopen', () => {
       const btn = document.getElementById(`view-${shop.id}`)
       if (btn) {
-        btn.addEventListener('click', () => {
+        btn.onclick = () => {
           router.push(`/shop/${shop.id}`)
-        })
+        }
       }
     })
 
@@ -106,17 +111,70 @@ const plotShops = () => {
 }
 
 onMounted(async () => {
+  if (Capacitor.getPlatform() !== 'web') {
+    await requestPermission()
+  }
+
+  // ✅ Initialize map
+  map.value = L.map('map').setView([8.95, 125.53], 13)
+
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '© OpenStreetMap contributors',
+  }).addTo(map.value)
+
+  // ✅ Wait until map is ready before fetching shops
+  map.value.whenReady(async () => {
+    await startWatching()
+    await fetchShops()
+  })
+})
+
+// Update marker when location changes
+let recenterTimeout: number | null = null
+
+watch([latitude, longitude], ([lat, lng]) => {
+  if (!map.value || lat === null || lng === null) return
+
+  // Update user marker immediately
+  if (userMarker) {
+    userMarker.setLatLng([lat, lng])
+  } else {
+    userMarker = L.marker([lat, lng])
+      .addTo(map.value!)
+      .bindPopup('You are here')
+      .openPopup()
+  }
+
+  // Debounce map.setView
+  if (recenterTimeout) clearTimeout(recenterTimeout)
+  recenterTimeout = window.setTimeout(() => {
+    try {
+      map.value!.setView([lat, lng], 15, { animate: true })
+    } catch (err) {
+      console.warn('⚠️ Leaflet setView failed:', err)
+    }
+  }, 1000) // wait 1 second after last GPS update
+})
+
+
+// ✅ Cleanup map + watchers when leaving page
+onMounted(async () => {
   // ✅ Request permission only on native
   if (Capacitor.getPlatform() !== 'web') {
     await requestPermission()
   }
 
   // Initialize map
-  map.value = L.map('map').setView([8.95, 125.53], 13)
+  map.value = L.map('map')
+
+  // ✅ Wait until map is ready before setting view
+  map.value.whenReady(() => {
+    map.value!.setView([8.95, 125.53], 13)
+  })
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
-  }).addTo(map.value)
+  }).addTo(map.value!)
 
   // Start tracking user location
   await startWatching()
@@ -125,32 +183,11 @@ onMounted(async () => {
   await fetchShops()
 })
 
-// Update marker when location changes
-watch([latitude, longitude], ([lat, lng]) => {
-  if (!map.value || lat === null || lng === null) return
-
-  map.value.setView([lat, lng], 15)
-
-  if (userMarker) {
-    userMarker.setLatLng([lat, lng])
-  } else {
-    userMarker = L.marker([lat, lng])
-      .addTo(map.value)
-      .bindPopup('You are here')
-      .openPopup()
-  }
-})
-
-// cleanup tracking when leaving page
-onUnmounted(() => {
-  stopWatching()
-})
 </script>
 
 <template>
   <v-app>
     <v-app-bar color="#3f83c7" flat>
-      <!-- Search -->
       <v-text-field
         v-model="search"
         label="Search..."
@@ -164,9 +201,6 @@ onUnmounted(() => {
           <v-btn icon @click="onSearch">
             <v-icon>mdi-magnify</v-icon>
           </v-btn>
-          <v-btn icon @click="goNotifications">
-            <v-icon>mdi-bell-outline</v-icon>
-          </v-btn>
         </template>
       </v-text-field>
     </v-app-bar>
@@ -174,7 +208,6 @@ onUnmounted(() => {
     <v-main>
       <!-- Map -->
       <div id="map">
-        <!-- Manual refresh -->
         <v-btn icon @click="getLocation" class="locate-btn">
           <v-icon>mdi-crosshairs-gps</v-icon>
         </v-btn>
@@ -189,7 +222,6 @@ onUnmounted(() => {
       </v-alert>
     </v-main>
 
-    <!-- Reusable BottomNav -->
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
@@ -198,6 +230,7 @@ onUnmounted(() => {
 #map {
   width: 100%;
   height: calc(100vh - 64px);
+  position: relative;
 }
 
 .locate-btn {
@@ -205,5 +238,7 @@ onUnmounted(() => {
   bottom: 20px;
   right: 20px;
   z-index: 1000;
+  background: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
 </style>
