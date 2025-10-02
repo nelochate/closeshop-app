@@ -44,7 +44,6 @@ const notifications = ref([
     <v-app-bar flat elevation="0" color="transparent">
       <v-btn variant="text" @click="goBack">
         <v-icon start>mdi-arrow-left</v-icon>
-        Back
       </v-btn>
       <v-toolbar-title class="font-bold">
         <strong>Notification</strong>

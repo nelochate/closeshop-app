@@ -1,121 +1,415 @@
-<script setup lang="ts">
-import { onMounted, ref } from 'vue'
-import { useGeolocation } from '@/composables/useGeolocation'
+<script setup lang="js">
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAuthUserStore } from '@/stores/authUser'
+import BottomNav from '@/common/layout/BottomNav.vue'
+import { supabase } from '@/utils/supabase'
 
-const authStore = useAuthUserStore()
-
+const router = useRouter()
+const activeTab = ref('home')
 const search = ref('')
 
-const onSearch = () => {
-  console.log('Searching for:', search.value)
+const products = ref([])
+const nearby = ref([])
+const loading = ref(true)
+const errorMsg = ref('')
+
+const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
+
+// ✅ Helper: normalize image field
+function extractImage(main_img_urls) {
+  if (!main_img_urls) return PLACEHOLDER_IMG
+  if (Array.isArray(main_img_urls) && main_img_urls.length) return main_img_urls[0]
+  if (typeof main_img_urls === 'string') {
+    try {
+      const parsed = JSON.parse(main_img_urls)
+      if (Array.isArray(parsed) && parsed.length) return parsed[0]
+    } catch {
+      return main_img_urls // plain string url
+    }
+  }
+  return PLACEHOLDER_IMG
 }
 
-// router instance
-const router = useRouter()
-
-// Navigation functions
-const goHome = () => router.push('/homepage')
-const goCart = () => router.push('/cartview')
-const goChat = () => router.push('/messageview')
-const goMap = () => router.push('/mapsearch')
-const goNotifications = () => router.push('/notificationview')
-const goAccount = () => router.push('/profileview')
-
-// Import location composable
-const { latitude, longitude, error, requestPermission, getLocation } = useGeolocation()
-
-onMounted(async () => {
-  await requestPermission()
-  await getLocation()
-})
-/*
-const handleLogout = async () => {
+// ✅ Fetch Shops
+async function fetchShops() {
   try {
-    await authStore.signOut()
-    router.push({ name: 'login' }) // ✅ always go back to login
-  } catch (error) {
-    console.error('Logout failed:', error)
-    alert('Something went wrong while logging out.')
+    const { data, error } = await supabase
+      .from('shops')
+      .select('id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region')
+      .order('business_name')
+
+    if (error) throw error
+
+    nearby.value = (data || []).map(s => ({
+      id: s.id,
+      title: s.business_name,
+      img: s.physical_store || PLACEHOLDER_IMG,
+      logo: s.logo_url,
+      address: [s.building, s.street, s.barangay, s.city, s.province, s.region].filter(Boolean).join(', ')
+    }))
+  } catch (err) {
+    console.error('fetchShops error:', err)
+    errorMsg.value = err.message
+    nearby.value = []
   }
 }
-  */
+
+// ✅ Fetch Products (with sold count + real price)
+async function fetchProducts() {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, prod_name, price, main_img_urls, shop_id, sold')
+
+    if (error) throw error
+
+    products.value = (data || []).map(p => ({
+      id: p.id,
+      title: p.prod_name || 'Untitled product',
+      price: p.price, // 👈 exact seller price
+      img: extractImage(p.main_img_urls),
+      sold: p.sold || 0 // 👈 fallback if null
+    }))
+  } catch (err) {
+    console.error('fetchProducts error:', err)
+    errorMsg.value = err.message
+    products.value = []
+  }
+}
+
+// ✅ Lifecycle
+onMounted(async () => {
+  loading.value = true
+  errorMsg.value = ''
+  await Promise.all([fetchShops(), fetchProducts()])
+  loading.value = false
+})
+
+// ✅ Handlers
+const onSearch = () => {
+  if (!search.value.trim()) return
+  router.push({ name: 'search', query: { q: search.value.trim() } })
+}
+const seeMoreNearby = () => router.push('/mapsearch')
+const goNotifications = () => router.push('/notificationview')
+const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
+const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
 </script>
 
 <template>
   <v-app>
-    <!-- Top Navigation -->
-    <v-app-bar class="top-nav" elevation="0" flat color="#5ca3eb">
-      <div class="m-10">
-        <v-text-field
-          v-model="search"
-          label="Search..."
-          hide-details
-          density="comfortable"
-          variant="outlined"
-          class="search-bar"
-          @keyup.enter="onSearch"
-        >
-          <template v-slot:append>
-            <v-btn icon @click="onSearch">
-              <v-icon>mdi-magnify</v-icon>
-            </v-btn>
-            <v-btn icon @click="goNotifications">
-              <v-icon>mdi-bell-outline</v-icon>
-            </v-btn>
-          </template>
-        </v-text-field>
-      </div>
-    </v-app-bar>
+    <v-main class="page">
+      <v-container class="py-4" style="max-width: 720px">
 
-    <!-- Main Content -->
-    <v-main class="app-main">
-      <v-card class="mx-auto my-8 pa-6" color="primary" elevation="2" max-width="400">
-        <h1 class="text-h4 text-center text-white font-weight-bold">testing 2.0</h1>
-      </v-card>
-     <!-- <v-btn color="error" @click="handleLogout">Logout</v-btn>-->
+        <!-- 🔎 Search + Notification -->
+        <v-sheet class="hero pa-4">
+          <div class="hero-row">
+            <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
+              density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
+              append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
+            <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
+              <v-icon size="22">mdi-bell-outline</v-icon>
+            </v-btn>
+          </div>
+        </v-sheet>
+
+        <!-- 🏬 Nearby Stores -->
+        <div class="section-header mt-6">
+          <h3 class="section-title">Nearby Stores</h3>
+          <button class="see-more" @click="seeMoreNearby">See more</button>
+        </div>
+
+        <div class="scroll-row">
+          <template v-if="loading">
+            <v-skeleton-loader v-for="i in 4" :key="'near-skel-' + i" type="image" class="item-card" />
+          </template>
+          <template v-else-if="nearby.length === 0">
+            <div class="empty-card">
+              <div class="empty-title">Nothing nearby yet</div>
+              <div class="empty-sub">Location-based results coming soon.</div>
+            </div>
+          </template>
+          <template v-else>
+            <div v-for="item in nearby" :key="item.id" class="item-card" @click="goToShop(item.id)">
+              <v-img :src="item.img" cover class="item-img" />
+
+              <!-- footer now contains meta -->
+              <div class="item-footer">
+                <v-avatar class="avatar-badge" size="20">
+                  <v-img :src="item.logo || PLACEHOLDER_IMG" />
+                </v-avatar>
+                <div class="item-title">{{ item.title }}</div>
+              </div>
+            </div>
+
+          </template>
+        </div>
+
+        <!-- 🛒 Products -->
+        <div class="section-header mt-6">
+          <h3 class="section-title">Browse Products</h3>
+        </div>
+
+        <template v-if="loading">
+          <div class="product-grid">
+            <v-skeleton-loader v-for="i in 6" :key="'prod-skel-' + i" type="image" class="product-card" />
+          </div>
+        </template>
+        <template v-else-if="products.length === 0">
+          <div class="empty-card">
+            <div class="empty-title">No products yet</div>
+            <div class="empty-sub">Products will appear here.</div>
+          </div>
+        </template>
+        <template v-else>
+          <div class="product-grid">
+            <div v-for="item in products" :key="item.id" class="product-card" @click="goToProduct(item.id)">
+              <v-img :src="item.img" class="product-img" cover />
+              <div class="product-info">
+                <div class="product-title">{{ item.title }}</div>
+                <div class="product-price">₱{{ Number(item.price).toFixed(2) }}</div>
+                <div class="product-sold">{{ item.sold }} sold</div>
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <!-- 🚨 Error -->
+        <v-alert v-if="errorMsg" class="mt-6" type="error" variant="tonal">
+          {{ errorMsg }}
+        </v-alert>
+      </v-container>
     </v-main>
 
     <!-- Bottom Navigation -->
-    <v-bottom-navigation class="bot-nav" height="64">
-      <v-btn value="home" @click="goHome">
-        <v-icon>mdi-home-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="cart" @click="goCart">
-        <v-icon>mdi-cart-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="map" @click="goMap">
-        <v-icon>mdi-search-web</v-icon>
-      </v-btn>
-
-      <v-btn value="chat" @click="goChat">
-        <v-icon>mdi-chat-outline</v-icon>
-      </v-btn>
-
-      <v-btn value="account" @click="goAccount">
-        <v-icon>mdi-account-check-outline</v-icon>
-      </v-btn>
-    </v-bottom-navigation>
+    <BottomNav v-model="activeTab" />
   </v-app>
 </template>
 
 <style scoped>
-
-
-.bot-nav {
-  background-color: #5ca3eb;
+.page {
+  background: #f5f7fa;
+  padding-bottom: 96px;
 }
 
-.search-bar {
-  max-width: 600px;
+.hero {
+  background: #e5f1f8;
+  border-radius: 14px;
+}
+
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-field {
   flex: 1;
 }
 
-.app-main {
-  padding: 16px;
-  margin-bottom: 64px; /* leave space above bottom nav */
+.search-field :deep(.v-field) {
+  background: #fff !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+}
+
+.search-field :deep(input) {
+  font-size: 14px;
+}
+
+.notif-btn {
+  width: 44px;
+  height: 44px;
+  min-width: 44px;
+  border-radius: 9999px;
+  background: #fff !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+}
+
+.notif-btn :deep(.v-icon) {
+  color: #111827;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-title {
+  font-size: 16px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.see-more {
+  background: transparent;
+  border: 0;
+  color: #6b7280;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.scroll-row {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding: 10px 2px 2px;
+  scroll-snap-type: x mandatory;
+}
+
+.scroll-row::-webkit-scrollbar {
+  display: none;
+}
+
+.item-card {
+  position: relative;
+  flex: 0 0 calc(33.333% - 12px);
+  height: 140px;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  background: #fff;
+  scroll-snap-align: start;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end; /* push footer to bottom */
+}
+
+.item-img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 0;
+}
+
+.item-footer {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: #4490dd;
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  z-index: 1;
+}
+
+.avatar-badge {
+  border: 2px solid #fff;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+  flex-shrink: 0;
+}
+
+.item-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+
+.item-meta {
+  position: absolute;
+  left: 36px;
+  right: 8px;
+  bottom: 6px;
+  color: #fff;
+}
+
+.item-sub {
+  font-size: 10px;
+  opacity: .9;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+}
+
+.empty-card {
+  width: 240px;
+  height: 124px;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 12px;
+}
+
+.empty-title {
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.empty-sub {
+  font-size: 12px;
+  color: #6b7280;
+}
+
+.mt-6 {
+  margin-top: 24px;
+}
+
+.product-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.product-card {
+  background: #fff;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+
+.product-card:hover {
+  transform: translateY(-2px);
+}
+
+.product-img {
+  width: 100%;
+  height: 160px;
+  object-fit: cover;
+}
+
+.product-info {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.product-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: #111827;
+  line-height: 1.3;
+  height: 32px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.product-price {
+  font-size: 14px;
+  font-weight: 700;
+  color: #e53935;
+}
+
+.product-sold {
+  font-size: 12px;
+  color: #6b7280;
 }
 </style>

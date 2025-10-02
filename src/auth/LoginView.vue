@@ -18,6 +18,8 @@ const showSuccess = ref(false) // Controls the visibility of the success message
 
 const isLoading = ref()
 
+
+
 // Login function using Supabase
 const login = async () => {
   isLoading.value = true
@@ -28,8 +30,8 @@ const login = async () => {
     })
 
     if (error) {
-      console.error('Login failed:', error.message)
-      errorMessage.value = 'Invalid credentials: ' + error.message
+      console.error('', error.message)
+      errorMessage.value = '' + error.message
       showError.value = true
 
       setTimeout(() => {
@@ -69,13 +71,13 @@ const login = async () => {
     }
 
     // Show success message
-    successMessage.value = 'Login successful! Redirecting...'
+    successMessage.value = 'Redirecting...'
     showSuccess.value = true
 
     setTimeout(() => {
       showSuccess.value = false
       router.push(redirectPath)
-    }, 2000) // quicker redirect
+    }, 2000)
   } catch (err) {
     console.error('Unexpected error:', err)
     errorMessage.value = 'Something went wrong, please try again.'
@@ -180,7 +182,8 @@ const loginWithFacebook = async () => {
             Sign In
           </v-btn>
 
-          <p class="forgot-link">Forgot Password</p>
+          <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
+
 
           <p class="register-link">
             Don’t have an account? <RouterLink to="/register">Register</RouterLink>
@@ -228,20 +231,20 @@ const loginWithFacebook = async () => {
   flex-direction: column;
   align-items: center;
   min-height: 100vh;
-  background: #f5f5f5; /* light background */
+  background: #f5f5f5;
   padding: 0;
 }
 
 .login-header {
-  background-color: #2e73b8; /* solid blue like your screenshot */
+  background-color: #2e73b8;
   color: #fff;
   width: 100%;
   height: 30%;
   padding: 3rem 2rem 5rem 2rem;
   position: relative;
-  border-bottom-left-radius: 40px; /* smooth curve if you want */
+  border-bottom-left-radius: 40px;
   overflow: hidden;
-  margin-bottom: 50px; /* pulls the header down */
+  margin-bottom: 50px;
 }
 
 .circle-deco {
@@ -272,7 +275,7 @@ const loginWithFacebook = async () => {
   padding: 2rem;
   width: 100%;
   max-width: 400px;
-  margin-top: -60px; /* pulls card upward into header */
+  margin-top: -60px;
 }
 
 .login-input {
@@ -288,17 +291,19 @@ const loginWithFacebook = async () => {
 }
 
 .forgot-link {
+  margin: 1rem 0;
+  font-size: 15px;
+  text-align: center;
+  color: #2e73b8f5;
+  font-weight: 580;
+}
+
+.register-link {
   margin-top: 0.8rem;
   font-size: 13px;
   color: #666;
   text-align: center;
   cursor: pointer;
-}
-
-.register-link {
-  margin: 1rem 0;
-  font-size: 14px;
-  text-align: center;
 }
 
 .divider {

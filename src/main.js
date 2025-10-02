@@ -7,6 +7,10 @@ import '@mdi/font/css/materialdesignicons.css'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 
+//import pwa elements
+import {defineCustomElements} from '@ionic/pwa-elements/loader';
+//initialize pwa elements
+defineCustomElements(window)
 // Vuetify
 import 'vuetify/styles'
 import { createVuetify } from 'vuetify'
@@ -23,6 +27,9 @@ const vuetify = createVuetify({
   components,
   directives,
 })
+
+
+
 
 // ✅ Use plugins in correct order
 app.use(pinia)
@@ -54,3 +61,25 @@ router.isReady().then(() => {
   console.error('Router failed to initialize:', error)
   app.mount('#app')
 })
+
+/*
+//for nominatim
+import express from 'express'
+import fetch from 'node-fetch'
+const app = express()
+
+app.get('/geocode', async (req, res) => {
+  const query = encodeURIComponent(req.query.q)
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${query}`
+
+  const response = await fetch(url, {
+    headers: {
+      'User-Agent': 'Closeshop/1.0 (your-email@example.com)' // Nominatim requires this
+    }
+  })
+  const data = await response.json()
+  res.json(data)
+})
+
+app.listen(3000)
+*/
