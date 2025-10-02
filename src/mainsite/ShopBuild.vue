@@ -324,6 +324,7 @@ const saveShop = async () => {
       region: 'CARAGA',
       delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
+      detected_address: fullAddress.value || null
     }
     let result
     if (!currentShopId.value) {
