@@ -18,6 +18,7 @@ import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import AddItem from '@/mainsite/AddItem.vue'
+import ChatView from '@/mainsite/ChatView.vue'
 
 // ✅ Define routes
 const routes = [
@@ -32,6 +33,13 @@ const routes = [
     component: MessageView,
     meta: { requiresAuth: true },
   },
+ {
+    path: '/chatview',
+    name: 'chatview',
+    component: ChatView,
+    meta: { requiresAuth: true },
+  },
+
   {
     path: '/profileview',
     name: 'profileview',
