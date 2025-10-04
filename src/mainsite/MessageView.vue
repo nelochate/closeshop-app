@@ -1,10 +1,10 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue"
-import { useRouter } from "vue-router"
-import BottomNav from "@/common/layout/BottomNav.vue"
-import { supabase } from "@/utils/supabase"
+import { ref, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import BottomNav from '@/common/layout/BottomNav.vue'
+import { supabase } from '@/utils/supabase'
 
-const activeTab = ref("chat")
+const activeTab = ref('chat')
 const router = useRouter()
 const goBack = () => router.back()
 
@@ -20,13 +20,13 @@ const fetchConversations = async () => {
 
   // Get all messages where I am sender OR receiver
   const { data, error } = await supabase
-    .from("messages")
-    .select("id, content, created_at, sender_id, receiver_id, is_read")
+    .from('messages')
+    .select('id, content, created_at, sender_id, receiver_id, is_read')
     .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-    .order("created_at", { ascending: false })
+    .order('created_at', { ascending: false })
 
   if (error) {
-    console.error("Error fetching messages:", error.message)
+    console.error('Error fetching messages:', error.message)
     return
   }
 
@@ -41,11 +41,11 @@ const fetchConversations = async () => {
       convMap.set(otherUserId, {
         id: msg.id,
         otherUserId,
-        sender: msg.sender_id === user.id ? "You" : msg.sender_id,
+        sender: msg.sender_id === user.id ? 'You' : msg.sender_id,
         lastMessage: msg.content,
         time: new Date(msg.created_at).toLocaleTimeString(),
         unread: !msg.is_read && msg.receiver_id === user.id,
-        avatar: "https://via.placeholder.com/48",
+        avatar: 'https://ui-avatars.com/api/?name=User',
       })
     }
   })
@@ -61,40 +61,35 @@ const subscribeMessages = async () => {
   if (!user) return
 
   supabase
-    .channel("realtime-messages")
-    .on(
-      "postgres_changes",
-      { event: "INSERT", schema: "public", table: "messages" },
-      (payload) => {
-        const newMsg = payload.new
-        const otherUserId = newMsg.sender_id === user.id ? newMsg.receiver_id : newMsg.sender_id
+    .channel('realtime-messages')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+      const newMsg = payload.new
+      const otherUserId = newMsg.sender_id === user.id ? newMsg.receiver_id : newMsg.sender_id
 
-        const existing = conversations.value.find((c) => c.otherUserId === otherUserId)
-        const latest = {
-          id: newMsg.id,
-          otherUserId,
-          sender: newMsg.sender_id === user.id ? "You" : newMsg.sender_id,
-          lastMessage: newMsg.content,
-          time: new Date(newMsg.created_at).toLocaleTimeString(),
-          unread: newMsg.receiver_id === user.id,
-          avatar: "https://via.placeholder.com/48",
-        }
-
-        if (existing) {
-          Object.assign(existing, latest)
-        } else {
-          conversations.value.unshift(latest)
-        }
+      const existing = conversations.value.find((c) => c.otherUserId === otherUserId)
+      const latest = {
+        id: newMsg.id,
+        otherUserId,
+        sender: newMsg.sender_id === user.id ? 'You' : newMsg.sender_id,
+        lastMessage: newMsg.content,
+        time: new Date(newMsg.created_at).toLocaleTimeString(),
+        unread: newMsg.receiver_id === user.id,
+        avatar: 'https://via.placeholder.com/48',
       }
-    )
+
+      if (existing) {
+        Object.assign(existing, latest)
+      } else {
+        conversations.value.unshift(latest)
+      }
+    })
     .subscribe()
 }
 
 // open a chat
 const openChat = (conv: any) => {
-  router.push({ name: "chatview", params: { id: conv.otherUserId } })
+  router.push({ name: 'chatview', params: { id: conv.otherUserId } })
 }
-
 
 onMounted(() => {
   // Fetch existing conversations
@@ -145,25 +140,22 @@ onMounted(() => {
             :class="{ unread: conv.unread }"
             @click="openChat(conv)"
           >
-            <!-- Avatar -->
-            <v-list-item-avatar>
+            <template #prepend>
               <v-avatar size="48">
                 <v-img :src="conv.avatar" alt="sender" />
               </v-avatar>
-            </v-list-item-avatar>
+            </template>
 
-            <!-- Message preview -->
-            <v-list-item-content>
-              <v-list-item-title>
-                <strong>{{ conv.sender }}</strong>
-              </v-list-item-title>
-              <v-list-item-subtitle>
-                {{ conv.lastMessage }}
-              </v-list-item-subtitle>
-            </v-list-item-content>
+            <v-list-item-title>
+              <strong>{{ conv.sender }}</strong>
+            </v-list-item-title>
+            <v-list-item-subtitle>
+              {{ conv.lastMessage }}
+            </v-list-item-subtitle>
 
-            <!-- Time -->
-            <div class="text-caption text-grey">{{ conv.time }}</div>
+            <template #append>
+              <div class="text-caption text-grey">{{ conv.time }}</div>
+            </template>
           </v-list-item>
         </v-list>
       </div>

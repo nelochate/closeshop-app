@@ -3,6 +3,8 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
+import { messaging } from '@/utils/firebase' // ✅ use centralized firebase setup
+import { getToken } from 'firebase/messaging' // for requesting permission
 
 const router = useRouter()
 const activeTab = ref('home')
@@ -24,7 +26,7 @@ function extractImage(main_img_urls) {
       const parsed = JSON.parse(main_img_urls)
       if (Array.isArray(parsed) && parsed.length) return parsed[0]
     } catch {
-      return main_img_urls // plain string url
+      return main_img_urls
     }
   }
   return PLACEHOLDER_IMG
@@ -45,7 +47,9 @@ async function fetchShops() {
       title: s.business_name,
       img: s.physical_store || PLACEHOLDER_IMG,
       logo: s.logo_url,
-      address: [s.building, s.street, s.barangay, s.city, s.province, s.region].filter(Boolean).join(', ')
+      address: [s.building, s.street, s.barangay, s.city, s.province, s.region]
+        .filter(Boolean)
+        .join(', ')
     }))
   } catch (err) {
     console.error('fetchShops error:', err)
@@ -54,7 +58,7 @@ async function fetchShops() {
   }
 }
 
-// ✅ Fetch Products (with sold count + real price)
+// ✅ Fetch Products
 async function fetchProducts() {
   try {
     const { data, error } = await supabase
@@ -66,14 +70,40 @@ async function fetchProducts() {
     products.value = (data || []).map(p => ({
       id: p.id,
       title: p.prod_name || 'Untitled product',
-      price: p.price, // 👈 exact seller price
+      price: p.price,
       img: extractImage(p.main_img_urls),
-      sold: p.sold || 0 // 👈 fallback if null
+      sold: p.sold || 0
     }))
   } catch (err) {
     console.error('fetchProducts error:', err)
     errorMsg.value = err.message
     products.value = []
+  }
+}
+
+// ✅ Request FCM token
+async function requestForToken() {
+  try {
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      console.warn('Notification permission denied.')
+      return null
+    }
+
+    // 👇 Replace with your Firebase VAPID key (found in Firebase Cloud Messaging settings)
+    const vapidKey = 'BOiw6_vllLo5TOjouOP8mMK_zhynZ8wakUg8ZgP_gfH9YwpUJ2ils7HCq15LBWpFq1pZvXGzye01pjUIDOjY6P8'
+
+    const token = await getToken(messaging, { vapidKey })
+    if (token) {
+      console.log('✅ FCM Token:', token)
+      return token
+    } else {
+      console.warn('No registration token available.')
+      return null
+    }
+  } catch (err) {
+    console.error('Error getting FCM token:', err)
+    return null
   }
 }
 
@@ -83,6 +113,19 @@ onMounted(async () => {
   errorMsg.value = ''
   await Promise.all([fetchShops(), fetchProducts()])
   loading.value = false
+
+  // ✅ Store FCM Token in Supabase
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return
+
+  const token = await requestForToken()
+  if (token) {
+    const { error } = await supabase
+      .from('user_fcm_tokens')
+      .upsert({ user_id: user.id, token }, { onConflict: 'user_id' })
+    if (error) console.error('Error saving FCM token:', error)
+    else console.log('✅ Token saved to Supabase')
+  }
 })
 
 // ✅ Handlers
@@ -93,20 +136,30 @@ const onSearch = () => {
 const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
-const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
+const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 </script>
 
 <template>
   <v-app>
     <v-main class="page">
       <v-container class="py-4" style="max-width: 720px">
-
         <!-- 🔎 Search + Notification -->
         <v-sheet class="hero pa-4">
           <div class="hero-row">
-            <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
-              density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
-              append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
+            <v-text-field
+              v-model="search"
+              class="search-field"
+              variant="solo"
+              rounded="pill"
+              hide-details
+              clearable
+              density="comfortable"
+              placeholder="Looking for something specific?"
+              prepend-inner-icon="mdi-magnify"
+              append-inner-icon="mdi-earth"
+              @keyup.enter="onSearch"
+              @click:prepend-inner="onSearch"
+            />
             <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
               <v-icon size="22">mdi-bell-outline</v-icon>
             </v-btn>
@@ -132,8 +185,6 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
           <template v-else>
             <div v-for="item in nearby" :key="item.id" class="item-card" @click="goToShop(item.id)">
               <v-img :src="item.img" cover class="item-img" />
-
-              <!-- footer now contains meta -->
               <div class="item-footer">
                 <v-avatar class="avatar-badge" size="20">
                   <v-img :src="item.logo || PLACEHOLDER_IMG" />
@@ -141,7 +192,6 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
                 <div class="item-title">{{ item.title }}</div>
               </div>
             </div>
-
           </template>
         </div>
 
@@ -174,18 +224,14 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
           </div>
         </template>
 
-        <!-- 🚨 Error -->
         <v-alert v-if="errorMsg" class="mt-6" type="error" variant="tonal">
           {{ errorMsg }}
         </v-alert>
       </v-container>
     </v-main>
-
-    <!-- Bottom Navigation -->
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
-
 <style scoped>
 .page {
   background: #f5f7fa;
