@@ -1,73 +1,110 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import BottomNav from '@/common/layout/BottomNav.vue'
-import { supabase } from '@/utils/supabase'
+import { ref, onMounted } from "vue"
+import { useRouter } from "vue-router"
+import BottomNav from "@/common/layout/BottomNav.vue"
+import { supabase } from "@/utils/supabase"
 
-const activeTab = ref('chat')
-
-// router instance
+const activeTab = ref("chat")
 const router = useRouter()
 const goBack = () => router.back()
 
 // state
-const messages = ref<any[]>([])
+const conversations = ref<any[]>([])
 
-// fetch messages from DB
-const fetchMessages = async () => {
+// fetch conversations (last message per user)
+const fetchConversations = async () => {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return
 
+  // Get all messages where I am sender OR receiver
   const { data, error } = await supabase
-    .from('messages')
-    .select('id, content, created_at, sender_id, receiver_id, is_read')
+    .from("messages")
+    .select("id, content, created_at, sender_id, receiver_id, is_read")
     .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-    .order('created_at', { ascending: false })
+    .order("created_at", { ascending: false })
 
   if (error) {
-    console.error('Error fetching messages:', error.message)
+    console.error("Error fetching messages:", error.message)
     return
   }
 
-  // Map results to your UI format
-  messages.value = data.map((msg) => ({
-    id: msg.id,
-    sender: msg.sender_id === user.id ? 'You' : msg.sender_id, // later: join with profiles
-    lastMessage: msg.content,
-    time: new Date(msg.created_at).toLocaleTimeString(),
-    unread: !msg.is_read && msg.receiver_id === user.id,
-    avatar: 'https://via.placeholder.com/48', // TODO: replace with user profile pic if available
-  }))
+  // Group messages by the "other user"
+  const convMap = new Map()
+
+  data.forEach((msg) => {
+    const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id
+
+    // only keep latest message per user
+    if (!convMap.has(otherUserId)) {
+      convMap.set(otherUserId, {
+        id: msg.id,
+        otherUserId,
+        sender: msg.sender_id === user.id ? "You" : msg.sender_id,
+        lastMessage: msg.content,
+        time: new Date(msg.created_at).toLocaleTimeString(),
+        unread: !msg.is_read && msg.receiver_id === user.id,
+        avatar: "https://via.placeholder.com/48",
+      })
+    }
+  })
+
+  conversations.value = Array.from(convMap.values())
 }
 
-// subscribe to realtime messages
-const subscribeMessages = () => {
+// subscribe to new messages
+const subscribeMessages = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
+
   supabase
-    .channel('messages')
+    .channel("realtime-messages")
     .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages' },
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages" },
       (payload) => {
-        console.log('New message:', payload.new)
         const newMsg = payload.new
-        messages.value.unshift({
+        const otherUserId = newMsg.sender_id === user.id ? newMsg.receiver_id : newMsg.sender_id
+
+        const existing = conversations.value.find((c) => c.otherUserId === otherUserId)
+        const latest = {
           id: newMsg.id,
-          sender: newMsg.sender_id,
+          otherUserId,
+          sender: newMsg.sender_id === user.id ? "You" : newMsg.sender_id,
           lastMessage: newMsg.content,
           time: new Date(newMsg.created_at).toLocaleTimeString(),
-          unread: true,
-          avatar: 'https://via.placeholder.com/48',
-        })
+          unread: newMsg.receiver_id === user.id,
+          avatar: "https://via.placeholder.com/48",
+        }
+
+        if (existing) {
+          Object.assign(existing, latest)
+        } else {
+          conversations.value.unshift(latest)
+        }
       }
     )
     .subscribe()
 }
 
+// open a chat
+const openChat = (conv: any) => {
+  router.push({ name: "chatview", params: { id: conv.otherUserId } })
+}
+
+
 onMounted(() => {
-  fetchMessages()
+  // Fetch existing conversations
+  fetchConversations()
+
+  // Subscribe to realtime updates
   subscribeMessages()
+
+  // 🔁 Refresh list every 15 seconds (optional but recommended)
+  setInterval(fetchConversations, 15000)
 })
 </script>
 
@@ -88,44 +125,45 @@ onMounted(() => {
 
     <v-main>
       <div class="messages-view">
-        <!-- If no messages -->
+        <!-- If no conversations -->
         <v-alert
-          v-if="messages.length === 0"
+          v-if="conversations.length === 0"
           type="info"
           border="start"
           color="primary"
           icon="mdi-information-outline"
         >
-          No messages yet!!
+          No conversations yet!
         </v-alert>
 
-        <!-- Otherwise show chat list -->
+        <!-- Otherwise show conversation list -->
         <v-list v-else>
           <v-list-item
-            v-for="msg in messages"
-            :key="msg.id"
+            v-for="conv in conversations"
+            :key="conv.id"
             class="message-item"
-            :class="{ unread: msg.unread }"
+            :class="{ unread: conv.unread }"
+            @click="openChat(conv)"
           >
             <!-- Avatar -->
             <v-list-item-avatar>
               <v-avatar size="48">
-                <v-img :src="msg.avatar" alt="sender" />
+                <v-img :src="conv.avatar" alt="sender" />
               </v-avatar>
             </v-list-item-avatar>
 
             <!-- Message preview -->
             <v-list-item-content>
               <v-list-item-title>
-                <strong>{{ msg.sender }}</strong>
+                <strong>{{ conv.sender }}</strong>
               </v-list-item-title>
               <v-list-item-subtitle>
-                {{ msg.lastMessage }}
+                {{ conv.lastMessage }}
               </v-list-item-subtitle>
             </v-list-item-content>
 
             <!-- Time -->
-            <div class="text-caption text-grey">{{ msg.time }}</div>
+            <div class="text-caption text-grey">{{ conv.time }}</div>
           </v-list-item>
         </v-list>
       </div>
@@ -144,7 +182,6 @@ onMounted(() => {
 .messages-view {
   padding: 16px;
 }
-
 .message-item {
   border-bottom: 1px solid #eee;
 }

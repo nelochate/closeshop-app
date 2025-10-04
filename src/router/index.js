@@ -1,6 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router' // Changed to createWebHistory
 
-
 import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
 import HomepageView from '@/mainsite/HomepageView.vue'
@@ -33,8 +32,14 @@ const routes = [
     component: MessageView,
     meta: { requiresAuth: true },
   },
- {
+  {
+    /*
     path: '/chatview',
+    name: 'chatview',
+    component: ChatView,
+    meta: { requiresAuth: true },
+    */
+    path: '/chatview/:id',
     name: 'chatview',
     component: ChatView,
     meta: { requiresAuth: true },
@@ -87,26 +92,26 @@ const routes = [
   {
     path: '/edit-profile',
     name: 'edit-profile',
-    component:() => import('@/mainsite/EditProfileview.vue'),
+    component: () => import('@/mainsite/EditProfileview.vue'),
     meta: { requiresAuth: true },
   },
 
   {
-  path: '/product/:id',
-  name: 'product-detail',
-  component: () => import('@/mainsite/ProductDetailView.vue'),
-  props: true
+    path: '/product/:id',
+    name: 'product-detail',
+    component: () => import('@/mainsite/ProductDetailView.vue'),
+    props: true,
   },
 
   {
-  path: '/shop/:id',
-  name: 'shop-view',
-  component: () => import('@/mainsite/ShopView.vue'),
-  props: true
+    path: '/shop/:id',
+    name: 'shop-view',
+    component: () => import('@/mainsite/ShopView.vue'),
+    props: true,
   },
   {
-    path:'/settings',
-    name:'settings',
+    path: '/settings',
+    name: 'settings',
     component: () => import('@/mainsite/SettingsView.vue'),
     meta: { requiresAuth: true },
   },
@@ -133,11 +138,10 @@ const routes = [
   },
 
   {
-  path: '/edit-address',
-  name: 'edit-address',
-  component: () => import('@/mainsite/edit/EditAddressView.vue')
+    path: '/edit-address',
+    name: 'edit-address',
+    component: () => import('@/mainsite/edit/EditAddressView.vue'),
   },
-
 
   // ✅ Catch-all route
   {
@@ -157,7 +161,7 @@ const router = createRouter({
       return savedPosition
     }
     return { top: 0 }
-  }
+  },
 })
 
 // ✅ Track if auth has been initialized
@@ -175,7 +179,14 @@ router.beforeEach(async (to, from, next) => {
 
     const isLoggedIn = authStore.isLoggedIn
 
-    console.log('Navigation:', to.path, 'Logged in:', isLoggedIn, 'Requires auth:', to.meta.requiresAuth)
+    console.log(
+      'Navigation:',
+      to.path,
+      'Logged in:',
+      isLoggedIn,
+      'Requires auth:',
+      to.meta.requiresAuth,
+    )
 
     // ✅ Skip auth check for routes that explicitly allow unauthenticated access
     if (to.meta.requiresAuth === false) {
