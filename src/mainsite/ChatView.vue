@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue"
+import { ref, onMounted, onUnmounted, nextTick, computed } from "vue"
 import { useRouter, useRoute } from "vue-router"
 import { supabase } from "@/utils/supabase"
 import { db } from "@/utils/firebase"
@@ -15,36 +15,64 @@ import {
 const router = useRouter()
 const route = useRoute()
 
-// Current logged-in user (Supabase)
+// current user + the other user (from /chatview/:id)
 const userId = ref<string | null>(null)
-// From route params: /chatview/:id
 const otherUserId = route.params.id as string
-console.log("Opening chat with:", otherUserId)
 
+// UI state
 const messages = ref<any[]>([])
 const newMessage = ref("")
 
-// Firestore chatId (combine both IDs sorted)
-const chatId = ref("")
-// Conversation row id in Supabase
-const conversationId = ref<string | null>(null)
+// ids
+const chatId = ref("")                // Firestore chat doc id (sorted pair)
+const conversationId = ref<string|null>(null) // Supabase conversation row id
+
+let stopMessages: null | (() => void) = null
+
+// helpers
+const isMe = (m: any) => m.senderId === userId.value
+
+const myInitial = computed(() =>
+  userId.value ? userId.value.slice(0, 2).toUpperCase() : "ME"
+)
+const otherInitial = computed(() =>
+  otherUserId ? otherUserId.slice(0, 2).toUpperCase() : "OT"
+)
+
+const formatTime = (createdAt: any) => {
+  // Firestore Timestamp has toDate(); if not, try Date
+  if (createdAt?.toDate) {
+    return createdAt.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+  if (createdAt) {
+    return new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  }
+  return ""
+}
+
+const scrollToBottom = async () => {
+  await nextTick()
+  const el = document.getElementById("chat-scroll")
+  if (el) el.scrollTop = el.scrollHeight
+}
 
 onMounted(async () => {
-  // Get current Supabase user
-  const {
-    data: { user },
-  } = await supabase.auth.getUser()
-  if (!user) return
+  // get current user
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return
+  userId.value = auth.user.id
 
-  userId.value = user.id
-  chatId.value = [user.id, otherUserId].sort().join("_")
+  // Firestore chat doc id: stable & shared
+  chatId.value = [userId.value, otherUserId].sort().join("_")
 
-  // ✅ Find or create a conversation in Supabase
+  // --- Find or create Supabase conversation (for long-term storage/queries)
+  // Use two filters joined with OR; do NOT put newlines in .or()
   const { data: conv, error } = await supabase
     .from("conversations")
     .select("id")
-  .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
-
+    .or(
+      `and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`
+    )
     .maybeSingle()
 
   if (error) console.error("Supabase error:", error)
@@ -52,126 +80,101 @@ onMounted(async () => {
   if (conv) {
     conversationId.value = conv.id
   } else {
-    const { data: newConv, error: insertError } = await supabase
+    const { data: newConv, error: insertErr } = await supabase
       .from("conversations")
-      .insert({ user1: user.id, user2: otherUserId })
+      .insert({ user1: userId.value, user2: otherUserId })
       .select("id")
       .single()
-
-    if (insertError) console.error("Error creating conversation:", insertError)
+    if (insertErr) console.error("Error creating conversation:", insertErr)
     conversationId.value = newConv?.id || null
   }
 
-  // ✅ Fetch Supabase chat history
-  if (conversationId.value) {
-    const { data: msgs, error: msgError } = await supabase
-      .from("messages")
-      .select("*")
-      .eq("conversation_id", conversationId.value)
-      .order("created_at", { ascending: true })
+  // --- Live Firestore feed (UI source of truth)
+  const q = query(
+    collection(db, "chats", chatId.value, "messages"),
+    orderBy("createdAt", "asc")
+  )
 
-    if (msgError) {
-      console.error("Error fetching messages:", msgError)
-    } else if (msgs) {
-      messages.value = msgs.map((m) => ({
-        id: m.id,
-        senderId: m.sender_id,
-        receiverId: m.receiver_id,
-        text: m.content,
-        createdAt: m.created_at ? new Date(m.created_at) : null,
-        isRead: m.is_read,
-      }))
-    }
-  }
-
-  // ✅ Subscribe to Firestore messages in this chat
-  if (chatId.value && chatId.value.trim() !== "") {
-    const q = query(
-      collection(db, "chats", chatId.value, "messages"),
-      orderBy("createdAt", "asc")
-    )
-    onSnapshot(q, (snapshot) => {
-      const liveMsgs = snapshot.docs.map((doc) => ({
-        id: doc.id,
-        ...doc.data(),
-      }))
-      // merge history + realtime (no duplicates if using Firestore only for new)
-     messages.value = liveMsgs
-
-    })
-  } else {
-    console.warn("chatId not ready, skipping Firestore listener")
-  }
+  stopMessages = onSnapshot(q, (snap) => {
+    messages.value = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
+    scrollToBottom()
+  })
 })
 
-// ✅ Send message
+onUnmounted(() => {
+  if (stopMessages) stopMessages()
+})
 
+// send message
 const sendMessage = async () => {
   if (!newMessage.value.trim() || !userId.value || !conversationId.value) return
 
   const msgData = {
-    senderId: userId.value,
+    senderId: userId.value!,
     receiverId: otherUserId,
     text: newMessage.value,
-    createdAt: serverTimestamp(),
+    createdAt: serverTimestamp(), // Firestore server time
     isRead: false,
   }
 
-  // 1️⃣ Save to Supabase
-  const { error: insertError } = await supabase.from("messages").insert({
+  // 1) Persist in Supabase
+  const { error: sErr } = await supabase.from("messages").insert({
     conversation_id: conversationId.value,
     sender_id: msgData.senderId,
     receiver_id: msgData.receiverId,
     content: msgData.text,
     is_read: msgData.isRead,
   })
+  if (sErr) console.error("Supabase insert error:", sErr)
 
-  if (insertError) {
-    console.error("Supabase message insert error:", insertError)
-  }
-
-  // 2️⃣ Save to Firestore (for realtime UI)
+  // 2) Realtime UI in Firestore
   await addDoc(collection(db, "chats", chatId.value, "messages"), msgData)
 
   newMessage.value = ""
+  scrollToBottom()
 }
-
 
 const goBack = () => router.back()
 </script>
 
 <template>
   <v-app>
-    <!-- Top Bar -->
     <v-app-bar flat color="primary" dark>
       <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title class="text-h6">Chat</v-toolbar-title>
     </v-app-bar>
+<v-main>
+  <div class="chat-container" ref="chatContainer">
+    <div
+      v-for="(msg, index) in messages"
+      :key="msg.id || index"
+      :class="['row', msg.senderId === userId ? 'me' : 'other']"
+    >
+      <!-- Avatar for the other user -->
+      <img
+        v-if="msg.senderId !== userId"
+        src="https://via.placeholder.com/32"
+        alt="avatar"
+        class="avatar"
+      />
 
-    <!-- Messages -->
-    <v-main>
-      <div class="chat-container">
-        <div
-          v-for="(msg, index) in messages"
-          :key="msg.id || index"
-          :class="['message-bubble', msg.senderId === userId?.value ? 'me' : 'other']"
-        >
-          <p class="text">{{ msg.text }}</p>
-          <span class="time">
-            {{
-              msg.createdAt?.toDate
-                ? msg.createdAt.toDate().toLocaleTimeString([], {
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  })
-                : (msg.createdAt ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
-            }}
-          </span>
-        </div>
+      <div :class="['message-bubble', msg.senderId === userId ? 'me' : 'other']">
+        <p class="text">{{ msg.text }}</p>
+        <span class="time">
+          {{
+            msg.createdAt?.toDate
+              ? msg.createdAt.toDate().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+              : (msg.createdAt
+                  ? new Date(msg.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                  : '')
+          }}
+        </span>
       </div>
-    </v-main>
+    </div>
+  </div>
+</v-main>
 
-    <!-- Bottom Input -->
+
     <v-footer app absolute class="pa-2" color="white">
       <v-text-field
         v-model="newMessage"
@@ -188,38 +191,73 @@ const goBack = () => router.back()
     </v-footer>
   </v-app>
 </template>
-
 <style scoped>
 .chat-container {
   display: flex;
   flex-direction: column;
   padding: 16px;
   gap: 12px;
+  background: linear-gradient(to bottom right, #f0f4ff, #ffffff);
+  height: calc(100vh - 120px);
+  overflow-y: auto;
 }
-.message-bubble {
-  max-width: 70%;
-  padding: 10px 14px;
-  border-radius: 16px;
-  font-size: 0.95rem;
+
+/* Rows for alignment */
+.row {
   display: flex;
-  flex-direction: column;
+  width: 100%;
+  align-items: flex-end;
 }
+
+.row.me {
+  justify-content: flex-end;
+}
+
+.row.other {
+  justify-content: flex-start;
+}
+
+/* Message bubbles */
+.message-bubble {
+  padding: 10px 14px;
+  border-radius: 18px;
+  max-width: 75%;
+  line-height: 1.4;
+  font-size: 15px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
+  position: relative;
+  transition: 0.2s ease;
+}
+
+/* My (logged-in user) messages */
 .message-bubble.me {
-  align-self: flex-end;
-  background: #1976d2;
+  background-color: #007aff;
   color: white;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 6px;
 }
+
+/* Other user's messages */
 .message-bubble.other {
-  align-self: flex-start;
-  background: #f1f1f1;
+  background-color: #ffffff;
   color: #000;
-  border-bottom-left-radius: 4px;
+  border-bottom-left-radius: 6px;
 }
+
+/* Optional avatar for other user */
+.avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  margin-right: 8px;
+  object-fit: cover;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+}
+
+/* Time text */
 .time {
   font-size: 0.7rem;
-  opacity: 0.7;
+  opacity: 0.6;
   margin-top: 4px;
-  align-self: flex-end;
+  text-align: right;
 }
 </style>
