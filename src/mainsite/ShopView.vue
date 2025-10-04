@@ -11,7 +11,6 @@ const router = useRouter()
 const shopId = route.params.id as string
 const activeTab = ref(null)
 
-
 //for chat feature
 
 const user = ref<any>(null)
@@ -139,9 +138,8 @@ const loadUser = async () => {
 }
 const isOwner = computed(() => {
   if (!user.value || !shop.value) return false
-  return user.value.id === shop.value.owner_id  // adjust column name if different
+  return user.value.id === shop.value.owner_id // adjust column name if different
 })
-
 </script>
 
 <template>
@@ -153,7 +151,11 @@ const isOwner = computed(() => {
       </v-btn>
       <v-toolbar-title class="top-text"><strong>Shop Details</strong></v-toolbar-title>
       <v-spacer />
-      <v-btn icon v-if="!isOwner" @click="router.push('/chatview')">
+      <v-btn
+        icon
+        v-if="!isOwner && shop?.owner_id"
+        @click="router.push({ name: 'chatview', params: { id: shop.owner_id } })"
+      >
         <v-icon>mdi-message-text</v-icon>
       </v-btn>
 

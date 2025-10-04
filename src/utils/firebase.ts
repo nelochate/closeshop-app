@@ -1,6 +1,5 @@
 // utils/firebase.ts
 
-// Import Firebase core + services you need
 import { initializeApp } from "firebase/app";
 import { getAnalytics } from "firebase/analytics";
 import { getFirestore } from "firebase/firestore";
@@ -12,7 +11,7 @@ const firebaseConfig = {
   apiKey: "AIzaSyABKTVJWXTSg21msTX5xBAYUvUSdufFn9A",
   authDomain: "closeshop-dc7a7.firebaseapp.com",
   projectId: "closeshop-dc7a7",
-  storageBucket: "closeshop-dc7a7.firebasestorage.app",
+  storageBucket: "closeshop-dc7a7.appspot.com", // ✅ FIXED
   messagingSenderId: "867069191023",
   appId: "1:867069191023:web:b3ba5f7b425fc57d5fbe9a",
   measurementId: "G-148YXKWW9G"
@@ -29,3 +28,4 @@ const messaging = getMessaging(app);
 
 // ✅ Export them for use in your app
 export { app, analytics, db, auth, messaging };
+export default app;
