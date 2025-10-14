@@ -42,15 +42,13 @@ const onSearch = () => {
   console.log('Searching for:', search.value)
 }
 
-/**
- * Fetch shops from Supabase
- */
+
 const fetchShops = async () => {
   try {
     loading.value = true
     const { data, error } = await supabase
       .from('shops')
-      .select('id, business_name, latitude, longitude, physical_store') // 👈 use physical_store not logo
+      .select('id, business_name, latitude, longitude, physical_store, logo_url') // 👈 added logo_url
 
     if (error) throw error
     shops.value = data || []
@@ -64,7 +62,7 @@ const fetchShops = async () => {
 }
 
 /**
- * Plot shop markers on the map
+ * ✅ Plot shop markers on the map
  */
 const plotShops = () => {
   if (!map.value) return
@@ -72,7 +70,7 @@ const plotShops = () => {
   // Clear old markers safely
   shopMarkers.forEach((m) => {
     if (map.value?.hasLayer(m)) {
-      map.value.removeLayer(m)  // safer than m.remove()
+      map.value.removeLayer(m)
     }
   })
   shopMarkers = []
@@ -96,7 +94,7 @@ const plotShops = () => {
         </div>
       `)
 
-    // ✅ Re-bind event when popup opens
+    // ✅ Bind popup event to route navigation
     marker.on('popupopen', () => {
       const btn = document.getElementById(`view-${shop.id}`)
       if (btn) {
@@ -110,32 +108,35 @@ const plotShops = () => {
   })
 }
 
+/**
+ * ✅ Lifecycle
+ */
 onMounted(async () => {
   if (Capacitor.getPlatform() !== 'web') {
     await requestPermission()
   }
 
-  // ✅ Initialize map
+  // Initialize map
   map.value = L.map('map').setView([8.95, 125.53], 13)
 
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  // ✅ Wait until map is ready before fetching shops
+  // Wait until map is ready before fetching shops and starting GPS
   map.value.whenReady(async () => {
     await startWatching()
     await fetchShops()
   })
 })
 
-// Update marker when location changes
+// ✅ Update user marker when location changes
 let recenterTimeout: number | null = null
 
 watch([latitude, longitude], ([lat, lng]) => {
-  if (!map.value || lat === null || lng === null) return
+  if (!map.value || !lat || !lng) return  // ✅ skip if map destroyed or no coords
+  if (!map.value._loaded) return          // ✅ skip if map not ready yet
 
-  // Update user marker immediately
   if (userMarker) {
     userMarker.setLatLng([lat, lng])
   } else {
@@ -145,42 +146,34 @@ watch([latitude, longitude], ([lat, lng]) => {
       .openPopup()
   }
 
-  // Debounce map.setView
+  // Debounced re-center
   if (recenterTimeout) clearTimeout(recenterTimeout)
   recenterTimeout = window.setTimeout(() => {
-    try {
-      map.value!.setView([lat, lng], 15, { animate: true })
-    } catch (err) {
-      console.warn('⚠️ Leaflet setView failed:', err)
+    if (map.value && map.value._loaded) {  // ✅ ensure map still exists
+      try {
+        map.value.setView([lat, lng], 15, { animate: true })
+      } catch (err) {
+        console.warn('⚠️ Leaflet setView failed:', err)
+      }
     }
-  }, 1000) // wait 1 second after last GPS update
+  }, 1000)
 })
 
 
-// ✅ Cleanup map + watchers when leaving page
-onMounted(async () => {
-  // ✅ Request permission only on native
-  if (Capacitor.getPlatform() !== 'web') {
-    await requestPermission()
+// ✅ Cleanup when unmounted
+onUnmounted(() => {
+  stopWatching()
+  if (map.value) {
+    shopMarkers.forEach((m) => {
+      if (map.value?.hasLayer(m)) map.value.removeLayer(m)
+    })
+    if (userMarker && map.value.hasLayer(userMarker)) {
+      map.value.removeLayer(userMarker)
+    }
+    map.value.off() // ✅ remove all event listeners
+    map.value.remove() // ✅ destroy map safely
+    map.value = null
   }
-
-  // Initialize map
-  map.value = L.map('map')
-
-  // ✅ Wait until map is ready before setting view
-  map.value.whenReady(() => {
-    map.value!.setView([8.95, 125.53], 13)
-  })
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-  }).addTo(map.value!)
-
-  // Start tracking user location
-  await startWatching()
-
-  // Fetch shops once on mount
-  await fetchShops()
 })
 
 </script>
@@ -213,7 +206,7 @@ onMounted(async () => {
         </v-btn>
       </div>
 
-      <div>
+      <div class="pa-4">
         <h1><strong>Stores within your location</strong></h1>
       </div>
 
