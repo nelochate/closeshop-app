@@ -22,7 +22,10 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 const router = useRouter()
 const cart = useCartStore()
+// Fetch cart to get the latest count
+cart.fetchCart()
 
+// v-model binding
 const value = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
