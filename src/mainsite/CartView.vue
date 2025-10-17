@@ -83,79 +83,44 @@ const checkoutSelected = () => {
 
         <!-- Cart Items -->
         <v-list v-else lines="two">
-          <v-list-item
-            v-for="item in cart.items"
-            :key="item.id"
-            class="cart-item mb-3 rounded-lg elevation-1"
-          >
-            <!-- Checkbox -->
+          <v-list-item v-for="item in cart.items" :key="item.id" class="cart-item mb-3 rounded-lg elevation-1">
             <template #prepend>
-              <v-checkbox
-                v-model="selectedItems"
-                :value="item.id"
-                density="compact"
-                color="primary"
-              />
+              <v-checkbox v-model="selectedItems" :value="item.id" density="compact" color="primary" />
+              <v-img :src="(typeof item.product?.main_img_urls === 'string'
+                ? JSON.parse(item.product.main_img_urls)[0]
+                : item.product?.main_img_urls?.[0]) || '/placeholder.png'" width="70" height="70"
+                class="rounded-lg ml-2" cover />
             </template>
 
-            <!-- Product Image -->
-            <v-img
-              :src="(typeof item.product?.main_img_urls === 'string'
-                      ? JSON.parse(item.product.main_img_urls)[0]
-                      : item.product?.main_img_urls?.[0]) || '/placeholder.png'"
-              width="70"
-              height="70"
-              class="rounded-lg mr-3"
-              cover
-            />
-
             <!-- Product Info -->
-            <v-list-item-content>
-              <v-list-item-title class="font-weight-medium">
-                {{ item.product?.prod_name || 'Unnamed Product' }}
-              </v-list-item-title>
-              <v-list-item-subtitle>
-                ₱{{ item.product?.price?.toFixed(2) || '0.00' }}
-              </v-list-item-subtitle>
+            <v-list-item-title class="font-weight-medium">
+              {{ item.product?.prod_name || 'Unnamed Product' }}
+            </v-list-item-title>
+            <v-list-item-subtitle>
+              ₱{{ item.product?.price?.toFixed(2) || '0.00' }}
+            </v-list-item-subtitle>
 
-              <!-- Quantity Controls -->
-              <div class="d-flex align-center mt-1">
-                <v-btn
-                  icon
-                  size="small"
-                  variant="outlined"
-                  color="primary"
-                  @click="updateQuantity(item.id, item.quantity - 1)"
-                >
-                  <v-icon small>mdi-minus</v-icon>
-                </v-btn>
-
-                <span class="mx-2">{{ item.quantity }}</span>
-
-                <v-btn
-                  icon
-                  size="small"
-                  variant="outlined"
-                  color="primary"
-                  @click="updateQuantity(item.id, item.quantity + 1)"
-                >
-                  <v-icon small>mdi-plus</v-icon>
-                </v-btn>
-              </div>
-            </v-list-item-content>
-
-            <!-- Price + Delete -->
+            <!-- Quantity Controls -->
             <template #append>
               <div class="d-flex flex-column align-end">
-                <div class="font-weight-bold text-primary">
+                <div class="d-flex align-center mt-1">
+                  <v-btn icon size="small" variant="outlined" color="primary"
+                    @click="updateQuantity(item.id, item.quantity - 1)">
+                    <v-icon small>mdi-minus</v-icon>
+                  </v-btn>
+
+                  <span class="mx-2">{{ item.quantity }}</span>
+
+                  <v-btn icon size="small" variant="outlined" color="primary"
+                    @click="updateQuantity(item.id, item.quantity + 1)">
+                    <v-icon small>mdi-plus</v-icon>
+                  </v-btn>
+                </div>
+
+                <div class="font-weight-bold text-primary mt-2">
                   ₱{{ ((item.product?.price || 0) * item.quantity).toFixed(2) }}
                 </div>
-                <v-btn
-                  icon
-                  variant="text"
-                  color="red"
-                  @click="deleteItem(item.id)"
-                >
+                <v-btn icon variant="text" color="red" @click="deleteItem(item.id)">
                   <v-icon>mdi-delete</v-icon>
                 </v-btn>
               </div>
@@ -166,24 +131,16 @@ const checkoutSelected = () => {
     </v-main>
 
     <!-- Checkout Bar -->
-    <v-sheet
-      v-if="cart.items.length"
-      elevation="6"
-      class="checkout-bar pa-3 d-flex align-center justify-space-between"
-    >
+    <v-sheet v-if="cart.items.length" elevation="6" class="checkout-bar pa-3 d-flex align-center justify-space-between">
       <div class="font-weight-bold">
         Total: ₱{{
-          cart.items
-            .filter(i => selectedItems.includes(i.id))
-            .reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0)
-            .toFixed(2)
+        cart.items
+        .filter(i => selectedItems.includes(i.id))
+        .reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0)
+        .toFixed(2)
         }}
       </div>
-      <v-btn
-        color="primary"
-        class="rounded-lg"
-        @click="checkoutSelected"
-      >
+      <v-btn color="primary" class="rounded-lg" @click="checkoutSelected">
         Checkout ({{ selectedItems.length }})
       </v-btn>
     </v-sheet>
