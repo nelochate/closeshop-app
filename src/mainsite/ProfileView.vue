@@ -152,7 +152,7 @@ const selectedSection = ref(purchaseSections[0])
               <v-icon v-else size="40">mdi-account</v-icon>
             </v-avatar>
 
-            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
+          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
               <v-icon class="edit-icon">mdi-pencil</v-icon>
             </v-btn>
           </div>
