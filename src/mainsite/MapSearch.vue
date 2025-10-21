@@ -161,27 +161,23 @@ watch([latitude, longitude], ([lat, lng]) => {
   const userLng = Number(lng)
   if (isNaN(userLat) || isNaN(userLng)) return
 
+  // Create or move the user marker
   if (userMarker) {
     userMarker.setLatLng([userLat, userLng])
   } else {
-    userMarker = L.marker([userLat, userLng], { icon: userIcon, updateWhenZoom: true })
+    userMarker = L.marker([userLat, userLng], { icon: userIcon })
       .addTo(map.value)
-      .bindPopup('You are here')
+      .bindPopup('📍 You are here')
       .openPopup()
   }
 
-  // ✅ Debounce and safely recenter (no animation during zoom)
-  if (recenterTimeout) clearTimeout(recenterTimeout)
-  recenterTimeout = window.setTimeout(() => {
-    if (map.value && map.value._loaded && !currentPopup) {
-      try {
-        map.value.setView([userLat, userLng], map.value.getZoom(), { animate: false })
-      } catch (err) {
-        console.warn('⚠️ Safe setView failed:', err)
-      }
-    }
-  }, 1500)
+  // ✅ Center map only once on first valid location
+  if (!map.value._userCentered) {
+    map.value.setView([userLat, userLng], 15, { animate: true })
+    map.value._userCentered = true
+  }
 })
+
 
 /* ✅ Cleanup */
 onUnmounted(() => {
