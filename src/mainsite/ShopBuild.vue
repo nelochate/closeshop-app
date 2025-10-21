@@ -391,34 +391,6 @@ onMounted(async () => {
   }
 })
 
-// a revere geocode function
-const reverseGeocode = async (lat: number, lng: number) => {
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
-    )
-    const data = await res.json()
-    if (data && data.address) {
-      // Fill separate fields
-      address.street.value = data.address.road || ''
-      address.house_no.value = data.address.house_number || ''
-      address.postal.value = data.address.postcode || ''
-      address.building.value = data.address.building || ''
-      address.barangay.value =
-        data.address.suburb || data.address.village || data.address.neighbourhood || ''
-
-      // Store full display name
-      fullAddress.value = data.display_name || ''
-
-      // ✅ Snackbar with detected address
-      showSnackbar(`Detected address: ${fullAddress.value}`, 'success')
-    }
-  } catch (err) {
-    console.error(err)
-    showSnackbar('Failed to fetch address', 'error')
-  }
-}
-
 </script>
 
 <template>
