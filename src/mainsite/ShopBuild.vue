@@ -45,9 +45,6 @@ const address = {
 // -------------------- Barangays --------------------
 const barangays = [/* ... (keep your list as is) ... */]
 
-<<<<<<< HEAD
-// -------------------- Map Setup --------------------
-=======
 // -------------------- Search --------------------
 const searchQuery = ref('')
 const searchResults = ref<any[]>([])
@@ -55,7 +52,6 @@ const showSearchResults = ref(false)
 const searchLoading = ref(false)
 
 // -------------------- Map --------------------
->>>>>>> 6f5981c9d4b92a82fd90b44517084ba3742a5cd0
 const latitude = ref<number | null>(8.9489)
 const longitude = ref<number | null>(125.5406)
 const map = ref<L.Map | null>(null)
@@ -394,8 +390,6 @@ onMounted(async () => {
     }
   }
 })
-<<<<<<< HEAD
-=======
 
 // a revere geocode function
 const reverseGeocode = async (lat: number, lng: number) => {
@@ -425,7 +419,6 @@ const reverseGeocode = async (lat: number, lng: number) => {
   }
 }
 
->>>>>>> 6f5981c9d4b92a82fd90b44517084ba3742a5cd0
 </script>
 
 <template>
