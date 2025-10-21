@@ -43,7 +43,9 @@ const address = {
 }
 
 // -------------------- Barangays --------------------
-const barangays = [/* ... (keep your list as is) ... */]
+const barangays = [
+  /* ... (keep your list as is) ... */
+]
 
 // -------------------- Search --------------------
 const searchQuery = ref('')
@@ -199,7 +201,10 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     if (pickerTarget.value === 'physical') {
       physicalUrl.value = newUrl
       if (currentShopId.value) {
-        await supabase.from('shops').update({ physical_store: newUrl }).eq('id', currentShopId.value)
+        await supabase
+          .from('shops')
+          .update({ physical_store: newUrl })
+          .eq('id', currentShopId.value)
       }
     } else {
       avatarUrl.value = newUrl
@@ -332,7 +337,7 @@ const saveShop = async () => {
 const reverseGeocode = async (lat: number, lng: number) => {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
     )
     const data = await res.json()
     if (data && data.address) {
@@ -390,7 +395,6 @@ onMounted(async () => {
     }
   }
 })
-
 </script>
 
 <template>
