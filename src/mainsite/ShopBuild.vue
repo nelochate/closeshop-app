@@ -441,6 +441,27 @@ watch(selectedBarangay, async (val) => {
   }
 })
 
+watch(selectedCity, async (cityCode) => {
+  if (!cityCode) return
+  const selectedCityObj = cities.value.find((c) => c.code === cityCode)
+  if (!selectedCityObj) return
+
+  const selectedProvinceObj = provinces.value.find((p) => p.code === selectedProvince.value)
+  const selectedRegionObj = regions.value.find((r) => r.code === selectedRegion.value)
+
+  const full = `${selectedCityObj.name}, ${selectedProvinceObj?.name || ''}, ${selectedRegionObj?.name || ''}, Philippines`
+  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(full)}`
+  const res = await fetch(url)
+  const data = await res.json()
+  if (data.length > 0) {
+    const { lat, lon } = data[0]
+    latitude.value = parseFloat(lat)
+    longitude.value = parseFloat(lon)
+    map.value?.setView([latitude.value, longitude.value], 12)
+    shopMarker?.setLatLng([latitude.value, longitude.value])
+  }
+})
+
 // -------------------- Load Shop --------------------
 onMounted(async () => {
   await fetchRegions()
