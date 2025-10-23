@@ -395,6 +395,17 @@ onMounted(async () => {
     }
   }
 })
+
+//for radio button
+const addressOption = ref<'manual' | 'map'>('manual')
+
+watch(addressOption, async (value) => {
+  if (value === 'manual') {
+    await nextTick()
+    if (!map.value) initMap(latitude.value!, longitude.value!)
+  }
+})
+
 </script>
 
 <template>
@@ -487,91 +498,101 @@ onMounted(async () => {
         />
 
         <h2 class="section-title">Address (Butuan City)</h2>
-        <v-text-field label="City" value="Butuan City" readonly outlined />
-        <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
-        <v-text-field label="Region" value="CARAGA" readonly outlined />
-        <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" outlined />
-        <v-text-field v-model="address.building.value" label="Building No." outlined />
-        <v-text-field v-model="address.street.value" label="Street Name" outlined />
-        <v-text-field v-model="address.house_no.value" label="House No." outlined />
-        <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
+        <v-radio-group v-model="addressOption" inline>
+          <v-radio label="Enter address manually" value="manual" />
+          <v-radio label="Set current location as shop address" value="map" />
+        </v-radio-group>
+        <div v-if="addressOption === 'manual'">
+          <v-text-field label="City" value="Butuan City" readonly outlined />
+          <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
+          <v-text-field label="Region" value="CARAGA" readonly outlined />
+          <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" outlined />
+          <v-text-field v-model="address.building.value" label="Building No." outlined />
+          <v-text-field v-model="address.street.value" label="Street Name" outlined />
+          <v-text-field v-model="address.house_no.value" label="House No." outlined />
+          <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
 
-        <v-divider class="my-4">or</v-divider>
-        <h4 class="text-center mb-2">Please drag/tap your location in the map</h4>
+          <h4 class="text-center mb-2">Please drag/tap your location in the map</h4>
 
-        <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">
-          Toggle Map Fullscreen
-        </v-btn>
+          <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">
+            Toggle Map Fullscreen
+          </v-btn>
 
-        <!-- Search Section with Results Dropdown -->
-        <div class="search-section">
-          <v-text-field
-            v-model="searchQuery"
-            label="Search place"
-            outlined
-            append-inner-icon="mdi-magnify"
-            @keyup.enter="searchPlace"
-            @click:clear="clearSearch"
-            clearable
-          />
+          <!-- Search Section with Results Dropdown -->
+          <div class="search-section">
+            <v-text-field
+              v-model="searchQuery"
+              label="Search place"
+              outlined
+              append-inner-icon="mdi-magnify"
+              @keyup.enter="searchPlace"
+              @click:clear="clearSearch"
+              clearable
+            />
+
+            <v-btn
+              color="primary"
+              @click="searchPlace"
+              class="mb-3 search-btn"
+              :loading="searchLoading"
+              :disabled="!searchQuery.trim()"
+            >
+              <v-icon left>mdi-magnify</v-icon>
+              Search
+            </v-btn>
+
+            <!-- Search Results Dropdown -->
+            <v-card
+              v-if="showSearchResults && searchResults.length > 0"
+              class="search-results"
+              elevation="4"
+            >
+              <v-list density="compact">
+                <v-list-subheader>Search Results</v-list-subheader>
+                <v-list-item
+                  v-for="(result, index) in searchResults"
+                  :key="index"
+                  @click="selectSearchResult(result)"
+                  class="search-result-item"
+                >
+                  <v-list-item-title class="text-body-2">
+                    {{ result.display_name }}
+                  </v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </v-card>
+          </div>
+
+        
+        </div>
+
+          <div id="map" class="map">
+            <v-btn icon @click="getLocation" class="locate-btn">
+              <v-icon>mdi-crosshairs-gps</v-icon>
+            </v-btn>
+          </div>
 
           <v-btn
-            color="primary"
-            @click="searchPlace"
-            class="mb-3 search-btn"
-            :loading="searchLoading"
-            :disabled="!searchQuery.trim()"
+            color="secondary"
+            @click="() => saveCoordinates(latitude!, longitude!)"
+            class="save-location"
           >
-            <v-icon left>mdi-magnify</v-icon>
-            Search
+            Save this location
+          </v-btn>
+        <div v-if="addressOption === 'map'">
+          <!--dria tamn-->
+          <v-btn block color="primary" @click="getLocation" class="mt-2">
+            Set my location as shop address
           </v-btn>
 
-          <!-- Search Results Dropdown -->
-          <v-card
-            v-if="showSearchResults && searchResults.length > 0"
-            class="search-results"
-            elevation="4"
-          >
-            <v-list density="compact">
-              <v-list-subheader>Search Results</v-list-subheader>
-              <v-list-item
-                v-for="(result, index) in searchResults"
-                :key="index"
-                @click="selectSearchResult(result)"
-                class="search-result-item"
-              >
-                <v-list-item-title class="text-body-2">
-                  {{ result.display_name }}
-                </v-list-item-title>
-              </v-list-item>
-            </v-list>
-          </v-card>
+          <v-text-field
+            v-if="fullAddress"
+            v-model="fullAddress"
+            label="Detected Address"
+            outlined
+            readonly
+          />
         </div>
-
-        <div id="map" class="map">
-          <v-btn icon @click="getLocation" class="locate-btn">
-            <v-icon>mdi-crosshairs-gps</v-icon>
-          </v-btn>
-        </div>
-
-        <v-btn
-          color="secondary"
-          @click="() => saveCoordinates(latitude!, longitude!)"
-          class="save-location"
-        >
-          Save this location
-        </v-btn>
-        <v-btn block color="primary" @click="getLocation" class="mt-2">
-          Set my location as shop address
-        </v-btn>
-
-        <v-text-field
-          v-if="fullAddress"
-          v-model="fullAddress"
-          label="Detected Address"
-          outlined
-          readonly
-        />
 
         <v-btn block color="#3f83c7" :loading="saving" @click="saveShop" class="mt-4 text-white">
           {{ saving ? 'Saving...' : 'Save Shop' }}
