@@ -552,16 +552,15 @@ onMounted(async () => {
           <v-btn icon @click="getLocation" class="locate-btn">
             <v-icon>mdi-crosshairs-gps</v-icon>
           </v-btn>
-
-          <v-btn
-            color="secondary"
-            @click="() => saveCoordinates(latitude!, longitude!)"
-            class="save-location"
-          >
-            Save this location
-          </v-btn>
         </div>
 
+        <v-btn
+          color="secondary"
+          @click="() => saveCoordinates(latitude!, longitude!)"
+          class="save-location"
+        >
+          Save this location
+        </v-btn>
         <v-btn block color="primary" @click="getLocation" class="mt-2">
           Set my location as shop address
         </v-btn>
@@ -729,6 +728,9 @@ onMounted(async () => {
 }
 
 /* ===== Map ===== */
+.map {
+  position: relative;
+}
 .map {
   height: 400px;
   width: 100%;
