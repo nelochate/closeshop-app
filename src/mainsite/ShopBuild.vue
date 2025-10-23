@@ -7,6 +7,16 @@ import * as L from 'leaflet'
 import 'leaflet.fullscreen'
 import 'leaflet.fullscreen/Control.FullScreen.css'
 
+/// -------------------- PSGC Address Dropdowns --------------------
+const regions = ref<any[]>([])
+const provinces = ref<any[]>([])
+const cities = ref<any[]>([])
+const barangaysList = ref<any[]>([])
+
+const selectedRegion = ref<any>(null)
+const selectedProvince = ref<any>(null)
+const selectedCity = ref<any>(null)
+const selectedBarangay = ref<any>(null)
 // -------------------- Router --------------------
 const router = useRouter()
 const goBack = () => router.back()
@@ -355,9 +365,85 @@ const reverseGeocode = async (lat: number, lng: number) => {
     showSnackbar('Failed to fetch address', 'error')
   }
 }
+// -------------------- PSGC Cloud API --------------------
+// -------------------- PSGC Cloud API --------------------
+const fetchRegions = async () => {
+  const res = await fetch('https://psgc.cloud/api/regions')
+  const data = await res.json()
+  regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const fetchProvinces = async (regionCode) => {
+  const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
+  const data = await res.json()
+  provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const fetchCities = async (provinceCode) => {
+  const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
+  const data = await res.json()
+  cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const fetchBarangays = async (cityCode) => {
+  const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
+  const data = await res.json()
+  barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+
+watch(selectedRegion, (regionCode) => {
+  selectedProvince.value = null
+  selectedCity.value = null
+  selectedBarangay.value = null
+  provinces.value = []
+  cities.value = []
+  barangaysList.value = []
+  if (regionCode) fetchProvinces(regionCode)
+})
+
+watch(selectedProvince, (provinceCode) => {
+  selectedCity.value = null
+  selectedBarangay.value = null
+  cities.value = []
+  barangaysList.value = []
+  if (provinceCode) fetchCities(provinceCode)
+})
+
+watch(selectedCity, (cityCode) => {
+  selectedBarangay.value = null
+  barangaysList.value = []
+  if (cityCode) fetchBarangays(cityCode)
+})
+
+watch(selectedBarangay, async (val) => {
+  if (!val || !selectedCity.value) return
+
+  const selectedCityObj = cities.value.find((c) => c.code === selectedCity.value)
+  const selectedProvinceObj = provinces.value.find((p) => p.code === selectedProvince.value)
+  const selectedRegionObj = regions.value.find((r) => r.code === selectedRegion.value)
+  const selectedBarangayObj = barangaysList.value.find((b) => b.code === val)
+
+  if (selectedBarangayObj && selectedCityObj && selectedProvinceObj && selectedRegionObj) {
+    const full = `${selectedBarangayObj.name}, ${selectedCityObj.name}, ${selectedProvinceObj.name}, ${selectedRegionObj.name}, Philippines`
+    fullAddress.value = full
+
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(full)}`
+    const res = await fetch(url)
+    const data = await res.json()
+    if (data.length > 0) {
+      const { lat, lon } = data[0]
+      latitude.value = parseFloat(lat)
+      longitude.value = parseFloat(lon)
+      map.value?.setView([latitude.value, longitude.value], 15)
+      shopMarker?.setLatLng([latitude.value, longitude.value])
+    }
+  }
+})
 
 // -------------------- Load Shop --------------------
 onMounted(async () => {
+  await fetchRegions()
   await nextTick()
 
   if (shopId.value) {
@@ -405,7 +491,6 @@ watch(addressOption, async (value) => {
     if (!map.value) initMap(latitude.value!, longitude.value!)
   }
 })
-
 </script>
 
 <template>
@@ -503,14 +588,58 @@ watch(addressOption, async (value) => {
           <v-radio label="Set current location as shop address" value="map" />
         </v-radio-group>
         <div v-if="addressOption === 'manual'">
-          <v-text-field label="City" value="Butuan City" readonly outlined />
-          <v-text-field label="Province" value="Agusan del Norte" readonly outlined />
-          <v-text-field label="Region" value="CARAGA" readonly outlined />
-          <v-select v-model="address.barangay.value" :items="barangays" label="Barangay" outlined />
-          <v-text-field v-model="address.building.value" label="Building No." outlined />
-          <v-text-field v-model="address.street.value" label="Street Name" outlined />
-          <v-text-field v-model="address.house_no.value" label="House No." outlined />
-          <v-text-field v-model="address.postal.value" label="Postal / ZIP Code" outlined />
+          <v-select
+            v-model="selectedRegion"
+            :items="regions"
+            item-title="name"
+            item-value="code"
+            label="Region"
+            outlined
+          />
+
+          <v-select
+            v-model="selectedProvince"
+            :items="provinces"
+            item-title="name"
+            item-value="code"
+            label="Province"
+            outlined
+            :disabled="!selectedRegion"
+          />
+
+          <v-select
+            v-model="selectedCity"
+            :items="cities"
+            item-title="name"
+            item-value="code"
+            label="City / Municipality"
+            outlined
+            :disabled="!selectedProvince"
+          />
+
+          <v-select
+            v-model="selectedBarangay"
+            :items="barangaysList"
+            item-title="name"
+            item-value="code"
+            label="Barangay"
+            outlined
+            :disabled="!selectedCity"
+          />
+
+          <v-text-field
+            v-if="fullAddress"
+            v-model="fullAddress"
+            label="Full Address"
+            readonly
+            outlined
+          />
+           <v-text-field
+            
+            label="Add more details (e.g., house no., street, building)"
+          
+            outlined
+          />
 
           <h4 class="text-center mb-2">Please drag/tap your location in the map</h4>
 
@@ -562,23 +691,21 @@ watch(addressOption, async (value) => {
               </v-list>
             </v-card>
           </div>
-
-        
         </div>
 
-          <div id="map" class="map">
-            <v-btn icon @click="getLocation" class="locate-btn">
-              <v-icon>mdi-crosshairs-gps</v-icon>
-            </v-btn>
-          </div>
-
-          <v-btn
-            color="secondary"
-            @click="() => saveCoordinates(latitude!, longitude!)"
-            class="save-location"
-          >
-            Save this location
+        <div id="map" class="map">
+          <v-btn icon @click="getLocation" class="locate-btn">
+            <v-icon>mdi-crosshairs-gps</v-icon>
           </v-btn>
+        </div>
+
+        <v-btn
+          color="secondary"
+          @click="() => saveCoordinates(latitude!, longitude!)"
+          class="save-location"
+        >
+          Save this location
+        </v-btn>
         <div v-if="addressOption === 'map'">
           <!--dria tamn-->
           <v-btn block color="primary" @click="getLocation" class="mt-2">
