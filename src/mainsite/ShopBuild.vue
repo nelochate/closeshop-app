@@ -7,7 +7,44 @@ import * as L from 'leaflet'
 import 'leaflet.fullscreen'
 import 'leaflet.fullscreen/Control.FullScreen.css'
 
-/// -------------------- PSGC Address Dropdowns --------------------
+// -------------------- ROUTER --------------------
+const router = useRouter()
+const route = useRoute()
+const goBack = () => router.back()
+const shopId = ref<string | null>((route.params.id as string) || null)
+
+// -------------------- STATES --------------------
+const currentShopId = ref<string | null>(null)
+const uploading = ref(false)
+const pickerTarget = ref<'logo' | 'physical' | null>(null)
+const showPicker = ref(false)
+const saving = ref(false)
+const snackbar = ref(false)
+const snackbarMessage = ref('')
+const snackbarColor = ref<'success' | 'error'>('success')
+
+// -------------------- SHOP INFO --------------------
+const shopName = ref('')
+const description = ref('')
+const openTime = ref('')
+const closeTime = ref('')
+const avatarUrl = ref<string | null>(null)
+const physicalUrl = ref<string | null>(null)
+const deliveryOptions = ref<string[]>([])
+const meetUpDetails = ref('')
+const fullAddress = ref('')
+
+// -------------------- ADDRESS --------------------
+const addressOption = ref<'manual' | 'map'>('manual')
+const address = {
+  barangay: ref(''),
+  building: ref(''),
+  street: ref(''),
+  postal: ref(''),
+  house_no: ref(''),
+}
+
+// -------------------- PSGC --------------------
 const regions = ref<any[]>([])
 const provinces = ref<any[]>([])
 const cities = ref<any[]>([])
@@ -17,57 +54,31 @@ const selectedRegion = ref<any>(null)
 const selectedProvince = ref<any>(null)
 const selectedCity = ref<any>(null)
 const selectedBarangay = ref<any>(null)
-// -------------------- Router --------------------
-const router = useRouter()
-const goBack = () => router.back()
 
-const route = useRoute()
-const shopId = ref<string | null>((route.params.id as string) || null)
-
-// -------------------- States --------------------
-const currentShopId = ref<string | null>(null)
-const avatarUrl = ref<string | null>(null)
-const physicalUrl = ref<string | null>(null)
-const uploading = ref(false)
-const pickerTarget = ref<'logo' | 'physical' | null>(null)
-const showPicker = ref(false)
-const saving = ref(false)
-const snackbar = ref(false)
-const snackbarMessage = ref('')
-const snackbarColor = ref<'success' | 'error'>('success')
-
-// -------------------- Shop Info --------------------
-const shopName = ref('')
-const description = ref('')
-const openTime = ref('')
-const closeTime = ref('')
-const fullAddress = ref('')
-
-// Address info
-const address = {
-  barangay: ref(''),
-  building: ref(''),
-  street: ref(''),
-  postal: ref(''),
-  house_no: ref(''),
-}
-
-// -------------------- Barangays --------------------
-const barangays = [
-  /* ... (keep your list as is) ... */
-]
-
-// -------------------- Search --------------------
-const searchQuery = ref('')
-const searchResults = ref<any[]>([])
-const showSearchResults = ref(false)
-const searchLoading = ref(false)
-
-// -------------------- Map --------------------
+// -------------------- MAP --------------------
 const latitude = ref<number | null>(8.9489)
 const longitude = ref<number | null>(125.5406)
 const map = ref<L.Map | null>(null)
 let shopMarker: L.Marker | null = null
+
+//reverse geocode
+const reverseGeocode = async (lat: number, lng: number) => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
+    )
+    const data = await res.json()
+    if (data?.display_name) {
+      fullAddress.value = data.display_name
+      showSnackbar(`📍 ${data.display_name}`, 'success')
+    } else {
+      showSnackbar('Address not found for this location', 'error')
+    }
+  } catch (err) {
+    console.error('Reverse geocoding failed:', err)
+    showSnackbar('Failed to fetch address', 'error')
+  }
+}
 
 const initMap = (lat: number, lng: number) => {
   if (map.value) return
@@ -83,10 +94,10 @@ const initMap = (lat: number, lng: number) => {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  // Marker
+  // ✅ Create only ONE marker
   shopMarker = L.marker([lat, lng], { draggable: true }).addTo(map.value)
 
-  // When dragged
+  // 📍 Allow dragging to update coordinates and show address
   shopMarker.on('dragend', async (e) => {
     const pos = (e.target as L.Marker).getLatLng()
     latitude.value = pos.lat
@@ -95,7 +106,7 @@ const initMap = (lat: number, lng: number) => {
     await reverseGeocode(pos.lat, pos.lng)
   })
 
-  // When map clicked
+  // 🖱 Clicking on the map moves the same marker and shows address
   map.value.on('click', async (e: L.LeafletMouseEvent) => {
     const { lat, lng } = e.latlng
     latitude.value = lat
@@ -108,75 +119,14 @@ const initMap = (lat: number, lng: number) => {
 
 const toggleFullscreen = () => map.value?.toggleFullscreen()
 
-// -------------------- Snackbar --------------------
+// -------------------- SNACKBAR --------------------
 const showSnackbar = (message: string, color: 'success' | 'error' = 'success') => {
   snackbarMessage.value = message
   snackbarColor.value = color
   snackbar.value = true
 }
 
-// -------------------- Search Functions --------------------
-const searchPlace = async () => {
-  if (!searchQuery.value.trim()) {
-    showSnackbar('Please enter a search query', 'error')
-    return
-  }
-
-  searchLoading.value = true
-  showSearchResults.value = false
-
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery.value)}&limit=5`,
-    )
-    const results = await res.json()
-
-    if (results.length > 0) {
-      searchResults.value = results
-      showSearchResults.value = true
-      showSnackbar(`Found ${results.length} results`, 'success')
-    } else {
-      showSnackbar('No results found', 'error')
-      searchResults.value = []
-    }
-  } catch (err) {
-    console.error(err)
-    showSnackbar('Search failed', 'error')
-    searchResults.value = []
-  } finally {
-    searchLoading.value = false
-  }
-}
-
-const selectSearchResult = async (result: any) => {
-  const lat = parseFloat(result.lat)
-  const lng = parseFloat(result.lon)
-
-  // Update map and marker
-  latitude.value = lat
-  longitude.value = lng
-  map.value?.setView([lat, lng], 17)
-  shopMarker?.setLatLng([lat, lng])
-
-  // Clear search results
-  searchResults.value = []
-  showSearchResults.value = false
-  searchQuery.value = result.display_name
-
-  // Save coordinates and reverse geocode
-  await saveCoordinates(lat, lng)
-  await reverseGeocode(lat, lng)
-
-  showSnackbar(`Location set to: ${result.display_name}`, 'success')
-}
-
-const clearSearch = () => {
-  searchResults.value = []
-  showSearchResults.value = false
-  searchQuery.value = ''
-}
-
-// -------------------- Image Picker --------------------
+// -------------------- IMAGE UPLOAD --------------------
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
     const {
@@ -192,8 +142,8 @@ const pickImage = async (source: 'camera' | 'gallery') => {
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
     if (!photo?.webPath) return
-    uploading.value = true
 
+    uploading.value = true
     const response = await fetch(photo.webPath)
     const blob = await response.blob()
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
@@ -201,26 +151,25 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     const bucket = pickerTarget.value === 'physical' ? 'physical_store' : 'Profile'
     const fileName = `${user.id}/${Date.now()}.png`
 
-    const { data, error } = await supabase.storage
-      .from(bucket)
-      .upload(fileName, file, { cacheControl: '3600', upsert: true })
+    const { data, error } = await supabase.storage.from(bucket).upload(fileName, file, {
+      cacheControl: '3600',
+      upsert: true,
+    })
     if (error) throw error
 
     const newUrl = `${import.meta.env.VITE_SUPABASE_URL}/storage/v1/object/public/${bucket}/${data.path}`
 
     if (pickerTarget.value === 'physical') {
       physicalUrl.value = newUrl
-      if (currentShopId.value) {
+      if (currentShopId.value)
         await supabase
           .from('shops')
           .update({ physical_store: newUrl })
           .eq('id', currentShopId.value)
-      }
     } else {
       avatarUrl.value = newUrl
-      if (currentShopId.value) {
+      if (currentShopId.value)
         await supabase.from('shops').update({ logo_url: newUrl }).eq('id', currentShopId.value)
-      }
     }
 
     showSnackbar('Image uploaded successfully', 'success')
@@ -234,22 +183,157 @@ const pickImage = async (source: 'camera' | 'gallery') => {
   }
 }
 
-// -------------------- Coordinates --------------------
+// -------------------- COORDINATES --------------------
 const saveCoordinates = async (lat: number, lng: number) => {
   try {
     if (!currentShopId.value) return
+
+    // Update coordinates + detected address
     const { error } = await supabase
       .from('shops')
-      .update({ latitude: lat, longitude: lng })
+      .update({
+        latitude: lat,
+        longitude: lng,
+        detected_address: fullAddress.value, // 🧠 add this line
+      })
       .eq('id', currentShopId.value)
+
     if (error) throw error
-    showSnackbar('Location updated successfully!', 'success')
+    showSnackbar(`📍 Location updated: ${fullAddress.value || 'Coordinates saved'}`, 'success')
   } catch (err) {
     console.error(err)
     showSnackbar('Failed to update location', 'error')
   }
 }
 
+
+const getCoordinatesFromAddress = async (address: string) => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`,
+    )
+    const data = await res.json()
+    if (data.length > 0) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) }
+    return null
+  } catch (error) {
+    console.error('Failed to fetch coordinates:', error)
+    return null
+  }
+}
+
+//for search
+// -------------------- SEARCH PLACE --------------------
+const searchQuery = ref('')
+const searchLoading = ref(false)
+const searchResults = ref<any[]>([])
+const showSearchResults = ref(false)
+
+const searchPlace = async () => {
+  if (!searchQuery.value.trim()) return
+  searchLoading.value = true
+  showSearchResults.value = false
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery.value)}`,
+    )
+    const data = await res.json()
+    searchResults.value = data
+    showSearchResults.value = true
+  } catch (err) {
+    console.error('Search failed:', err)
+  } finally {
+    searchLoading.value = false
+  }
+}
+
+const selectSearchResult = (result: any) => {
+  latitude.value = parseFloat(result.lat)
+  longitude.value = parseFloat(result.lon)
+  map.value?.setView([latitude.value, longitude.value], 15)
+  shopMarker?.setLatLng([latitude.value, longitude.value])
+  fullAddress.value = result.display_name
+  showSearchResults.value = false
+}
+
+const clearSearch = () => {
+  searchQuery.value = ''
+  searchResults.value = []
+  showSearchResults.value = false
+}
+
+// -------------------- PSGC API --------------------
+const fetchRegions = async () => {
+  const res = await fetch('https://psgc.cloud/api/regions')
+  const data = await res.json()
+  regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const fetchProvinces = async (regionCode) => {
+  const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
+  const data = await res.json()
+  provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const fetchCities = async (provinceCode) => {
+  const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
+  const data = await res.json()
+  cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+const fetchBarangays = async (cityCode) => {
+  const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
+  const data = await res.json()
+  barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
+}
+
+// Dropdown watchers
+watch(selectedRegion, (regionCode) => {
+  selectedProvince.value = null
+  selectedCity.value = null
+  selectedBarangay.value = null
+  provinces.value = []
+  cities.value = []
+  barangaysList.value = []
+  if (regionCode) fetchProvinces(regionCode)
+})
+
+watch(selectedProvince, (provinceCode) => {
+  selectedCity.value = null
+  selectedBarangay.value = null
+  cities.value = []
+  barangaysList.value = []
+  if (provinceCode) fetchCities(provinceCode)
+})
+
+watch(selectedCity, (cityCode) => {
+  selectedBarangay.value = null
+  barangaysList.value = []
+  if (cityCode) fetchBarangays(cityCode)
+})
+
+watch(selectedBarangay, async (val) => {
+  if (!val || !selectedCity.value) return
+
+  const regionObj = regions.value.find((r) => r.code === selectedRegion.value)
+  const provinceObj = provinces.value.find((p) => p.code === selectedProvince.value)
+  const cityObj = cities.value.find((c) => c.code === selectedCity.value)
+  const barangayObj = barangaysList.value.find((b) => b.code === val)
+
+  if (barangayObj && cityObj && provinceObj && regionObj) {
+    const full = `${barangayObj.name}, ${cityObj.name}, ${provinceObj.name}, ${regionObj.name}, Philippines`
+    fullAddress.value = full
+
+    const coords = await getCoordinatesFromAddress(full)
+    if (coords) {
+      latitude.value = coords.lat
+      longitude.value = coords.lon
+      map.value?.setView([coords.lat, coords.lon], 15)
+      shopMarker?.setLatLng([coords.lat, coords.lon])
+    }
+  }
+})
+
+// -------------------- GET LOCATION --------------------
 const getLocation = () => {
   if (!navigator.geolocation) {
     showSnackbar('Geolocation not supported', 'error')
@@ -262,7 +346,7 @@ const getLocation = () => {
       map.value?.setView([latitude.value, longitude.value], 17)
       shopMarker?.setLatLng([latitude.value, longitude.value])
       await saveCoordinates(latitude.value, longitude.value)
-      await reverseGeocode(latitude.value, longitude.value)
+      //  await reverseGeocode(latitude.value, longitude.value)
     },
     (err) => {
       console.error(err)
@@ -272,10 +356,7 @@ const getLocation = () => {
   )
 }
 
-// -------------------- Save Shop --------------------
-const deliveryOptions = ref<string[]>([])
-const meetUpDetails = ref('')
-
+// -------------------- SAVE SHOP --------------------
 const saveShop = async () => {
   if (saving.value) return
   if (!latitude.value || !longitude.value) {
@@ -314,27 +395,17 @@ const saveShop = async () => {
       detected_address: fullAddress.value || null,
     }
 
-    let result
     if (!currentShopId.value) {
       const { data, error } = await supabase.from('shops').insert(shopData).select().single()
       if (error) throw error
       currentShopId.value = data.id
-      result = data
       showSnackbar('Shop created successfully!', 'success')
       router.push(`/shop/${data.id}`)
     } else {
-      const { data, error } = await supabase
-        .from('shops')
-        .update(shopData)
-        .eq('id', currentShopId.value)
-        .select()
-        .single()
+      const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
       if (error) throw error
-      result = data
       showSnackbar('Shop updated successfully!', 'success')
     }
-
-    console.log('Saved shop:', result)
   } catch (err) {
     console.error(err)
     showSnackbar('Failed to save shop', 'error')
@@ -343,127 +414,7 @@ const saveShop = async () => {
   }
 }
 
-// -------------------- Reverse Geocode --------------------
-const reverseGeocode = async (lat: number, lng: number) => {
-  try {
-    const res = await fetch(
-      `https://corsproxy.io/?https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
-    )
-    const data = await res.json()
-    if (data && data.address) {
-      address.street.value = data.address.road || ''
-      address.house_no.value = data.address.house_number || ''
-      address.postal.value = data.address.postcode || ''
-      address.building.value = data.address.building || ''
-      address.barangay.value =
-        data.address.suburb || data.address.village || data.address.neighbourhood || ''
-      fullAddress.value = data.display_name || ''
-      showSnackbar(`Detected address: ${fullAddress.value}`, 'success')
-    }
-  } catch (err) {
-    console.error(err)
-    showSnackbar('Failed to fetch address', 'error')
-  }
-}
-
-
-// -------------------- PSGC Cloud API --------------------
-const fetchRegions = async () => {
-  const res = await fetch('https://psgc.cloud/api/regions')
-  const data = await res.json()
-  regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
-}
-
-const fetchProvinces = async (regionCode) => {
-  const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
-  const data = await res.json()
-  provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
-}
-
-const fetchCities = async (provinceCode) => {
-  const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
-  const data = await res.json()
-  cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
-}
-
-const fetchBarangays = async (cityCode) => {
-  const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
-  const data = await res.json()
-  barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
-}
-
-
-watch(selectedRegion, (regionCode) => {
-  selectedProvince.value = null
-  selectedCity.value = null
-  selectedBarangay.value = null
-  provinces.value = []
-  cities.value = []
-  barangaysList.value = []
-  if (regionCode) fetchProvinces(regionCode)
-})
-
-watch(selectedProvince, (provinceCode) => {
-  selectedCity.value = null
-  selectedBarangay.value = null
-  cities.value = []
-  barangaysList.value = []
-  if (provinceCode) fetchCities(provinceCode)
-})
-
-watch(selectedCity, (cityCode) => {
-  selectedBarangay.value = null
-  barangaysList.value = []
-  if (cityCode) fetchBarangays(cityCode)
-})
-
-watch(selectedBarangay, async (val) => {
-  if (!val || !selectedCity.value) return
-
-  const selectedCityObj = cities.value.find((c) => c.code === selectedCity.value)
-  const selectedProvinceObj = provinces.value.find((p) => p.code === selectedProvince.value)
-  const selectedRegionObj = regions.value.find((r) => r.code === selectedRegion.value)
-  const selectedBarangayObj = barangaysList.value.find((b) => b.code === val)
-
-  if (selectedBarangayObj && selectedCityObj && selectedProvinceObj && selectedRegionObj) {
-    const full = `${selectedBarangayObj.name}, ${selectedCityObj.name}, ${selectedProvinceObj.name}, ${selectedRegionObj.name}, Philippines`
-    fullAddress.value = full
-
-    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(full)}`
-    const res = await fetch(url)
-    const data = await res.json()
-    if (data.length > 0) {
-      const { lat, lon } = data[0]
-      latitude.value = parseFloat(lat)
-      longitude.value = parseFloat(lon)
-      map.value?.setView([latitude.value, longitude.value], 15)
-      shopMarker?.setLatLng([latitude.value, longitude.value])
-    }
-  }
-})
-
-watch(selectedCity, async (cityCode) => {
-  if (!cityCode) return
-  const selectedCityObj = cities.value.find((c) => c.code === cityCode)
-  if (!selectedCityObj) return
-
-  const selectedProvinceObj = provinces.value.find((p) => p.code === selectedProvince.value)
-  const selectedRegionObj = regions.value.find((r) => r.code === selectedRegion.value)
-
-  const full = `${selectedCityObj.name}, ${selectedProvinceObj?.name || ''}, ${selectedRegionObj?.name || ''}, Philippines`
-  const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(full)}`
-  const res = await fetch(url)
-  const data = await res.json()
-  if (data.length > 0) {
-    const { lat, lon } = data[0]
-    latitude.value = parseFloat(lat)
-    longitude.value = parseFloat(lon)
-    map.value?.setView([latitude.value, longitude.value], 12)
-    shopMarker?.setLatLng([latitude.value, longitude.value])
-  }
-})
-
-// -------------------- Load Shop --------------------
+// -------------------- MOUNT --------------------
 onMounted(async () => {
   await fetchRegions()
   await nextTick()
@@ -487,34 +438,12 @@ onMounted(async () => {
     latitude.value = data.latitude || 8.9489
     longitude.value = data.longitude || 125.5406
     fullAddress.value = data.detected_address || ''
-
-    initMap(latitude.value, longitude.value)
-    map.value?.setView([latitude.value, longitude.value], 17)
-    shopMarker?.setLatLng([latitude.value, longitude.value])
-  } else {
-    initMap(latitude.value!, longitude.value!)
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition((pos) => {
-        latitude.value = pos.coords.latitude
-        longitude.value = pos.coords.longitude
-        map.value?.setView([latitude.value, longitude.value], 17)
-        shopMarker?.setLatLng([latitude.value, longitude.value])
-      })
-    }
   }
+
+  initMap(latitude.value!, longitude.value!)
+  map.value?.setView([latitude.value!, longitude.value!], 15)
+  shopMarker?.setLatLng([latitude.value!, longitude.value!])
 })
-
-//for radio button
-const addressOption = ref<'manual' | 'map'>('manual')
-
-watch(addressOption, async (value) => {
-  if (value === 'manual') {
-    await nextTick()
-    if (!map.value) initMap(latitude.value!, longitude.value!)
-  }
-})
-
-
 </script>
 
 <template>
@@ -658,12 +587,7 @@ watch(addressOption, async (value) => {
             readonly
             outlined
           />
-           <v-text-field
-            
-            label="Add more details (e.g., house no., street, building)"
-          
-            outlined
-          />
+          <v-text-field label="Add more details (e.g., house no., street, building)" outlined />
 
           <h4 class="text-center mb-2">Please drag/tap your location in the map</h4>
 
