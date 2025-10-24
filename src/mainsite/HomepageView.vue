@@ -458,4 +458,32 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
   font-size: 12px;
   color: #6b7280;
 }
+
+/* ✅ Keep products 2-column layout for small devices (e.g. 350x800) */
+@media (max-width: 480px) {
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px;
+  }
+
+  .product-card {
+    height: auto;
+  }
+
+  .product-img {
+    height: 140px;
+  }
+
+  .product-title {
+    font-size: 12px;
+  }
+
+  .product-price {
+    font-size: 13px;
+  }
+
+  .product-sold {
+    font-size: 11px;
+  }
+}
 </style>
