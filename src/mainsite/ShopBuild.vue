@@ -347,7 +347,7 @@ const saveShop = async () => {
 const reverseGeocode = async (lat: number, lng: number) => {
   try {
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+      `https://corsproxy.io/?https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`
     )
     const data = await res.json()
     if (data && data.address) {
@@ -365,7 +365,8 @@ const reverseGeocode = async (lat: number, lng: number) => {
     showSnackbar('Failed to fetch address', 'error')
   }
 }
-// -------------------- PSGC Cloud API --------------------
+
+
 // -------------------- PSGC Cloud API --------------------
 const fetchRegions = async () => {
   const res = await fetch('https://psgc.cloud/api/regions')
@@ -512,6 +513,8 @@ watch(addressOption, async (value) => {
     if (!map.value) initMap(latitude.value!, longitude.value!)
   }
 })
+
+
 </script>
 
 <template>
