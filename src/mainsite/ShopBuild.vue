@@ -360,10 +360,16 @@ const getLocation = () => {
     async (pos) => {
       latitude.value = pos.coords.latitude
       longitude.value = pos.coords.longitude
+
+      // ✅ Move map and marker
       map.value?.setView([latitude.value, longitude.value], 17)
       shopMarker?.setLatLng([latitude.value, longitude.value])
+
+      // ✅ Reverse geocode to get readable address
+      await reverseGeocode(latitude.value, longitude.value)
+
+      // ✅ Optionally save to Supabase
       await saveCoordinates(latitude.value, longitude.value)
-      //  await reverseGeocode(latitude.value, longitude.value)
     },
     (err) => {
       console.error(err)
@@ -372,6 +378,7 @@ const getLocation = () => {
     { enableHighAccuracy: true, timeout: 10000 },
   )
 }
+
 
 // -------------------- SAVE SHOP --------------------
 const saveShop = async () => {
@@ -664,13 +671,13 @@ onMounted(async () => {
           </v-btn>
         </div>
 
-        <v-btn
+    <!-- <v-btn
           color="secondary"
           @click="() => saveCoordinates(latitude!, longitude!)"
           class="save-location"
         >
           Save this location
-        </v-btn>
+        </v-btn>-->   
         <div v-if="addressOption === 'map'">
           <!--dria tamn-->
           <v-btn block color="primary" @click="getLocation" class="mt-2">
