@@ -334,6 +334,25 @@ watch(selectedBarangay, async (val) => {
   }
 })
 
+// for map zoomers
+watch(fullAddress, async (newVal) => {
+  if (!newVal || !map.value) return
+
+  const coords = await getCoordinatesFromAddress(newVal)
+  if (coords) {
+    latitude.value = coords.lat
+    longitude.value = coords.lon
+
+    // Move map and marker
+    map.value.setView([coords.lat, coords.lon], 15)
+    shopMarker?.setLatLng([coords.lat, coords.lon])
+
+    // Optionally, you can auto-save the coordinates
+    await saveCoordinates(coords.lat, coords.lon)
+  }
+})
+
+
 // -------------------- GET LOCATION --------------------
 const getLocation = () => {
   if (!navigator.geolocation) {
