@@ -8,6 +8,98 @@ import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 
 const activeTab = ref('map')
+const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
+
+
+// polygon style for city boundary
+const highlightCityBoundary = async (cityName: string) => {
+  if (!map.value) return
+
+  // Ask Nominatim for the city polygon
+  const url =
+    `https://nominatim.openstreetmap.org/search` +
+    `?format=geojson&polygon_geojson=1&addressdetails=1&dedupe=1&limit=5` +
+    `&city=${encodeURIComponent(cityName)}` +
+    `&country=Philippines`
+
+  const res = await fetch(url, {
+    headers: {
+      'Accept-Language': 'en',
+      // Good practice with Nominatim (rate-limits rely on UA)
+      'User-Agent': 'CloseShop/1.0 (contact@example.com)'
+    }
+  })
+  const geo = await res.json()
+
+  if (!geo?.features?.length) {
+    console.warn('No GeoJSON features for city:', cityName)
+    return
+  }
+
+  // Prefer administrative boundary polygons
+  const feature =
+    geo.features.find((f: any) =>
+      f.geometry &&
+      (f.properties?.class === 'boundary' || f.properties?.category === 'boundary' || f.properties?.type === 'administrative') &&
+      (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+    )
+    // fallback: any polygon
+    ?? geo.features.find((f: any) =>
+      f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+    )
+
+  if (!feature) {
+    console.warn('No polygon boundary found for city:', cityName, geo.features)
+    return
+  }
+
+  // Remove previous boundary layer
+  if (cityBoundaryLayer.value && map.value.hasLayer(cityBoundaryLayer.value)) {
+    map.value.removeLayer(cityBoundaryLayer.value)
+  }
+
+  // Draw boundary
+  cityBoundaryLayer.value = L.geoJSON(feature.geometry, {
+    style: {
+      color: '#0ea5e9',      // outline
+      weight: 3,
+      fillColor: '#0ea5e9',  // soft fill
+      fillOpacity: 0.08
+    }
+  }).addTo(map.value)
+
+  // Fit map to boundary
+  map.value.fitBounds(cityBoundaryLayer.value.getBounds().pad(0.2))
+}
+
+const highlightBoundaryForUserLocation = async (lat: number, lng: number) => {
+  try {
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&addressdetails=1`,
+      {
+        headers: {
+          'Accept-Language': 'en',
+          'User-Agent': 'CloseShop/1.0 (contact@example.com)'
+        }
+      }
+    )
+    const data = await res.json()
+    const addr = data?.address || {}
+
+    // Nominatim can use different keys depending on locality
+    const city =
+      addr.city || addr.town || addr.municipality || addr.village || addr.county
+
+    if (city) {
+      await highlightCityBoundary(city)
+    } else {
+      console.warn('Could not resolve city name from reverse geocode.', data)
+    }
+  } catch (e) {
+    console.error('Reverse geocode failed:', e)
+  }
+}
+
 
 // ✅ Stable marker icons with retina support 
 const userIcon = L.icon({
@@ -151,6 +243,7 @@ const fetchNearbyPOIs = async (lat: number, lng: number) => {
     console.error('Failed to fetch nearby POIs:', err)
   }
 }
+
 
     // 🔄 For shops missing coordinates, fetch coordinates from their address
  /* ✅ Fetch shops (with fallback to address geocoding) */
@@ -325,7 +418,6 @@ watch([latitude, longitude], async ([lat, lng]) => {
   const userLng = Number(lng)
   if (isNaN(userLat) || isNaN(userLng)) return
 
-  // Update or create user marker
   if (userMarker) {
     userMarker.setLatLng([userLat, userLng])
   } else {
@@ -335,14 +427,20 @@ watch([latitude, longitude], async ([lat, lng]) => {
       .openPopup()
   }
 
-  // ✅ Throttled POI fetching
   const now = Date.now()
   if (now - lastPOIFetch > POI_FETCH_INTERVAL) {
     lastPOIFetch = now
     await fetchNearbyPOIs(userLat, userLng)
+    await highlightCityBoundary('Butuan City')
+
+    // 🧹 Remove unwanted blue mini-polygons (like building outlines)
+    map.value.eachLayer(layer => {
+      if (layer instanceof L.GeoJSON) {
+        map.value.removeLayer(layer)
+      }
+    })
   }
 
-  // ✅ Safe recentering after slight delay
   if (recenterTimeout) clearTimeout(recenterTimeout)
   recenterTimeout = window.setTimeout(() => {
     if (map.value && map.value._loaded && !currentPopup) {
