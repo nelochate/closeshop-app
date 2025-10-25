@@ -59,9 +59,8 @@ const onSearch = () => {
 }
 
 /* ✅ Fetch shops */
-/* ✅ Fetch shops (with fallback to address geocoding) */
-/* ✅ Fetch nearby non-registered shops (POIs) */
-/* ✅ Fetch nearby non-registered shops (POIs) */
+let poiMarkers: L.Marker[] = [] // 🧹 track green markers
+
 const fetchNearbyPOIs = async (lat: number, lng: number) => {
   try {
     if (!lat || !lng || !map.value) return
@@ -79,6 +78,10 @@ const fetchNearbyPOIs = async (lat: number, lng: number) => {
       return
     }
 
+    // 🧹 Remove old green markers first
+    poiMarkers.forEach((m) => map.value?.removeLayer(m))
+    poiMarkers = []
+
     data.forEach((place) => {
       const poiLat = parseFloat(place.lat)
       const poiLng = parseFloat(place.lon)
@@ -87,37 +90,67 @@ const fetchNearbyPOIs = async (lat: number, lng: number) => {
 
       const name = place.display_name?.split(',')[0] || 'Unnamed Place'
 
+      // 🛑 Skip already registered shops (based on name + proximity)
+      const isRegistered = shops.value.some((shop) => {
+        const shopName = shop.business_name?.toLowerCase().trim()
+        return (
+          shopName &&
+          name.toLowerCase().includes(shopName) &&
+          Math.abs(shop.latitude - poiLat) < 0.001 &&
+          Math.abs(shop.longitude - poiLng) < 0.001
+        )
+      })
+      if (isRegistered) return
+
+      // ✅ Add new green marker
       const marker = L.marker([poiLat, poiLng], {
         icon: poiIcon,
         title: name,
       }).addTo(map.value!)
 
+      const mapsUrl = `https://www.google.com/maps?q=${poiLat},${poiLng}`
+
       const popupHtml = `
         <div style="text-align:center;">
           <p><strong>${name}</strong></p>
-          <button id="invite-${poiLat}-${poiLng}"
-                  style="padding:6px 12px; background:#4caf50; color:white; border:none; border-radius:6px; cursor:pointer;">
-            Invite Shop to Join
-          </button>
+          <div style="display:flex; flex-direction:column; gap:6px; align-items:center;">
+            <button id="invite-${poiLat}-${poiLng}"
+                    style="padding:6px 12px; background:#4caf50; color:white; border:none; border-radius:6px; cursor:pointer;">
+              Invite Shop to Join
+            </button>
+            <button id="viewmap-${poiLat}-${poiLng}"
+                    style="padding:6px 12px; background:#1976d2; color:white; border:none; border-radius:6px; cursor:pointer;">
+              View on Map
+            </button>
+          </div>
         </div>
       `
       marker.bindPopup(popupHtml)
 
       marker.on('popupopen', () => {
-        const btn = document.getElementById(`invite-${poiLat}-${poiLng}`)
-        if (btn) {
-          btn.onclick = () => {
+        const inviteBtn = document.getElementById(`invite-${poiLat}-${poiLng}`)
+        const mapBtn = document.getElementById(`viewmap-${poiLat}-${poiLng}`)
+
+        if (inviteBtn) {
+          inviteBtn.onclick = () => {
             alert(`📨 Invitation sent to "${name}"!`)
             marker.closePopup()
           }
         }
+
+        if (mapBtn) {
+          mapBtn.onclick = () => {
+            window.open(mapsUrl, '_blank')
+          }
+        }
       })
+
+      poiMarkers.push(marker)
     })
   } catch (err) {
     console.error('Failed to fetch nearby POIs:', err)
   }
-} // ✅ close fetchNearbyPOIs properly here
-
+}
 
     // 🔄 For shops missing coordinates, fetch coordinates from their address
  /* ✅ Fetch shops (with fallback to address geocoding) */
