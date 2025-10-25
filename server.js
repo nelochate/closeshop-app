@@ -1,4 +1,5 @@
-// server.js
+
+/*// server.js
 import express from 'express'
 import cors from 'cors'
 import fetch from 'node-fetch'
@@ -24,3 +25,4 @@ app.get('/api/reverse', async (req, res) => {
 })
 
 app.listen(3000, () => console.log('✅ Proxy server running on http://localhost:3000'))
+*/
