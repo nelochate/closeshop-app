@@ -9,7 +9,7 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 
 const activeTab = ref('map')
 
-// ✅ Stable marker icons with retina support
+// ✅ Stable marker icons with retina support 
 const userIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -19,16 +19,26 @@ const userIcon = L.icon({
   popupAnchor: [1, -34],
   shadowSize: [41, 41],
 })
-
+// for the registered shops
 const shopIcon = L.icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
-  iconRetinaUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-blue.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
+  iconRetinaUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
+  shadowUrl: '',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
-  shadowSize: [41, 41],
 })
+
+//marker for unregistered shops/nearby points of interest
+const poiIcon = L.icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
+  iconRetinaUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+  shadowUrl: '',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+})
+
 
 const { latitude, longitude, requestPermission, getLocation, startWatching, stopWatching } = useGeolocation()
 const router = useRouter()
@@ -49,18 +59,122 @@ const onSearch = () => {
 }
 
 /* ✅ Fetch shops */
+/* ✅ Fetch shops (with fallback to address geocoding) */
+/* ✅ Fetch nearby non-registered shops (POIs) */
+/* ✅ Fetch nearby non-registered shops (POIs) */
+const fetchNearbyPOIs = async (lat: number, lng: number) => {
+  try {
+    if (!lat || !lng || !map.value) return
+
+    console.log('🔍 Searching nearby places...')
+    const res = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=shop&addressdetails=1&limit=30&bounded=1&viewbox=${lng - 0.05},${lat + 0.05},${lng + 0.05},${lat - 0.05}`
+    )
+
+    const data = await res.json()
+    console.log('🟢 Found nearby POIs:', data.length)
+
+    if (!Array.isArray(data)) {
+      console.warn('⚠️ Nominatim did not return an array:', data)
+      return
+    }
+
+    data.forEach((place) => {
+      const poiLat = parseFloat(place.lat)
+      const poiLng = parseFloat(place.lon)
+      if (isNaN(poiLat) || isNaN(poiLng)) return
+      if (!place.address || place.address.city !== 'Butuan City') return
+
+      const name = place.display_name?.split(',')[0] || 'Unnamed Place'
+
+      const marker = L.marker([poiLat, poiLng], {
+        icon: poiIcon,
+        title: name,
+      }).addTo(map.value!)
+
+      const popupHtml = `
+        <div style="text-align:center;">
+          <p><strong>${name}</strong></p>
+          <button id="invite-${poiLat}-${poiLng}"
+                  style="padding:6px 12px; background:#4caf50; color:white; border:none; border-radius:6px; cursor:pointer;">
+            Invite Shop to Join
+          </button>
+        </div>
+      `
+      marker.bindPopup(popupHtml)
+
+      marker.on('popupopen', () => {
+        const btn = document.getElementById(`invite-${poiLat}-${poiLng}`)
+        if (btn) {
+          btn.onclick = () => {
+            alert(`📨 Invitation sent to "${name}"!`)
+            marker.closePopup()
+          }
+        }
+      })
+    })
+  } catch (err) {
+    console.error('Failed to fetch nearby POIs:', err)
+  }
+} // ✅ close fetchNearbyPOIs properly here
+
+
+    // 🔄 For shops missing coordinates, fetch coordinates from their address
+ /* ✅ Fetch shops (with fallback to address geocoding) */
 const fetchShops = async () => {
   try {
     loading.value = true
+    errorMsg.value = null
+
     const { data, error } = await supabase
       .from('shops')
-      .select('id, business_name, latitude, longitude, physical_store, logo_url')
+      .select('id, business_name, latitude, longitude, physical_store, logo_url, detected_address')
 
     if (error) throw error
-    shops.value = data || []
+    if (!data) {
+      errorMsg.value = 'No shops found.'
+      return
+    }
+
+    // 🔄 For shops missing coordinates, fetch coordinates from their address
+    const processedShops = await Promise.all(
+      data.map(async (shop) => {
+        let lat = parseFloat(shop.latitude)
+        let lng = parseFloat(shop.longitude)
+
+        if (isNaN(lat) || isNaN(lng)) {
+          const address = shop.detected_address
+          if (address) {
+            try {
+              const geoRes = await fetch(
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+              )
+              const geoData = await geoRes.json()
+              if (geoData.length > 0) {
+                lat = parseFloat(geoData[0].lat)
+                lng = parseFloat(geoData[0].lon)
+
+                // ✅ Optionally save back to Supabase for caching
+                await supabase
+                  .from('shops')
+                  .update({ latitude: lat, longitude: lng })
+                  .eq('id', shop.id)
+              }
+            } catch (geoErr) {
+              console.warn(`Failed to geocode shop ${shop.business_name}:`, geoErr)
+            }
+          }
+        }
+
+        return { ...shop, latitude: lat, longitude: lng }
+      })
+    )
+
+    shops.value = processedShops
     plotShops()
   } catch (err: any) {
-    errorMsg.value = err.message
+    errorMsg.value = err.message || 'Failed to fetch shops.'
+    console.error(err)
   } finally {
     loading.value = false
   }
@@ -70,14 +184,18 @@ const fetchShops = async () => {
 const plotShops = () => {
   if (!map.value || !map.value._loaded) return
 
-  // Clear previous markers
+  // 🧹 Clear previous markers
   shopMarkers.forEach((marker) => map.value?.removeLayer(marker))
   shopMarkers = []
 
   shops.value.forEach((shop) => {
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
-    if (isNaN(lat) || isNaN(lng)) return
+
+    if (isNaN(lat) || isNaN(lng)) {
+      console.warn('⚠️ Skipping shop with invalid coordinates:', shop.business_name, shop.latitude, shop.longitude)
+      return
+    }
 
     const imageUrl = shop.physical_store || shop.logo_url || 'https://via.placeholder.com/80'
 
@@ -99,6 +217,7 @@ const plotShops = () => {
         </button>
       </div>
     `
+
     marker.bindPopup(popupHtml)
 
     marker.on('popupopen', () => {
@@ -118,7 +237,17 @@ const plotShops = () => {
 
     shopMarkers.push(marker)
   })
+
+  // ✅ Adjust map to show all markers
+  if (shopMarkers.length > 0 && map.value) {
+    const group = L.featureGroup(shopMarkers)
+    map.value.fitBounds(group.getBounds().pad(0.2))
+  }
+
+  console.log('🧭 Shop markers count:', shopMarkers.length)
 }
+
+
 
 /* ✅ Initialize map */
 const initializeMap = () => {
@@ -154,13 +283,16 @@ onMounted(async () => {
 
 /* ✅ Handle user marker + safe recentering */
 let recenterTimeout: number | null = null
+let lastPOIFetch = 0
+const POI_FETCH_INTERVAL = 10000 // fetch green markers every 10 seconds max
 
-watch([latitude, longitude], ([lat, lng]) => {
+watch([latitude, longitude], async ([lat, lng]) => {
   if (!map.value || lat == null || lng == null) return
   const userLat = Number(lat)
   const userLng = Number(lng)
   if (isNaN(userLat) || isNaN(userLng)) return
 
+  // Update or create user marker
   if (userMarker) {
     userMarker.setLatLng([userLat, userLng])
   } else {
@@ -170,7 +302,14 @@ watch([latitude, longitude], ([lat, lng]) => {
       .openPopup()
   }
 
-  // ✅ Debounce and safely recenter (no animation during zoom)
+  // ✅ Throttled POI fetching
+  const now = Date.now()
+  if (now - lastPOIFetch > POI_FETCH_INTERVAL) {
+    lastPOIFetch = now
+    await fetchNearbyPOIs(userLat, userLng)
+  }
+
+  // ✅ Safe recentering after slight delay
   if (recenterTimeout) clearTimeout(recenterTimeout)
   recenterTimeout = window.setTimeout(() => {
     if (map.value && map.value._loaded && !currentPopup) {
@@ -182,6 +321,7 @@ watch([latitude, longitude], ([lat, lng]) => {
     }
   }, 1500)
 })
+
 
 /* ✅ Cleanup */
 onUnmounted(() => {
