@@ -1,4 +1,3 @@
-
 <script setup lang="ts">
 import { ref, watch, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -69,8 +68,9 @@ const reverseGeocode = async (lat: number, lng: number) => {
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
     )
     const data = await res.json()
+
     if (data?.display_name) {
-      fullAddress.value = data.display_name
+      fullAddress.value = data.display_name // ✅ auto-fill address
       showSnackbar(`📍 ${data.display_name}`, 'success')
     } else {
       showSnackbar('Address not found for this location', 'error')
@@ -104,17 +104,16 @@ const initMap = (lat: number, lng: number) => {
     latitude.value = pos.lat
     longitude.value = pos.lng
     await saveCoordinates(pos.lat, pos.lng)
-    await reverseGeocode(pos.lat, pos.lng)
+    await reverseGeocode(pos.lat, pos.lng) // ✅ update fullAddress when dragged
   })
 
-  // 🖱 Clicking on the map moves the same marker and shows address
   map.value.on('click', async (e: L.LeafletMouseEvent) => {
     const { lat, lng } = e.latlng
     latitude.value = lat
     longitude.value = lng
     shopMarker?.setLatLng([lat, lng])
     await saveCoordinates(lat, lng)
-    await reverseGeocode(lat, lng)
+    await reverseGeocode(lat, lng) // ✅ update fullAddress when tapped
   })
 }
 
@@ -206,7 +205,6 @@ const saveCoordinates = async (lat: number, lng: number) => {
     showSnackbar('Failed to update location', 'error')
   }
 }
-
 
 const getCoordinatesFromAddress = async (address: string) => {
   try {
@@ -351,7 +349,6 @@ watch(fullAddress, async (newVal) => {
     await saveCoordinates(coords.lat, coords.lon)
   }
 })
-
 
 // -------------------- GET LOCATION --------------------
 const getLocation = () => {
