@@ -500,7 +500,7 @@ const recenterToUser = async () => {
 
 <template>
   <v-app>
-    <v-app-bar color="#3f83c7" flat>
+    <v-app-bar class="searchshop" color="#3f83c7" flat>
       <v-text-field
         v-model="search"
         label="Search shops..."
@@ -558,6 +558,9 @@ const recenterToUser = async () => {
   background: white;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
 }
+.searchshop {
+ padding: 30px 16px calc(12px + env(safe-area-inset-top)) 16px;
+}
 
 /* ✅ Leaflet container stable visuals */
 :deep(.leaflet-container) {
@@ -579,4 +582,5 @@ const recenterToUser = async () => {
 :deep(.leaflet-popup-tip) {
   box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
 }
+
 </style>
