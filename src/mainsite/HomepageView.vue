@@ -225,29 +225,18 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 <template>
   <v-app>
     <v-main class="page">
+      <!-- 🔎 Search + Notification -->
+      <v-sheet class="hero">
+        <div class="hero-row">
+          <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
+            density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
+            append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
+          <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
+            <v-icon size="22">mdi-bell-outline</v-icon>
+          </v-btn>
+        </div>
+      </v-sheet>
       <v-container class="py-4" style="max-width: 720px">
-        <!-- 🔎 Search + Notification -->
-        <v-sheet class="hero pa-4">
-          <div class="hero-row">
-            <v-text-field
-              v-model="search"
-              class="search-field"
-              variant="solo"
-              rounded="pill"
-              hide-details
-              clearable
-              density="comfortable"
-              placeholder="Looking for something specific?"
-              prepend-inner-icon="mdi-magnify"
-              append-inner-icon="mdi-earth"
-              @keyup.enter="onSearch"
-              @click:prepend-inner="onSearch"
-            />
-            <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
-              <v-icon size="22">mdi-bell-outline</v-icon>
-            </v-btn>
-          </div>
-        </v-sheet>
 
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
@@ -322,8 +311,17 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 }
 
 .hero {
-  background: #e5f1f8;
-  border-radius: 14px;
+  background: #3f83c7;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  margin: 0;
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
 }
 
 .hero-row {

@@ -64,7 +64,7 @@ const checkoutSelected = () => {
 <template>
   <v-app>
     <!-- Header -->
-    <v-app-bar flat color="#3f83c7" dark>
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark>
       <v-toolbar-title><strong>Cart</strong></v-toolbar-title>
     </v-app-bar>
 
@@ -151,6 +151,11 @@ const checkoutSelected = () => {
 </template>
 
 <style scoped>
+.app-bar {
+  padding-top: env(safe-area-inset-top);
+  padding: 15px 16px calc(12px + env(safe-area-inset-top)) 16px;
+}
+
 .content {
   flex: 1;
   display: flex;
