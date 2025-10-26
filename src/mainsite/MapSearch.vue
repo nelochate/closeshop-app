@@ -10,7 +10,6 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 const activeTab = ref('map')
 const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
 
-
 // polygon style for city boundary
 const highlightCityBoundary = async (cityName: string) => {
   if (!map.value) return
@@ -26,8 +25,8 @@ const highlightCityBoundary = async (cityName: string) => {
     headers: {
       'Accept-Language': 'en',
       // Good practice with Nominatim (rate-limits rely on UA)
-      'User-Agent': 'CloseShop/1.0 (contact@example.com)'
-    }
+      'User-Agent': 'CloseShop/1.0 (contact@example.com)',
+    },
   })
   const geo = await res.json()
 
@@ -38,14 +37,18 @@ const highlightCityBoundary = async (cityName: string) => {
 
   // Prefer administrative boundary polygons
   const feature =
-    geo.features.find((f: any) =>
-      f.geometry &&
-      (f.properties?.class === 'boundary' || f.properties?.category === 'boundary' || f.properties?.type === 'administrative') &&
-      (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
-    )
+    geo.features.find(
+      (f: any) =>
+        f.geometry &&
+        (f.properties?.class === 'boundary' ||
+          f.properties?.category === 'boundary' ||
+          f.properties?.type === 'administrative') &&
+        (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'),
+    ) ??
     // fallback: any polygon
-    ?? geo.features.find((f: any) =>
-      f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon')
+    geo.features.find(
+      (f: any) =>
+        f.geometry && (f.geometry.type === 'Polygon' || f.geometry.type === 'MultiPolygon'),
     )
 
   if (!feature) {
@@ -61,11 +64,11 @@ const highlightCityBoundary = async (cityName: string) => {
   // Draw boundary
   cityBoundaryLayer.value = L.geoJSON(feature.geometry, {
     style: {
-      color: '#0ea5e9',      // outline
+      color: '#0ea5e9', // outline
       weight: 3,
-      fillColor: '#0ea5e9',  // soft fill
-      fillOpacity: 0.08
-    }
+      fillColor: '#0ea5e9', // soft fill
+      fillOpacity: 0.08,
+    },
   }).addTo(map.value)
 
   // Fit map to boundary
@@ -79,16 +82,15 @@ const highlightBoundaryForUserLocation = async (lat: number, lng: number) => {
       {
         headers: {
           'Accept-Language': 'en',
-          'User-Agent': 'CloseShop/1.0 (contact@example.com)'
-        }
-      }
+          'User-Agent': 'CloseShop/1.0 (contact@example.com)',
+        },
+      },
     )
     const data = await res.json()
     const addr = data?.address || {}
 
     // Nominatim can use different keys depending on locality
-    const city =
-      addr.city || addr.town || addr.municipality || addr.village || addr.county
+    const city = addr.city || addr.town || addr.municipality || addr.village || addr.county
 
     if (city) {
       await highlightCityBoundary(city)
@@ -100,8 +102,7 @@ const highlightBoundaryForUserLocation = async (lat: number, lng: number) => {
   }
 }
 
-
-// ✅ Stable marker icons with retina support 
+// ✅ Stable marker icons with retina support
 const userIcon = L.icon({
   iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
   iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
@@ -113,8 +114,10 @@ const userIcon = L.icon({
 })
 // for the registered shops
 const shopIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
-  iconRetinaUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
+  iconRetinaUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
   shadowUrl: '',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
@@ -123,16 +126,18 @@ const shopIcon = L.icon({
 
 //marker for unregistered shops/nearby points of interest
 const poiIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
-  iconRetinaUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
+  iconRetinaUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
   shadowUrl: '',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
 })
 
-
-const { latitude, longitude, requestPermission, getLocation, startWatching, stopWatching } = useGeolocation()
+const { latitude, longitude, requestPermission, getLocation, startWatching, stopWatching } =
+  useGeolocation()
 const router = useRouter()
 
 const search = ref('')
@@ -159,7 +164,7 @@ const fetchNearbyPOIs = async (lat: number, lng: number) => {
 
     console.log('🔍 Searching nearby places...')
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=shop&addressdetails=1&limit=30&bounded=1&viewbox=${lng - 0.05},${lat + 0.05},${lng + 0.05},${lat - 0.05}`
+      `https://nominatim.openstreetmap.org/search?format=json&q=shop&addressdetails=1&limit=30&bounded=1&viewbox=${lng - 0.05},${lat + 0.05},${lng + 0.05},${lat - 0.05}`,
     )
 
     const data = await res.json()
@@ -244,9 +249,8 @@ const fetchNearbyPOIs = async (lat: number, lng: number) => {
   }
 }
 
-
-    // 🔄 For shops missing coordinates, fetch coordinates from their address
- /* ✅ Fetch shops (with fallback to address geocoding) */
+// 🔄 For shops missing coordinates, fetch coordinates from their address
+/* ✅ Fetch shops (with fallback to address geocoding) */
 const fetchShops = async () => {
   try {
     loading.value = true
@@ -273,7 +277,7 @@ const fetchShops = async () => {
           if (address) {
             try {
               const geoRes = await fetch(
-                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`,
               )
               const geoData = await geoRes.json()
               if (geoData.length > 0) {
@@ -293,7 +297,7 @@ const fetchShops = async () => {
         }
 
         return { ...shop, latitude: lat, longitude: lng }
-      })
+      }),
     )
 
     shops.value = processedShops
@@ -319,7 +323,12 @@ const plotShops = () => {
     const lng = Number(shop.longitude)
 
     if (isNaN(lat) || isNaN(lng)) {
-      console.warn('⚠️ Skipping shop with invalid coordinates:', shop.business_name, shop.latitude, shop.longitude)
+      console.warn(
+        '⚠️ Skipping shop with invalid coordinates:',
+        shop.business_name,
+        shop.latitude,
+        shop.longitude,
+      )
       return
     }
 
@@ -372,8 +381,6 @@ const plotShops = () => {
 
   console.log('🧭 Shop markers count:', shopMarkers.length)
 }
-
-
 
 /* ✅ Initialize map */
 const initializeMap = () => {
@@ -434,7 +441,7 @@ watch([latitude, longitude], async ([lat, lng]) => {
     await highlightCityBoundary('Butuan City')
 
     // 🧹 Remove unwanted blue mini-polygons (like building outlines)
-    map.value.eachLayer(layer => {
+    map.value.eachLayer((layer) => {
       if (layer instanceof L.GeoJSON) {
         map.value.removeLayer(layer)
       }
@@ -453,7 +460,6 @@ watch([latitude, longitude], async ([lat, lng]) => {
   }, 1500)
 })
 
-
 /* ✅ Cleanup */
 onUnmounted(() => {
   stopWatching()
@@ -471,6 +477,25 @@ onUnmounted(() => {
   userMarker = null
   currentPopup = null
 })
+
+/* ✅ Manual recenter to current location */
+const locating = ref(false)
+
+const recenterToUser = async () => {
+  locating.value = true
+  try {
+    const { coords } = await getLocation()
+    if (coords) {
+      const lat = coords.latitude
+      const lng = coords.longitude
+      if (map.value) map.value.setView([lat, lng], 16, { animate: true })
+    }
+  } catch {
+    alert('Unable to retrieve location.')
+  } finally {
+    locating.value = false
+  }
+}
 </script>
 
 <template>
@@ -496,8 +521,8 @@ onUnmounted(() => {
     <v-main>
       <!-- Map Container -->
       <div id="map">
-        <v-btn icon @click="getLocation" class="locate-btn">
-          <v-icon>mdi-crosshairs-gps</v-icon>
+        <v-btn icon :loading="locating" @click="recenterToUser" class="locate-btn">
+          <v-icon v-if="!locating">mdi-crosshairs-gps</v-icon>
         </v-btn>
       </div>
 
