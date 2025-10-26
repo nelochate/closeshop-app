@@ -14,14 +14,12 @@
     "format": "prettier --write src/"
   },
   "dependencies": {
-    "@capacitor/android": "7.4.3",
+    "@capacitor/android": "^7.4.4",
     "@capacitor/app": "7.0.2",
     "@capacitor/camera": "^7.0.2",
-    "@capacitor/cli": "7.4.3",
-    "@capacitor/core": "^7.4.3",
     "@capacitor/geolocation": "^7.1.5",
     "@capacitor/haptics": "7.0.2",
-    "@capacitor/ios": "7.4.3",
+    "@capacitor/ios": "^7.4.4",
     "@capacitor/keyboard": "7.0.2",
     "@capacitor/status-bar": "7.0.2",
     "@dataconnect/generated": "file:src/dataconnect-generated",
@@ -43,6 +41,8 @@
     "vuetify": "^3.9.7"
   },
   "devDependencies": {
+    "@capacitor/cli": "^7.4.4",
+    "@capacitor/core": "^7.4.4",
     "@eslint/js": "^9.31.0",
     "@mdi/font": "^7.4.47",
     "@types/leaflet": "^1.9.21",
