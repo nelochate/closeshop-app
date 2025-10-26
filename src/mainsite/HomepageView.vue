@@ -3,13 +3,16 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
-import { messaging } from '@/utils/firebase' // ✅ use centralized firebase setup
-import { getToken } from 'firebase/messaging' // for requesting permission
+import { messaging } from '@/utils/firebase'
+import { getToken } from 'firebase/messaging'
+import { Geolocation } from '@capacitor/geolocation'
+import { PushNotifications } from '@capacitor/push-notifications'
+import { Network } from '@capacitor/network'
+import { Capacitor } from '@capacitor/core'
 
 const router = useRouter()
 const activeTab = ref('home')
 const search = ref('')
-
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
@@ -17,7 +20,147 @@ const errorMsg = ref('')
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
 
-// ✅ Helper: normalize image field
+/* 🧭 Location Permission */
+async function requestLocationPermission() {
+  try {
+    const perm = await Geolocation.requestPermissions()
+    if (perm.location === 'granted') {
+      const coords = await Geolocation.getCurrentPosition()
+      console.log('📍 User location:', coords.coords)
+      return coords.coords
+    } else {
+      alert('Please enable location permission to see nearby shops.')
+      return null
+    }
+  } catch (err) {
+    console.error('Error requesting location:', err)
+    return null
+  }
+}
+
+/* 🔔 Notifications Permission */
+async function requestPushPermission() {
+  try {
+    const permStatus = await PushNotifications.checkPermissions()
+    if (permStatus.receive !== 'granted') {
+      const req = await PushNotifications.requestPermissions()
+      if (req.receive !== 'granted') {
+        console.warn('Notifications permission denied.')
+        return
+      }
+    }
+
+    await PushNotifications.register()
+
+    PushNotifications.addListener('registration', (token) => {
+      console.log('✅ Push token:', token.value)
+    })
+
+    PushNotifications.addListener('registrationError', (error) => {
+      console.error('❌ Push registration error:', error)
+    })
+  } catch (err) {
+    console.error('Error requesting push permission:', err)
+  }
+}
+
+/* 🌐 Network Status */
+async function checkNetworkStatus() {
+  try {
+    const status = await Network.getStatus()
+    console.log('📶 Network status:', status)
+    if (!status.connected) {
+      alert('No internet connection. Please connect to Wi-Fi or mobile data.')
+    }
+
+    Network.addListener('networkStatusChange', (status) => {
+      console.log('🌐 Network changed:', status)
+      if (!status.connected) {
+        alert('⚠️ You are offline.')
+      } else {
+        console.log('✅ Back online.')
+      }
+    })
+  } catch (err) {
+    console.error('Network check error:', err)
+  }
+}
+
+/* 📡 Firebase Token */
+async function requestForToken() {
+  try {
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      console.warn('Notification permission denied.')
+      return null
+    }
+
+    const vapidKey = 'BOiw6_vllLo5TOjouOP8mMK_zhynZ8wakUg8ZgP_gfH9YwpUJ2ils7HCq15LBWpFq1pZvXGzye01pjUIDOjY6P8'
+    const token = await getToken(messaging, { vapidKey })
+
+    if (token) {
+      console.log('✅ FCM Token:', token)
+      return token
+    } else {
+      console.warn('No registration token available.')
+      return null
+    }
+  } catch (err) {
+    console.error('Error getting FCM token:', err)
+    return null
+  }
+}
+
+/* 🏪 Fetch Shops */
+async function fetchShops() {
+  try {
+    const { data, error } = await supabase
+      .from('shops')
+      .select('id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region')
+      .order('business_name')
+
+    if (error) throw error
+
+    nearby.value = (data || []).map((s) => ({
+      id: s.id,
+      title: s.business_name,
+      img: s.physical_store || PLACEHOLDER_IMG,
+      logo: s.logo_url,
+      address: [s.building, s.street, s.barangay, s.city, s.province, s.region]
+        .filter(Boolean)
+        .join(', '),
+    }))
+  } catch (err) {
+    console.error('fetchShops error:', err)
+    errorMsg.value = err.message
+    nearby.value = []
+  }
+}
+
+/* 🛍️ Fetch Products */
+async function fetchProducts() {
+  try {
+    const { data, error } = await supabase
+      .from('products')
+      .select('id, prod_name, price, main_img_urls, shop_id, sold')
+
+    if (error) throw error
+
+    products.value = (data || []).map((p) => ({
+      id: p.id,
+      title: p.prod_name || 'Untitled product',
+      price: p.price,
+      img: extractImage(p.main_img_urls),
+      sold: p.sold || 0,
+    }))
+  } catch (err) {
+    console.error('fetchProducts error:', err)
+    errorMsg.value = err.message
+    products.value = []
+  }
+}
+
+/* 🖼️ Normalize Image */
 function extractImage(main_img_urls) {
   if (!main_img_urls) return PLACEHOLDER_IMG
   if (Array.isArray(main_img_urls) && main_img_urls.length) return main_img_urls[0]
@@ -32,103 +175,43 @@ function extractImage(main_img_urls) {
   return PLACEHOLDER_IMG
 }
 
-// ✅ Fetch Shops
-async function fetchShops() {
-  try {
-    const { data, error } = await supabase
-      .from('shops')
-      .select('id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region')
-      .order('business_name')
-
-    if (error) throw error
-
-    nearby.value = (data || []).map(s => ({
-      id: s.id,
-      title: s.business_name,
-      img: s.physical_store || PLACEHOLDER_IMG,
-      logo: s.logo_url,
-      address: [s.building, s.street, s.barangay, s.city, s.province, s.region]
-        .filter(Boolean)
-        .join(', ')
-    }))
-  } catch (err) {
-    console.error('fetchShops error:', err)
-    errorMsg.value = err.message
-    nearby.value = []
-  }
-}
-
-// ✅ Fetch Products
-async function fetchProducts() {
-  try {
-    const { data, error } = await supabase
-      .from('products')
-      .select('id, prod_name, price, main_img_urls, shop_id, sold')
-
-    if (error) throw error
-
-    products.value = (data || []).map(p => ({
-      id: p.id,
-      title: p.prod_name || 'Untitled product',
-      price: p.price,
-      img: extractImage(p.main_img_urls),
-      sold: p.sold || 0
-    }))
-  } catch (err) {
-    console.error('fetchProducts error:', err)
-    errorMsg.value = err.message
-    products.value = []
-  }
-}
-
-// ✅ Request FCM token
-async function requestForToken() {
-  try {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      console.warn('Notification permission denied.')
-      return null
-    }
-
-    // 👇 Replace with your Firebase VAPID key (found in Firebase Cloud Messaging settings)
-    const vapidKey = 'BOiw6_vllLo5TOjouOP8mMK_zhynZ8wakUg8ZgP_gfH9YwpUJ2ils7HCq15LBWpFq1pZvXGzye01pjUIDOjY6P8'
-
-    const token = await getToken(messaging, { vapidKey })
-    if (token) {
-      console.log('✅ FCM Token:', token)
-      return token
-    } else {
-      console.warn('No registration token available.')
-      return null
-    }
-  } catch (err) {
-    console.error('Error getting FCM token:', err)
-    return null
-  }
-}
-
-// ✅ Lifecycle
+/* 🚀 Main Lifecycle */
 onMounted(async () => {
-  loading.value = true
-  errorMsg.value = ''
-  await Promise.all([fetchShops(), fetchProducts()])
-  loading.value = false
+  try {
+    loading.value = true
+    errorMsg.value = ''
 
-  // ✅ Store FCM Token in Supabase
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return
+    // Request permissions (only on native builds)
+    if (Capacitor.isNativePlatform()) {
+      await checkNetworkStatus()
+      await requestLocationPermission()
+      await requestPushPermission()
+    }
 
-  const token = await requestForToken()
-  if (token) {
-    const { error } = await supabase
-      .from('user_fcm_tokens')
-      .upsert({ user_id: user.id, token }, { onConflict: 'user_id' })
-    if (error) console.error('Error saving FCM token:', error)
-    else console.log('✅ Token saved to Supabase')
+    // Load data
+    await Promise.all([fetchShops(), fetchProducts()])
+    loading.value = false
+
+    // Save FCM token
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const token = await requestForToken()
+      if (token) {
+        const { error } = await supabase
+          .from('user_fcm_tokens')
+          .upsert({ user_id: user.id, token }, { onConflict: 'user_id' })
+        if (error) console.error('Error saving FCM token:', error)
+        else console.log('✅ Token saved to Supabase')
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error in onMounted:', err)
+  } finally {
+    loading.value = false
   }
 })
 
-// ✅ Handlers
+/* 🧭 Navigation */
 const onSearch = () => {
   if (!search.value.trim()) return
   router.push({ name: 'search', query: { q: search.value.trim() } })
