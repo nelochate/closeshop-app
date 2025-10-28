@@ -11,49 +11,75 @@ const goBack = () => router.back()
 // state
 const conversations = ref<any[]>([])
 
-// fetch conversations (last message per user)
 const fetchConversations = async () => {
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return
 
-  // Get all messages where I am sender OR receiver
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id, content, created_at, sender_id, receiver_id, is_read')
-    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-    .order('created_at', { ascending: false })
-
+ const { data, error } = await supabase
+  .from('conversations')
+  .select(`
+    id,
+    user1,
+    user2,
+    user1_profile:conversations_user1_fkey(
+      first_name,
+      last_name,
+      avatar_url
+    ),
+    user2_profile:conversations_user2_fkey (
+      first_name,
+      last_name,
+      avatar_url
+    ),
+    messages:messages_conversation_id_fkey (
+      id,
+      content,
+      created_at,
+      sender_id,
+      receiver_id,
+      is_read
+    )
+  `)
+  .or(`user1.eq.${user.id},user2.eq.${user.id}`)
+  .order('updated_at', { ascending: false })
+console.log('Fetched conversations:', JSON.stringify(data, null, 2))
   if (error) {
-    console.error('Error fetching messages:', error.message)
+    console.error('❌ Error fetching conversations:', error.message)
     return
   }
 
-  // Group messages by the "other user"
-  const convMap = new Map()
+  conversations.value = data.map((conv) => {
+    const lastMsg = conv.messages?.[conv.messages.length - 1]
+    const isUser1 = conv.user1 === user.id
+    const otherProfile = isUser1 ? conv.user2_profile : conv.user1_profile
 
-  data.forEach((msg) => {
-    const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id
-
-    // only keep latest message per user
-    if (!convMap.has(otherUserId)) {
-      convMap.set(otherUserId, {
-        id: msg.id,
-        otherUserId,
-        sender: msg.sender_id === user.id ? 'You' : msg.sender_id,
-        lastMessage: msg.content,
-        time: new Date(msg.created_at).toLocaleTimeString(),
-        unread: !msg.is_read && msg.receiver_id === user.id,
-        avatar: 'https://ui-avatars.com/api/?name=User',
-      })
+    return {
+      id: conv.id,
+      otherUserId: isUser1 ? conv.user2 : conv.user1,
+      otherUserName:
+        `${otherProfile?.first_name || ''} ${otherProfile?.last_name || ''}`.trim() || 'User',
+      avatar:
+        otherProfile?.avatar_url ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(
+          otherProfile?.first_name || 'User',
+        )}`,
+      sender: lastMsg?.sender_id === user.id ? 'You' : otherProfile?.first_name || 'User',
+      lastMessage: lastMsg?.content || '(No messages yet)',
+      time: lastMsg?.created_at
+        ? new Date(lastMsg.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : '',
+      unread: lastMsg ? !lastMsg.is_read && lastMsg.receiver_id === user.id : false,
     }
   })
-
-  conversations.value = Array.from(convMap.values())
 }
 
-// subscribe to new messages
+
+// subscribe to new messages (re-fetch conversations on new message)
 const subscribeMessages = async () => {
   const {
     data: { user },
@@ -64,23 +90,8 @@ const subscribeMessages = async () => {
     .channel('realtime-messages')
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
       const newMsg = payload.new
-      const otherUserId = newMsg.sender_id === user.id ? newMsg.receiver_id : newMsg.sender_id
-
-      const existing = conversations.value.find((c) => c.otherUserId === otherUserId)
-      const latest = {
-        id: newMsg.id,
-        otherUserId,
-        sender: newMsg.sender_id === user.id ? 'You' : newMsg.sender_id,
-        lastMessage: newMsg.content,
-        time: new Date(newMsg.created_at).toLocaleTimeString(),
-        unread: newMsg.receiver_id === user.id,
-        avatar: 'https://via.placeholder.com/48',
-      }
-
-      if (existing) {
-        Object.assign(existing, latest)
-      } else {
-        conversations.value.unshift(latest)
+      if (newMsg.sender_id === user.id || newMsg.receiver_id === user.id) {
+        fetchConversations() // Refresh when relevant
       }
     })
     .subscribe()
@@ -109,7 +120,6 @@ onMounted(() => {
     <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
       <v-btn variant="text" @click="goBack">
         <v-icon start>mdi-arrow-left</v-icon>
-        Back
       </v-btn>
       <v-toolbar-title class="font-bold">
         <strong>Messages</strong>
@@ -147,10 +157,10 @@ onMounted(() => {
             </template>
 
             <v-list-item-title>
-              <strong>{{ conv.sender }}</strong>
+              <strong>{{ conv.otherUserName }}</strong>
             </v-list-item-title>
             <v-list-item-subtitle>
-              {{ conv.lastMessage }}
+              <span v-if="conv.sender === 'You'">You: </span>{{ conv.lastMessage }}
             </v-list-item-subtitle>
 
             <template #append>
