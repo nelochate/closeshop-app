@@ -64,7 +64,6 @@ router.isReady().then(() => {
 
 //for service worker
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('/firebase-messaging-sw.js')
     .then(() => console.log('Service Worker registered for Firebase Messaging'))
     .catch((err) => console.error('Service Worker registration failed:', err));
 }
