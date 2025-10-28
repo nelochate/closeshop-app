@@ -12,39 +12,31 @@ const goBack = () => router.back()
 const conversations = ref<any[]>([])
 
 const fetchConversations = async () => {
+  // ✅ Get the logged-in user
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return
 
- const { data, error } = await supabase
-  .from('conversations')
-  .select(`
+  const { data, error } = await supabase
+    .from('conversations')
+    .select(
+      `
     id,
     user1,
     user2,
-    user1_profile:conversations_user1_fkey(
-      first_name,
-      last_name,
-      avatar_url
-    ),
-    user2_profile:conversations_user2_fkey (
-      first_name,
-      last_name,
-      avatar_url
-    ),
+  user1_profile:profiles!conversations_user1_fkey(first_name, last_name, avatar_url),
+    user2_profile:profiles!conversations_user2_fkey(first_name, last_name, avatar_url),
     messages:messages_conversation_id_fkey (
-      id,
-      content,
-      created_at,
-      sender_id,
-      receiver_id,
-      is_read
+      id, content, created_at, sender_id, receiver_id, is_read
     )
-  `)
-  .or(`user1.eq.${user.id},user2.eq.${user.id}`)
-  .order('updated_at', { ascending: false })
-console.log('Fetched conversations:', JSON.stringify(data, null, 2))
+  `,
+    )
+    .or(`user1.eq.${user.id},user2.eq.${user.id}`)
+    .order('updated_at', { ascending: false })
+
+  console.log('Fetched conversations:', JSON.stringify(data, null, 2))
+
   if (error) {
     console.error('❌ Error fetching conversations:', error.message)
     return
@@ -53,6 +45,11 @@ console.log('Fetched conversations:', JSON.stringify(data, null, 2))
   conversations.value = data.map((conv) => {
     const lastMsg = conv.messages?.[conv.messages.length - 1]
     const isUser1 = conv.user1 === user.id
+    console.log('DEBUG -> user.id:', user.id)
+    console.log('conv.user1:', conv.user1)
+    console.log('conv.user2:', conv.user2)
+    console.log('Resolved profile:', isUser1 ? conv.user2_profile : conv.user1_profile)
+
     const otherProfile = isUser1 ? conv.user2_profile : conv.user1_profile
 
     return {
@@ -77,7 +74,6 @@ console.log('Fetched conversations:', JSON.stringify(data, null, 2))
     }
   })
 }
-
 
 // subscribe to new messages (re-fetch conversations on new message)
 const subscribeMessages = async () => {
