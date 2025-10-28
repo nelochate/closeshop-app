@@ -1,187 +1,155 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, computed } from "vue"
-import { useRouter, useRoute } from "vue-router"
-import { supabase } from "@/utils/supabase"
-import { db } from "@/utils/firebase"
-import {
-  collection,
-  addDoc,
-  query,
-  orderBy,
-  onSnapshot,
-  serverTimestamp,
-} from "firebase/firestore"
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { supabase } from '@/utils/supabase'
 
 const router = useRouter()
 const route = useRoute()
 
-// current user + the other user (from /chatview/:id)
 const userId = ref<string | null>(null)
 const otherUserId = route.params.id as string
-
-// UI state
+const conversationId = ref<string | null>(null)
 const messages = ref<any[]>([])
-const newMessage = ref("")
-
-// ids
-const chatId = ref("") // Firestore chat doc id (sorted pair)
-const conversationId = ref<string | null>(null) // Supabase conversation row id
-
-let stopMessages: null | (() => void) = null
-
-// helpers
-const isMe = (m: any) => m.senderId === userId.value
-
-const myInitial = computed(() =>
-  userId.value ? userId.value.slice(0, 2).toUpperCase() : "ME"
-)
-const otherInitial = computed(() =>
-  otherUserId ? otherUserId.slice(0, 2).toUpperCase() : "OT"
-)
-
-const formatTime = (createdAt: any) => {
-  if (createdAt?.toDate) {
-    return createdAt.toDate().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  }
-  if (createdAt) {
-    return new Date(createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-  }
-  return ""
-}
+const newMessage = ref('')
+let subscription: any = null
 
 const scrollToBottom = async () => {
   await nextTick()
-  const el = document.getElementById("chat-scroll")
+  const el = document.getElementById('chat-scroll')
   if (el) el.scrollTop = el.scrollHeight
 }
 
-onMounted(async () => {
-  // ✅ 1. Ensure user is authenticated
+// ✅ Fetch or create a conversation
+const getOrCreateConversation = async () => {
   const { data: auth } = await supabase.auth.getUser()
-  if (!auth.user) {
-    console.error("❌ User not authenticated — can't open chat.")
-    return
-  }
+  if (!auth.user) return
   userId.value = auth.user.id
 
-  // ✅ 2. Create stable chat id
-  chatId.value = [userId.value, otherUserId].sort().join("_")
-
-  // ✅ 3. Find or create conversation in Supabase
-  const { data: conv, error: convError } = await supabase
-    .from("conversations")
-    .select("id")
-    .or(
-      `and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`
-    )
+  // find existing conversation
+  const { data: existing, error } = await supabase
+    .from('conversations')
+    .select('id')
+    .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
     .maybeSingle()
 
-  if (convError) console.error("Supabase conversation error:", convError)
+  if (error) console.error('Conversation fetch error:', error)
 
-  if (conv) {
-    conversationId.value = conv.id
+  if (existing) {
+    conversationId.value = existing.id
   } else {
-    const { data: newConv, error: insertErr } = await supabase
-      .from("conversations")
+    const { data: created, error: createErr } = await supabase
+      .from('conversations')
       .insert({ user1: userId.value, user2: otherUserId })
-      .select("id")
+      .select('id')
       .single()
-
-    if (insertErr) console.error("Error creating conversation:", insertErr)
-    conversationId.value = newConv?.id || null
+    if (createErr) console.error('Conversation create error:', createErr)
+    conversationId.value = created?.id || null
   }
-
-  console.log("💬 Conversation ID after setup:", conversationId.value)
-
-  // ✅ 4. Firestore realtime messages
-  const q = query(
-    collection(db, "chats", chatId.value, "messages"),
-    orderBy("createdAt", "asc")
-  )
-
-  stopMessages = onSnapshot(q, (snap) => {
-    messages.value = snap.docs.map((d) => ({ id: d.id, ...d.data() }))
-    scrollToBottom()
-  })
-})
-
-onUnmounted(() => {
-  if (stopMessages) stopMessages()
-})
-
-// ✅ 5. Send message
-const sendMessage = async () => {
-  if (!newMessage.value.trim() || !userId.value || !conversationId.value) return
-
-  const msgData = {
-    senderId: userId.value!,
-    receiverId: otherUserId,
-    text: newMessage.value,
-    createdAt: serverTimestamp(),
-    isRead: false,
-  }
-
-  console.log("💬 Sending message:", msgData)
-  console.log("Conversation ID:", conversationId.value)
-
-  // ✅ Fix: use "public.messages" explicitly
-  const { error: sErr } = await supabase.from("messages").insert([
-    {
-      conversation_id: conversationId.value,
-      sender_id: msgData.senderId,
-      receiver_id: msgData.receiverId,
-      content: msgData.text,
-      is_read: msgData.isRead,
-    },
-  ])
-
-  if (sErr) console.error("🚨 Supabase insert error:", sErr)
-
-  // ✅ Firestore realtime for UI
-  await addDoc(collection(db, "chats", chatId.value, "messages"), msgData)
-
-  newMessage.value = ""
-  scrollToBottom()
 }
 
+// ✅ Load messages
+const loadMessages = async () => {
+  if (!conversationId.value) return
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId.value)
+    .order('created_at', { ascending: true })
+  if (!error && data) {
+    messages.value = data
+    scrollToBottom()
+  }
+}
+
+// ✅ Subscribe to realtime messages
+const subscribeMessages = async () => {
+  if (!conversationId.value) return
+
+  subscription = supabase
+    .channel(`chat-${conversationId.value}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId.value}` },
+      (payload) => {
+        messages.value.push(payload.new)
+        scrollToBottom()
+      }
+    )
+    .subscribe()
+}
+
+// ✅ Send a message
+const sendMessage = async () => {
+  if (!newMessage.value.trim() || !conversationId.value || !userId.value) return
+
+  const msg = {
+    conversation_id: conversationId.value,
+    sender_id: userId.value,
+    receiver_id: otherUserId,
+    content: newMessage.value,
+    is_read: false,
+  }
+
+  const { data, error } = await supabase.from('messages').insert([msg]).select('*').single()
+
+  if (error) {
+    console.error('Send message error:', error)
+  } else {
+    // Immediately show new message in UI
+    messages.value.push(data)
+    scrollToBottom()
+  }
+
+  newMessage.value = ''
+}
+
+
 const goBack = () => router.back()
+
+onMounted(async () => {
+  await getOrCreateConversation()
+  await loadMessages()
+
+  // Only subscribe once conversationId is confirmed
+  if (conversationId.value) {
+    await subscribeMessages()
+  }
+})
+
+
+onUnmounted(() => {
+  if (subscription) supabase.removeChannel(subscription)
+})
+
+
 </script>
 
 <template>
   <v-app>
     <v-app-bar flat color="primary" dark>
       <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
-      <v-toolbar-title class="text-h6">Chat</v-toolbar-title>
+      <v-toolbar-title>Chat</v-toolbar-title>
     </v-app-bar>
 
     <v-main>
-      <div class="chat-container" ref="chatContainer" id="chat-scroll">
+      <div id="chat-scroll" class="chat-container">
         <div
-          v-for="(msg, index) in messages"
-          :key="msg.id || index"
-          :class="['row', msg.senderId === userId ? 'me' : 'other']"
+          v-for="msg in messages"
+          :key="msg.id"
+          :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
         >
-          <!-- Avatar for the other user -->
-          <img
-            v-if="msg.senderId !== userId"
-            src="https://placehold.co/32x32"
-            alt="avatar"
-            class="avatar"
-          />
-
-          <div :class="['message-bubble', msg.senderId === userId ? 'me' : 'other']">
-            <p class="text">{{ msg.text }}</p>
-            <span class="time">{{ formatTime(msg.createdAt) }}</span>
+          <div class="bubble">
+            {{ msg.content }}
+            <span class="time">{{ new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
           </div>
         </div>
       </div>
     </v-main>
 
-    <v-footer app absolute class="pa-2" color="white">
+    <v-footer app class="pa-2" color="white">
       <v-text-field
         v-model="newMessage"
         variant="outlined"
-        density="comfortable"
         placeholder="Type a message..."
         hide-details
         class="flex-grow-1"
@@ -200,60 +168,32 @@ const goBack = () => router.back()
   flex-direction: column;
   padding: 16px;
   gap: 12px;
-  background: linear-gradient(to bottom right, #f0f4ff, #ffffff);
   height: calc(100vh - 120px);
   overflow-y: auto;
+  background: #f9fafb;
 }
-
-.row {
+.message-row {
   display: flex;
-  width: 100%;
-  align-items: flex-end;
+  margin-bottom: 8px;
 }
-
-.row.me {
+.message-row.me {
   justify-content: flex-end;
 }
-
-.row.other {
-  justify-content: flex-start;
-}
-
-.message-bubble {
+.bubble {
+  max-width: 70%;
   padding: 10px 14px;
   border-radius: 18px;
-  max-width: 75%;
-  line-height: 1.4;
-  font-size: 15px;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   position: relative;
+  background-color: #e5f1ff;
 }
-
-.message-bubble.me {
+.message-row.me .bubble {
   background-color: #007aff;
   color: white;
-  border-bottom-right-radius: 6px;
 }
-
-.message-bubble.other {
-  background-color: #ffffff;
-  color: #000;
-  border-bottom-left-radius: 6px;
-}
-
-.avatar {
-  width: 32px;
-  height: 32px;
-  border-radius: 50%;
-  margin-right: 8px;
-  object-fit: cover;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
 .time {
+  display: block;
   font-size: 0.7rem;
   opacity: 0.6;
   margin-top: 4px;
-  text-align: right;
 }
 </style>
