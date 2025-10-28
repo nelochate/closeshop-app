@@ -22,7 +22,10 @@ const props = defineProps({
 const emit = defineEmits(['update:modelValue'])
 const router = useRouter()
 const cart = useCartStore()
+// Fetch cart to get the latest count
+cart.fetchCart()
 
+// v-model binding
 const value = computed({
   get: () => props.modelValue,
   set: (v) => emit('update:modelValue', v),
@@ -78,8 +81,6 @@ function go(key) {
 .v-bottom-navigation {
   box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.1);
   background: #3f83c7;
-  border-top-left-radius: 15px;
-  border-top-right-radius: 15px;
 }
 .v-btn {
   color: rgb(0, 49, 98);

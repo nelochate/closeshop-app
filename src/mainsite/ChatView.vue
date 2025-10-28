@@ -1,60 +1,155 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { supabase } from '@/utils/supabase'
 
 const router = useRouter()
-const messages = ref([
-  { id: 1, sender: 'me', text: 'Hey! How are you?', time: '10:30 AM' },
-  { id: 2, sender: 'other', text: 'I’m good, thanks! You?', time: '10:31 AM' },
-  { id: 3, sender: 'me', text: 'Doing great 🚀 Working on my project.', time: '10:32 AM' },
-])
+const route = useRoute()
 
+const userId = ref<string | null>(null)
+const otherUserId = route.params.id as string
+const conversationId = ref<string | null>(null)
+const messages = ref<any[]>([])
 const newMessage = ref('')
+let subscription: any = null
+
+const scrollToBottom = async () => {
+  await nextTick()
+  const el = document.getElementById('chat-scroll')
+  if (el) el.scrollTop = el.scrollHeight
+}
+
+// ✅ Fetch or create a conversation
+const getOrCreateConversation = async () => {
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return
+  userId.value = auth.user.id
+
+  // find existing conversation
+  const { data: existing, error } = await supabase
+    .from('conversations')
+    .select('id')
+    .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+    .maybeSingle()
+
+  if (error) console.error('Conversation fetch error:', error)
+
+  if (existing) {
+    conversationId.value = existing.id
+  } else {
+    const { data: created, error: createErr } = await supabase
+      .from('conversations')
+      .insert({ user1: userId.value, user2: otherUserId })
+      .select('id')
+      .single()
+    if (createErr) console.error('Conversation create error:', createErr)
+    conversationId.value = created?.id || null
+  }
+}
+
+// ✅ Load messages
+const loadMessages = async () => {
+  if (!conversationId.value) return
+  const { data, error } = await supabase
+    .from('messages')
+    .select('*')
+    .eq('conversation_id', conversationId.value)
+    .order('created_at', { ascending: true })
+  if (!error && data) {
+    messages.value = data
+    scrollToBottom()
+  }
+}
+
+// ✅ Subscribe to realtime messages
+const subscribeMessages = async () => {
+  if (!conversationId.value) return
+
+  subscription = supabase
+    .channel(`chat-${conversationId.value}`)
+    .on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${conversationId.value}` },
+      (payload) => {
+        messages.value.push(payload.new)
+        scrollToBottom()
+      }
+    )
+    .subscribe()
+}
+
+// ✅ Send a message
+const sendMessage = async () => {
+  if (!newMessage.value.trim() || !conversationId.value || !userId.value) return
+
+  const msg = {
+    conversation_id: conversationId.value,
+    sender_id: userId.value,
+    receiver_id: otherUserId,
+    content: newMessage.value,
+    is_read: false,
+  }
+
+  const { data, error } = await supabase.from('messages').insert([msg]).select('*').single()
+
+  if (error) {
+    console.error('Send message error:', error)
+  } else {
+    // Immediately show new message in UI
+    messages.value.push(data)
+    scrollToBottom()
+  }
+
+  newMessage.value = ''
+}
+
 
 const goBack = () => router.back()
 
-const sendMessage = () => {
-  if (!newMessage.value.trim()) return
-  messages.value.push({
-    id: Date.now(),
-    sender: 'me',
-    text: newMessage.value,
-    time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-  })
-  newMessage.value = ''
-}
+onMounted(async () => {
+  await getOrCreateConversation()
+  await loadMessages()
+
+  // Only subscribe once conversationId is confirmed
+  if (conversationId.value) {
+    await subscribeMessages()
+  }
+})
+
+
+onUnmounted(() => {
+  if (subscription) supabase.removeChannel(subscription)
+})
+
+
 </script>
 
 <template>
   <v-app>
-    <!-- Top Bar -->
     <v-app-bar flat color="primary" dark>
-      <v-btn icon @click="goBack">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
-      <v-toolbar-title class="text-h6">Chat</v-toolbar-title>
+      <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
+      <v-toolbar-title>Chat</v-toolbar-title>
     </v-app-bar>
 
-    <!-- Messages -->
     <v-main>
-      <div class="chat-container">
+      <div id="chat-scroll" class="chat-container">
         <div
           v-for="msg in messages"
           :key="msg.id"
-          :class="['message-bubble', msg.sender === 'me' ? 'me' : 'other']"
+          :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
         >
-          <p class="text">{{ msg.text }}</p>
-          <span class="time">{{ msg.time }}</span>
+          <div class="bubble">
+            {{ msg.content }}
+            <span class="time">{{ new Date(msg.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) }}</span>
+          </div>
         </div>
       </div>
     </v-main>
 
-    <!-- Bottom Input -->
-    <v-footer app absolute class="pa-2" color="white">
+    <v-footer app class="pa-2" color="white">
       <v-text-field
         v-model="newMessage"
         variant="outlined"
-        density="comfortable"
         placeholder="Type a message..."
         hide-details
         class="flex-grow-1"
@@ -73,35 +168,32 @@ const sendMessage = () => {
   flex-direction: column;
   padding: 16px;
   gap: 12px;
+  height: calc(100vh - 120px);
+  overflow-y: auto;
+  background: #f9fafb;
 }
-
-.message-bubble {
+.message-row {
+  display: flex;
+  margin-bottom: 8px;
+}
+.message-row.me {
+  justify-content: flex-end;
+}
+.bubble {
   max-width: 70%;
   padding: 10px 14px;
-  border-radius: 16px;
-  font-size: 0.95rem;
-  display: flex;
-  flex-direction: column;
+  border-radius: 18px;
+  position: relative;
+  background-color: #e5f1ff;
 }
-
-.message-bubble.me {
-  align-self: flex-end;
-  background: #1976d2;
+.message-row.me .bubble {
+  background-color: #007aff;
   color: white;
-  border-bottom-right-radius: 4px;
 }
-
-.message-bubble.other {
-  align-self: flex-start;
-  background: #f1f1f1;
-  color: #000;
-  border-bottom-left-radius: 4px;
-}
-
 .time {
+  display: block;
   font-size: 0.7rem;
-  opacity: 0.7;
+  opacity: 0.6;
   margin-top: 4px;
-  align-self: flex-end;
 }
 </style>

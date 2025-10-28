@@ -152,7 +152,7 @@ const selectedSection = ref(purchaseSections[0])
               <v-icon v-else size="40">mdi-account</v-icon>
             </v-avatar>
 
-            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
+          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
               <v-icon class="edit-icon">mdi-pencil</v-icon>
             </v-btn>
           </div>
@@ -216,7 +216,7 @@ const selectedSection = ref(purchaseSections[0])
   font-size: 0.95rem;
   border: 2px solid #5e6e7e;
   padding: 8px 20px;
-  height: 42px !important;
+  height: 35px !important;
   margin-left: -14px;
   max-width: 200px;
 }
@@ -246,7 +246,7 @@ const selectedSection = ref(purchaseSections[0])
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   color: #fff;
   margin-top: 0px !important;
-  border-bottom-left-radius: 12px;
+  border-bottom-left-radius: 20px;
 }
 
 .avatar-container {

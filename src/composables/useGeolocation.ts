@@ -1,145 +1,128 @@
-// fr to display user location
-import { ref } from 'vue'
-import { useGeolocation } from '@/composables/useGeolocation'
-import { useMap } from '@/composables/useMap'
+// 🧭 useGeolocation composable
+// ------------------------------------------------------------
+// This Vue composable provides reactive access to the user's
+// geolocation data (latitude and longitude). It supports:
+// - One-time location retrieval
+// - Continuous tracking (watch mode)
+// - Stopping geolocation tracking when no longer needed
+// ------------------------------------------------------------
 
-
-import { Geolocation } from '@capacitor/geolocation'
-const latitude = ref<number | null>(null)
-const longitude = ref<number | null>(null)
-const error = ref<string | null>(null)
-let watchId: string | null = null
-
-const requestPermission = async () => {
-  try {
-    const permResult = await Geolocation.requestPermissions()
-    console.log('Permission result:', permResult)
-    return permResult
-  } catch (err: any) {
-    error.value = err.message
-    console.error('Permission error:', err)
-  }
-}
-
-const getLocation = async () => {
-  try {
-    const position = await Geolocation.getCurrentPosition({
-      enableHighAccuracy: true,
-      timeout: 10000,
-    })
-    latitude.value = position.coords.latitude
-    longitude.value = position.coords.longitude
-    return position
-  } catch (err: any) {
-    error.value = err.message
-    console.error('Get location error:', err)
-  }
-}
-
-const startWatching = async () => {
-  try {
-    watchId = await Geolocation.watchPosition(
-      { enableHighAccuracy: true },
-      (position, err) => {
-        if (err) {
-          error.value = err.message
-          console.error('Watch error:', err)
-          return
-        }
-        if (position) {
-          latitude.value = position.coords.latitude
-          longitude.value = position.coords.longitude
-        }
-      }
-    )
-  } catch (err: any) {
-    error.value = err.message
-    console.error('Start watch error:', err)
-  }
-}
-
-const stopWatching = () => {
-  if (watchId) {
-    Geolocation.clearWatch({ id: watchId })
-    watchId = null
-  }
-}
+import { ref, onUnmounted } from 'vue'
 
 export function useGeolocation() {
+  // Reactive state for coordinates
+  const latitude = ref<number | null>(null)
+  const longitude = ref<number | null>(null)
+
+  // Flag to indicate if we are currently tracking the user
+  const watching = ref(false)
+
+  // ------------------------------------------------------------
+  // 🧾 requestPermission()
+  // Requests location permission and fetches initial position.
+  // This is useful to trigger the browser's permission prompt
+  // before starting background tracking.
+  // ------------------------------------------------------------
+  const requestPermission = async () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation is not supported by your browser.')
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          // Store user's current coordinates
+          latitude.value = position.coords.latitude
+          longitude.value = position.coords.longitude
+          resolve()
+        },
+        (error) => reject(error) // Handle denied or failed requests
+      )
+    })
+  }
+
+  // ------------------------------------------------------------
+  // 📍 getLocation()
+  // Fetches the current location once (without continuous tracking)
+  // and updates the reactive latitude/longitude refs.
+  // Returns a Promise that resolves once a position is retrieved.
+  // ------------------------------------------------------------
+  const getLocation = async () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation is not supported by your browser.')
+    }
+
+    return new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latitude.value = position.coords.latitude
+          longitude.value = position.coords.longitude
+          resolve(position) // Return the position for convenience
+        },
+        (error) => reject(error)
+      )
+    })
+  }
+
+  // Keep track of the geolocation watcher ID for cleanup
+  let watchId: number | null = null
+
+  // ------------------------------------------------------------
+  // 🛰 startWatching()
+  // Starts continuously tracking the user's position using
+  // navigator.geolocation.watchPosition(). Each time the user's
+  // position changes, the reactive latitude and longitude are updated.
+  // ------------------------------------------------------------
+  const startWatching = () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation is not supported by your browser.')
+    }
+
+    // Prevent multiple watchers from being started
+    if (watching.value) return
+
+    watching.value = true
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        latitude.value = position.coords.latitude
+        longitude.value = position.coords.longitude
+      },
+      (error) => console.error('Error watching position:', error)
+    )
+  }
+
+  // ------------------------------------------------------------
+  // 🛑 stopWatching()
+  // Stops the ongoing geolocation watcher to save resources.
+  // Should be called when the component unmounts or when
+  // location tracking is no longer needed.
+  // ------------------------------------------------------------
+  const stopWatching = () => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId)
+      watchId = null
+    }
+    watching.value = false
+  }
+
+  // ------------------------------------------------------------
+  // 🧹 Lifecycle cleanup
+  // Automatically stop tracking when the component using this
+  // composable is unmounted to prevent memory leaks.
+  // ------------------------------------------------------------
+  onUnmounted(() => {
+    stopWatching()
+  })
+
+  // ------------------------------------------------------------
+  // Expose the reactive data and functions to components
+  // ------------------------------------------------------------
   return {
     latitude,
     longitude,
-    error,
     requestPermission,
     getLocation,
     startWatching,
     stopWatching,
   }
 }
-
- /*
-// use map for the shop-build.vue file, for display shop location
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-
-let map: L.Map | null = null
-let marker: L.Marker | null = null
-
-const isMapReady = ref(false)
-
-/**
- // Initialize the map
- 
-export function initMap(elementId: string, defaultCoords: [number, number] = [8.9475, 125.5406]) {
-  if (map) return map
-
-  map = L.map(elementId).setView(defaultCoords, 13)
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map)
-
-  marker = L.marker(defaultCoords).addTo(map)
-  isMapReady.value = true
-  return map
-}
-
-/**
- // Update marker and center map
- 
-export function updateMapPosition(coords: [number, number]) {
-  if (!map || !marker) return
-  marker.setLatLng(coords)
-  map.setView(coords, 16)
-}
-
-/**
-  Geocode an address string to coords
- 
-export async function geocodeAddress(address: string): Promise<[number, number] | null> {
-  if (!address) return null
-
-  try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`
-    )
-    const results = await response.json()
-    if (results && results.length > 0) {
-      const { lat, lon } = results[0]
-      return [parseFloat(lat), parseFloat(lon)]
-    }
-  } catch (err) {
-    console.error('Geocode error:', err)
-  }
-  return null
-}
-
-export function useMap() {
-  return {
-    initMap,
-    updateMapPosition,
-    geocodeAddress,
-    isMapReady
-  }
-}
-  */

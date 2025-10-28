@@ -5,69 +5,108 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
 
 const activeTab = ref('chat')
-
-// router instance
 const router = useRouter()
 const goBack = () => router.back()
 
 // state
-const messages = ref<any[]>([])
+const conversations = ref<any[]>([])
 
-// fetch messages from DB
-const fetchMessages = async () => {
+const fetchConversations = async () => {
+  // ✅ Get the logged-in user
   const {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return
 
   const { data, error } = await supabase
-    .from('messages')
-    .select('id, content, created_at, sender_id, receiver_id, is_read')
-    .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
-    .order('created_at', { ascending: false })
+    .from('conversations')
+    .select(
+      `
+    id,
+    user1,
+    user2,
+  user1_profile:profiles!conversations_user1_fkey(first_name, last_name, avatar_url),
+    user2_profile:profiles!conversations_user2_fkey(first_name, last_name, avatar_url),
+    messages:messages_conversation_id_fkey (
+      id, content, created_at, sender_id, receiver_id, is_read
+    )
+  `,
+    )
+    .or(`user1.eq.${user.id},user2.eq.${user.id}`)
+    .order('updated_at', { ascending: false })
+
+  console.log('Fetched conversations:', JSON.stringify(data, null, 2))
 
   if (error) {
-    console.error('Error fetching messages:', error.message)
+    console.error('❌ Error fetching conversations:', error.message)
     return
   }
 
-  // Map results to your UI format
-  messages.value = data.map((msg) => ({
-    id: msg.id,
-    sender: msg.sender_id === user.id ? 'You' : msg.sender_id, // later: join with profiles
-    lastMessage: msg.content,
-    time: new Date(msg.created_at).toLocaleTimeString(),
-    unread: !msg.is_read && msg.receiver_id === user.id,
-    avatar: 'https://via.placeholder.com/48', // TODO: replace with user profile pic if available
-  }))
+  conversations.value = data.map((conv) => {
+    const lastMsg = conv.messages?.[conv.messages.length - 1]
+    const isUser1 = conv.user1 === user.id
+    console.log('DEBUG -> user.id:', user.id)
+    console.log('conv.user1:', conv.user1)
+    console.log('conv.user2:', conv.user2)
+    console.log('Resolved profile:', isUser1 ? conv.user2_profile : conv.user1_profile)
+
+    const otherProfile = isUser1 ? conv.user2_profile : conv.user1_profile
+
+    return {
+      id: conv.id,
+      otherUserId: isUser1 ? conv.user2 : conv.user1,
+      otherUserName:
+        `${otherProfile?.first_name || ''} ${otherProfile?.last_name || ''}`.trim() || 'User',
+      avatar:
+        otherProfile?.avatar_url ||
+        `https://ui-avatars.com/api/?name=${encodeURIComponent(
+          otherProfile?.first_name || 'User',
+        )}`,
+      sender: lastMsg?.sender_id === user.id ? 'You' : otherProfile?.first_name || 'User',
+      lastMessage: lastMsg?.content || '(No messages yet)',
+      time: lastMsg?.created_at
+        ? new Date(lastMsg.created_at).toLocaleTimeString([], {
+            hour: '2-digit',
+            minute: '2-digit',
+          })
+        : '',
+      unread: lastMsg ? !lastMsg.is_read && lastMsg.receiver_id === user.id : false,
+    }
+  })
 }
 
-// subscribe to realtime messages
-const subscribeMessages = () => {
+// subscribe to new messages (re-fetch conversations on new message)
+const subscribeMessages = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
+
   supabase
-    .channel('messages')
-    .on(
-      'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'messages' },
-      (payload) => {
-        console.log('New message:', payload.new)
-        const newMsg = payload.new
-        messages.value.unshift({
-          id: newMsg.id,
-          sender: newMsg.sender_id,
-          lastMessage: newMsg.content,
-          time: new Date(newMsg.created_at).toLocaleTimeString(),
-          unread: true,
-          avatar: 'https://via.placeholder.com/48',
-        })
+    .channel('realtime-messages')
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+      const newMsg = payload.new
+      if (newMsg.sender_id === user.id || newMsg.receiver_id === user.id) {
+        fetchConversations() // Refresh when relevant
       }
-    )
+    })
     .subscribe()
 }
 
+// open a chat
+const openChat = (conv: any) => {
+  router.push({ name: 'chatview', params: { id: conv.otherUserId } })
+}
+
 onMounted(() => {
-  fetchMessages()
+  // Fetch existing conversations
+  fetchConversations()
+
+  // Subscribe to realtime updates
   subscribeMessages()
+
+  // 🔁 Refresh list every 15 seconds (optional but recommended)
+  setInterval(fetchConversations, 15000)
 })
 </script>
 
@@ -77,7 +116,6 @@ onMounted(() => {
     <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
       <v-btn variant="text" @click="goBack">
         <v-icon start>mdi-arrow-left</v-icon>
-        Back
       </v-btn>
       <v-toolbar-title class="font-bold">
         <strong>Messages</strong>
@@ -88,44 +126,42 @@ onMounted(() => {
 
     <v-main>
       <div class="messages-view">
-        <!-- If no messages -->
+        <!-- If no conversations -->
         <v-alert
-          v-if="messages.length === 0"
+          v-if="conversations.length === 0"
           type="info"
           border="start"
           color="primary"
           icon="mdi-information-outline"
         >
-          No messages yet!!
+          No conversations yet!
         </v-alert>
 
-        <!-- Otherwise show chat list -->
+        <!-- Otherwise show conversation list -->
         <v-list v-else>
           <v-list-item
-            v-for="msg in messages"
-            :key="msg.id"
+            v-for="conv in conversations"
+            :key="conv.id"
             class="message-item"
-            :class="{ unread: msg.unread }"
+            :class="{ unread: conv.unread }"
+            @click="openChat(conv)"
           >
-            <!-- Avatar -->
-            <v-list-item-avatar>
+            <template #prepend>
               <v-avatar size="48">
-                <v-img :src="msg.avatar" alt="sender" />
+                <v-img :src="conv.avatar" alt="sender" />
               </v-avatar>
-            </v-list-item-avatar>
+            </template>
 
-            <!-- Message preview -->
-            <v-list-item-content>
-              <v-list-item-title>
-                <strong>{{ msg.sender }}</strong>
-              </v-list-item-title>
-              <v-list-item-subtitle>
-                {{ msg.lastMessage }}
-              </v-list-item-subtitle>
-            </v-list-item-content>
+            <v-list-item-title>
+              <strong>{{ conv.otherUserName }}</strong>
+            </v-list-item-title>
+            <v-list-item-subtitle>
+              <span v-if="conv.sender === 'You'">You: </span>{{ conv.lastMessage }}
+            </v-list-item-subtitle>
 
-            <!-- Time -->
-            <div class="text-caption text-grey">{{ msg.time }}</div>
+            <template #append>
+              <div class="text-caption text-grey">{{ conv.time }}</div>
+            </template>
           </v-list-item>
         </v-list>
       </div>
@@ -144,7 +180,6 @@ onMounted(() => {
 .messages-view {
   padding: 16px;
 }
-
 .message-item {
   border-bottom: 1px solid #eee;
 }

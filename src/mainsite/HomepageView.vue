@@ -3,11 +3,16 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
+import { messaging } from '@/utils/firebase'
+import { getToken } from 'firebase/messaging'
+import { Geolocation } from '@capacitor/geolocation'
+import { PushNotifications } from '@capacitor/push-notifications'
+import { Network } from '@capacitor/network'
+import { Capacitor } from '@capacitor/core'
 
 const router = useRouter()
 const activeTab = ref('home')
 const search = ref('')
-
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
@@ -15,22 +20,98 @@ const errorMsg = ref('')
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
 
-// ✅ Helper: normalize image field
-function extractImage(main_img_urls) {
-  if (!main_img_urls) return PLACEHOLDER_IMG
-  if (Array.isArray(main_img_urls) && main_img_urls.length) return main_img_urls[0]
-  if (typeof main_img_urls === 'string') {
-    try {
-      const parsed = JSON.parse(main_img_urls)
-      if (Array.isArray(parsed) && parsed.length) return parsed[0]
-    } catch {
-      return main_img_urls // plain string url
+/* 🧭 Location Permission */
+async function requestLocationPermission() {
+  try {
+    const perm = await Geolocation.requestPermissions()
+    if (perm.location === 'granted') {
+      const coords = await Geolocation.getCurrentPosition()
+      console.log('📍 User location:', coords.coords)
+      return coords.coords
+    } else {
+      alert('Please enable location permission to see nearby shops.')
+      return null
     }
+  } catch (err) {
+    console.error('Error requesting location:', err)
+    return null
   }
-  return PLACEHOLDER_IMG
 }
 
-// ✅ Fetch Shops
+/* 🔔 Notifications Permission */
+async function requestPushPermission() {
+  try {
+    const permStatus = await PushNotifications.checkPermissions()
+    if (permStatus.receive !== 'granted') {
+      const req = await PushNotifications.requestPermissions()
+      if (req.receive !== 'granted') {
+        console.warn('Notifications permission denied.')
+        return
+      }
+    }
+
+    await PushNotifications.register()
+
+    PushNotifications.addListener('registration', (token) => {
+      console.log('✅ Push token:', token.value)
+    })
+
+    PushNotifications.addListener('registrationError', (error) => {
+      console.error('❌ Push registration error:', error)
+    })
+  } catch (err) {
+    console.error('Error requesting push permission:', err)
+  }
+}
+
+/* 🌐 Network Status */
+async function checkNetworkStatus() {
+  try {
+    const status = await Network.getStatus()
+    console.log('📶 Network status:', status)
+    if (!status.connected) {
+      alert('No internet connection. Please connect to Wi-Fi or mobile data.')
+    }
+
+    Network.addListener('networkStatusChange', (status) => {
+      console.log('🌐 Network changed:', status)
+      if (!status.connected) {
+        alert('⚠️ You are offline.')
+      } else {
+        console.log('✅ Back online.')
+      }
+    })
+  } catch (err) {
+    console.error('Network check error:', err)
+  }
+}
+
+/* 📡 Firebase Token */
+async function requestForToken() {
+  try {
+    const permission = await Notification.requestPermission()
+    if (permission !== 'granted') {
+      console.warn('Notification permission denied.')
+      return null
+    }
+
+    const vapidKey = 'BOiw6_vllLo5TOjouOP8mMK_zhynZ8wakUg8ZgP_gfH9YwpUJ2ils7HCq15LBWpFq1pZvXGzye01pjUIDOjY6P8'
+    const token = await getToken(messaging, { vapidKey })
+
+    if (token) {
+      console.log('✅ FCM Token:', token)
+      return token
+    } else {
+      console.warn('No registration token available.')
+      return null
+    }
+  } catch (err) {
+    console.error('Error getting FCM token:', err)
+    return null
+  }
+}
+
+/* 🏪 Fetch Shops */
 async function fetchShops() {
   try {
     const { data, error } = await supabase
@@ -40,12 +121,14 @@ async function fetchShops() {
 
     if (error) throw error
 
-    nearby.value = (data || []).map(s => ({
+    nearby.value = (data || []).map((s) => ({
       id: s.id,
       title: s.business_name,
       img: s.physical_store || PLACEHOLDER_IMG,
       logo: s.logo_url,
-      address: [s.building, s.street, s.barangay, s.city, s.province, s.region].filter(Boolean).join(', ')
+      address: [s.building, s.street, s.barangay, s.city, s.province, s.region]
+        .filter(Boolean)
+        .join(', '),
     }))
   } catch (err) {
     console.error('fetchShops error:', err)
@@ -54,7 +137,7 @@ async function fetchShops() {
   }
 }
 
-// ✅ Fetch Products (with sold count + real price)
+/* 🛍️ Fetch Products */
 async function fetchProducts() {
   try {
     const { data, error } = await supabase
@@ -63,12 +146,12 @@ async function fetchProducts() {
 
     if (error) throw error
 
-    products.value = (data || []).map(p => ({
+    products.value = (data || []).map((p) => ({
       id: p.id,
       title: p.prod_name || 'Untitled product',
-      price: p.price, // 👈 exact seller price
+      price: p.price,
       img: extractImage(p.main_img_urls),
-      sold: p.sold || 0 // 👈 fallback if null
+      sold: p.sold || 0,
     }))
   } catch (err) {
     console.error('fetchProducts error:', err)
@@ -77,15 +160,58 @@ async function fetchProducts() {
   }
 }
 
-// ✅ Lifecycle
+/* 🖼️ Normalize Image */
+function extractImage(main_img_urls) {
+  if (!main_img_urls) return PLACEHOLDER_IMG
+  if (Array.isArray(main_img_urls) && main_img_urls.length) return main_img_urls[0]
+  if (typeof main_img_urls === 'string') {
+    try {
+      const parsed = JSON.parse(main_img_urls)
+      if (Array.isArray(parsed) && parsed.length) return parsed[0]
+    } catch {
+      return main_img_urls
+    }
+  }
+  return PLACEHOLDER_IMG
+}
+
+/* 🚀 Main Lifecycle */
 onMounted(async () => {
-  loading.value = true
-  errorMsg.value = ''
-  await Promise.all([fetchShops(), fetchProducts()])
-  loading.value = false
+  try {
+    loading.value = true
+    errorMsg.value = ''
+
+    // Request permissions (only on native builds)
+    if (Capacitor.isNativePlatform()) {
+      await checkNetworkStatus()
+      await requestLocationPermission()
+      await requestPushPermission()
+    }
+
+    // Load data
+    await Promise.all([fetchShops(), fetchProducts()])
+    loading.value = false
+
+    // Save FCM token
+    const { data: { user } } = await supabase.auth.getUser()
+    if (user) {
+      const token = await requestForToken()
+      if (token) {
+        const { error } = await supabase
+          .from('user_fcm_tokens')
+          .upsert({ user_id: user.id, token }, { onConflict: 'user_id' })
+        if (error) console.error('Error saving FCM token:', error)
+        else console.log('✅ Token saved to Supabase')
+      }
+    }
+  } catch (err) {
+    console.error('❌ Error in onMounted:', err)
+  } finally {
+    loading.value = false
+  }
 })
 
-// ✅ Handlers
+/* 🧭 Navigation */
 const onSearch = () => {
   if (!search.value.trim()) return
   router.push({ name: 'search', query: { q: search.value.trim() } })
@@ -93,25 +219,24 @@ const onSearch = () => {
 const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
-const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
+const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 </script>
 
 <template>
   <v-app>
     <v-main class="page">
+      <!-- 🔎 Search + Notification -->
+      <v-sheet class="hero">
+        <div class="hero-row">
+          <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
+            density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
+            append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
+          <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
+            <v-icon size="22">mdi-bell-outline</v-icon>
+          </v-btn>
+        </div>
+      </v-sheet>
       <v-container class="py-4" style="max-width: 720px">
-
-        <!-- 🔎 Search + Notification -->
-        <v-sheet class="hero pa-4">
-          <div class="hero-row">
-            <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
-              density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
-              append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
-            <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
-              <v-icon size="22">mdi-bell-outline</v-icon>
-            </v-btn>
-          </div>
-        </v-sheet>
 
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
@@ -132,8 +257,6 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
           <template v-else>
             <div v-for="item in nearby" :key="item.id" class="item-card" @click="goToShop(item.id)">
               <v-img :src="item.img" cover class="item-img" />
-
-              <!-- footer now contains meta -->
               <div class="item-footer">
                 <v-avatar class="avatar-badge" size="20">
                   <v-img :src="item.logo || PLACEHOLDER_IMG" />
@@ -141,7 +264,6 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
                 <div class="item-title">{{ item.title }}</div>
               </div>
             </div>
-
           </template>
         </div>
 
@@ -174,18 +296,14 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
           </div>
         </template>
 
-        <!-- 🚨 Error -->
         <v-alert v-if="errorMsg" class="mt-6" type="error" variant="tonal">
           {{ errorMsg }}
         </v-alert>
       </v-container>
     </v-main>
-
-    <!-- Bottom Navigation -->
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
-
 <style scoped>
 .page {
   background: #f5f7fa;
@@ -193,8 +311,17 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
 }
 
 .hero {
-  background: #e5f1f8;
-  border-radius: 14px;
+  background: #3f83c7;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  margin: 0;
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  border-bottom-left-radius: 10px;
+  border-bottom-right-radius: 10px;
 }
 
 .hero-row {
@@ -411,5 +538,33 @@ const goToShop = (id) => {router.push({ name: 'shop-view', params: { id } })}
 .product-sold {
   font-size: 12px;
   color: #6b7280;
+}
+
+/* ✅ Keep products 2-column layout for small devices (e.g. 350x800) */
+@media (max-width: 480px) {
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 10px;
+  }
+
+  .product-card {
+    height: auto;
+  }
+
+  .product-img {
+    height: 140px;
+  }
+
+  .product-title {
+    font-size: 12px;
+  }
+
+  .product-price {
+    font-size: 13px;
+  }
+
+  .product-sold {
+    font-size: 11px;
+  }
 }
 </style>
