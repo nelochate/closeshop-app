@@ -297,14 +297,22 @@ const locating = ref(false)
 const recenterToUser = async () => {
   locating.value = true
   try {
-    const { coords } = await getLocation()
-    if (coords && map.value) map.value.setView([coords.latitude, coords.longitude], 16, { animate: true })
+    // ⚡ Use existing coordinates from watcher
+    if (latitude.value && longitude.value && map.value) {
+      map.value.setView([latitude.value, longitude.value], 16, { animate: true })
+    } else {
+      // fallback if watcher not yet active
+      const { coords } = await getLocation()
+      if (coords && map.value)
+        map.value.setView([coords.latitude, coords.longitude], 16, { animate: true })
+    }
   } catch {
     alert('Unable to retrieve location.')
   } finally {
     locating.value = false
   }
 }
+
 
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
