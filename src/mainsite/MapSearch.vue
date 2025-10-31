@@ -9,7 +9,6 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 
 const activeTab = ref('map')
 const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
-
 const map = ref<L.Map | null>(null)
 const router = useRouter()
 const search = ref('')
@@ -17,11 +16,11 @@ const shops = ref<any[]>([])
 const loading = ref(false)
 const errorMsg = ref<string | null>(null)
 const showShopMenu = ref(false)
+const shopDisplayMode = ref<'within' | 'outside'>('within')
 
-// Geolocation composable
-const { latitude, longitude, requestPermission, getLocation, startWatching, stopWatching } = useGeolocation()
+const { latitude, longitude, requestPermission, getLocation, startWatching, stopWatching } =
+  useGeolocation()
 
-// Markers
 let userMarker: L.Marker | null = null
 let shopMarkers: L.Marker[] = []
 let poiMarkers: L.Marker[] = []
@@ -38,16 +37,20 @@ const userIcon = L.icon({
 })
 
 const shopIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
-  iconRetinaUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
+  iconRetinaUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-red.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
 })
 
 const poiIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
-  iconRetinaUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
+  iconRetinaUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-2x-green.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
   popupAnchor: [1, -34],
@@ -90,7 +93,7 @@ const highlightCityBoundary = async (cityName: string) => {
       (f: any) =>
         f.geometry &&
         (f.properties?.class === 'boundary' || f.properties?.type === 'administrative') &&
-        ['Polygon', 'MultiPolygon'].includes(f.geometry.type)
+        ['Polygon', 'MultiPolygon'].includes(f.geometry.type),
     )
 
     if (!feature) return
@@ -118,10 +121,17 @@ const highlightCityBoundary = async (cityName: string) => {
 const fetchShops = async () => {
   try {
     loading.value = true
-    const { data, error } = await supabase
+    let query = supabase
       .from('shops')
-      .select('id, business_name, latitude, longitude, logo_url, physical_store, detected_address')
+      .select(
+        'id, business_name, latitude, longitude, logo_url, physical_store, detected_address, city',
+      )
 
+    if (shopDisplayMode.value === 'within') {
+      query = query.eq('city', 'Butuan City')
+    }
+
+    const { data, error } = await query
     if (error) throw error
     if (!data) return
 
@@ -134,13 +144,16 @@ const fetchShops = async () => {
           if (shop.detected_address) {
             try {
               const geoRes = await fetch(
-                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(shop.detected_address)}`
+                `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(shop.detected_address)}`,
               )
               const geoData = await geoRes.json()
               if (geoData.length > 0) {
                 lat = parseFloat(geoData[0].lat)
                 lng = parseFloat(geoData[0].lon)
-                await supabase.from('shops').update({ latitude: lat, longitude: lng }).eq('id', shop.id)
+                await supabase
+                  .from('shops')
+                  .update({ latitude: lat, longitude: lng })
+                  .eq('id', shop.id)
               }
             } catch (geoErr) {
               console.warn('Failed to geocode:', shop.business_name, geoErr)
@@ -148,7 +161,7 @@ const fetchShops = async () => {
           }
         }
         return { ...shop, latitude: lat, longitude: lng }
-      })
+      }),
     )
 
     shops.value = processed
@@ -164,7 +177,6 @@ const fetchShops = async () => {
 /* -------------------- PLOT SHOPS -------------------- */
 const plotShops = () => {
   if (!map.value) return
-
   shopMarkers.forEach((m) => map.value?.removeLayer(m))
   shopMarkers = []
 
@@ -174,7 +186,6 @@ const plotShops = () => {
     if (isNaN(lat) || isNaN(lng)) return
 
     const imageUrl = shop.physical_store || shop.logo_url || 'https://via.placeholder.com/80'
-
     const marker = L.marker([lat, lng], { icon: shopIcon, title: shop.business_name }).addTo(map.value!)
 
     const popupHtml = `
@@ -195,70 +206,8 @@ const plotShops = () => {
         }
       }
     })
-
     shopMarkers.push(marker)
   })
-
-  if (shopMarkers.length > 0) {
-    const group = L.featureGroup(shopMarkers)
-    map.value.fitBounds(group.getBounds().pad(0.2))
-  }
-}
-
-/* -------------------- NEARBY POIs -------------------- */
-const fetchNearbyPOIs = async (lat: number, lng: number) => {
-  if (!map.value) return
-  try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=shop&addressdetails=1&limit=25&bounded=1&viewbox=${lng - 0.05},${lat + 0.05},${lng + 0.05},${lat - 0.05}`
-    )
-    const data = await res.json()
-
-    poiMarkers.forEach((m) => map.value?.removeLayer(m))
-    poiMarkers = []
-
-    for (const place of data) {
-      const poiLat = parseFloat(place.lat)
-      const poiLng = parseFloat(place.lon)
-      if (isNaN(poiLat) || isNaN(poiLng)) continue
-      if (place.address?.city !== 'Butuan City') continue
-
-      const name = place.display_name?.split(',')[0] || 'Unnamed Place'
-      const isRegistered = shops.value.some(
-        (s) =>
-          s.business_name?.toLowerCase() === name.toLowerCase() &&
-          Math.abs(s.latitude - poiLat) < 0.001 &&
-          Math.abs(s.longitude - poiLng) < 0.001
-      )
-      if (isRegistered) continue
-
-      const marker = L.marker([poiLat, poiLng], { icon: poiIcon, title: name }).addTo(map.value!)
-      const mapsUrl = `https://www.google.com/maps?q=${poiLat},${poiLng}`
-
-      const popupHtml = `
-        <div style="text-align:center;">
-          <p><strong>${name}</strong></p>
-          <button id="invite-${poiLat}-${poiLng}" style="padding:6px 12px;background:#4caf50;color:white;border:none;border-radius:6px;cursor:pointer;margin-bottom:4px;">Invite Shop</button>
-          <button id="viewmap-${poiLat}-${poiLng}" style="padding:6px 12px;background:#1976d2;color:white;border:none;border-radius:6px;cursor:pointer;">View on Map</button>
-        </div>
-      `
-
-      marker.bindPopup(popupHtml)
-      marker.on('popupopen', () => {
-        document.getElementById(`invite-${poiLat}-${poiLng}`)?.addEventListener('click', () => {
-          alert(`📨 Invitation sent to "${name}"!`)
-          marker.closePopup()
-        })
-        document.getElementById(`viewmap-${poiLat}-${poiLng}`)?.addEventListener('click', () => {
-          window.open(mapsUrl, '_blank')
-        })
-      })
-
-      poiMarkers.push(marker)
-    }
-  } catch (e) {
-    console.error('Failed to fetch POIs:', e)
-  }
 }
 
 /* -------------------- USER LOCATION -------------------- */
@@ -268,51 +217,37 @@ const POI_FETCH_INTERVAL = 15000
 
 watch([latitude, longitude], async ([lat, lng]) => {
   if (!map.value || lat == null || lng == null) return
-
   const userLat = Number(lat)
   const userLng = Number(lng)
-
   if (!isFinite(userLat) || !isFinite(userLng)) return
 
   if (userMarker) {
     userMarker.setLatLng([userLat, userLng])
   } else {
-    userMarker = L.marker([userLat, userLng], { icon: userIcon }).addTo(map.value).bindPopup('You are here').openPopup()
-  }
-
-  const now = Date.now()
-  if (now - lastPOIFetch > POI_FETCH_INTERVAL) {
-    lastPOIFetch = now
-    await fetchNearbyPOIs(userLat, userLng)
+    userMarker = L.marker([userLat, userLng], { icon: userIcon })
+      .addTo(map.value)
+      .bindPopup('You are here')
+      .openPopup()
   }
 
   if (recenterTimeout) clearTimeout(recenterTimeout)
   recenterTimeout = window.setTimeout(() => {
-    if (map.value && !currentPopup) map.value.setView([userLat, userLng], map.value.getZoom(), { animate: false })
-  }, 1500)
+    if (map.value && !currentPopup)
+      map.value.panTo([userLat, userLng], { animate: true, duration: 0.5 })
+  }, 600)
 })
 
 /* -------------------- RECENTER BUTTON -------------------- */
 const locating = ref(false)
 const recenterToUser = async () => {
+  if (!latitude.value || !longitude.value || !map.value) return
   locating.value = true
   try {
-    // ⚡ Use existing coordinates from watcher
-    if (latitude.value && longitude.value && map.value) {
-      map.value.setView([latitude.value, longitude.value], 16, { animate: true })
-    } else {
-      // fallback if watcher not yet active
-      const { coords } = await getLocation()
-      if (coords && map.value)
-        map.value.setView([coords.latitude, coords.longitude], 16, { animate: true })
-    }
-  } catch {
-    alert('Unable to retrieve location.')
+    map.value.setView([latitude.value, longitude.value], 16, { animate: true })
   } finally {
     locating.value = false
   }
 }
-
 
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
@@ -337,13 +272,7 @@ onUnmounted(() => {
 <template>
   <v-app>
     <v-app-bar class="searchshop" color="#3f83c7" flat>
-      <v-text-field
-        v-model="search"
-        label="Search shops..."
-        hide-details
-        density="comfortable"
-        variant="outlined"
-      >
+      <v-text-field v-model="search" label="Search shops..." hide-details density="comfortable" variant="outlined">
         <template #append>
           <v-btn icon @click="console.log('Searching for', search)">
             <v-icon>mdi-magnify</v-icon>
@@ -353,19 +282,38 @@ onUnmounted(() => {
     </v-app-bar>
 
     <v-main>
-
-      
       <div id="map"></div>
 
-  <div class="map-buttons" v-if="!showShopMenu">
-  <v-btn icon :loading="locating" @click="recenterToUser" class="locate-btn">
-    <v-icon>mdi-crosshairs-gps</v-icon>
-  </v-btn>
+      <div class="map-buttons" v-if="!showShopMenu">
+        <v-btn icon :loading="locating" @click="recenterToUser" class="locate-btn">
+          <v-icon>mdi-crosshairs-gps</v-icon>
+        </v-btn>
 
-  <v-btn icon @click="showShopMenu = true" class="menu-btn">
-    <v-icon>mdi-menu</v-icon>
-  </v-btn>
-</div>
+        <v-menu location="top" transition="scale-transition">
+          <template #activator="{ props }">
+            <v-btn icon v-bind="props" class="menu-options-btn">
+              <v-icon>mdi-dots-vertical</v-icon>
+            </v-btn>
+          </template>
+
+          <v-list>
+            <v-list-item @click="shopDisplayMode = 'within'; fetchShops()">
+              <v-list-item-title>Display Within City (Nearby)</v-list-item-title>
+            </v-list-item>
+            <v-list-item @click="shopDisplayMode = 'outside'; fetchShops()">
+              <v-list-item-title>Display Outside City (Explore More)</v-list-item-title>
+            </v-list-item>
+          </v-list>
+        </v-menu>
+
+        <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip">
+          🌏 Exploring Outside City
+        </v-chip>
+
+        <v-btn icon @click="showShopMenu = true" class="menu-btn">
+          <v-icon>mdi-menu</v-icon>
+        </v-btn>
+      </div>
 
       <v-alert v-if="errorMsg" type="error" class="ma-4">{{ errorMsg }}</v-alert>
     </v-main>
@@ -379,20 +327,14 @@ onUnmounted(() => {
       <v-divider></v-divider>
 
       <v-list>
-        <v-list-item
-          v-for="shop in shops"
-          :key="shop.id"
-          @click="router.push(`/shop/${shop.id}`); showShopMenu = false"
-        >
+        <v-list-item v-for="shop in shops" :key="shop.id" @click="router.push(`/shop/${shop.id}`); showShopMenu = false">
           <template #prepend>
             <v-avatar size="40">
               <img :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'" />
             </v-avatar>
           </template>
           <v-list-item-title>{{ shop.business_name }}</v-list-item-title>
-          <v-list-item-subtitle v-if="shop.detected_address">
-            {{ shop.detected_address }}
-          </v-list-item-subtitle>
+          <v-list-item-subtitle v-if="shop.detected_address">{{ shop.detected_address }}</v-list-item-subtitle>
         </v-list-item>
       </v-list>
     </v-navigation-drawer>
@@ -411,54 +353,26 @@ onUnmounted(() => {
   width: 100%;
 }
 
-.searchshop {
-  padding: 30px 16px calc(12px + env(safe-area-inset-top)) 16px;
-}
-
 .map-buttons {
   position: absolute;
-  bottom: 20px;              /* distance from bottom of map */
-  right: 20px;               /* distance from right edge */
+  bottom: 20px;
+  right: 20px;
   display: flex;
-  flex-direction: column;    /* stack vertically */
-  gap: 10px;                 /* space between buttons */
-  z-index: 2000;             /* 🟢 ensure above map overlay */
-  pointer-events: auto;      /* allow taps */
+  flex-direction: column;
+  gap: 10px;
+  z-index: 2000;
 }
-/* each button inside gets a subtle white background */
+
 .map-buttons .v-btn {
   background: white;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  z-index: 2001;             /* 🟢 ensure they stay on top of popups */
 }
 
-.menu-btn,
-.locate-btn {
-  background: white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+.mode-chip {
+  position: absolute;
+  bottom: 90px;
+  right: 20px;
+  z-index: 2100;
+  font-weight: 500;
 }
-
-:deep(.leaflet-container) {
-  background: #f8f9fa;
-}
-
-:deep(.leaflet-popup-content-wrapper) {
-  border-radius: 8px;
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.15);
-}
-:deep(.v-navigation-drawer) {
-  position: absolute !important;
-  top: var(--v-toolbar-height, 64px);
-  bottom: var(--v-bottom-navigation-height, 56px);
-  height: auto !important;
-  z-index: 3000 !important; /* 🟢 make sure it's above map buttons */
-}
-:deep(.v-navigation-drawer .v-toolbar) {
-  z-index: 3100 !important;
-  position: relative;
-}
-:deep(.v-navigation-drawer.v-navigation-drawer--temporary) {
-  transition: transform 0.3s ease;
-}
-
 </style>
