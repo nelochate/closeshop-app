@@ -12,7 +12,6 @@ const goBack = () => router.back()
 const conversations = ref<any[]>([])
 
 const fetchConversations = async () => {
-  // ✅ Get the logged-in user
   const {
     data: { user },
   } = await supabase.auth.getUser()
@@ -20,62 +19,82 @@ const fetchConversations = async () => {
 
   const { data, error } = await supabase
     .from('conversations')
-    .select(
-      `
-    id,
-    user1,
-    user2,
-  user1_profile:profiles!conversations_user1_fkey(first_name, last_name, avatar_url),
-    user2_profile:profiles!conversations_user2_fkey(first_name, last_name, avatar_url),
-    messages:messages_conversation_id_fkey (
-      id, content, created_at, sender_id, receiver_id, is_read
-    )
-  `,
-    )
+    .select(`
+      id,
+      user1,
+      user2,
+      user1_profile:profiles!conversations_user1_fkey (
+        first_name,
+        last_name,
+        avatar_url
+      ),
+      user2_profile:profiles!conversations_user2_fkey (
+        first_name,
+        last_name,
+        avatar_url
+      ),
+      messages:messages_conversation_id_fkey (
+        id,
+        content,
+        created_at,
+        sender_id,
+        receiver_id,
+        is_read
+      )
+    `)
     .or(`user1.eq.${user.id},user2.eq.${user.id}`)
     .order('updated_at', { ascending: false })
-
-  console.log('Fetched conversations:', JSON.stringify(data, null, 2))
 
   if (error) {
     console.error('❌ Error fetching conversations:', error.message)
     return
   }
 
-  conversations.value = data.map((conv) => {
-    const lastMsg = conv.messages?.[conv.messages.length - 1]
-    const isUser1 = conv.user1 === user.id
-    console.log('DEBUG -> user.id:', user.id)
-    console.log('conv.user1:', conv.user1)
-    console.log('conv.user2:', conv.user2)
-    console.log('Resolved profile:', isUser1 ? conv.user2_profile : conv.user1_profile)
+  // ✅ Only this block should remain here — no await outside
+  conversations.value = await Promise.all(
+    (data || []).map(async (conv) => {
+      const lastMsg = conv.messages?.[conv.messages.length - 1]
+      const isUser1 = conv.user1 === user.id
+      const otherUserId = isUser1 ? conv.user2 : conv.user1
+      const otherProfile = isUser1 ? conv.user2_profile : conv.user1_profile
 
-    const otherProfile = isUser1 ? conv.user2_profile : conv.user1_profile
+      // Fetch shop owned by this user (if any)
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('business_name, logo_url')
+        .eq('owner_id', otherUserId)
+        .maybeSingle()
 
-    return {
-      id: conv.id,
-      otherUserId: isUser1 ? conv.user2 : conv.user1,
-      otherUserName:
-        `${otherProfile?.first_name || ''} ${otherProfile?.last_name || ''}`.trim() || 'User',
-      avatar:
-        otherProfile?.avatar_url ||
-        `https://ui-avatars.com/api/?name=${encodeURIComponent(
-          otherProfile?.first_name || 'User',
-        )}`,
-      sender: lastMsg?.sender_id === user.id ? 'You' : otherProfile?.first_name || 'User',
-      lastMessage: lastMsg?.content || '(No messages yet)',
-      time: lastMsg?.created_at
-        ? new Date(lastMsg.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit',
-          })
-        : '',
-      unread: lastMsg ? !lastMsg.is_read && lastMsg.receiver_id === user.id : false,
-    }
-  })
+      return {
+        id: conv.id,
+        otherUserId,
+        otherUserName:
+          shop?.business_name ||
+          `${otherProfile?.first_name || ''} ${otherProfile?.last_name || ''}`.trim() ||
+          'User',
+        avatar:
+          shop?.logo_url ||
+          otherProfile?.avatar_url ||
+          `https://ui-avatars.com/api/?name=${encodeURIComponent(
+            shop?.business_name || otherProfile?.first_name || 'User',
+          )}`,
+        sender: lastMsg?.sender_id === user.id ? 'You' : otherProfile?.first_name || 'User',
+        lastMessage: lastMsg?.content || '(No messages yet)',
+        time: lastMsg?.created_at
+          ? new Date(lastMsg.created_at).toLocaleTimeString([], {
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : '',
+        unread: lastMsg ? !lastMsg.is_read && lastMsg.receiver_id === user.id : false,
+      }
+    }),
+  )
 }
 
-// subscribe to new messages (re-fetch conversations on new message)
+// ✅ Remove this duplicate block entirely (it breaks the setup)
+// conversations.value = await Promise.all(...)
+
 const subscribeMessages = async () => {
   const {
     data: { user },
@@ -93,19 +112,13 @@ const subscribeMessages = async () => {
     .subscribe()
 }
 
-// open a chat
 const openChat = (conv: any) => {
   router.push({ name: 'chatview', params: { id: conv.otherUserId } })
 }
 
 onMounted(() => {
-  // Fetch existing conversations
   fetchConversations()
-
-  // Subscribe to realtime updates
   subscribeMessages()
-
-  // 🔁 Refresh list every 15 seconds (optional but recommended)
   setInterval(fetchConversations, 15000)
 })
 </script>
