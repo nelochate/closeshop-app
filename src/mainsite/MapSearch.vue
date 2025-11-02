@@ -6,6 +6,7 @@ import { useGeolocation } from '@/composables/useGeolocation'
 import { Capacitor } from '@capacitor/core'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
+import { Geolocation } from '@capacitor/geolocation'
 
 /* -------------------- STATE -------------------- */
 const activeTab = ref('map')
@@ -19,6 +20,9 @@ const errorMsg = ref<string | null>(null)
 const showShopMenu = ref(false)
 const shopDisplayMode = ref<'within' | 'outside'>('within')
 const userCity = ref<string | null>(null)
+const lastKnownKey = 'closeshop_last_location'
+const lastKnown = ref<[number, number] | null>(null)
+let lastUpdateTs = 0
 
 /* -------------------- GEOAPIFY CONFIG -------------------- */
 const GEOAPIFY_API_KEY = 'b4cb2e0e4f4a4e4fb385fae9418d4da7'
@@ -44,10 +48,37 @@ const shopIcon = L.icon({
   iconAnchor: [12, 41],
 })
 
+/* -------------------- CACHE LOCATION -------------------- */
+function loadCachedLocation() {
+  try {
+    const v = localStorage.getItem(lastKnownKey)
+    if (v) {
+      const arr = JSON.parse(v)
+      if (Array.isArray(arr) && arr.length === 2) {
+        lastKnown.value = [Number(arr[0]), Number(arr[1])]
+      }
+    }
+  } catch (e) {
+    console.warn('Could not read cached location', e)
+  }
+}
+
+function saveCachedLocation(lat: number, lng: number) {
+  try {
+    localStorage.setItem(lastKnownKey, JSON.stringify([lat, lng]))
+  } catch (e) {
+    console.warn('Could not save cached location', e)
+  }
+}
+
 /* -------------------- MAP INITIALIZATION -------------------- */
 const initializeMap = () => {
   if (map.value && map.value._loaded) {
-    try { map.value.remove() } catch (e) { console.warn(e) }
+    try {
+      map.value.remove()
+    } catch (e) {
+      console.warn(e)
+    }
   }
 
   map.value = L.map('map', { center: [8.95, 125.53], zoom: 13 })
@@ -55,58 +86,80 @@ const initializeMap = () => {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  // Force resize fix on mobile
+  loadCachedLocation()
+  const placeholder = lastKnown.value ?? [8.95, 125.53]
+  userMarker = L.marker(placeholder, { icon: userIcon })
+    .addTo(map.value)
+    .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
+    .openPopup()
+
   setTimeout(() => map.value?.invalidateSize(), 500)
 }
 
-
 /* -------------------- USER CITY BOUNDARY -------------------- */
 const highlightUserCityBoundary = async (lat: number, lon: number) => {
-  if (!map.value) return
+  if (!map.value) return;
+
   try {
+    // Step 1: Reverse geocode to detect user's city name (you can keep Geoapify for accuracy)
     const geoRes = await fetch(
-      `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lon}&apiKey=${GEOAPIFY_API_KEY}`,
-    )
-    const geoData = await geoRes.json()
+      `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lon}&apiKey=${GEOAPIFY_API_KEY}`
+    );
+    const geoData = await geoRes.json();
+    const props = geoData.features?.[0]?.properties || {};
     const cityName =
-      geoData.features?.[0]?.properties?.city ||
-      geoData.features?.[0]?.properties?.town ||
-      geoData.features?.[0]?.properties?.village
+      props.city ||
+      props.town ||
+      props.village ||
+      props.county ||
+      props.state_district ||
+      props.state;
+
     if (!cityName) {
-      errorMsg.value = 'Unable to detect city from your location.'
-      return
+      errorMsg.value = 'Unable to detect city from your location.';
+      return;
     }
 
-    userCity.value = cityName
+    userCity.value = cityName;
+    console.log('🗺️ User city detected:', cityName);
 
-    const overpassUrl = `https://overpass-api.de/api/interpreter?data=[out:json];relation["name"="${cityName}"]["boundary"="administrative"];out geom;`
-    const res = await fetch(overpassUrl)
-    const data = await res.json()
-    if (!data.elements?.length) {
-      console.warn('No boundary found for', cityName)
-      return
+    // ✅ Step 2: Fetch city boundary polygon from OpenStreetMap (Nominatim)
+    const osmUrl = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(
+      cityName
+    )}&country=Philippines&format=geojson&polygon_geojson=1`;
+
+    const osmRes = await fetch(osmUrl, {
+      headers: { 'User-Agent': 'CloseShop-App' },
+    });
+    const osmData = await osmRes.json();
+
+    if (!osmData.features?.length) {
+      console.warn('No OSM boundary found for:', cityName);
+      errorMsg.value = `No boundary found for ${cityName}`;
+      return;
     }
 
-    const feature = data.elements[0]
-    const coordinates = feature.members
-      .filter((m: any) => m.geometry)
-      .map((m: any) => m.geometry.map((p: any) => [p.lon, p.lat]))
+    // Step 3: Use first matching boundary
+    const boundaryFeature = osmData.features[0];
 
-    const geojson = { type: 'Feature', geometry: { type: 'Polygon', coordinates } }
-
+    // Remove old boundary layer if exists
     if (cityBoundaryLayer.value && map.value.hasLayer(cityBoundaryLayer.value)) {
-      map.value.removeLayer(cityBoundaryLayer.value)
+      map.value.removeLayer(cityBoundaryLayer.value);
     }
 
-    cityBoundaryLayer.value = L.geoJSON(geojson, {
+    // Step 4: Draw the new boundary
+    cityBoundaryLayer.value = L.geoJSON(boundaryFeature, {
       style: { color: '#0ea5e9', weight: 3, fillOpacity: 0.1 },
-    }).addTo(map.value)
-    map.value.fitBounds(cityBoundaryLayer.value.getBounds().pad(0.2))
+    }).addTo(map.value);
+
+    map.value.fitBounds(cityBoundaryLayer.value.getBounds().pad(0.2));
+    console.log(`✅ Boundary highlighted for ${cityName}`);
   } catch (e) {
-    console.error('Failed to fetch city boundary:', e)
-    errorMsg.value = 'Unable to highlight city boundary.'
+    console.error('Failed to highlight city boundary:', e);
+    errorMsg.value = 'Unable to highlight city boundary.';
   }
-}
+};
+
 
 /* -------------------- FETCH SHOPS -------------------- */
 const fetchShops = async () => {
@@ -130,22 +183,22 @@ const fetchShops = async () => {
 
 /* -------------------- PLOT SHOPS -------------------- */
 const plotShops = () => {
-  if (!map.value || !map.value._loaded) return; // ensure map is ready
-  if (!shops.value.length) return;
+  if (!map.value || !map.value._loaded) return
+  if (!shops.value.length) return
 
-  // Remove old markers
-  shopMarkers.forEach((m) => map.value?.removeLayer(m));
-  shopMarkers = [];
+  shopMarkers.forEach((m) => map.value?.removeLayer(m))
+  shopMarkers = []
 
   for (const shop of shops.value) {
     const lat = Number(shop.latitude),
-          lng = Number(shop.longitude);
-    if (!isFinite(lat) || !isFinite(lng)) continue;
+      lng = Number(shop.longitude)
+    if (!isFinite(lat) || !isFinite(lng)) continue
 
-    const imageUrl = shop.physical_store || shop.logo_url || 'https://placehold.co/80x80';
-
-    const marker = L.marker([lat, lng], { icon: shopIcon, title: shop.business_name }).addTo(map.value!);
-    (marker as any).shopCity = shop.city;
+    const imageUrl = shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'
+    const marker = L.marker([lat, lng], { icon: shopIcon, title: shop.business_name }).addTo(
+      map.value!,
+    )
+    ;(marker as any).shopCity = shop.city
 
     marker.bindPopup(`
       <div style="text-align:center;">
@@ -153,27 +206,24 @@ const plotShops = () => {
         <p><strong>${shop.business_name}</strong></p>
         <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;">View Shop</button>
       </div>
-    `);
+    `)
 
     marker.on('popupopen', () => {
-      const btn = document.getElementById(`view-${shop.id}`);
+      const btn = document.getElementById(`view-${shop.id}`)
       if (btn)
         btn.onclick = () => {
-          router.push(`/shop/${shop.id}`);
-          marker.closePopup();
-        };
-    });
+          router.push(`/shop/${shop.id}`)
+          marker.closePopup()
+        }
+    })
 
-    shopMarkers.push(marker);
+    shopMarkers.push(marker)
   }
 
-  // Only update visibility if userCity is available
-  if (userCity.value) updateMarkerVisibility();
-};
+  if (userCity.value) updateMarkerVisibility()
+}
 
-
-
-/* -------------------- DISPLAY MODE BUTTONS -------------------- */
+/* -------------------- DISPLAY MODE -------------------- */
 const showWithinCity = () => {
   shopDisplayMode.value = 'within'
   updateMarkerVisibility()
@@ -185,47 +235,56 @@ const showOutsideCity = () => {
 
 /* -------------------- MARKER FILTERING -------------------- */
 const updateMarkerVisibility = () => {
-  if (!userCity.value) return;
+  if (!userCity.value) return
 
-  const userCityName = userCity.value.trim().toLowerCase();
+  const userCityName = userCity.value.trim().toLowerCase()
 
   shopMarkers.forEach((marker) => {
-    const shopCityName = ((marker as any).shopCity || '').trim().toLowerCase();
-
-    const isSameCity = shopCityName.includes(userCityName) || userCityName.includes(shopCityName);
+    const shopCityName = ((marker as any).shopCity || '').trim().toLowerCase()
+    const isSameCity = shopCityName.includes(userCityName) || userCityName.includes(shopCityName)
 
     if (shopDisplayMode.value === 'within') {
-      // Show only shops in the same city
-      if (isSameCity) map.value?.addLayer(marker);
-      else map.value?.removeLayer(marker);
+      if (isSameCity) map.value?.addLayer(marker)
+      else map.value?.removeLayer(marker)
     } else {
-      // Show only shops outside the user's city
-      if (!isSameCity) map.value?.addLayer(marker);
-      else map.value?.removeLayer(marker);
+      if (!isSameCity) map.value?.addLayer(marker)
+      else map.value?.removeLayer(marker)
     }
-  });
-};
+  })
+}
 
 /* -------------------- USER LOCATION TRACKING -------------------- */
 watch([latitude, longitude], async ([lat, lng]) => {
   if (!map.value || lat == null || lng == null) return
-  const userLat = Number(lat),
-    userLng = Number(lng)
+  const userLat = Number(lat)
+  const userLng = Number(lng)
   if (!isFinite(userLat) || !isFinite(userLng)) return
 
-  map.value.whenReady(() => {
-    if (userMarker) userMarker.setLatLng([userLat, userLng])
-    else
-      userMarker = L.marker([userLat, userLng], { icon: userIcon })
-        .addTo(map.value!)
-        .bindPopup('You are here')
-        .openPopup()
-  })
+  const now = Date.now()
+  if (now - lastUpdateTs < 1000) {
+    saveCachedLocation(userLat, userLng)
+    return
+  }
+  lastUpdateTs = now
 
-  await highlightUserCityBoundary(userLat, userLng)
-  await fetchShops()
+  if (userMarker) {
+    userMarker.setLatLng([userLat, userLng])
+    userMarker.setPopupContent('You are here')
+  } else {
+    userMarker = L.marker([userLat, userLng], { icon: userIcon })
+      .addTo(map.value)
+      .bindPopup('You are here')
+      .openPopup()
+  }
+
+  saveCachedLocation(userLat, userLng)
+  console.log('📍 User coordinates:', userLat, userLng)
+
+  void highlightUserCityBoundary(userLat, userLng)
+  void fetchShops()
 })
 
+/* -------------------- RECENTER -------------------- */
 const recenterToUser = async () => {
   if (!map.value || !latitude.value || !longitude.value) return
   locating.value = true
@@ -241,19 +300,46 @@ const recenterToUser = async () => {
 
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
-  if (Capacitor.getPlatform() !== 'web') await requestPermission()
   initializeMap()
+  if (Capacitor.getPlatform() !== 'web') {
+    await requestPermission()
+  }
+
+  try {
+    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 5000 })
+    const quickLat = pos.coords.latitude
+    const quickLng = pos.coords.longitude
+
+    if (map.value) {
+      if (!userMarker) {
+        userMarker = L.marker([quickLat, quickLng], { icon: userIcon })
+          .addTo(map.value)
+          .bindPopup('You are here')
+          .openPopup()
+      } else {
+        userMarker.setLatLng([quickLat, quickLng])
+        userMarker.setPopupContent('You are here')
+      }
+      map.value.setView([quickLat, quickLng], 16, { animate: true })
+    }
+
+    saveCachedLocation(quickLat, quickLng)
+    void highlightUserCityBoundary(quickLat, quickLng)
+    void fetchShops()
+  } catch (err) {
+    console.warn('Quick geolocation failed:', err)
+  }
+
   map.value?.whenReady(async () => {
     await startWatching()
-    if (latitude.value && longitude.value) {
-      await highlightUserCityBoundary(latitude.value, longitude.value)
-      await fetchShops()
-    }
   })
 })
 
 onUnmounted(() => {
   stopWatching()
+  if (latitude.value && longitude.value) {
+    saveCachedLocation(Number(latitude.value), Number(longitude.value))
+  }
   if (map.value) {
     try {
       setTimeout(() => map.value?.remove(), 300)
