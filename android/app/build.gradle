@@ -13,12 +13,18 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
         aaptOptions {
-            // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+            // Skip unnecessary files and disable crunching to reduce memory usage
             ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+            cruncherEnabled = false
         }
     }
 
     buildTypes {
+        debug {
+            aaptOptions {
+                cruncherEnabled = false  // ⚡ disables PNG/font compression for debug
+            }
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
@@ -34,13 +40,11 @@ repositories {
 
 dependencies {
     implementation fileTree(include: ['*.jar'], dir: 'libs')
-
-    // ✅ Replaced variable references with actual stable versions
     implementation "androidx.appcompat:appcompat:1.7.0"
     implementation "androidx.coordinatorlayout:coordinatorlayout:1.2.0"
     implementation "androidx.core:core-splashscreen:1.0.1"
     implementation platform('com.google.firebase:firebase-bom:33.2.0')
-implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-analytics'
     implementation project(':capacitor-android')
     implementation project(':capacitor-cordova-android-plugins')
 
@@ -49,13 +53,13 @@ implementation 'com.google.firebase:firebase-analytics'
     androidTestImplementation "androidx.test.espresso:espresso-core:3.5.1"
 }
 
-// 🔧 Capacitor build file
+// Capacitor build file
 apply from: 'capacitor.build.gradle'
 
-// ✅ Firebase plugin
+// Firebase plugin
 apply plugin: 'com.google.gms.google-services'
 
-// ✅ Optional: check if google-services.json exists (for safety)
+// Optional safety check
 try {
     def servicesJSON = file('google-services.json')
     if (!servicesJSON.exists()) {
