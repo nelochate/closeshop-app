@@ -317,6 +317,43 @@ onUnmounted(() => {
 
 /* -------------------- SHOP LIST CLICK -------------------- */
 const openShop = (shopId: string) => { focusOnShopMarker(shopId); showShopMenu.value = false }
+
+/* -------------------- SEARCH FILTER -------------------- */
+const filteredShops = ref<any[]>([])
+
+watch([search, shops], () => {
+  const term = search.value.trim().toLowerCase()
+  if (!term) {
+    filteredShops.value = [...shops.value]
+  } else {
+    filteredShops.value = shops.value.filter(shop => {
+      const name = shop.business_name?.toLowerCase() ?? ''
+      const city = shop.city?.toLowerCase() ?? ''
+      return name.includes(term) || city.includes(term)
+    })
+  }
+  updateMarkersByFilter()
+})
+
+const updateMarkersByFilter = () => {
+  shopMarkers.forEach(marker => {
+    const shop = shops.value.find(s => s.id === (marker as any).shopId)
+    if (!shop) return
+    const match = filteredShops.value.some(s => s.id === shop.id)
+    if (match && map.value) map.value.addLayer(marker)
+    else if (map.value) map.value.removeLayer(marker)
+  })
+}
+
+//helper
+const highlightMatch = (text: string, term: string) => {
+  if (!term) return text
+  const regex = new RegExp(`(${term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi')
+  return text.replace(regex, '<span class="highlight">$1</span>')
+}
+
+
+
 </script>
 <template>
   <v-app>
@@ -371,18 +408,24 @@ const openShop = (shopId: string) => { focusOnShopMarker(shopId); showShopMenu.v
       </v-toolbar>
       <v-divider></v-divider>
 
-      <v-list>
-        <v-list-item v-for="shop in shops" :key="shop.id" @click="openShop(shop.id)">
-          <template #prepend>
-            <v-avatar size="40">
-              <img :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'" />
-            </v-avatar>
-          </template>
-          <v-list-item-title>{{ shop.business_name }}</v-list-item-title>
-          <v-list-item-subtitle>{{ getFullAddress(shop) }}</v-list-item-subtitle>
-          <v-list-item-subtitle v-if="shop.distanceKm">{{ shop.distanceKm.toFixed(2) }} km away</v-list-item-subtitle>
-        </v-list-item>
-      </v-list>
+   <v-list>
+  <v-list-item v-for="shop in filteredShops" :key="shop.id" @click="openShop(shop.id)">
+    <template #prepend>
+      <v-avatar size="40">
+        <img :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'" />
+      </v-avatar>
+    </template>
+
+    <v-list-item-title v-html="highlightMatch(shop.business_name, search)"></v-list-item-title>
+
+    <v-list-item-subtitle v-html="highlightMatch(getFullAddress(shop), search)"></v-list-item-subtitle>
+
+    <v-list-item-subtitle v-if="shop.distanceKm">
+      {{ shop.distanceKm.toFixed(2) }} km away
+    </v-list-item-subtitle>
+  </v-list-item>
+</v-list>
+
     </v-navigation-drawer>
 
     <BottomNav v-model="activeTab" />
@@ -420,4 +463,11 @@ const openShop = (shopId: string) => { focusOnShopMarker(shopId); showShopMenu.v
   z-index: 2100;
   font-weight: 500;
 }
+.highlight {
+  background-color: #ffe066;
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
 </style>
