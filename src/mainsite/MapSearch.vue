@@ -98,68 +98,44 @@ const initializeMap = () => {
 
 /* -------------------- USER CITY BOUNDARY -------------------- */
 const highlightUserCityBoundary = async (lat: number, lon: number) => {
-  if (!map.value) return;
-
+  if (!map.value) return
   try {
-    // Step 1: Reverse geocode to detect user's city name (you can keep Geoapify for accuracy)
     const geoRes = await fetch(
       `https://api.geoapify.com/v1/geocode/reverse?lat=${lat}&lon=${lon}&apiKey=${GEOAPIFY_API_KEY}`
-    );
-    const geoData = await geoRes.json();
-    const props = geoData.features?.[0]?.properties || {};
+    )
+    const geoData = await geoRes.json()
+    const props = geoData.features?.[0]?.properties || {}
     const cityName =
-      props.city ||
-      props.town ||
-      props.village ||
-      props.county ||
-      props.state_district ||
-      props.state;
-
+      props.city || props.town || props.village || props.county || props.state_district || props.state
     if (!cityName) {
-      errorMsg.value = 'Unable to detect city from your location.';
-      return;
+      errorMsg.value = 'Unable to detect city from your location.'
+      return
     }
+    userCity.value = cityName
 
-    userCity.value = cityName;
-    console.log('🗺️ User city detected:', cityName);
-
-    // ✅ Step 2: Fetch city boundary polygon from OpenStreetMap (Nominatim)
-    const osmUrl = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(
-      cityName
-    )}&country=Philippines&format=geojson&polygon_geojson=1`;
-
-    const osmRes = await fetch(osmUrl, {
-      headers: { 'User-Agent': 'CloseShop-App' },
-    });
-    const osmData = await osmRes.json();
-
+    const osmUrl = `https://nominatim.openstreetmap.org/search?city=${encodeURIComponent(cityName)}&country=Philippines&format=geojson&polygon_geojson=1`
+    const osmRes = await fetch(osmUrl, { headers: { 'User-Agent': 'CloseShop-App' } })
+    const osmData = await osmRes.json()
     if (!osmData.features?.length) {
-      console.warn('No OSM boundary found for:', cityName);
-      errorMsg.value = `No boundary found for ${cityName}`;
-      return;
+      errorMsg.value = `No boundary found for ${cityName}`
+      return
     }
 
-    // Step 3: Use first matching boundary
-    const boundaryFeature = osmData.features[0];
-
-    // Remove old boundary layer if exists
+    const boundaryFeature = osmData.features[0]
     if (cityBoundaryLayer.value && map.value.hasLayer(cityBoundaryLayer.value)) {
-      map.value.removeLayer(cityBoundaryLayer.value);
+      map.value.removeLayer(cityBoundaryLayer.value)
     }
 
-    // Step 4: Draw the new boundary
     cityBoundaryLayer.value = L.geoJSON(boundaryFeature, {
       style: { color: '#0ea5e9', weight: 3, fillOpacity: 0.1 },
-    }).addTo(map.value);
+    }).addTo(map.value)
 
-    map.value.fitBounds(cityBoundaryLayer.value.getBounds().pad(0.2));
-    console.log(`✅ Boundary highlighted for ${cityName}`);
+    map.value.fitBounds(cityBoundaryLayer.value.getBounds().pad(0.2))
   } catch (e) {
-    console.error('Failed to highlight city boundary:', e);
-    errorMsg.value = 'Unable to highlight city boundary.';
+    console.error('Failed to highlight city boundary:', e)
+    errorMsg.value = 'Unable to highlight city boundary.'
   }
-};
-
+}
 
 /* -------------------- FETCH SHOPS -------------------- */
 const fetchShops = async () => {
@@ -167,9 +143,22 @@ const fetchShops = async () => {
     loading.value = true
     const { data, error } = await supabase
       .from('shops')
-      .select(
-        'id, business_name, latitude, longitude, logo_url, physical_store, detected_address, city',
-      )
+      .select(`
+        id,
+        business_name,
+        latitude,
+        longitude,
+        logo_url,
+        physical_store,
+        detected_address,
+        house_no,
+        building,
+        street,
+        barangay,
+        city,
+        province,
+        postal
+      `)
     if (error) throw error
     shops.value = data || []
     plotShops()
@@ -181,6 +170,15 @@ const fetchShops = async () => {
   }
 }
 
+/* -------------------- HELPER: FULL ADDRESS -------------------- */
+const getFullAddress = (shop: any) => {
+  if (shop.detected_address) return shop.detected_address
+  const parts = [shop.house_no, shop.building, shop.street, shop.barangay, shop.city, shop.province, shop.postal].filter(Boolean)
+  if (parts.length) return parts.join(', ')
+  if (shop.physical_store) return shop.physical_store
+  return 'Address not available'
+}
+
 /* -------------------- PLOT SHOPS -------------------- */
 const plotShops = () => {
   if (!map.value || !map.value._loaded) return
@@ -190,67 +188,78 @@ const plotShops = () => {
   shopMarkers = []
 
   for (const shop of shops.value) {
-    const lat = Number(shop.latitude),
-      lng = Number(shop.longitude)
+    const lat = Number(shop.latitude)
+    const lng = Number(shop.longitude)
     if (!isFinite(lat) || !isFinite(lng)) continue
 
     const imageUrl = shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'
-    const marker = L.marker([lat, lng], { icon: shopIcon, title: shop.business_name }).addTo(
-      map.value!,
-    )
-    ;(marker as any).shopCity = shop.city
+    const userLat = latitude.value ? Number(latitude.value) : (lastKnown.value?.[0] ?? 0)
+    const userLng = longitude.value ? Number(longitude.value) : (lastKnown.value?.[1] ?? 0)
+    const distanceKm = getDistanceInKm(userLat, userLng, lat, lng)
+    ;(shop as any).distanceKm = distanceKm
+
+    const marker = L.marker([lat, lng], { icon: shopIcon, title: shop.business_name }).addTo(map.value!)
+    ;(marker as any).shopId = shop.id
+    ;(marker as any).distanceKm = distanceKm
 
     marker.bindPopup(`
       <div style="text-align:center;">
         <img src="${imageUrl}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
         <p><strong>${shop.business_name}</strong></p>
+        <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
+        <p style="margin:2px 0; font-size:14px;">${distanceKm.toFixed(2)} km away</p>
         <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;">View Shop</button>
       </div>
     `)
 
     marker.on('popupopen', () => {
       const btn = document.getElementById(`view-${shop.id}`)
-      if (btn)
-        btn.onclick = () => {
-          router.push(`/shop/${shop.id}`)
-          marker.closePopup()
-        }
+      if (btn) btn.onclick = () => { router.push(`/shop/${shop.id}`); marker.closePopup() }
     })
 
     shopMarkers.push(marker)
   }
 
+  shops.value.sort((a, b) => ((a as any).distanceKm ?? 999) - ((b as any).distanceKm ?? 999))
   if (userCity.value) updateMarkerVisibility()
 }
 
+/* -------------------- FOCUS ON SHOP -------------------- */
+const focusOnShopMarker = (shopId: string) => {
+  const marker = shopMarkers.find((m: any) => m.shopId === shopId)
+  if (marker && map.value) {
+    map.value.setView(marker.getLatLng(), 16, { animate: true })
+    marker.openPopup()
+  }
+}
+
 /* -------------------- DISPLAY MODE -------------------- */
-const showWithinCity = () => {
-  shopDisplayMode.value = 'within'
-  updateMarkerVisibility()
-}
-const showOutsideCity = () => {
-  shopDisplayMode.value = 'outside'
-  updateMarkerVisibility()
-}
+const showWithinCity = () => { shopDisplayMode.value = 'within'; updateMarkerVisibility() }
+const showOutsideCity = () => { shopDisplayMode.value = 'outside'; updateMarkerVisibility() }
 
 /* -------------------- MARKER FILTERING -------------------- */
+const normalizeCity = (name: string | null) => name ? name.toLowerCase().replace(/city|municipality|municipal|town|province/g, '').trim() : ''
 const updateMarkerVisibility = () => {
   if (!userCity.value) return
-
-  const userCityName = userCity.value.trim().toLowerCase()
-
+  const userCityNorm = normalizeCity(userCity.value)
   shopMarkers.forEach((marker) => {
-    const shopCityName = ((marker as any).shopCity || '').trim().toLowerCase()
-    const isSameCity = shopCityName.includes(userCityName) || userCityName.includes(shopCityName)
-
-    if (shopDisplayMode.value === 'within') {
-      if (isSameCity) map.value?.addLayer(marker)
-      else map.value?.removeLayer(marker)
-    } else {
-      if (!isSameCity) map.value?.addLayer(marker)
-      else map.value?.removeLayer(marker)
-    }
+    const shop = shops.value.find((s: any) => s.id === (marker as any).shopId)
+    const shopCityNorm = normalizeCity(shop?.city)
+    const isSameCity = shopCityNorm && userCityNorm ? shopCityNorm.includes(userCityNorm) || userCityNorm.includes(shopCityNorm) : false
+    if (shopDisplayMode.value === 'within') isSameCity ? map.value?.addLayer(marker) : map.value?.removeLayer(marker)
+    else !isSameCity ? map.value?.addLayer(marker) : map.value?.removeLayer(marker)
   })
+}
+
+/* -------------------- DISTANCE -------------------- */
+const getDistanceInKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const toRad = (v: number) => (v * Math.PI) / 180
+  const R = 6371
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+  return R * c
 }
 
 /* -------------------- USER LOCATION TRACKING -------------------- */
@@ -261,25 +270,13 @@ watch([latitude, longitude], async ([lat, lng]) => {
   if (!isFinite(userLat) || !isFinite(userLng)) return
 
   const now = Date.now()
-  if (now - lastUpdateTs < 1000) {
-    saveCachedLocation(userLat, userLng)
-    return
-  }
+  if (now - lastUpdateTs < 1000) { saveCachedLocation(userLat, userLng); return }
   lastUpdateTs = now
 
-  if (userMarker) {
-    userMarker.setLatLng([userLat, userLng])
-    userMarker.setPopupContent('You are here')
-  } else {
-    userMarker = L.marker([userLat, userLng], { icon: userIcon })
-      .addTo(map.value)
-      .bindPopup('You are here')
-      .openPopup()
-  }
+  if (userMarker) { userMarker.setLatLng([userLat, userLng]); userMarker.setPopupContent('You are here') }
+  else { userMarker = L.marker([userLat, userLng], { icon: userIcon }).addTo(map.value).bindPopup('You are here').openPopup() }
 
   saveCachedLocation(userLat, userLng)
-  console.log('📍 User coordinates:', userLat, userLng)
-
   void highlightUserCityBoundary(userLat, userLng)
   void fetchShops()
 })
@@ -288,74 +285,39 @@ watch([latitude, longitude], async ([lat, lng]) => {
 const recenterToUser = async () => {
   if (!map.value || !latitude.value || !longitude.value) return
   locating.value = true
-  try {
-    await new Promise((r) => setTimeout(r, 100))
-    map.value.setView([latitude.value, longitude.value], 16, { animate: true })
-  } catch (err) {
-    console.error('Map recenter error:', err)
-  } finally {
-    locating.value = false
-  }
+  try { await new Promise((r) => setTimeout(r, 100)); map.value.setView([latitude.value, longitude.value], 16, { animate: true }) }
+  finally { locating.value = false }
 }
 
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
   initializeMap()
-  if (Capacitor.getPlatform() !== 'web') {
-    await requestPermission()
-  }
-
+  if (Capacitor.getPlatform() !== 'web') await requestPermission()
   try {
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 5000 })
     const quickLat = pos.coords.latitude
     const quickLng = pos.coords.longitude
-
     if (map.value) {
-      if (!userMarker) {
-        userMarker = L.marker([quickLat, quickLng], { icon: userIcon })
-          .addTo(map.value)
-          .bindPopup('You are here')
-          .openPopup()
-      } else {
-        userMarker.setLatLng([quickLat, quickLng])
-        userMarker.setPopupContent('You are here')
-      }
+      if (!userMarker) userMarker = L.marker([quickLat, quickLng], { icon: userIcon }).addTo(map.value).bindPopup('You are here').openPopup()
+      else { userMarker.setLatLng([quickLat, quickLng]); userMarker.setPopupContent('You are here') }
       map.value.setView([quickLat, quickLng], 16, { animate: true })
     }
-
     saveCachedLocation(quickLat, quickLng)
     void highlightUserCityBoundary(quickLat, quickLng)
     void fetchShops()
-  } catch (err) {
-    console.warn('Quick geolocation failed:', err)
-  }
-
-  map.value?.whenReady(async () => {
-    await startWatching()
-  })
+  } catch (err) { console.warn('Quick geolocation failed:', err) }
+  map.value?.whenReady(async () => { await startWatching() })
 })
 
 onUnmounted(() => {
   stopWatching()
-  if (latitude.value && longitude.value) {
-    saveCachedLocation(Number(latitude.value), Number(longitude.value))
-  }
-  if (map.value) {
-    try {
-      setTimeout(() => map.value?.remove(), 300)
-    } catch (e) {
-      console.warn('Error removing map:', e)
-    }
-  }
+  if (latitude.value && longitude.value) saveCachedLocation(Number(latitude.value), Number(longitude.value))
+  if (map.value) try { setTimeout(() => map.value?.remove(), 300) } catch {}
 })
 
 /* -------------------- SHOP LIST CLICK -------------------- */
-const openShop = (shopId: number) => {
-  router.push(`/shop/${shopId}`)
-  showShopMenu.value = false
-}
+const openShop = (shopId: string) => { focusOnShopMarker(shopId); showShopMenu.value = false }
 </script>
-
 <template>
   <v-app>
     <v-app-bar class="searchshop" color="#3f83c7" flat>
@@ -381,12 +343,10 @@ const openShop = (shopId: number) => {
         <v-btn icon :loading="locating" @click="recenterToUser"
           ><v-icon>mdi-crosshairs-gps</v-icon></v-btn
         >
-
         <v-menu location="top" transition="scale-transition">
           <template #activator="{ props }">
             <v-btn icon v-bind="props"><v-icon>mdi-dots-vertical</v-icon></v-btn>
           </template>
-
           <v-list-item @click="showWithinCity"
             ><v-list-item-title>Display Within City (Nearby)</v-list-item-title></v-list-item
           >
@@ -409,22 +369,18 @@ const openShop = (shopId: number) => {
         <v-toolbar-title>Nearby Shops ({{ shops.length }})</v-toolbar-title>
         <v-btn icon @click="showShopMenu = false"><v-icon>mdi-close</v-icon></v-btn>
       </v-toolbar>
-
       <v-divider></v-divider>
 
       <v-list>
         <v-list-item v-for="shop in shops" :key="shop.id" @click="openShop(shop.id)">
           <template #prepend>
             <v-avatar size="40">
-              <img
-                :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'"
-              />
+              <img :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'" />
             </v-avatar>
           </template>
           <v-list-item-title>{{ shop.business_name }}</v-list-item-title>
-          <v-list-item-subtitle v-if="shop.detected_address">{{
-            shop.detected_address
-          }}</v-list-item-subtitle>
+          <v-list-item-subtitle>{{ getFullAddress(shop) }}</v-list-item-subtitle>
+          <v-list-item-subtitle v-if="shop.distanceKm">{{ shop.distanceKm.toFixed(2) }} km away</v-list-item-subtitle>
         </v-list-item>
       </v-list>
     </v-navigation-drawer>
@@ -444,7 +400,6 @@ const openShop = (shopId: number) => {
   min-height: 400px;
   height: calc(100vh - var(--v-toolbar-height, 64px) - var(--v-bottom-navigation-height, 56px));
 }
-
 .map-buttons {
   position: absolute;
   bottom: 20px;
@@ -454,7 +409,6 @@ const openShop = (shopId: number) => {
   gap: 10px;
   z-index: 2000;
 }
-
 .map-buttons .v-btn {
   background: white;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
