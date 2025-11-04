@@ -35,14 +35,14 @@ const mainImage = (imgs) => {
   return imgs
 }
 
-
 // Fetch product + shop
 onMounted(async () => {
   loading.value = true
   try {
     const { data, error: err } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         prod_description,
@@ -55,7 +55,8 @@ onMounted(async () => {
           business_name,
           logo_url
         )
-      `)
+      `,
+      )
       .eq('id', productId)
       .single()
     if (err) throw err
@@ -113,8 +114,7 @@ const animateToCart = () => {
   clone.style.width = `${imgRect.width}px`
   clone.style.height = `${imgRect.height}px`
   clone.style.zIndex = '2000'
-  clone.style.transition =
-    'all 0.8s cubic-bezier(0.65, -0.1, 0.25, 1.5), opacity 0.8s'
+  clone.style.transition = 'all 0.8s cubic-bezier(0.65, -0.1, 0.25, 1.5), opacity 0.8s'
 
   document.body.appendChild(clone)
   void clone.offsetWidth // reflow
@@ -134,6 +134,14 @@ const animateToCart = () => {
   }, 800)
 }
 
+// routes
+const goToShop = (shopId) => {
+  router.push(`/shop/${shopId}`)
+}
+
+const goToChat = (ownerId) => {
+  router.push(`/chatview/${ownerId}`)
+}
 </script>
 
 <template>
@@ -145,22 +153,14 @@ const animateToCart = () => {
       </v-btn>
       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
-<v-btn icon ref="cartIconRef" @click="goToCart">
-  <v-badge
-    v-if="cart.count"
-    :content="cart.count"
-    color="red"
-    offset-x="-7"
-    offset-y="-3"
-
-  >
-    <v-icon size="28">mdi-cart-outline</v-icon>
-  </v-badge>
-  <template v-else>
-    <v-icon size="28">mdi-cart-outline</v-icon>
-  </template>
-</v-btn>
-
+      <v-btn icon ref="cartIconRef" @click="goToCart">
+        <v-badge v-if="cart.count" :content="cart.count" color="red" offset-x="-7" offset-y="-3">
+          <v-icon size="28">mdi-cart-outline</v-icon>
+        </v-badge>
+        <template v-else>
+          <v-icon size="28">mdi-cart-outline</v-icon>
+        </template>
+      </v-btn>
 
       <v-btn icon @click="shareProduct">
         <v-icon>mdi-share-variant-outline</v-icon>
@@ -179,7 +179,12 @@ const animateToCart = () => {
       <!-- Product Details -->
       <v-sheet v-else class="product-sheet pa-4">
         <!-- Single Product Image -->
-        <v-img ref="productImgRef" :src="mainImage(product.main_img_urls)" class="product-img mb-4" contain />
+        <v-img
+          ref="productImgRef"
+          :src="mainImage(product.main_img_urls)"
+          class="product-img mb-4"
+          contain
+        />
 
         <!-- Product Info -->
         <div class="product-info mb-4">
@@ -190,7 +195,12 @@ const animateToCart = () => {
         </div>
 
         <!-- Shop Info -->
-        <v-card flat class="shop-card pa-2 d-flex align-center mb-4">
+        <v-card
+          flat
+          class="shop-card pa-2 d-flex align-center mb-4"
+          @click="goToShop(product.shop.id)"
+          style="cursor: pointer"
+        >
           <v-avatar size="48">
             <v-img :src="product.shop.logo_url || '/placeholder.png'" />
           </v-avatar>
@@ -206,7 +216,7 @@ const animateToCart = () => {
       <v-row class="w-full pa-0 ma-0" no-gutters>
         <!-- Chat Now -->
         <v-col cols="3.5" class="pa-0">
-          <v-btn block class="bottom-btn chat-now-btn" @click="chatNow">
+          <v-btn block class="bottom-btn chat-now-btn" @click="goToChat(product.shop.owner_id)">
             <v-icon left size="20">mdi-chat-outline</v-icon>
             Chat Now
           </v-btn>
@@ -219,7 +229,6 @@ const animateToCart = () => {
             Add to Cart
           </v-btn>
         </v-col>
-
 
         <!-- Add to Cart Dialog -->
         <v-dialog v-model="showAddToCart" max-width="500" transition="dialog-bottom-transition">
@@ -242,8 +251,13 @@ const animateToCart = () => {
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Choose Size:</p>
                 <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap">
-                  <v-btn v-for="size in product.sizes" :key="size" :value="size" variant="outlined"
-                    class="ma-1 rounded-pill">
+                  <v-btn
+                    v-for="size in product.sizes"
+                    :key="size"
+                    :value="size"
+                    variant="outlined"
+                    class="ma-1 rounded-pill"
+                  >
                     {{ size }}
                   </v-btn>
                 </v-btn-toggle>
@@ -253,8 +267,13 @@ const animateToCart = () => {
               <div v-if="product.varieties && product.varieties.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Choose Variety:</p>
                 <v-btn-toggle v-model="selectedVariety" mandatory class="flex-wrap">
-                  <v-btn v-for="variety in product.varieties" :key="variety" :value="variety" variant="outlined"
-                    class="ma-1 rounded-pill">
+                  <v-btn
+                    v-for="variety in product.varieties"
+                    :key="variety"
+                    :value="variety"
+                    variant="outlined"
+                    class="ma-1 rounded-pill"
+                  >
                     {{ variety }}
                   </v-btn>
                 </v-btn-toggle>
@@ -264,15 +283,34 @@ const animateToCart = () => {
               <div class="mt-2">
                 <p class="font-weight-medium mb-2">Quantity:</p>
                 <div class="d-flex align-center">
-                  <v-btn icon variant="tonal" color="grey" size="small" @click="quantity = Math.max(1, quantity - 1)">
+                  <v-btn
+                    icon
+                    variant="tonal"
+                    color="grey"
+                    size="small"
+                    @click="quantity = Math.max(1, quantity - 1)"
+                  >
                     <v-icon>mdi-minus</v-icon>
                   </v-btn>
 
-                  <v-text-field v-model.number="quantity" type="number" min="1" :max="product.stock" density="compact"
-                    variant="outlined" class="mx-2" style="max-width: 80px; text-align: center" />
+                  <v-text-field
+                    v-model.number="quantity"
+                    type="number"
+                    min="1"
+                    :max="product.stock"
+                    density="compact"
+                    variant="outlined"
+                    class="mx-2"
+                    style="max-width: 80px; text-align: center"
+                  />
 
-                  <v-btn icon variant="tonal" color="grey" size="small"
-                    @click="quantity = Math.min(product.stock, quantity + 1)">
+                  <v-btn
+                    icon
+                    variant="tonal"
+                    color="grey"
+                    size="small"
+                    @click="quantity = Math.min(product.stock, quantity + 1)"
+                  >
                     <v-icon>mdi-plus</v-icon>
                   </v-btn>
                 </div>
@@ -291,13 +329,9 @@ const animateToCart = () => {
           </v-card>
         </v-dialog>
 
-
-
         <!-- Buy Now -->
         <v-col cols="5" class="pa-0">
-          <v-btn block class="bottom-btn buy-now-btn" @click="checkoutNow">
-            Buy Now
-          </v-btn>
+          <v-btn block class="bottom-btn buy-now-btn" @click="checkoutNow"> Buy Now </v-btn>
         </v-col>
       </v-row>
     </v-bottom-navigation>
