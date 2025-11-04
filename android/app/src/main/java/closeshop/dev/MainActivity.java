@@ -1,4 +1,4 @@
-package com.closeshop.dev;
+package closeshop.dev;
 
 import com.getcapacitor.BridgeActivity;
 

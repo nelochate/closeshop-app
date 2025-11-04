@@ -294,7 +294,7 @@ onMounted(async () => {
           <v-text-field v-model="stock" label="Stock / Quantity" type="number" variant="outlined" />
 
           <!-- Sizes -->
-          <v-label class="mt-4 mb-2 font-medium">Available Sizes</v-label>
+          <v-label class="mt-4 mb-2 font-medium">Available Sizes(ignore if not applicable)</v-label>
           <v-row dense>
             <v-col v-for="size in availableSizes" :key="size" cols="6" sm="4" md="2">
               <v-checkbox v-model="selectedSizes" :label="size" :value="size" density="comfortable" hide-details />
