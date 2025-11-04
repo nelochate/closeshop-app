@@ -19,31 +19,61 @@ const scrollToBottom = async () => {
   if (el) el.scrollTop = el.scrollHeight
 }
 
-// ✅ Fetch or create a conversation
+// ✅ Fetch or create a conversation safely
 const getOrCreateConversation = async () => {
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return
   userId.value = auth.user.id
 
-  // find existing conversation
-  const { data: existing, error } = await supabase
-    .from('conversations')
-    .select('id')
-    .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
-    .maybeSingle()
+  try {
+    // 🔍 Find existing conversation between two users
+    const { data: existing, error: fetchErr } = await supabase
+      .from('conversations')
+      .select('id')
+      .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+      .maybeSingle()
 
-  if (error) console.error('Conversation fetch error:', error)
+    if (fetchErr) console.error('Conversation fetch error:', fetchErr)
 
-  if (existing) {
-    conversationId.value = existing.id
-  } else {
+    if (existing) {
+      conversationId.value = existing.id
+      return
+    }
+
+    // ✅ Check if both users exist in profiles
+    const { data: user1Profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', userId.value)
+      .maybeSingle()
+
+    const { data: user2Profile } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', otherUserId)
+      .maybeSingle()
+
+    // 🧩 If the shop owner or current user has no profile, stop gracefully
+    if (!user1Profile || !user2Profile) {
+      console.warn('Cannot create conversation — missing profile record for one of the users.')
+      return
+    }
+
+    // 🆕 Create conversation
     const { data: created, error: createErr } = await supabase
       .from('conversations')
       .insert({ user1: userId.value, user2: otherUserId })
       .select('id')
       .single()
-    if (createErr) console.error('Conversation create error:', createErr)
+
+    if (createErr) {
+      console.error('Conversation create error:', createErr)
+      return
+    }
+
     conversationId.value = created?.id || null
+  } catch (err: any) {
+    console.error('Error in getOrCreateConversation:', err.message)
   }
 }
 
@@ -78,7 +108,7 @@ const subscribeMessages = async () => {
     .subscribe()
 }
 
-// ✅ Send a message
+// ✅ Send message
 const sendMessage = async () => {
   if (!newMessage.value.trim() || !conversationId.value || !userId.value) return
 
@@ -95,7 +125,6 @@ const sendMessage = async () => {
   if (error) {
     console.error('Send message error:', error)
   } else {
-    // Immediately show new message in UI
     messages.value.push(data)
     scrollToBottom()
   }
@@ -103,25 +132,17 @@ const sendMessage = async () => {
   newMessage.value = ''
 }
 
-
 const goBack = () => router.back()
 
 onMounted(async () => {
   await getOrCreateConversation()
   await loadMessages()
-
-  // Only subscribe once conversationId is confirmed
-  if (conversationId.value) {
-    await subscribeMessages()
-  }
+  if (conversationId.value) await subscribeMessages()
 })
-
 
 onUnmounted(() => {
   if (subscription) supabase.removeChannel(subscription)
 })
-
-
 </script>
 
 <template>
