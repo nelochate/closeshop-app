@@ -37,7 +37,7 @@ const handleLogout = async () => {
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat color="#3f83c7" dark density="comfortable">
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -78,6 +78,9 @@ const handleLogout = async () => {
 </template>
 
 <style scoped>
+.app-bar {
+  padding-top: 20px;
+}
 .settings-container {
   padding: 24px;
 }

@@ -472,12 +472,12 @@ onMounted(async () => {
 
 <template>
   <v-app>
-    <!-- Top bar -->
-    <v-app-bar flat color="#3f83c7" class="text-white">
-      <v-btn icon variant="text" @click="goBack" class="text-white">
+    <!-- Top App Bar -->
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
+      <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title>Shop Setup</v-toolbar-title>
+      <v-toolbar-title><strong>Create Shop</strong></v-toolbar-title>
     </v-app-bar>
 
     <v-main class="pb-16">
@@ -677,7 +677,7 @@ onMounted(async () => {
           class="save-location"
         >
           Save this location
-        </v-btn>-->   
+        </v-btn>-->
         <div v-if="addressOption === 'map'">
           <!--dria tamn-->
           <v-btn block color="primary" @click="getLocation" class="mt-2">
@@ -716,6 +716,9 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+.app-bar{
+  padding-top: 22px;
+}
 /* ===== Cover Section ===== */
 .cover-section {
   position: relative;
