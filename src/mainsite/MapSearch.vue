@@ -380,4 +380,7 @@ const openShop = (shopId: number) => {
   z-index: 2100;
   font-weight: 500;
 }
+.searchshop {
+  padding-top: 25px;
+}
 </style>

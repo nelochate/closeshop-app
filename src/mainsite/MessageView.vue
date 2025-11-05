@@ -189,6 +189,7 @@ onMounted(() => {
 .bot-nav,
 .top-nav {
   background-color: #5ca3eb;
+  padding-top: 17px;
 }
 .messages-view {
   padding: 16px;
