@@ -152,8 +152,7 @@ const checkoutSelected = () => {
 
 <style scoped>
 .app-bar {
-  padding-top: env(safe-area-inset-top);
-  padding: 15px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  padding-top: 12px;
 }
 
 .content {

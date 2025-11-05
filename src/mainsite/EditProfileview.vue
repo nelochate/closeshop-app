@@ -284,6 +284,9 @@ const maskedEmail = computed(() => {
 </template>
 
 <style scoped>
+.app-bar {
+  padding-top: 22px;
+}
 /* Modern font */
 .modern-font {
   font-family: 'Inter', 'Roboto', 'Helvetica Neue', sans-serif;
