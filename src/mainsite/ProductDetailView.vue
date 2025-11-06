@@ -142,6 +142,31 @@ const goToShop = (shopId) => {
 const goToChat = (ownerId) => {
   router.push(`/chatview/${ownerId}`)
 }
+
+//sample rating
+
+const reviews = ref([
+  {
+    id: 1,
+    user_name: 'Jane Dela Cruz',
+    user_avatar: '/user1.jpg',
+    shop_rating: 4.5,
+    product_rating: 5,
+    message: 'Great quality! The product arrived fast and matches the description.',
+    likes: 12,
+    dislikes: 1,
+  },
+  {
+    id: 2,
+    user_name: 'Mark Santos',
+    user_avatar: '/user2.jpg',
+    shop_rating: 4,
+    product_rating: 4,
+    message: 'Good item, but the packaging could be better.',
+    likes: 6,
+    dislikes: 0,
+  },
+])
 </script>
 
 <template>
@@ -606,28 +631,6 @@ const goToChat = (ownerId) => {
   }
 }
 
-const reviews = ref([
-  {
-    id: 1,
-    user_name: 'Jane Dela Cruz',
-    user_avatar: '/user1.jpg',
-    shop_rating: 4.5,
-    product_rating: 5,
-    message: 'Great quality! The product arrived fast and matches the description.',
-    likes: 12,
-    dislikes: 1,
-  },
-  {
-    id: 2,
-    user_name: 'Mark Santos',
-    user_avatar: '/user2.jpg',
-    shop_rating: 4,
-    product_rating: 4,
-    message: 'Good item, but the packaging could be better.',
-    likes: 6,
-    dislikes: 0,
-  },
-])
 .v-card-text {
   line-height: 1.4;
   color: #374151;
