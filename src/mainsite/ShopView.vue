@@ -114,6 +114,7 @@ const initMap = () => {
 
 onMounted(async () => {
   loading.value = true
+  await loadUser() // ✅ Load user first
   await fetchShop()
   await fetchProducts()
   loading.value = false
@@ -153,7 +154,7 @@ const isOwner = computed(() => {
       <v-spacer />
       <v-btn
         icon
-        v-if="!isOwner && shop?.owner_id"
+        v-if="userLoaded && !isOwner && shop?.owner_id"
         @click="router.push({ name: 'chatview', params: { id: shop.owner_id } })"
       >
         <v-icon>mdi-message-text</v-icon>
