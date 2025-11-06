@@ -209,6 +209,70 @@ const goToChat = (ownerId) => {
           </div>
         </v-card>
       </v-sheet>
+
+      <!-- Feedback Section -->
+      <v-divider class="my-4">Customer Feedback</v-divider>
+
+      <v-card
+        v-for="review in reviews"
+        :key="review.id"
+        class="mx-4 my-3 pa-3"
+        elevation="1"
+        rounded="lg"
+      >
+        <div class="d-flex align-center mb-2">
+          <v-avatar size="42" class="mr-3">
+            <v-img :src="review.user_avatar || '/placeholder.png'" />
+          </v-avatar>
+          <div>
+            <p class="font-weight-medium mb-0">{{ review.user_name }}</p>
+            <p class="text-caption text-grey">2 days ago</p>
+          </div>
+        </div>
+
+        <!-- Ratings -->
+        <div class="mb-2">
+          <div class="d-flex align-center mb-1">
+            <span class="text-caption mr-2">Shop Rating:</span>
+            <v-rating
+              v-model="review.shop_rating"
+              color="amber"
+              half-increments
+              readonly
+              density="compact"
+              size="18"
+            />
+          </div>
+
+          <div class="d-flex align-center">
+            <span class="text-caption mr-2">Product Rating:</span>
+            <v-rating
+              v-model="review.product_rating"
+              color="amber"
+              half-increments
+              readonly
+              density="compact"
+              size="18"
+            />
+          </div>
+        </div>
+
+        <!-- Review Message -->
+        <v-card-text class="py-1 text-body-2">{{ review.message }}</v-card-text>
+
+        <!-- Like/Dislike Actions -->
+        <v-card-actions class="pt-0">
+          <v-btn variant="text" size="small" color="primary" @click="review.likes++">
+            <v-icon left size="18">mdi-thumb-up-outline</v-icon>
+            {{ review.likes }}
+          </v-btn>
+
+          <v-btn variant="text" size="small" color="error" @click="review.dislikes++">
+            <v-icon left size="18">mdi-thumb-down-outline</v-icon>
+            {{ review.dislikes }}
+          </v-btn>
+        </v-card-actions>
+      </v-card>
     </v-main>
 
     <!-- Bottom Nav -->
@@ -541,4 +605,36 @@ const goToChat = (ownerId) => {
     gap: 2px;
   }
 }
+
+const reviews = ref([
+  {
+    id: 1,
+    user_name: 'Jane Dela Cruz',
+    user_avatar: '/user1.jpg',
+    shop_rating: 4.5,
+    product_rating: 5,
+    message: 'Great quality! The product arrived fast and matches the description.',
+    likes: 12,
+    dislikes: 1,
+  },
+  {
+    id: 2,
+    user_name: 'Mark Santos',
+    user_avatar: '/user2.jpg',
+    shop_rating: 4,
+    product_rating: 4,
+    message: 'Good item, but the packaging could be better.',
+    likes: 6,
+    dislikes: 0,
+  },
+])
+.v-card-text {
+  line-height: 1.4;
+  color: #374151;
+}
+
+.text-caption.text-grey {
+  color: #6b7280;
+}
+
 </style>
