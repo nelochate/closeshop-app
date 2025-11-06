@@ -119,7 +119,7 @@ const goShopOrBuild = () => {
 }
 
 // Purchase sections (dropdown menu)
-const purchaseSections = ['My purchases', 'On going', 'Cancelled', 'Purchased done/rated']
+const purchaseSections = ['My purchases', 'Cancelled', 'Purchased done']
 const selectedSection = ref(purchaseSections[0])
 </script>
 

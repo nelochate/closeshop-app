@@ -3,8 +3,9 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
-//import { messaging } from '@/utils/firebase'
-//import { getToken } from 'firebase/messaging'
+// ❌ Firebase imports removed (no longer needed)
+// import { messaging } from '@/utils/firebase'
+// import { getToken } from 'firebase/messaging'
 import { Geolocation } from '@capacitor/geolocation'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
@@ -86,7 +87,7 @@ async function checkNetworkStatus() {
   }
 }
 
-/* 📡 Firebase Token */
+/* ❌ Firebase Token (removed — no longer used)
 async function requestForToken() {
   try {
     const permission = await Notification.requestPermission()
@@ -110,6 +111,7 @@ async function requestForToken() {
     return null
   }
 }
+*/
 
 /* 🏪 Fetch Shops */
 async function fetchShops() {
@@ -190,20 +192,6 @@ onMounted(async () => {
 
     // Load data
     await Promise.all([fetchShops(), fetchProducts()])
-    loading.value = false
-
-    // Save FCM token
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const token = await requestForToken()
-      if (token) {
-        const { error } = await supabase
-          .from('user_fcm_tokens')
-          .upsert({ user_id: user.id, token }, { onConflict: 'user_id' })
-        if (error) console.error('Error saving FCM token:', error)
-        else console.log('✅ Token saved to Supabase')
-      }
-    }
   } catch (err) {
     console.error('❌ Error in onMounted:', err)
   } finally {
