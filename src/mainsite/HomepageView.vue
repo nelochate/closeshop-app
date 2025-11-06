@@ -3,8 +3,6 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
-import { messaging } from '@/utils/firebase'
-import { getToken } from 'firebase/messaging'
 import { Geolocation } from '@capacitor/geolocation'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
@@ -38,29 +36,53 @@ async function requestLocationPermission() {
   }
 }
 
-/* 🔔 Notifications Permission */
-async function requestPushPermission() {
+/* 🔔 Push Notifications — Native Only (Capacitor) */
+async function setupPushNotifications() {
   try {
-    const permStatus = await PushNotifications.checkPermissions()
+    // Step 1: Check permission
+    let permStatus = await PushNotifications.checkPermissions()
     if (permStatus.receive !== 'granted') {
       const req = await PushNotifications.requestPermissions()
       if (req.receive !== 'granted') {
-        console.warn('Notifications permission denied.')
+        console.warn('❌ Notifications permission denied.')
         return
       }
     }
 
+    // Step 2: Register with APNS/FCM (handled internally by Capacitor)
     await PushNotifications.register()
 
-    PushNotifications.addListener('registration', (token) => {
-      console.log('✅ Push token:', token.value)
+    // Step 3: Handle successful registration (token received)
+    PushNotifications.addListener('registration', async (token) => {
+      console.log('✅ Push token (Capacitor):', token.value)
+
+      // Optional: Save token to Supabase for your backend
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { error } = await supabase
+          .from('user_fcm_tokens')
+          .upsert({ user_id: user.id, token: token.value }, { onConflict: 'user_id' })
+        if (error) console.error('Error saving push token:', error)
+        else console.log('✅ Token saved to Supabase')
+      }
     })
 
+    // Step 4: Handle registration errors
     PushNotifications.addListener('registrationError', (error) => {
       console.error('❌ Push registration error:', error)
     })
+
+    // Step 5: Handle foreground notifications
+    PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      console.log('📩 Push received:', notification)
+    })
+
+    // Step 6: Handle user tapping a notification
+    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+      console.log('🖱️ Notification action:', action.notification)
+    })
   } catch (err) {
-    console.error('Error requesting push permission:', err)
+    console.error('⚠️ setupPushNotifications error:', err)
   }
 }
 
@@ -83,31 +105,6 @@ async function checkNetworkStatus() {
     })
   } catch (err) {
     console.error('Network check error:', err)
-  }
-}
-
-/* 📡 Firebase Token */
-async function requestForToken() {
-  try {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      console.warn('Notification permission denied.')
-      return null
-    }
-
-    const vapidKey = 'BOiw6_vllLo5TOjouOP8mMK_zhynZ8wakUg8ZgP_gfH9YwpUJ2ils7HCq15LBWpFq1pZvXGzye01pjUIDOjY6P8'
-    const token = await getToken(messaging, { vapidKey })
-
-    if (token) {
-      console.log('✅ FCM Token:', token)
-      return token
-    } else {
-      console.warn('No registration token available.')
-      return null
-    }
-  } catch (err) {
-    console.error('Error getting FCM token:', err)
-    return null
   }
 }
 
@@ -181,29 +178,15 @@ onMounted(async () => {
     loading.value = true
     errorMsg.value = ''
 
-    // Request permissions (only on native builds)
+    // Only run these on mobile builds
     if (Capacitor.isNativePlatform()) {
       await checkNetworkStatus()
       await requestLocationPermission()
-      await requestPushPermission()
+      await setupPushNotifications() // ✅ replaces Firebase-based token code
     }
 
     // Load data
     await Promise.all([fetchShops(), fetchProducts()])
-    loading.value = false
-
-    // Save FCM token
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      const token = await requestForToken()
-      if (token) {
-        const { error } = await supabase
-          .from('user_fcm_tokens')
-          .upsert({ user_id: user.id, token }, { onConflict: 'user_id' })
-        if (error) console.error('Error saving FCM token:', error)
-        else console.log('✅ Token saved to Supabase')
-      }
-    }
   } catch (err) {
     console.error('❌ Error in onMounted:', err)
   } finally {
@@ -221,6 +204,7 @@ const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
 const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 </script>
+
 
 <template>
   <v-app>
