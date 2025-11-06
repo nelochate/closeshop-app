@@ -463,7 +463,6 @@ const highlightMatch = (text: string, term: string) => {
   z-index: 2100;
   font-weight: 500;
 }
-<<<<<<< HEAD
 .highlight {
   background-color: #ffe066;
   font-weight: 600;
@@ -471,9 +470,4 @@ const highlightMatch = (text: string, term: string) => {
   padding: 0 2px;
 }
 
-=======
-.searchshop {
-  padding-top: 25px;
-}
->>>>>>> 661ba554e4dfb09c41c18aeec118370821f3e956
 </style>
