@@ -18,6 +18,19 @@ const errorMsg = ref('')
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
 
+//Search Functionality
+const searchQuery = ref('')
+function goToSearch() {
+  if (router.currentRoute.value.name !== 'search') {
+    router.push({ name: 'search', query: { q: searchQuery.value || '' } })
+  }
+}
+
+function updateSearch() {
+  // instantly sync search input with SearchView via query param
+  router.replace({ name: 'search', query: { q: searchQuery.value } })
+}
+
 /* 🧭 Location Permission */
 async function requestLocationPermission() {
   try {
@@ -195,10 +208,6 @@ onMounted(async () => {
 })
 
 /* 🧭 Navigation */
-const onSearch = () => {
-  if (!search.value.trim()) return
-  router.push({ name: 'search', query: { q: search.value.trim() } })
-}
 const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
@@ -212,9 +221,9 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
       <!-- 🔎 Search + Notification -->
       <v-sheet class="hero">
         <div class="hero-row">
-          <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
-            density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
-            append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
+          <v-text-field v-model="searchQuery" class="search-field" variant="solo" rounded="pill" hide-details clearable
+            density="comfortable" placeholder="Search products..." prepend-inner-icon="mdi-magnify"
+            append-inner-icon="mdi-earth" @focus="goToSearch" @input="updateSearch" />
           <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
             <v-icon size="22">mdi-bell-outline</v-icon>
           </v-btn>
