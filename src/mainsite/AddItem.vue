@@ -23,6 +23,7 @@ const selectedSizes = ref<string[]>([])
 const hasSizes = ref(false)
 const hasVarieties = ref(false)
 const hasSamePrice = ref(false)
+const isSubmitting = ref(false)
 
 // Main images
 const mainProductImages = ref<File[]>([])
@@ -85,9 +86,11 @@ const openMainPreview = (image: string) => {
 }
 
 const removeMainImage = (index: number) => {
-  URL.revokeObjectURL(mainImagePreviews.value[index])
-  mainProductImages.value.splice(index, 1)
-  mainImagePreviews.value.splice(index, 1)
+  if (confirm('Remove this image?')) {
+    URL.revokeObjectURL(mainImagePreviews.value[index])
+    mainProductImages.value.splice(index, 1)
+    mainImagePreviews.value.splice(index, 1)
+  }
 }
 
 // -------------------- Upload images --------------------
@@ -124,6 +127,9 @@ const removeOldImages = async (urls: string[]) => {
 
 // -------------------- Submit --------------------
 const submitForm = async () => {
+  if (isSubmitting.value) return // prevent double-clicks
+  isSubmitting.value = true
+
   try {
     const {
       data: { user },
@@ -164,14 +170,12 @@ const submitForm = async () => {
     }
 
     if (isEditMode.value && productId.value) {
-      // fetch old product to clean up replaced images
       const { data: oldProduct } = await supabase
         .from('products')
         .select('main_img_urls, varieties')
         .eq('id', productId.value)
         .single()
 
-      // update row
       const { error } = await supabase
         .from('products')
         .update({
@@ -187,7 +191,6 @@ const submitForm = async () => {
 
       if (error) throw error
 
-      // remove old images only if new ones were uploaded
       if (newImageUrls.length && oldProduct?.main_img_urls) {
         await removeOldImages(oldProduct.main_img_urls)
       }
@@ -210,18 +213,18 @@ const submitForm = async () => {
           price: price.value,
           stock: stock.value,
           main_img_urls: finalImageUrls,
-          sizes: selectedSizes.value,
-          varieties: varietyData,
           sizes: hasSizes.value ? selectedSizes.value : [],
           varieties: hasVarieties.value ? varietyData : [],
         },
       ])
       showSnackbar('✅ Product added successfully!', 'success')
-      resetForm() // 🧹 Clear all inputs after saving
+      resetForm()
     }
   } catch (err: any) {
     console.error('❌ Error saving product:', err.message)
     showSnackbar('❌ Something went wrong. Please try again.', 'error')
+  } finally {
+    isSubmitting.value = false // ✅ always re-enable button
   }
 }
 
@@ -509,6 +512,8 @@ const resetForm = () => {
             prepend-icon="mdi-content-save"
             class="mt-4"
             block
+            :loading="isSubmitting"
+            :disabled="isSubmitting"
           >
             {{ isEditMode ? 'Update Product' : 'Add Product' }}
           </v-btn>
