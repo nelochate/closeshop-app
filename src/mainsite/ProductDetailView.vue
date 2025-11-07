@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
@@ -20,7 +20,7 @@ const selectedSize = ref(null)
 const selectedVariety = ref(null)
 const openImageDialog = ref(false) // for image zoom dialog
 const previewIndex = ref(0) // for image zoom dialog
-
+const user = ref(null) // current user
 //for variety zoom dialog
 const openVarietyDialog = ref(false)
 const varietyPreviewIndex = ref(0)
@@ -47,6 +47,11 @@ const mainImage = (imgs) => {
 onMounted(async () => {
   loading.value = true
   try {
+    // 🧠 Get current logged-in user first
+    const { data: userData } = await supabase.auth.getUser()
+    user.value = userData?.user
+
+    // 🛒 Fetch product + shop details
     const { data, error: err } = await supabase
       .from('products')
       .select(
@@ -65,7 +70,8 @@ onMounted(async () => {
         shop:shops!products_shop_id_fkey(
           id,
           business_name,
-          logo_url
+          logo_url,
+          owner_id
         )
       `,
       )
@@ -75,7 +81,7 @@ onMounted(async () => {
     if (err) throw err
     product.value = data
 
-    // 🧠 Parse JSON fields safely
+    // 🧩 Parse JSON safely
     if (product.value.sizes && typeof product.value.sizes === 'string') {
       try {
         product.value.sizes = JSON.parse(product.value.sizes)
@@ -96,6 +102,8 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+
+  // Auto-select if only one option
   if (product.value.sizes?.length === 1) {
     selectedSize.value = product.value.sizes[0]
   }
@@ -177,8 +185,10 @@ const goToShop = (shopId) => {
   router.push(`/shop/${shopId}`)
 }
 
-const goToChat = (ownerId) => {
-  router.push(`/chatview/${ownerId}`)
+const goToChat = () => {
+  if (product.value?.shop?.owner_id) {
+    router.push(`/chatview/${product.value.shop.owner_id}`)
+  }
 }
 
 //sample rating
@@ -222,6 +232,13 @@ const previewVarietyImages = (images, index = 0) => {
   varietyPreviewIndex.value = index
   openVarietyDialog.value = true
 }
+
+// to store dialog selections
+const isOwner = computed(() => {
+  return (
+    user.value && product.value?.shop?.owner_id && user.value.id === product.value.shop.owner_id
+  )
+})
 </script>
 
 <template>
@@ -453,125 +470,29 @@ const previewVarietyImages = (images, index = 0) => {
     <!-- Bottom Nav -->
     <v-bottom-navigation absolute app class="bottom-nav">
       <v-row class="w-full pa-0 ma-0" no-gutters>
-        <!-- Chat Now -->
-        <v-col cols="3.5" class="pa-0">
-          <v-btn block class="bottom-btn chat-now-btn" @click="goToChat(product.shop.owner_id)">
-            <v-icon left size="20">mdi-chat-outline</v-icon>
-            Chat Now
-          </v-btn>
-        </v-col>
+        <!-- Only show bottom buttons if NOT owner -->
+        <template v-if="!isOwner">
+          <!-- Chat Now -->
+          <v-col cols="3.5" class="pa-0">
+            <v-btn block class="bottom-btn chat-now-btn" @click="goToChat(product.shop.owner_id)">
+              <v-icon left size="20">mdi-chat-outline</v-icon>
+              Chat Now
+            </v-btn>
+          </v-col>
 
-        <!-- Add to Cart -->
-        <v-col cols="3.5" class="pa-0">
-          <v-btn block class="bottom-btn cart-btn" @click="showAddToCart = true">
-            <v-icon left size="20">mdi-cart-outline</v-icon>
-            Add to Cart
-          </v-btn>
-        </v-col>
+          <!-- Add to Cart -->
+          <v-col cols="3.5" class="pa-0">
+            <v-btn block class="bottom-btn cart-btn" @click="showAddToCart = true">
+              <v-icon left size="20">mdi-cart-outline</v-icon>
+              Add to Cart
+            </v-btn>
+          </v-col>
 
-        <!-- Add to Cart Dialog -->
-        <v-dialog v-model="showAddToCart" max-width="500" transition="dialog-bottom-transition">
-          <v-card>
-            <!-- Header with product image + name -->
-            <v-card-title class="d-flex align-center">
-              <v-avatar size="56" class="mr-3">
-                <v-img :src="mainImage(product.main_img_urls)" />
-              </v-avatar>
-              <div>
-                <div class="text-subtitle-1 font-weight-bold">{{ product.prod_name }}</div>
-                <div class="text-subtitle-2 text-red">₱{{ product.price }}</div>
-              </div>
-            </v-card-title>
-
-            <v-divider />
-
-            <v-card-text>
-              <!-- Sizes -->
-              <div v-if="product.sizes && product.sizes.length" class="mb-4">
-                <p class="font-weight-medium mb-2">Choose Size:</p>
-                <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap">
-                  <v-btn
-                    v-for="size in product.sizes"
-                    :key="size"
-                    :value="size"
-                    variant="outlined"
-                    class="ma-1 rounded-pill"
-                  >
-                    {{ size }}
-                  </v-btn>
-                </v-btn-toggle>
-              </div>
-
-              <!-- Varieties -->
-              <div v-if="product.varieties && product.varieties.length" class="mb-4">
-                <p class="font-weight-medium mb-2">Choose Variety:</p>
-                <v-btn-toggle v-model="selectedVariety" mandatory class="flex-wrap">
-                  <v-btn
-                    v-for="variety in product.varieties"
-                    :key="variety"
-                    :value="variety"
-                    variant="outlined"
-                    class="ma-1 rounded-pill"
-                  >
-                    {{ variety }}
-                  </v-btn>
-                </v-btn-toggle>
-              </div>
-
-              <!-- Quantity -->
-              <div class="mt-2">
-                <p class="font-weight-medium mb-2">Quantity:</p>
-                <div class="d-flex align-center">
-                  <v-btn
-                    icon
-                    variant="tonal"
-                    color="grey"
-                    size="small"
-                    @click="quantity = Math.max(1, quantity - 1)"
-                  >
-                    <v-icon>mdi-minus</v-icon>
-                  </v-btn>
-
-                  <v-text-field
-                    v-model.number="quantity"
-                    type="number"
-                    min="1"
-                    :max="product.stock"
-                    density="compact"
-                    variant="outlined"
-                    class="mx-2"
-                    style="max-width: 80px; text-align: center"
-                  />
-
-                  <v-btn
-                    icon
-                    variant="tonal"
-                    color="grey"
-                    size="small"
-                    @click="quantity = Math.min(product.stock, quantity + 1)"
-                  >
-                    <v-icon>mdi-plus</v-icon>
-                  </v-btn>
-                </div>
-                <p class="text-caption mt-1 grey--text">Available stock: {{ product.stock }}</p>
-              </div>
-            </v-card-text>
-
-            <v-divider />
-
-            <v-card-actions class="pa-4">
-              <v-btn block color="primary" class="rounded-lg" @click="confirmAddToCart">
-                <v-icon left>mdi-cart-plus</v-icon>
-                Add to Cart
-              </v-btn>
-            </v-card-actions>
-          </v-card>
-        </v-dialog>
-
-        <!-- Buy Now -->
-        <v-col cols="5" class="pa-0">
-          <v-btn block class="bottom-btn buy-now-btn" @click="checkoutNow"> Buy Now </v-btn>
-        </v-col>
+          <!-- Buy Now -->
+          <v-col cols="5" class="pa-0">
+            <v-btn block class="bottom-btn buy-now-btn" @click="checkoutNow"> Buy Now </v-btn>
+          </v-col>
+        </template>
       </v-row>
     </v-bottom-navigation>
   </v-app>
