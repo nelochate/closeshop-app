@@ -1,8 +1,9 @@
 <script setup lang="js">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
+import VueEasyLightbox from 'vue-easy-lightbox'
 
 const cart = useCartStore()
 const route = useRoute()
@@ -17,6 +18,13 @@ const showAddToCart = ref(false)
 const quantity = ref(1)
 const selectedSize = ref(null)
 const selectedVariety = ref(null)
+const openImageDialog = ref(false) // for image zoom dialog
+const previewIndex = ref(0) // for image zoom dialog
+
+//for variety zoom dialog
+const openVarietyDialog = ref(false)
+const varietyPreviewIndex = ref(0)
+const varietyImages = ref([]) // store selected variety images
 
 // DOM refs
 const productImgRef = ref(null)
@@ -50,6 +58,10 @@ onMounted(async () => {
         main_img_urls,
         sold,
         stock,
+        sizes,
+        varieties,
+        has_sizes,
+        has_varieties,
         shop:shops!products_shop_id_fkey(
           id,
           business_name,
@@ -59,15 +71,41 @@ onMounted(async () => {
       )
       .eq('id', productId)
       .single()
+
     if (err) throw err
     product.value = data
+
+    // 🧠 Parse JSON fields safely
+    if (product.value.sizes && typeof product.value.sizes === 'string') {
+      try {
+        product.value.sizes = JSON.parse(product.value.sizes)
+      } catch {
+        product.value.sizes = []
+      }
+    }
+
+    if (product.value.varieties && typeof product.value.varieties === 'string') {
+      try {
+        product.value.varieties = JSON.parse(product.value.varieties)
+      } catch {
+        product.value.varieties = []
+      }
+    }
   } catch (e) {
     error.value = e.message || 'Failed to load product'
   } finally {
     loading.value = false
   }
+  if (product.value.sizes?.length === 1) {
+    selectedSize.value = product.value.sizes[0]
+  }
+
+  if (product.value.varieties?.length === 1) {
+    selectedVariety.value = product.value.varieties[0]
+  }
 })
 
+//lahi napd ni
 const confirmAddToCart = async () => {
   if (!product.value) return
   try {
@@ -167,10 +205,29 @@ const reviews = ref([
     dislikes: 0,
   },
 ])
+
+//watcher
+watch(showAddToCart, (val) => {
+  if (val) {
+    // when dialog opens, preserve the last selected
+    dialogSelectedSize.value = selectedSize.value
+    dialogSelectedVariety.value = selectedVariety.value
+  }
+})
+
+// for dialog selections
+const previewVarietyImages = (images, index = 0) => {
+  if (!images || !images.length) return
+  varietyImages.value = images
+  varietyPreviewIndex.value = index
+  openVarietyDialog.value = true
+}
 </script>
 
 <template>
   <v-app>
+    <VueEasyLightbox />
+
     <!-- Top Nav -->
     <v-app-bar color="#438fda" dark flat>
       <v-btn icon @click="router.back()">
@@ -203,18 +260,111 @@ const reviews = ref([
 
       <!-- Product Details -->
       <v-sheet v-else class="product-sheet pa-4">
-        <!-- Single Product Image -->
-        <v-img
-          ref="productImgRef"
-          :src="mainImage(product.main_img_urls)"
-          class="product-img mb-4"
-          contain
+        <!-- Product Image (click to enlarge) -->
+        <!-- Product Images -->
+        <div class="product-images mb-4">
+          <v-carousel
+            v-if="product.main_img_urls && product.main_img_urls.length > 1"
+            hide-delimiter-background
+            height="300"
+          >
+            <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
+              <v-img
+                :src="img"
+                height="300"
+                class="rounded-lg"
+                style="cursor: zoom-in"
+                @click="((previewIndex = index), (openImageDialog = true))"
+              />
+            </v-carousel-item>
+          </v-carousel>
+
+          <!-- Fallback: Single Image -->
+          <v-img
+            v-else
+            :src="mainImage(product.main_img_urls)"
+            class="product-img mb-4"
+            contain
+            style="cursor: zoom-in"
+            @click="openImageDialog = true"
+          />
+        </div>
+
+        <!-- Image Lightbox -->
+        <VueEasyLightbox
+          v-if="openImageDialog"
+          :visible="openImageDialog"
+          :imgs="product.main_img_urls"
+          :index="previewIndex"
+          @hide="openImageDialog = false"
+        />
+        <!-- Variety Image Lightbox -->
+        <VueEasyLightbox
+          v-if="openVarietyDialog"
+          :visible="openVarietyDialog"
+          :imgs="varietyImages"
+          :index="varietyPreviewIndex"
+          @hide="openVarietyDialog = false"
         />
 
         <!-- Product Info -->
         <div class="product-info mb-4">
           <h2 class="product-title mb-2">{{ product.prod_name }}</h2>
           <p class="product-price mb-2">₱{{ product.price }}</p>
+
+          <!-- 🆕 Varieties -->
+          <div v-if="product.varieties && product.varieties.length" class="mb-3">
+            <p class="font-weight-medium mb-1">Variety:</p>
+
+            <v-btn-toggle v-model="selectedVariety" mandatory class="flex-wrap">
+              <v-btn
+                v-for="variety in product.varieties"
+                :key="variety.name"
+                :value="variety"
+                variant="outlined"
+                class="ma-1 pa-2 rounded-pill d-flex flex-column align-center"
+                color="primary"
+                style="min-width: 80px; max-width: 120px"
+              >
+                <v-img
+                  v-if="variety.images && variety.images.length"
+                  :src="variety.images[0]"
+                  width="40"
+                  height="40"
+                  class="mb-1 rounded-circle"
+                  cover
+                  style="cursor: zoom-in"
+                  @click.stop="previewVarietyImages(variety.images)"
+                />
+
+                <span class="text-caption font-weight-medium">{{ variety.name }}</span>
+                <span v-if="!product.has_same_price" class="text-caption text-red">
+                  ₱{{ variety.price }}
+                </span>
+              </v-btn>
+            </v-btn-toggle>
+          </div>
+
+          <!-- 🆕 Sizes -->
+          <div v-if="product.sizes && product.sizes.length" class="mb-3">
+            <p class="font-weight-medium mb-1">Size:</p>
+            <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap" style="gap: 6px">
+              <v-btn
+                v-for="size in product.sizes"
+                :key="size"
+                :value="size"
+                variant="outlined"
+                class="ma-1 rounded-pill text-capitalize"
+                color="primary"
+                size="small"
+              >
+                {{ size }}
+              </v-btn>
+            </v-btn-toggle>
+          </div>
+          <p v-if="selectedSize" class="text-caption text-grey mt-1">
+            Selected size: <strong>{{ selectedSize }}</strong>
+          </p>
           <p class="product-description mb-2">{{ product.prod_description }}</p>
           <p class="product-meta">Sold: {{ product.sold }} | Stock: {{ product.stock }}</p>
         </div>
@@ -640,4 +790,29 @@ const reviews = ref([
   color: #6b7280;
 }
 
+/*for varieties*/
+.v-btn-toggle .v-btn {
+  background-color: #fff;
+  border: 1px solid #e0e0e0;
+  transition: all 0.2s ease;
+}
+
+.v-btn-toggle .v-btn:hover {
+  transform: scale(1.05);
+  border-color: #438fda;
+}
+
+.v-btn-toggle .v-btn--active {
+  background-color: #e8f3ff;
+  border-color: #438fda;
+}
+/*for image zoom*/
+.zoomed-img {
+  transition: transform 0.3s ease;
+  cursor: grab;
+}
+
+.zoomed-img:hover {
+  transform: scale(1.05);
+}
 </style>
