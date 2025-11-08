@@ -148,6 +148,14 @@ const routes = [
     path: '/:pathMatch(.*)*',
     redirect: '/',
   },
+
+  //Search Functionality
+  {
+  path: '/search',
+  name: 'search',
+  component: () => import('@/mainsite/SearchView.vue')
+}
+
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
