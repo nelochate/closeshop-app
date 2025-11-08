@@ -18,7 +18,7 @@ import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import AddItem from '@/mainsite/AddItem.vue'
 import ChatView from '@/mainsite/ChatView.vue'
-
+import PurchaseView from '@/mainsite/PurchaseView.vue'
 // ✅ Define routes
 const routes = [
   { path: '/', name: 'login', component: LoginView },
@@ -33,12 +33,7 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
-    /*
-    path: '/chatview',
-    name: 'chatview',
-    component: ChatView,
-    meta: { requiresAuth: true },
-    */
+  
     path: '/chatview/:id',
     name: 'chatview',
     component: ChatView,
@@ -153,9 +148,15 @@ const routes = [
   {
   path: '/search',
   name: 'search',
-  component: () => import('@/mainsite/SearchView.vue')
-}
+  component: () => import('@/mainsite/SearchView.vue'),
+},
 
+//Purchase transaction
+  {
+      path: '/purchaseview',
+      name: 'purchaseview',
+      component: () => import('@/mainsite/PurchaseView.vue'),
+    }
 ]
 
 // ✅ Use HISTORY mode instead of hash mode

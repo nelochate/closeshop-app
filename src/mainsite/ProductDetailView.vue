@@ -490,7 +490,9 @@ const isOwner = computed(() => {
 
           <!-- Buy Now -->
           <v-col cols="5" class="pa-0">
-            <v-btn block class="bottom-btn buy-now-btn" @click="checkoutNow"> Buy Now </v-btn>
+            <v-btn block class="bottom-btn buy-now-btn" color="primary" to="/purchaseview">
+              Buy Now
+            </v-btn>
           </v-col>
         </template>
       </v-row>
