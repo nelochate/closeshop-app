@@ -27,10 +27,6 @@
     "@dataconnect/generated": "file:src/dataconnect-generated",
     "@ionic/pwa-elements": "^3.3.0",
     "@supabase/supabase-js": "^2.57.4",
-<<<<<<< HEAD
-    "firebase-messaging": "^1.0.6",
-=======
->>>>>>> ff2c181d87c2338990d0bd7c243a2badd21f6e0b
     "leaflet": "^1.9.4",
     "leaflet-control-geocoder": "^3.3.0",
     "leaflet-geosearch": "^4.2.1",
