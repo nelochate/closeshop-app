@@ -3,9 +3,6 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
-// ❌ Firebase imports removed (no longer needed)
-// import { messaging } from '@/utils/firebase'
-// import { getToken } from 'firebase/messaging'
 import { Geolocation } from '@capacitor/geolocation'
 import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
@@ -20,6 +17,19 @@ const loading = ref(true)
 const errorMsg = ref('')
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
+
+//Search Functionality
+const searchQuery = ref('')
+function goToSearch() {
+  if (router.currentRoute.value.name !== 'search') {
+    router.push({ name: 'search', query: { q: searchQuery.value || '' } })
+  }
+}
+
+function updateSearch() {
+  // instantly sync search input with SearchView via query param
+  router.replace({ name: 'search', query: { q: searchQuery.value } })
+}
 
 /* 🧭 Location Permission */
 async function requestLocationPermission() {
@@ -39,29 +49,53 @@ async function requestLocationPermission() {
   }
 }
 
-/* 🔔 Notifications Permission */
-async function requestPushPermission() {
+/* 🔔 Push Notifications — Native Only (Capacitor) */
+async function setupPushNotifications() {
   try {
-    const permStatus = await PushNotifications.checkPermissions()
+    // Step 1: Check permission
+    let permStatus = await PushNotifications.checkPermissions()
     if (permStatus.receive !== 'granted') {
       const req = await PushNotifications.requestPermissions()
       if (req.receive !== 'granted') {
-        console.warn('Notifications permission denied.')
+        console.warn('❌ Notifications permission denied.')
         return
       }
     }
 
+    // Step 2: Register with APNS/FCM (handled internally by Capacitor)
     await PushNotifications.register()
 
-    PushNotifications.addListener('registration', (token) => {
-      console.log('✅ Push token:', token.value)
+    // Step 3: Handle successful registration (token received)
+    PushNotifications.addListener('registration', async (token) => {
+      console.log('✅ Push token (Capacitor):', token.value)
+
+      // Optional: Save token to Supabase for your backend
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { error } = await supabase
+          .from('user_fcm_tokens')
+          .upsert({ user_id: user.id, token: token.value }, { onConflict: 'user_id' })
+        if (error) console.error('Error saving push token:', error)
+        else console.log('✅ Token saved to Supabase')
+      }
     })
 
+    // Step 4: Handle registration errors
     PushNotifications.addListener('registrationError', (error) => {
       console.error('❌ Push registration error:', error)
     })
+
+    // Step 5: Handle foreground notifications
+    PushNotifications.addListener('pushNotificationReceived', (notification) => {
+      console.log('📩 Push received:', notification)
+    })
+
+    // Step 6: Handle user tapping a notification
+    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+      console.log('🖱️ Notification action:', action.notification)
+    })
   } catch (err) {
-    console.error('Error requesting push permission:', err)
+    console.error('⚠️ setupPushNotifications error:', err)
   }
 }
 
@@ -86,32 +120,6 @@ async function checkNetworkStatus() {
     console.error('Network check error:', err)
   }
 }
-
-/* ❌ Firebase Token (removed — no longer used)
-async function requestForToken() {
-  try {
-    const permission = await Notification.requestPermission()
-    if (permission !== 'granted') {
-      console.warn('Notification permission denied.')
-      return null
-    }
-
-    const vapidKey = 'BOiw6_vllLo5TOjouOP8mMK_zhynZ8wakUg8ZgP_gfH9YwpUJ2ils7HCq15LBWpFq1pZvXGzye01pjUIDOjY6P8'
-    const token = await getToken(messaging, { vapidKey })
-
-    if (token) {
-      console.log('✅ FCM Token:', token)
-      return token
-    } else {
-      console.warn('No registration token available.')
-      return null
-    }
-  } catch (err) {
-    console.error('Error getting FCM token:', err)
-    return null
-  }
-}
-*/
 
 /* 🏪 Fetch Shops */
 async function fetchShops() {
@@ -183,11 +191,11 @@ onMounted(async () => {
     loading.value = true
     errorMsg.value = ''
 
-    // Request permissions (only on native builds)
+    // Only run these on mobile builds
     if (Capacitor.isNativePlatform()) {
       await checkNetworkStatus()
       await requestLocationPermission()
-      await requestPushPermission()
+      await setupPushNotifications() // ✅ replaces Firebase-based token code
     }
 
     // Load data
@@ -200,15 +208,12 @@ onMounted(async () => {
 })
 
 /* 🧭 Navigation */
-const onSearch = () => {
-  if (!search.value.trim()) return
-  router.push({ name: 'search', query: { q: search.value.trim() } })
-}
 const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
 const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 </script>
+
 
 <template>
   <v-app>
@@ -216,9 +221,9 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
       <!-- 🔎 Search + Notification -->
       <v-sheet class="hero">
         <div class="hero-row">
-          <v-text-field v-model="search" class="search-field" variant="solo" rounded="pill" hide-details clearable
-            density="comfortable" placeholder="Looking for something specific?" prepend-inner-icon="mdi-magnify"
-            append-inner-icon="mdi-earth" @keyup.enter="onSearch" @click:prepend-inner="onSearch" />
+          <v-text-field v-model="searchQuery" class="search-field" variant="solo" rounded="pill" hide-details clearable
+            density="comfortable" placeholder="Search products..." prepend-inner-icon="mdi-magnify"
+            append-inner-icon="mdi-earth" @focus="goToSearch" @input="updateSearch" />
           <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
             <v-icon size="22">mdi-bell-outline</v-icon>
           </v-btn>
