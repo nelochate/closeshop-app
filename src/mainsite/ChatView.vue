@@ -21,26 +21,45 @@ const scrollToBottom = async () => {
 
 // ✅ Fetch or create a conversation safely
 const getOrCreateConversation = async () => {
-  const { data: auth } = await supabase.auth.getUser()
-  if (!auth.user) return
+  const { data: auth, error: authErr } = await supabase.auth.getUser()
+  if (authErr) {
+    console.error('Auth fetch error:', authErr)
+    return
+  }
+
+  if (!auth?.user) {
+    console.warn('No authenticated user found. Please log in first.')
+    return
+  }
+
   userId.value = auth.user.id
+  console.log('🟦 Logged in userId:', userId.value)
+  console.log('🟩 Chatting with userId:', otherUserId)
+
+  if (!userId.value || !otherUserId) {
+    console.warn('Missing one of the user IDs — cannot start conversation.')
+    return
+  }
 
   try {
-    // 🔍 Find existing conversation between two users
+    // 🔍 Check for existing conversation
     const { data: existing, error: fetchErr } = await supabase
       .from('conversations')
       .select('id')
-      .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+      .or(
+        `and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`
+      )
       .maybeSingle()
 
     if (fetchErr) console.error('Conversation fetch error:', fetchErr)
 
     if (existing) {
       conversationId.value = existing.id
+      console.log('✅ Found existing conversation:', conversationId.value)
       return
     }
 
-    // ✅ Check if both users exist in profiles
+    // 🧩 Make sure both profiles exist
     const { data: user1Profile } = await supabase
       .from('profiles')
       .select('id')
@@ -53,7 +72,6 @@ const getOrCreateConversation = async () => {
       .eq('id', otherUserId)
       .maybeSingle()
 
-    // 🧩 If the shop owner or current user has no profile, stop gracefully
     if (!user1Profile || !user2Profile) {
       console.warn('Cannot create conversation — missing profile record for one of the users.')
       return
@@ -62,20 +80,22 @@ const getOrCreateConversation = async () => {
     // 🆕 Create conversation
     const { data: created, error: createErr } = await supabase
       .from('conversations')
-      .insert({ user1: userId.value, user2: otherUserId })
+      .insert({
+        user1: userId.value,
+        user2: otherUserId,
+      })
       .select('id')
       .single()
 
-    if (createErr) {
-      console.error('Conversation create error:', createErr)
-      return
-    }
+    if (createErr) throw createErr
 
-    conversationId.value = created?.id || null
-  } catch (err: any) {
-    console.error('Error in getOrCreateConversation:', err.message)
+    conversationId.value = created.id
+    console.log('🆕 Created new conversation:', conversationId.value)
+  } catch (err) {
+    console.error('Error in getOrCreateConversation:', err)
   }
 }
+
 
 // ✅ Load messages
 const loadMessages = async () => {

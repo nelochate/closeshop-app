@@ -20,6 +20,10 @@ const price = ref<number | null>(null)
 const stock = ref<number | null>(null)
 const availableSizes = ['XS', 'S', 'M', 'L', 'XL', 'XXL']
 const selectedSizes = ref<string[]>([])
+const hasSizes = ref(false)
+const hasVarieties = ref(false)
+const hasSamePrice = ref(false)
+const isSubmitting = ref(false)
 
 // Main images
 const mainProductImages = ref<File[]>([])
@@ -82,9 +86,11 @@ const openMainPreview = (image: string) => {
 }
 
 const removeMainImage = (index: number) => {
-  URL.revokeObjectURL(mainImagePreviews.value[index])
-  mainProductImages.value.splice(index, 1)
-  mainImagePreviews.value.splice(index, 1)
+  if (confirm('Remove this image?')) {
+    URL.revokeObjectURL(mainImagePreviews.value[index])
+    mainProductImages.value.splice(index, 1)
+    mainImagePreviews.value.splice(index, 1)
+  }
 }
 
 // -------------------- Upload images --------------------
@@ -121,6 +127,9 @@ const removeOldImages = async (urls: string[]) => {
 
 // -------------------- Submit --------------------
 const submitForm = async () => {
+  if (isSubmitting.value) return // prevent double-clicks
+  isSubmitting.value = true
+
   try {
     const {
       data: { user },
@@ -129,7 +138,11 @@ const submitForm = async () => {
     if (userError || !user) throw new Error('No user logged in')
 
     // find shop id
-    const { data: shop } = await supabase.from('shops').select('id').eq('owner_id', user.id).maybeSingle()
+    const { data: shop } = await supabase
+      .from('shops')
+      .select('id')
+      .eq('owner_id', user.id)
+      .maybeSingle()
     if (!shop) throw new Error('No shop found. Please create a shop first.')
 
     const shopId = shop.id
@@ -149,18 +162,20 @@ const submitForm = async () => {
       } else if (Array.isArray(v.images)) {
         urls = v.images as string[]
       }
-      varietyData.push({ name: v.name, price: v.price, images: urls })
+
+      // ✅ If hasSamePrice, use main price
+      const varietyPrice = hasSamePrice.value ? price.value : v.price
+
+      varietyData.push({ name: v.name, price: varietyPrice, images: urls })
     }
 
     if (isEditMode.value && productId.value) {
-      // fetch old product to clean up replaced images
       const { data: oldProduct } = await supabase
         .from('products')
         .select('main_img_urls, varieties')
         .eq('id', productId.value)
         .single()
 
-      // update row
       const { error } = await supabase
         .from('products')
         .update({
@@ -176,7 +191,6 @@ const submitForm = async () => {
 
       if (error) throw error
 
-      // remove old images only if new ones were uploaded
       if (newImageUrls.length && oldProduct?.main_img_urls) {
         await removeOldImages(oldProduct.main_img_urls)
       }
@@ -199,15 +213,18 @@ const submitForm = async () => {
           price: price.value,
           stock: stock.value,
           main_img_urls: finalImageUrls,
-          sizes: selectedSizes.value,
-          varieties: varietyData,
+          sizes: hasSizes.value ? selectedSizes.value : [],
+          varieties: hasVarieties.value ? varietyData : [],
         },
       ])
       showSnackbar('✅ Product added successfully!', 'success')
+      resetForm()
     }
   } catch (err: any) {
     console.error('❌ Error saving product:', err.message)
     showSnackbar('❌ Something went wrong. Please try again.', 'error')
+  } finally {
+    isSubmitting.value = false // ✅ always re-enable button
   }
 }
 
@@ -219,8 +236,9 @@ onMounted(async () => {
     const { data, error } = await supabase
       .from('products')
       .select('*')
-      .eq('id', productId.value)   // 👈 use string id
+      .eq('id', productId.value)
       .single()
+
     if (!error && data) {
       productName.value = data.prod_name
       description.value = data.prod_description
@@ -228,23 +246,94 @@ onMounted(async () => {
       stock.value = data.stock
       selectedSizes.value = data.sizes || []
       mainImagePreviews.value = data.main_img_urls || []
-      varieties.value = (data.varieties || []).map((v: any, idx: number) => ({
-        id: idx,
-        name: v.name,
-        price: v.price,
-        images: v.images || [],
-        previews: v.images || [],
-      }))
+
+      // 🟢 Check for varieties
+      if (data.varieties && data.varieties.length > 0) {
+        hasVarieties.value = true
+
+        // 🟢 Auto-detect if all variety prices are the same as the main product
+        hasSamePrice.value = data.varieties.every((v: any) => v.price === data.price)
+
+        // 🟢 Map varieties back into editable form
+        varieties.value = data.varieties.map((v: any, idx: number) => ({
+          id: idx,
+          name: v.name,
+          price: v.price,
+          images: v.images || [],
+          previews: v.images || [],
+        }))
+      }
     }
   }
 })
-</script>
 
+const addVariety = () => {
+  varieties.value.push({
+    id: Date.now(),
+    name: '',
+    price: 0,
+    images: [],
+    previews: [],
+  })
+}
+
+// -------------------- Variety image helpers --------------------
+const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') => {
+  try {
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      resultType: CameraResultType.Uri,
+      source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
+    })
+
+    if (!photo?.webPath) return
+    if (variety.images.length >= 3) {
+      alert('Max 3 images per variety')
+      return
+    }
+
+    const response = await fetch(photo.webPath)
+    const blob = await response.blob()
+    const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+
+    variety.images.push(file)
+    variety.previews.push(photo.webPath)
+  } catch (err) {
+    console.error('Error picking variety image:', err)
+  }
+}
+
+const removeVarietyImage = (variety: Variety, index: number) => {
+  URL.revokeObjectURL(variety.previews[index])
+  variety.images.splice(index, 1)
+  variety.previews.splice(index, 1)
+}
+
+// reset form
+const resetForm = () => {
+  productName.value = ''
+  description.value = ''
+  price.value = null
+  stock.value = null
+  selectedSizes.value = []
+  hasSizes.value = false
+  hasVarieties.value = false
+  hasSamePrice.value = false
+  mainProductImages.value = []
+  mainImagePreviews.value = []
+  varieties.value = []
+
+  // scroll to top after reset
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+</script>
 <template>
   <v-app>
     <v-app-bar flat color="primary" dark>
       <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
-      <v-toolbar-title class="text-h6">{{ isEditMode ? 'Edit Product' : 'Add Product' }}</v-toolbar-title>
+      <v-toolbar-title class="text-h6">{{
+        isEditMode ? 'Edit Product' : 'Add Product'
+      }}</v-toolbar-title>
     </v-app-bar>
 
     <v-main>
@@ -252,7 +341,12 @@ onMounted(async () => {
         <v-form @submit.prevent="submitForm">
           <!-- Main Product Photos -->
           <v-label class="mb-2 font-medium">Main Product Photos (max 5)</v-label>
-          <v-btn color="primary" prepend-icon="mdi-plus" rounded="lg" @click="showPhotoPicker = true">
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-plus"
+            rounded="lg"
+            @click="showPhotoPicker = true"
+          >
             Add Photo
           </v-btn>
 
@@ -290,77 +384,149 @@ onMounted(async () => {
           <!-- Product Info -->
           <v-text-field v-model="productName" label="Product Name" variant="outlined" required />
           <v-textarea v-model="description" label="Description" variant="outlined" rows="3" />
-          <v-text-field v-model="price" label="Price" type="number" prefix="₱" variant="outlined" required />
+          <v-text-field
+            v-model="price"
+            label="Price"
+            type="number"
+            prefix="₱"
+            variant="outlined"
+            required
+          />
           <v-text-field v-model="stock" label="Stock / Quantity" type="number" variant="outlined" />
 
-          <!-- Sizes -->
-          <v-label class="mt-4 mb-2 font-medium">Available Sizes(ignore if not applicable)</v-label>
-          <v-row dense>
-            <v-col v-for="size in availableSizes" :key="size" cols="6" sm="4" md="2">
-              <v-checkbox v-model="selectedSizes" :label="size" :value="size" density="comfortable" hide-details />
-            </v-col>
-          </v-row>
+          <!-- --- Sizes Option --- -->
+          <v-switch v-model="hasSizes" label="Has Sizes?" color="primary" inset />
 
-          <!-- Varieties -->
-          <v-card class="mt-6" rounded="xl" elevation="2">
-            <v-card-title class="d-flex justify-between">
-              <strong>Varieties</strong>
-              <v-btn size="small" color="primary" variant="tonal" @click="addVariety">
-                <v-icon start>mdi-plus</v-icon> Add
-              </v-btn>
-            </v-card-title>
-            <v-divider />
-            <v-card-text>
-              <div v-if="varieties.length === 0" class="text-body-2 text-grey">No varieties yet.</div>
-              <v-row v-else dense>
-                <v-col v-for="variety in varieties" :key="variety.id" cols="12" sm="6" md="4">
-                  <v-card class="pa-3" rounded="lg" elevation="1">
-                    <v-text-field v-model="variety.name" label="Variety Name" variant="outlined" hide-details />
-                    <v-text-field
-                      v-model="variety.price"
-                      label="Variety Price"
-                      type="number"
-                      prefix="₱"
-                      variant="outlined"
-                      hide-details
-                    />
-
-                    <v-label class="mt-2 font-medium">Images (max 3)</v-label>
-                    <v-btn size="small" color="primary" @click="pickVarietyImage(variety, 'camera')">
-                      <v-icon start>mdi-camera</v-icon> Camera
-                    </v-btn>
-                    <v-btn size="small" color="primary" @click="pickVarietyImage(variety, 'gallery')">
-                      <v-icon start>mdi-image</v-icon> Gallery
-                    </v-btn>
-
-                    <v-row class="mt-2" dense>
-                      <v-col v-for="(img, idx) in variety.previews" :key="idx" cols="6">
-                        <v-card class="pa-1" rounded="lg" elevation="1">
-                          <v-img :src="img" aspect-ratio="1" cover />
-                          <v-btn
-                            icon="mdi-close"
-                            size="x-small"
-                            class="remove-btn"
-                            color="red"
-                            @click.stop="removeVarietyImage(variety, idx)"
-                          />
-                        </v-card>
-                      </v-col>
-                    </v-row>
-                  </v-card>
+          <!-- Sizes Section -->
+          <v-expand-transition>
+            <div v-if="hasSizes">
+              <v-label class="mt-2 mb-2 font-medium">Available Sizes</v-label>
+              <v-row dense>
+                <v-col v-for="size in availableSizes" :key="size" cols="6" sm="4" md="2">
+                  <v-checkbox
+                    v-model="selectedSizes"
+                    :label="size"
+                    :value="size"
+                    density="comfortable"
+                    hide-details
+                  />
                 </v-col>
               </v-row>
-            </v-card-text>
-          </v-card>
+            </div>
+          </v-expand-transition>
+
+          <!-- --- Varieties Option --- -->
+          <v-switch v-model="hasVarieties" label="Has Varieties?" color="primary" inset />
+
+          <v-expand-transition>
+            <div v-if="hasVarieties">
+              <!-- Same Price Switch -->
+              <v-switch
+                v-model="hasSamePrice"
+                label="Same price as main product?"
+                color="primary"
+                inset
+              />
+
+              <v-card class="mt-4" rounded="xl" elevation="2">
+                <v-card-title class="d-flex justify-between">
+                  <strong>Varieties</strong>
+                  <v-btn size="small" color="primary" variant="tonal" @click="addVariety">
+                    <v-icon start>mdi-plus</v-icon> Add
+                  </v-btn>
+                </v-card-title>
+                <v-divider />
+                <v-card-text>
+                  <div v-if="varieties.length === 0" class="text-body-2 text-grey">
+                    No varieties yet.
+                  </div>
+
+                  <v-row v-else dense>
+                    <v-col v-for="variety in varieties" :key="variety.id" cols="12" sm="6" md="4">
+                      <v-card class="pa-3" rounded="lg" elevation="1">
+                        <v-text-field
+                          v-model="variety.name"
+                          label="Variety Name"
+                          variant="outlined"
+                          hide-details
+                        />
+
+                        <!-- Conditionally show price input -->
+                        <v-expand-transition>
+                          <div v-if="!hasSamePrice">
+                            <v-text-field
+                              v-model="variety.price"
+                              label="Variety Price"
+                              type="number"
+                              prefix="₱"
+                              variant="outlined"
+                              hide-details
+                            />
+                          </div>
+                        </v-expand-transition>
+
+                        <!-- Image inputs -->
+                        <v-label class="mt-2 font-medium">Images (max 3)</v-label>
+                        <v-btn
+                          size="small"
+                          color="primary"
+                          @click="pickVarietyImage(variety, 'camera')"
+                        >
+                          <v-icon start>mdi-camera</v-icon> Camera
+                        </v-btn>
+                        <v-btn
+                          size="small"
+                          color="primary"
+                          @click="pickVarietyImage(variety, 'gallery')"
+                        >
+                          <v-icon start>mdi-image</v-icon> Gallery
+                        </v-btn>
+
+                        <v-row class="mt-2" dense>
+                          <v-col v-for="(img, idx) in variety.previews" :key="idx" cols="6">
+                            <v-card class="pa-1" rounded="lg" elevation="1">
+                              <v-img :src="img" aspect-ratio="1" cover />
+                              <v-btn
+                                icon="mdi-close"
+                                size="x-small"
+                                class="remove-btn"
+                                color="red"
+                                @click.stop="removeVarietyImage(variety, idx)"
+                              />
+                            </v-card>
+                          </v-col>
+                        </v-row>
+                      </v-card>
+                    </v-col>
+                  </v-row>
+                </v-card-text>
+              </v-card>
+            </div>
+          </v-expand-transition>
 
           <!-- Submit -->
-          <v-btn type="submit" color="primary" rounded="lg" prepend-icon="mdi-content-save" class="mt-4" block>
+          <v-btn
+            type="submit"
+            color="primary"
+            rounded="lg"
+            prepend-icon="mdi-content-save"
+            class="mt-4"
+            block
+            :loading="isSubmitting"
+            :disabled="isSubmitting"
+          >
             {{ isEditMode ? 'Update Product' : 'Add Product' }}
           </v-btn>
         </v-form>
 
         <!-- Snackbar -->
-        <v-snackbar v-model="snackbar" :color="snackbarColor" timeout="3000" location="bottom right" rounded="lg">
+        <v-snackbar
+          v-model="snackbar"
+          :color="snackbarColor"
+          timeout="3000"
+          location="bottom right"
+          rounded="lg"
+        >
           {{ snackbarMessage }}
         </v-snackbar>
       </v-container>
