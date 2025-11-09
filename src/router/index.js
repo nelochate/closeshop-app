@@ -33,7 +33,6 @@ const routes = [
     meta: { requiresAuth: true },
   },
   {
-  
     path: '/chatview/:id',
     name: 'chatview',
     component: ChatView,
@@ -146,17 +145,18 @@ const routes = [
 
   //Search Functionality
   {
-  path: '/search',
-  name: 'search',
-  component: () => import('@/mainsite/SearchView.vue'),
-},
+    path: '/search',
+    name: 'search',
+    component: () => import('@/mainsite/SearchView.vue'),
+  },
 
-//Purchase transaction
+  //Purchase transaction
   {
-      path: '/purchaseview',
-      name: 'purchaseview',
-      component: () => import('@/mainsite/PurchaseView.vue'),
-    }
+    path: '/purchaseview/:id',
+    name: 'purchaseview',
+    component: () => import('@/mainsite/PurchaseView.vue'),
+    props: true, // so route param is available as a prop
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode

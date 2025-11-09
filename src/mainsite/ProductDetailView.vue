@@ -5,6 +5,7 @@ import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
 import VueEasyLightbox from 'vue-easy-lightbox'
 
+console.log('useRoute:', useRoute, 'useRouter:', useRouter)
 const cart = useCartStore()
 const route = useRoute()
 const router = useRouter()
@@ -29,6 +30,7 @@ const varietyImages = ref([]) // store selected variety images
 // DOM refs
 const productImgRef = ref(null)
 const cartIconRef = ref(null)
+
 
 // Get the main image
 const mainImage = (imgs) => {
@@ -239,6 +241,76 @@ const isOwner = computed(() => {
     user.value && product.value?.shop?.owner_id && user.value.id === product.value.shop.owner_id
   )
 })
+
+const generateTransactionNumber = () => {
+  const timestamp = Date.now() // milliseconds since 1970
+  const random = Math.floor(Math.random() * 1000) // 0-999
+  return `TXN${timestamp}${random.toString().padStart(3, '0')}`
+}
+
+// to store dialog selection
+const buyNow = async () => {
+  if (!user.value) return alert('Please log in first.')
+  if (!product.value) return alert('Product not loaded')
+
+  if (product.value.has_sizes && !selectedSize.value)
+    return alert('Please select a size')
+  if (product.value.has_varieties && !selectedVariety.value)
+    return alert('Please select a variety')
+
+  try {
+    const transactionNumber = generateTransactionNumber()
+
+    // 1️⃣ Insert order with transaction number
+    const { data: orderData, error: orderError } = await supabase
+      .from('orders')
+      .insert({
+        user_id: user.value.id,
+        total_amount: product.value.price,
+        payment_method: 'cash',
+        status: 'pending',
+        transaction_number: transactionNumber, // <--- new column
+      })
+      .select()
+
+    if (orderError) throw orderError
+    const order = orderData?.[0]
+    if (!order) throw new Error('Order insert failed.')
+
+    // 2️⃣ Insert order item
+    const { data: itemData, error: itemError } = await supabase
+      .from('order_items')
+      .insert({
+        order_id: order.id,
+        product_id: product.value.id,
+        quantity: 1,
+        price: product.value.price,
+      })
+      .select()
+
+    if (itemError) throw itemError
+
+    // 3️⃣ Insert payment record
+    const { data: paymentData, error: paymentError } = await supabase
+      .from('payments')
+      .insert({
+        order_id: order.id,
+        amount: product.value.price,
+        status: 'pending',
+      })
+      .select()
+
+    if (paymentError) throw paymentError
+
+    // ✅ Navigate to purchase page
+    router.push(`/purchaseview/${transactionNumber}`)
+  } catch (err) {
+    console.error('Buy Now Error:', err)
+    alert(`Failed to process order. ${err.message || ''}`)
+  }
+}
+
+
 </script>
 
 <template>
@@ -490,7 +562,7 @@ const isOwner = computed(() => {
 
           <!-- Buy Now -->
           <v-col cols="5" class="pa-0">
-            <v-btn block class="bottom-btn buy-now-btn" color="primary" to="/purchaseview">
+            <v-btn block class="bottom-btn buy-now-btn" color="primary" @click="buyNow">
               Buy Now
             </v-btn>
           </v-col>
