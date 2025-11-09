@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
 import { Geolocation } from '@capacitor/geolocation'
-import { PushNotifications } from '@capacitor/push-notifications'
+//import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
 import { Capacitor } from '@capacitor/core'
 
@@ -62,7 +62,7 @@ async function setupPushNotifications() {
     }
 
     // Step 2: Register with APNS/FCM (handled internally by Capacitor)
-    await PushNotifications.register()
+   // await PushNotifications.register()
 
     // Step 3: Handle successful registration (token received)
     PushNotifications.addListener('registration', async (token) => {
