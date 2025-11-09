@@ -17,7 +17,7 @@ const showMapSnackbar = ref(false)
 const snackbarMessage = ref('')
 const addressMode = ref('manual')
 const isEdit = ref(false)
-const addressId = ref(route.query.id || null)
+const addressId = ref(route.params.id || null)
 
 const map = ref(null)
 const marker = ref(null)
@@ -62,24 +62,45 @@ const barangays = [
 
 // --- Load address if editing ---
 const loadAddress = async () => {
-  const { data: userData } = await supabase.auth.getUser()
-  if (!userData?.user) return router.push({ name: 'login' })
-
-  if (addressId.value) {
-    const { data, error } = await supabase
-      .from('addresses')
-      .select('*')
-      .eq('id', addressId.value)
-      .eq('user_id', userData.user.id)
-      .single()
-
-    if (data) {
-      address.value = { ...data }
-      isEdit.value = true
-      updateMap()
-    } else if (error) {
-      console.error('Load address error:', error)
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userError || !userData?.user) {
+      console.error('User not authenticated:', userError)
+      return router.push({ name: 'login' })
     }
+
+    if (addressId.value) {
+      const { data, error } = await supabase
+        .from('addresses')
+        .select('*')
+        .eq('id', addressId.value)
+        .eq('user_id', userData.user.id)
+        .single()
+
+      if (error) {
+        console.error('Load address error:', error)
+        snackbarMessage.value = 'Error loading address'
+        showMapSnackbar.value = true
+        return
+      }
+
+      if (data) {
+        // Only assign properties that exist in the address object
+        Object.keys(address.value).forEach(key => {
+          if (data[key] !== undefined) {
+            address.value[key] = data[key]
+          }
+        })
+        isEdit.value = true
+
+        // Update map after a short delay to ensure DOM is ready
+        setTimeout(() => updateMap(), 500)
+      }
+    }
+  } catch (error) {
+    console.error('Unexpected error in loadAddress:', error)
+    snackbarMessage.value = 'Unexpected error loading address'
+    showMapSnackbar.value = true
   }
 }
 
@@ -87,68 +108,153 @@ const loadAddress = async () => {
 const saveAddress = async () => {
   try {
     isLoading.value = true
-    const { data: userData } = await supabase.auth.getUser()
-    if (!userData?.user) throw new Error('User not found')
 
-    if (address.value.is_default) {
-      // Set all other addresses to false
-      await supabase.from('addresses')
-        .update({ is_default: false })
-        .eq('user_id', userData.user.id)
+    // Validate required fields
+    if (!address.value.barangay) {
+      throw new Error('Barangay is required')
     }
 
-    if (isEdit.value) {
-      await supabase.from('addresses')
-        .update({ ...address.value, updated_at: new Date().toISOString() })
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userError || !userData?.user) {
+      throw new Error('User not authenticated')
+    }
+
+    // Prepare address data - only include fields that exist in the table
+    const addressData = {
+      recipient_name: address.value.recipient_name || null,
+      phone: address.value.phone || null,
+      street: address.value.street || null,
+      city: address.value.city || 'Butuan City',
+      province: address.value.province || 'Agusan del Norte',
+      postal_code: address.value.postal_code || '8600',
+      is_default: address.value.is_default || false,
+      purok: address.value.purok || null,
+      barangay: address.value.barangay || null,
+      updated_at: new Date().toISOString(),
+    }
+
+    // Handle default address logic
+    if (address.value.is_default) {
+      // Set all other addresses to false
+      const { error: updateError } = await supabase
+        .from('addresses')
+        .update({ is_default: false })
+        .eq('user_id', userData.user.id)
+        .neq('id', addressId.value || '00000000-0000-0000-0000-000000000000') // Avoid empty IN clause
+
+      if (updateError) {
+        console.error('Error updating default addresses:', updateError)
+      }
+    }
+
+    let result
+    if (isEdit.value && addressId.value) {
+      // Update existing address
+      result = await supabase
+        .from('addresses')
+        .update(addressData)
         .eq('id', addressId.value)
+        .eq('user_id', userData.user.id)
     } else {
-      await supabase.from('addresses').insert([{
-        ...address.value,
-        user_id: userData.user.id,
-        created_at: new Date().toISOString(),
-      }])
+      // Insert new address
+      result = await supabase
+        .from('addresses')
+        .insert([{
+          ...addressData,
+          user_id: userData.user.id,
+          created_at: new Date().toISOString(),
+        }])
+    }
+
+    if (result.error) {
+      throw new Error(result.error.message || 'Failed to save address')
     }
 
     successMessage.value = isEdit.value ? 'Address updated successfully!' : 'Address added successfully!'
     showSuccess.value = true
-    setTimeout(() => router.replace({ name: 'addresslist', query: { refreshed: Date.now() } }), 1500)
+
+    setTimeout(() => {
+      router.replace({ name: 'my-address', query: { refreshed: Date.now() } })
+    }, 1500)
 
   } catch (error) {
     console.error('Save address error:', error)
-    successMessage.value = 'Error: ' + error.message
+    successMessage.value = 'Error: ' + (error.message || 'Failed to save address')
     showSuccess.value = true
   } finally {
     isLoading.value = false
   }
 }
 
-// --- Update Map (via Node.js proxy) ---
+// --- Update Map (with fallback to direct API) ---
 const updateMap = async () => {
-  if (!map.value) return
+  if (!map.value) {
+    console.warn('Map not initialized')
+    return
+  }
 
   const house = address.value.house_no || ''
   const street = address.value.street || ''
   const purok = address.value.purok || ''
   const barangay = address.value.barangay || ''
   const city = address.value.city || 'Butuan City'
-  const query = `${house} ${street} ${purok} ${barangay}, ${city}, Philippines`
 
-  if (!barangay && !street) return
+  if (!barangay && !street) {
+    // Reset to default view if no address
+    map.value.setView([8.9492, 125.5436], 13)
+    if (marker.value) {
+      map.value.removeLayer(marker.value)
+      marker.value = null
+    }
+    return
+  }
+
+  const query = `${house} ${street} ${purok} ${barangay}, ${city}, Philippines`.trim()
 
   try {
-    const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
-    const results = await res.json()
+    let results = []
+
+    // Try proxy first, then fallback to direct API
+    try {
+      const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
+      if (res.ok) {
+        results = await res.json()
+      } else {
+        throw new Error('Proxy failed')
+      }
+    } catch (proxyError) {
+      console.warn('Proxy failed, trying direct API:', proxyError)
+      // Fallback to direct Nominatim API with proper headers
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'YourApp/1.0 (your-email@example.com)'
+          }
+        }
+      )
+      if (res.ok) {
+        results = await res.json()
+      }
+    }
+
     if (results.length > 0) {
       const { lat, lon } = results[0]
       const latNum = parseFloat(lat)
       const lonNum = parseFloat(lon)
 
       map.value.setView([latNum, lonNum], 15)
-      if (marker.value) marker.value.setLatLng([latNum, lonNum])
-      else marker.value = L.marker([latNum, lonNum]).addTo(map.value)
+      if (marker.value) {
+        marker.value.setLatLng([latNum, lonNum])
+      } else {
+        marker.value = L.marker([latNum, lonNum]).addTo(map.value)
+      }
+    } else {
+      console.warn('No results found for query:', query)
     }
   } catch (error) {
-    console.error('Error updating map via proxy:', error)
+    console.error('Error updating map:', error)
   }
 }
 
@@ -157,47 +263,130 @@ const useCurrentLocation = async () => {
   try {
     snackbarMessage.value = 'Getting your location...'
     showMapSnackbar.value = true
+    isLoading.value = true
 
-    const coords = await Geolocation.getCurrentPosition()
+    // Check permissions
+    const permissions = await Geolocation.checkPermissions()
+    if (permissions.location !== 'granted') {
+      const request = await Geolocation.requestPermissions()
+      if (request.location !== 'granted') {
+        throw new Error('Location permission denied')
+      }
+    }
+
+    const coords = await Geolocation.getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 10000
+    })
+
     const lat = coords.coords.latitude
     const lng = coords.coords.longitude
 
+    // Update map view
     map.value.setView([lat, lng], 15)
-    if (marker.value) marker.value.setLatLng([lat, lng])
-    else marker.value = L.marker([lat, lng]).addTo(map.value)
-
-    // Reverse geocode via proxy
-    const res = await fetch(`http://localhost:3000/api/geocode?q=${lat},${lng}`)
-    const results = await res.json()
-    if (results.length > 0 && results[0].display_name) {
-      const addrParts = results[0].display_name.split(',').map(p => p.trim())
-      address.value.street = addrParts[0] || ''
-      address.value.barangay = addrParts[1] || ''
-      address.value.city = addrParts[2] || 'Butuan City'
+    if (marker.value) {
+      marker.value.setLatLng([lat, lng])
+    } else {
+      marker.value = L.marker([lat, lng]).addTo(map.value)
     }
 
-    snackbarMessage.value = 'Location detected!'
+    // Reverse geocode
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
+        {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'YourApp/1.0 (your-email@example.com)'
+          }
+        }
+      )
+
+      if (res.ok) {
+        const result = await res.json()
+        if (result.address) {
+          const addr = result.address
+
+          // Update address fields with geocoded data
+          address.value.street = addr.road || addr.footway || ''
+          address.value.barangay = addr.suburb || addr.neighbourhood || addr.village || ''
+          address.value.city = addr.city || addr.town || addr.municipality || 'Butuan City'
+          address.value.province = addr.state || 'Agusan del Norte'
+          address.value.region = addr.region || 'Caraga'
+          address.value.postal_code = addr.postcode || '8600'
+          address.value.house_no = addr.house_number || ''
+
+          snackbarMessage.value = 'Location detected successfully!'
+        } else {
+          snackbarMessage.value = 'Location detected but address details not found'
+        }
+      } else {
+        throw new Error('Reverse geocoding failed')
+      }
+    } catch (geocodeError) {
+      console.error('Reverse geocoding error:', geocodeError)
+      snackbarMessage.value = 'Location detected but address lookup failed'
+    }
+
     showMapSnackbar.value = true
   } catch (error) {
     console.error('Location error:', error)
-    snackbarMessage.value = 'Unable to detect location.'
+    snackbarMessage.value = 'Unable to detect location: ' + (error.message || 'Unknown error')
     showMapSnackbar.value = true
+  } finally {
+    isLoading.value = false
   }
 }
 
 // --- Lifecycle & Watchers ---
 onMounted(() => {
-  map.value = L.map('map').setView([8.9492, 125.5436], 13)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors'
-  }).addTo(map.value)
+  // Initialize map with error handling
+  try {
+    const mapElement = document.getElementById('map')
+    if (mapElement) {
+      map.value = L.map('map').setView([8.9492, 125.5436], 13)
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors'
+      }).addTo(map.value)
+
+      console.log('Map initialized successfully')
+    } else {
+      console.error('Map element not found')
+    }
+  } catch (mapError) {
+    console.error('Error initializing map:', mapError)
+  }
+
   loadAddress()
 })
 
+// Watch for address changes with debounce
+let updateMapTimeout
 watch(
-  () => [address.value.street, address.value.barangay, address.value.house_no],
-  () => updateMap()
+  () => [address.value.street, address.value.barangay, address.value.house_no, address.value.purok],
+  () => {
+    if (updateMapTimeout) clearTimeout(updateMapTimeout)
+    updateMapTimeout = setTimeout(() => {
+      if (addressMode.value === 'manual') {
+        updateMap()
+      }
+    }, 1000) // Debounce for 1 second
+  }
 )
+
+// Watch address mode changes
+watch(addressMode, (newMode) => {
+  if (newMode === 'location') {
+    // Reset to default view when switching to location mode
+    if (map.value) {
+      map.value.setView([8.9492, 125.5436], 13)
+      if (marker.value) {
+        map.value.removeLayer(marker.value)
+        marker.value = null
+      }
+    }
+  }
+})
 </script>
 
 <template>
@@ -232,24 +421,88 @@ watch(
           <v-card-text>
             <v-form @submit.prevent="saveAddress">
               <v-row>
-                <v-col cols="12"><v-text-field v-model="address.recipient_name" label="Recipient Name" /></v-col>
-                <v-col cols="12"><v-text-field v-model="address.phone" label="Phone Number" /></v-col>
-                <v-col cols="12"><v-select v-model="address.barangay" :items="barangays" label="Barangay" required /></v-col>
-                <v-col cols="12"><v-text-field v-model="address.purok" label="Purok" /></v-col>
-                <v-col cols="12"><v-text-field v-model="address.street" label="Street" /></v-col>
-                <v-col cols="12"><v-text-field v-model="address.building" label="Building No." /></v-col>
-                <v-col cols="12"><v-text-field v-model="address.house_no" label="House No." /></v-col>
-                <v-col cols="12"><v-text-field v-model="address.postal_code" label="Postal Code" /></v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.recipient_name"
+                    label="Recipient Name"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.phone"
+                    label="Phone Number"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-select
+                    v-model="address.barangay"
+                    :items="barangays"
+                    label="Barangay *"
+                    variant="outlined"
+                    required
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.purok"
+                    label="Purok"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.street"
+                    label="Street"
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.building"
+                    label="Building No."
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.house_no"
+                    label="House No."
+                    variant="outlined"
+                  />
+                </v-col>
+                <v-col cols="12">
+                  <v-text-field
+                    v-model="address.postal_code"
+                    label="Postal Code"
+                    variant="outlined"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-checkbox
+                    v-model="address.is_default"
+                    label="Set as default address"
+                    color="primary"
+                  />
+                </v-col>
 
                 <v-col cols="12">
                   <div id="map" class="map-wrapper"></div>
-                  <p class="text-caption mt-2">Map updates automatically</p>
+                  <p class="text-caption mt-2 text-grey">Map will update automatically as you fill in address details</p>
                 </v-col>
 
                 <v-col cols="12" class="text-right">
-                  <v-btn type="submit" color="primary" :loading="isLoading" :disabled="!address.barangay">
+                  <v-btn
+                    type="submit"
+                    color="primary"
+                    size="large"
+                    :loading="isLoading"
+                    :disabled="!address.barangay"
+                  >
                     <v-icon class="me-2">mdi-check</v-icon>
-                    {{ isLoading ? 'Saving...' : 'Save Address' }}
+                    {{ isLoading ? 'Saving...' : (isEdit ? 'Update Address' : 'Save Address') }}
                   </v-btn>
                 </v-col>
               </v-row>
@@ -260,23 +513,79 @@ watch(
         <v-card v-else class="mt-4">
           <v-card-title>Use My Current Location</v-card-title>
           <v-card-text>
-            <v-btn color="primary" @click="useCurrentLocation" :loading="isLoading">
+            <v-btn
+              color="primary"
+              @click="useCurrentLocation"
+              :loading="isLoading"
+              variant="outlined"
+            >
               <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
               Detect My Location
             </v-btn>
 
             <v-row class="mt-4">
-              <v-col cols="12"><v-text-field v-model="address.street" label="Street" readonly /></v-col>
-              <v-col cols="12"><v-text-field v-model="address.barangay" label="Barangay" readonly /></v-col>
-              <v-col cols="12"><v-text-field v-model="address.city" label="City" readonly /></v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.recipient_name"
+                  label="Recipient Name"
+                  variant="outlined"
+                />
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.phone"
+                  label="Phone Number"
+                  variant="outlined"
+                />
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.street"
+                  label="Street"
+                  variant="outlined"
+                  readonly
+                />
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.barangay"
+                  label="Barangay"
+                  variant="outlined"
+                  readonly
+                />
+              </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.city"
+                  label="City"
+                  variant="outlined"
+                  readonly
+                />
+              </v-col>
             </v-row>
 
             <v-col cols="12" class="mt-4">
               <div id="map" class="map-wrapper"></div>
-              <p class="text-caption mt-2">Your detected location appears here</p>
+              <p class="text-caption mt-2 text-grey">Your detected location will appear here</p>
             </v-col>
 
-            <v-btn block color="primary" class="mt-4" @click="saveAddress" :loading="isLoading" :disabled="!address.barangay">
+            <v-col cols="12">
+              <v-checkbox
+                v-model="address.is_default"
+                label="Set as default address"
+                color="primary"
+              />
+            </v-col>
+
+            <v-btn
+              block
+              color="primary"
+              class="mt-4"
+              @click="saveAddress"
+              :loading="isLoading"
+              :disabled="!address.barangay"
+              size="large"
+            >
               <v-icon class="me-2">mdi-check</v-icon>
               {{ isLoading ? 'Saving...' : 'Save Current Location' }}
             </v-btn>
@@ -295,6 +604,14 @@ watch(
   margin-top: 10px;
   border: 1px solid #e0e0e0;
 }
-:deep(.leaflet-container) { border-radius: 12px; }
-:deep(.leaflet-container:fullscreen) { width: 100vw; height: 100vh; border-radius: 0; }
+
+:deep(.leaflet-container) {
+  border-radius: 12px;
+}
+
+:deep(.leaflet-container:fullscreen) {
+  width: 100vw;
+  height: 100vh;
+  border-radius: 0;
+}
 </style>
