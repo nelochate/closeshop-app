@@ -137,7 +137,7 @@ const routes = [
     component: () => import('@/mainsite/edit/MyAddressView.vue'),
   },
   {
-    path: '/edit-address',
+    path: '/edit-address/:id?',
     name: 'edit-address',
     component: () => import('@/mainsite/edit/EditAddressForm.vue'),
     meta: { requiresAuth: true },
@@ -151,11 +151,10 @@ const routes = [
 
   //Search Functionality
   {
-  path: '/search',
-  name: 'search',
-  component: () => import('@/mainsite/SearchView.vue')
-}
-
+    path: '/search',
+    name: 'search',
+    component: () => import('@/mainsite/SearchView.vue'),
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
