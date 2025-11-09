@@ -549,7 +549,7 @@ onMounted(async () => {
         </v-row>
 
         <h2 class="section-title">Delivery Options</h2>
-        <v-checkbox v-model="deliveryOptions" label="Call a Rider" value="courier" />
+        <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
         <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
         <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
         <v-text-field

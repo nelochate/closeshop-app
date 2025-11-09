@@ -145,18 +145,11 @@ const routes = [
 
   //Search Functionality
   {
-    path: '/search',
-    name: 'search',
-    component: () => import('@/mainsite/SearchView.vue'),
-  },
+  path: '/search',
+  name: 'search',
+  component: () => import('@/mainsite/SearchView.vue')
+}
 
-  //Purchase transaction
-  {
-    path: '/purchaseview/:id',
-    name: 'purchaseview',
-    component: () => import('@/mainsite/PurchaseView.vue'),
-    props: true, // so route param is available as a prop
-  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
