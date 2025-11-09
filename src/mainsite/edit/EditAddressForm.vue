@@ -1,38 +1,39 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { useAuthUserStore } from '@/stores/authUser'
 import { Geolocation } from '@capacitor/geolocation'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
-import 'leaflet.fullscreen/Control.FullScreen.css'
-import 'leaflet.fullscreen/Control.FullScreen.js'
 
 const router = useRouter()
 const route = useRoute()
-const authStore = useAuthUserStore()
 
 // --- State ---
 const isLoading = ref(false)
 const showSuccess = ref(false)
 const successMessage = ref('')
+const showMapSnackbar = ref(false)
+const snackbarMessage = ref('')
+const addressMode = ref('manual')
+const isEdit = ref(false)
+const addressId = ref(route.query.id || null)
 
 const map = ref(null)
 const marker = ref(null)
 
 const address = ref({
-  region: '',
-  province: '',
-  city: 'Butuan City', // default since this is Butuan
+  region: 'Caraga',
+  province: 'Agusan del Norte',
+  city: 'Butuan City',
+  recipient_name: '',
+  phone: '',
+  purok: '',
   barangay: '',
   building: '',
   street: '',
-  city: 'Butuan City',
-  province: 'Agusan del Norte',
+  house_no: '',
   postal_code: '8600',
-  purok: '',
-  barangay: '',
   is_default: false,
 })
 
@@ -59,57 +60,83 @@ const barangays = [
   'Villa Kananga'
 ]
 
-// Load address from profile
+// --- Load address if editing ---
 const loadAddress = async () => {
   const { data: userData } = await supabase.auth.getUser()
-  if (userData?.user && authStore.profile) {
-    Object.assign(address.value, {
-      region: authStore.profile.region || '',
-      province: authStore.profile.province || '',
-      city: authStore.profile.city || 'Butuan City',
-      barangay: authStore.profile.barangay || '',
-      building: authStore.profile.building || '',
-      street: authStore.profile.street || '',
-      house_no: authStore.profile.house_no || '',
-      postal: authStore.profile.postal || '',
-      purok: authStore.profile.purok || '',
-    })
-    updateMap()
+  if (!userData?.user) return router.push({ name: 'login' })
+
+  if (addressId.value) {
+    const { data, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('id', addressId.value)
+      .eq('user_id', userData.user.id)
+      .single()
+
+    if (data) {
+      address.value = { ...data }
+      isEdit.value = true
+      updateMap()
+    } else if (error) {
+      console.error('Load address error:', error)
+    }
   }
 }
 
-// Save address to supabase
+// --- Save address ---
 const saveAddress = async () => {
   try {
     isLoading.value = true
     const { data: userData } = await supabase.auth.getUser()
     if (!userData?.user) throw new Error('User not found')
 
-    await supabase.from('profiles').update({
-      ...address.value,
-      updated_at: new Date().toISOString(),
-    }).eq('id', userData.user.id)
+    if (address.value.is_default) {
+      // Set all other addresses to false
+      await supabase.from('addresses')
+        .update({ is_default: false })
+        .eq('user_id', userData.user.id)
+    }
 
-    successMessage.value = isEdit.value
-      ? 'Address updated successfully!'
-      : 'Address added successfully!'
+    if (isEdit.value) {
+      await supabase.from('addresses')
+        .update({ ...address.value, updated_at: new Date().toISOString() })
+        .eq('id', addressId.value)
+    } else {
+      await supabase.from('addresses').insert([{
+        ...address.value,
+        user_id: userData.user.id,
+        created_at: new Date().toISOString(),
+      }])
+    }
+
+    successMessage.value = isEdit.value ? 'Address updated successfully!' : 'Address added successfully!'
     showSuccess.value = true
-    setTimeout(() => router.replace({ name: 'profileview', query: { refreshed: Date.now() } }), 2000)
-  } catch (e) {
-    successMessage.value = 'Error: ' + e.message
+    setTimeout(() => router.replace({ name: 'addresslist', query: { refreshed: Date.now() } }), 1500)
+
+  } catch (error) {
+    console.error('Save address error:', error)
+    successMessage.value = 'Error: ' + error.message
     showSuccess.value = true
   } finally {
     isLoading.value = false
   }
 }
 
-// Update map preview using Nominatim API
+// --- Update Map (via Node.js proxy) ---
 const updateMap = async () => {
-  const query = `${address.value.house_no} ${address.value.street} ${address.value.barangay}, ${address.value.city}, Philippines`
-  if (!address.value.barangay && !address.value.street) return
+  if (!map.value) return
+
+  const house = address.value.house_no || ''
+  const street = address.value.street || ''
+  const purok = address.value.purok || ''
+  const barangay = address.value.barangay || ''
+  const city = address.value.city || 'Butuan City'
+  const query = `${house} ${street} ${purok} ${barangay}, ${city}, Philippines`
+
+  if (!barangay && !street) return
 
   try {
-    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`)
+    const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
     const results = await res.json()
     if (results.length > 0) {
       const { lat, lon } = results[0]
@@ -117,28 +144,56 @@ const updateMap = async () => {
       const lonNum = parseFloat(lon)
 
       map.value.setView([latNum, lonNum], 15)
-      if (marker.value) {
-        marker.value.setLatLng([latNum, lonNum])
-      } else {
-        marker.value = L.marker([latNum, lonNum]).addTo(map.value)
-      }
+      if (marker.value) marker.value.setLatLng([latNum, lonNum])
+      else marker.value = L.marker([latNum, lonNum]).addTo(map.value)
     }
   } catch (error) {
-    console.error('Error updating map:', error)
+    console.error('Error updating map via proxy:', error)
   }
 }
 
+// --- Detect user location ---
+const useCurrentLocation = async () => {
+  try {
+    snackbarMessage.value = 'Getting your location...'
+    showMapSnackbar.value = true
+
+    const coords = await Geolocation.getCurrentPosition()
+    const lat = coords.coords.latitude
+    const lng = coords.coords.longitude
+
+    map.value.setView([lat, lng], 15)
+    if (marker.value) marker.value.setLatLng([lat, lng])
+    else marker.value = L.marker([lat, lng]).addTo(map.value)
+
+    // Reverse geocode via proxy
+    const res = await fetch(`http://localhost:3000/api/geocode?q=${lat},${lng}`)
+    const results = await res.json()
+    if (results.length > 0 && results[0].display_name) {
+      const addrParts = results[0].display_name.split(',').map(p => p.trim())
+      address.value.street = addrParts[0] || ''
+      address.value.barangay = addrParts[1] || ''
+      address.value.city = addrParts[2] || 'Butuan City'
+    }
+
+    snackbarMessage.value = 'Location detected!'
+    showMapSnackbar.value = true
+  } catch (error) {
+    console.error('Location error:', error)
+    snackbarMessage.value = 'Unable to detect location.'
+    showMapSnackbar.value = true
+  }
+}
+
+// --- Lifecycle & Watchers ---
 onMounted(() => {
-  // Init Leaflet map
-  map.value = L.map('map').setView([8.9492, 125.5436], 13) // Default to Butuan
+  map.value = L.map('map').setView([8.9492, 125.5436], 13)
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors'
   }).addTo(map.value)
-
   loadAddress()
 })
 
-// Watch changes to address fields and update map
 watch(
   () => [address.value.street, address.value.barangay, address.value.house_no],
   () => updateMap()
@@ -153,18 +208,15 @@ watch(
     </v-app-bar>
 
     <v-main>
-      <!-- Success Snackbar -->
       <v-snackbar v-model="showSuccess" :timeout="3000" color="success" location="top">
         {{ successMessage }}
       </v-snackbar>
 
-      <!-- Map Snackbar -->
       <v-snackbar v-model="showMapSnackbar" :timeout="4000" color="info" location="top">
         {{ snackbarMessage }}
       </v-snackbar>
 
       <v-container>
-        <!-- Address Mode -->
         <v-card>
           <v-card-title>Address Mode</v-card-title>
           <v-card-text>
@@ -175,39 +227,29 @@ watch(
           </v-card-text>
         </v-card>
 
-        <!-- Manual Mode -->
         <v-card v-if="addressMode === 'manual'" class="mt-4">
           <v-card-title>Enter Address Manually</v-card-title>
           <v-card-text>
             <v-form @submit.prevent="saveAddress">
               <v-row>
+                <v-col cols="12"><v-text-field v-model="address.recipient_name" label="Recipient Name" /></v-col>
+                <v-col cols="12"><v-text-field v-model="address.phone" label="Phone Number" /></v-col>
+                <v-col cols="12"><v-select v-model="address.barangay" :items="barangays" label="Barangay" required /></v-col>
+                <v-col cols="12"><v-text-field v-model="address.purok" label="Purok" /></v-col>
+                <v-col cols="12"><v-text-field v-model="address.street" label="Street" /></v-col>
+                <v-col cols="12"><v-text-field v-model="address.building" label="Building No." /></v-col>
+                <v-col cols="12"><v-text-field v-model="address.house_no" label="House No." /></v-col>
+                <v-col cols="12"><v-text-field v-model="address.postal_code" label="Postal Code" /></v-col>
+
                 <v-col cols="12">
-                  <v-text-field v-model="address.purok" label="Purok" variant="outlined" />
-                </v-col>
-                <v-col cols="12">
-                  <v-select v-model="address.barangay" :items="barangays" label="Barangay" variant="outlined" />
-                </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="address.building" label="Building No." variant="outlined" />
-                </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="address.street" label="Street" variant="outlined" />
-                </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="address.house_no" label="House No." variant="outlined" />
-                </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="address.postal" label="Postal Code" variant="outlined" />
+                  <div id="map" class="map-wrapper"></div>
+                  <p class="text-caption mt-2">Map updates automatically</p>
                 </v-col>
 
-                <!-- Leaflet Map Preview -->
-                <v-col cols="12">
-                  <div id="map"></div>
-                </v-col>
                 <v-col cols="12" class="text-right">
-                  <v-btn type="submit" color="primary" size="large">
+                  <v-btn type="submit" color="primary" :loading="isLoading" :disabled="!address.barangay">
                     <v-icon class="me-2">mdi-check</v-icon>
-                    {{ isLoading ? 'Saved' : 'Save Address' }}
+                    {{ isLoading ? 'Saving...' : 'Save Address' }}
                   </v-btn>
                 </v-col>
               </v-row>
@@ -215,20 +257,28 @@ watch(
           </v-card-text>
         </v-card>
 
-        <!-- Location Mode -->
         <v-card v-else class="mt-4">
           <v-card-title>Use My Current Location</v-card-title>
           <v-card-text>
-            <v-btn color="primary" @click="useCurrentLocation">
+            <v-btn color="primary" @click="useCurrentLocation" :loading="isLoading">
               <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
               Detect My Location
             </v-btn>
+
+            <v-row class="mt-4">
+              <v-col cols="12"><v-text-field v-model="address.street" label="Street" readonly /></v-col>
+              <v-col cols="12"><v-text-field v-model="address.barangay" label="Barangay" readonly /></v-col>
+              <v-col cols="12"><v-text-field v-model="address.city" label="City" readonly /></v-col>
+            </v-row>
+
             <v-col cols="12" class="mt-4">
-              <div id="locationMap" class="map-wrapper"></div>
+              <div id="map" class="map-wrapper"></div>
+              <p class="text-caption mt-2">Your detected location appears here</p>
             </v-col>
-            <v-btn block color="primary" class="mt-4" @click="saveAddress">
+
+            <v-btn block color="primary" class="mt-4" @click="saveAddress" :loading="isLoading" :disabled="!address.barangay">
               <v-icon class="me-2">mdi-check</v-icon>
-              Save Current Location
+              {{ isLoading ? 'Saving...' : 'Save Current Location' }}
             </v-btn>
           </v-card-text>
         </v-card>
@@ -243,9 +293,8 @@ watch(
   height: 300px;
   border-radius: 12px;
   margin-top: 10px;
+  border: 1px solid #e0e0e0;
 }
-:deep(.leaflet-container:fullscreen) {
-  width: 100vw;
-  height: 100vh;
-}
+:deep(.leaflet-container) { border-radius: 12px; }
+:deep(.leaflet-container:fullscreen) { width: 100vw; height: 100vh; border-radius: 0; }
 </style>

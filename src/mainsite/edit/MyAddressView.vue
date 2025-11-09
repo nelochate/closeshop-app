@@ -107,9 +107,10 @@ onMounted(loadAddresses)
               <v-card-text>
                 <div class="d-flex justify-space-between align-center">
                   <div>
-                    <div class="font-medium">{{ addr.recipient_name }}</div>
-                    <div>{{ addr.street }}, {{ addr.purok }}, {{ addr.barangay }}, {{ addr.city }}</div>
-                    <div>{{ addr.phone }}</div>
+                    <div class="font-medium">{{ addr.recipient_name }} | {{ addr.phone }}</div>
+                    <div>{{ addr.purok }}, {{ addr.barangay }}, {{ addr.street }}, {{ addr.building }}, {{ addr.house_no }}, {{ addr.city }}</div>
+                    <div>{{ addr.province }}, {{ addr.postal_code }}</div>
+
                     <div v-if="addr.is_default" class="text-primary font-medium">Default Address</div>
                   </div>
                   <div class="d-flex flex-column align-end">
