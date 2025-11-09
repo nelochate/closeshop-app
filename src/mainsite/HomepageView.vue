@@ -10,7 +10,6 @@ import { Capacitor } from '@capacitor/core'
 
 const router = useRouter()
 const activeTab = ref('home')
-const search = ref('')
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
