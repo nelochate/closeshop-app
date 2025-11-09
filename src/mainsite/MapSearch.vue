@@ -668,7 +668,7 @@ const updateShops = async () => {
   }
 
   .map-buttons {
-    bottom: 6vh;
+    bottom: 10vh;
     right: 4vw;
     gap: 0.4rem;
   }
