@@ -19,83 +19,35 @@ const scrollToBottom = async () => {
   if (el) el.scrollTop = el.scrollHeight
 }
 
-// ✅ Fetch or create a conversation safely
+// ✅ Fetch or create a conversation
 const getOrCreateConversation = async () => {
-  const { data: auth, error: authErr } = await supabase.auth.getUser()
-  if (authErr) {
-    console.error('Auth fetch error:', authErr)
-    return
-  }
-
-  if (!auth?.user) {
-    console.warn('No authenticated user found. Please log in first.')
-    return
-  }
-
+  const { data: auth } = await supabase.auth.getUser()
+  if (!auth.user) return
   userId.value = auth.user.id
   console.log('🟦 Logged in userId:', userId.value)
   console.log('🟩 Chatting with userId:', otherUserId)
 
-  if (!userId.value || !otherUserId) {
-    console.warn('Missing one of the user IDs — cannot start conversation.')
-    return
-  }
+  // find existing conversation
+  const { data: existing, error } = await supabase
+    .from('conversations')
+    .select('id')
+    .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+    .maybeSingle()
 
-  try {
-    // 🔍 Check for existing conversation
-    const { data: existing, error: fetchErr } = await supabase
-      .from('conversations')
-      .select('id')
-      .or(
-        `and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`
-      )
-      .maybeSingle()
+  if (error) console.error('Conversation fetch error:', error)
 
-    if (fetchErr) console.error('Conversation fetch error:', fetchErr)
-
-    if (existing) {
-      conversationId.value = existing.id
-      console.log('✅ Found existing conversation:', conversationId.value)
-      return
-    }
-
-    // 🧩 Make sure both profiles exist
-    const { data: user1Profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', userId.value)
-      .maybeSingle()
-
-    const { data: user2Profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', otherUserId)
-      .maybeSingle()
-
-    if (!user1Profile || !user2Profile) {
-      console.warn('Cannot create conversation — missing profile record for one of the users.')
-      return
-    }
-
-    // 🆕 Create conversation
+  if (existing) {
+    conversationId.value = existing.id
+  } else {
     const { data: created, error: createErr } = await supabase
       .from('conversations')
-      .insert({
-        user1: userId.value,
-        user2: otherUserId,
-      })
+      .insert({ user1: userId.value, user2: otherUserId })
       .select('id')
       .single()
-
-    if (createErr) throw createErr
-
-    conversationId.value = created.id
-    console.log('🆕 Created new conversation:', conversationId.value)
-  } catch (err) {
-    console.error('Error in getOrCreateConversation:', err)
+    if (createErr) console.error('Conversation create error:', createErr)
+    conversationId.value = created?.id || null
   }
 }
-
 
 // ✅ Load messages
 const loadMessages = async () => {
@@ -128,7 +80,7 @@ const subscribeMessages = async () => {
     .subscribe()
 }
 
-// ✅ Send message
+// ✅ Send a message
 const sendMessage = async () => {
   if (!newMessage.value.trim() || !conversationId.value || !userId.value) return
 
@@ -145,6 +97,7 @@ const sendMessage = async () => {
   if (error) {
     console.error('Send message error:', error)
   } else {
+    // Immediately show new message in UI
     messages.value.push(data)
     scrollToBottom()
   }
@@ -152,17 +105,25 @@ const sendMessage = async () => {
   newMessage.value = ''
 }
 
+
 const goBack = () => router.back()
 
 onMounted(async () => {
   await getOrCreateConversation()
   await loadMessages()
-  if (conversationId.value) await subscribeMessages()
+
+  // Only subscribe once conversationId is confirmed
+  if (conversationId.value) {
+    await subscribeMessages()
+  }
 })
+
 
 onUnmounted(() => {
   if (subscription) supabase.removeChannel(subscription)
 })
+
+
 </script>
 
 <template>
