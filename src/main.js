@@ -6,6 +6,7 @@ import router from './router'
 import '@mdi/font/css/materialdesignicons.css'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
+import { useNotificationStore } from '@/stores/notification'
 
 //import pwa elements
 import {defineCustomElements} from '@ionic/pwa-elements/loader';
@@ -60,6 +61,15 @@ router.isReady().then(() => {
 }).catch((error) => {
   console.error('Router failed to initialize:', error)
   app.mount('#app')
+})
+
+// ✅ Notification; Start listening after user logs in
+supabase.auth.onAuthStateChange((event, session) => {
+  if (session?.user) {
+    const notificationStore = useNotificationStore()
+    notificationStore.fetchNotifications(session.user.id)
+    notificationStore.listenForNotifications(session.user.id)
+  }
 })
 
 
