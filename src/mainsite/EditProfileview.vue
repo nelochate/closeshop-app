@@ -23,6 +23,9 @@ const formData = ref({
   email: '',
 })
 
+// User address
+const userAddress = ref('')
+
 // Success message
 const showSuccessAndRedirect = (message) => {
   successMessage.value = message
@@ -54,6 +57,37 @@ const loadUserData = async () => {
     console.error('Error loading user data:', error)
   }
 }
+
+// Load user address
+const loadUserAddress = async () => {
+  try {
+    const { data: userData } = await supabase.auth.getUser()
+    if (!userData?.user) return
+
+    const userId = userData.user.id // Ensure this is a string
+
+    const { data: address, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('user_id', userId) // <-- pass UUID as string
+      .order('updated_at', { ascending: false })
+      .limit(1)
+      .single()
+
+    if (error) throw error
+
+    if (address) {
+      const a = address
+      userAddress.value = `${a.house_no || ''} ${a.street || ''}, ${a.building || ''}, ${a.purok || ''}, ${a.barangay || ''}, ${a.city || ''}`.replace(/(^[ ,]+)|([ ,]+$)/g, '').replace(/,{2,}/g, ',')
+    } else {
+      userAddress.value = 'No address set'
+    }
+  } catch (error) {
+    console.error('Error loading user address:', error)
+    userAddress.value = 'Failed to load address'
+  }
+}
+
 
 // Upload avatar
 async function uploadAvatar(file) {
@@ -145,7 +179,10 @@ const goBack = () => {
   router.replace({ name: 'profileview', query: { refreshed: Date.now() } })
 }
 
-onMounted(loadUserData)
+onMounted(() => {
+  loadUserData()
+  loadUserAddress()
+})
 
 const fullName = computed(() => {
   const first = formData.value.firstName || ''
@@ -157,7 +194,7 @@ const fullName = computed(() => {
 const maskedPhone = computed(() => {
   if (!formData.value.phone) return ''
   const phone = formData.value.phone
-  return phone.replace(/.(?=.{2})/g, '*')  // keep last 2 digits
+  return phone.replace(/.(?=.{2})/g, '*')
 })
 
 // Mask email (show first & last char + domain)
@@ -248,17 +285,19 @@ const maskedEmail = computed(() => {
                           <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
                         </template>
                       </v-list-item>
+
+                      <v-divider />
+
+                      <!-- Address -->
+                      <v-list-item class="list-item" @click="router.push({ name: 'my-address' })">
+                        <v-list-item-title class="font-medium">Address</v-list-item-title>
+                        <v-list-item-subtitle>{{ userAddress }}</v-list-item-subtitle>
+                        <template #append>
+                          <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
+                        </template>
+                      </v-list-item>
                     </v-list>
                   </v-card>
-                </v-col>
-
-                <!-- Redirect to Edit Address -->
-                <v-col cols="12" class="mt-4">
-                  <v-btn block color="indigo-darken-3" class="rounded-lg text-white font-medium"
-                    @click="router.push({ name: 'edit-address' })">
-                    <v-icon class="me-2">mdi-map-marker</v-icon>
-                    Edit Address
-                  </v-btn>
                 </v-col>
               </v-row>
             </v-form>
@@ -287,34 +326,26 @@ const maskedEmail = computed(() => {
 .app-bar {
   padding-top: 22px;
 }
-/* Modern font */
 .modern-font {
   font-family: 'Inter', 'Roboto', 'Helvetica Neue', sans-serif;
 }
-
-/* Cards */
 .v-card {
   margin-bottom: 20px;
   border-radius: 14px;
 }
-
 .avatar-card {
   background: linear-gradient(135deg, #5276b0, #354d7c);
   color: white;
   border-radius: 16px;
 }
-
 .info-card {
   border-radius: 16px;
   background-color: #fafafa;
 }
-
-/* Avatar */
 .avatar-container {
   position: relative;
   display: inline-block;
 }
-
 .edit-btn {
   position: absolute;
   bottom: -5px;
@@ -323,27 +354,21 @@ const maskedEmail = computed(() => {
   border-radius: 50%;
   transition: transform 0.2s ease;
 }
-
 .edit-btn:hover {
   transform: scale(1.1);
 }
-
-/* List Items */
 .list-card {
   background-color: #fff;
   border-radius: 12px;
 }
-
 .list-item {
   padding-top: 14px;
   padding-bottom: 14px;
 }
-
 .v-list-item-title {
   font-weight: 500;
   font-size: 15px;
 }
-
 .v-list-item-subtitle {
   font-size: 14px;
   color: #555;

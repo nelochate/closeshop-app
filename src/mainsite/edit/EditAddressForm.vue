@@ -1,31 +1,34 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import L from 'leaflet'
 import 'leaflet/dist/leaflet.css'
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthUserStore()
 
 const isLoading = ref(false)
 const showSuccess = ref(false)
 const successMessage = ref('')
+const isEdit = ref(false)
 
 const map = ref(null)
 const marker = ref(null)
+const addressId = ref(route.query.id || null)
 
 const address = ref({
-  region: '',
-  province: '',
-  city: 'Butuan City', // default since this is Butuan
-  barangay: '',
-  building: '',
+  recipient_name: '',
+  phone: '',
   street: '',
-  house_no: '',
-  postal: '',
+  city: 'Butuan City',
+  province: 'Agusan del Norte',
+  postal_code: '8600',
   purok: '',
+  barangay: '',
+  is_default: false,
 })
 
 const barangays = [
@@ -51,52 +54,77 @@ const barangays = [
   'Villa Kananga'
 ]
 
-// Load address from profile
+// Load address for editing
 const loadAddress = async () => {
   const { data: userData } = await supabase.auth.getUser()
-  if (userData?.user && authStore.profile) {
-    Object.assign(address.value, {
-      region: authStore.profile.region || '',
-      province: authStore.profile.province || '',
-      city: authStore.profile.city || 'Butuan City',
-      barangay: authStore.profile.barangay || '',
-      building: authStore.profile.building || '',
-      street: authStore.profile.street || '',
-      house_no: authStore.profile.house_no || '',
-      postal: authStore.profile.postal || '',
-      purok: authStore.profile.purok || '',
-    })
-    updateMap()
+  if (!userData?.user) return router.push({ name: 'login' })
+
+  if (addressId.value) {
+    const { data, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('id', addressId.value)
+      .eq('user_id', userData.user.id)
+      .single()
+
+    if (data) {
+      address.value = { ...data }
+      isEdit.value = true
+      updateMap()
+    } else if (error) {
+      console.error('Load address error:', error)
+    }
   }
 }
 
-// Save address to supabase
+// Save or update address
 const saveAddress = async () => {
   try {
     isLoading.value = true
     const { data: userData } = await supabase.auth.getUser()
     if (!userData?.user) throw new Error('User not found')
 
-    await supabase.from('profiles').update({
-      ...address.value,
-      updated_at: new Date().toISOString(),
-    }).eq('id', userData.user.id)
+    if (address.value.is_default) {
+      // Set all other addresses to false
+      await supabase.from('addresses')
+        .update({ is_default: false })
+        .eq('user_id', userData.user.id)
+    }
 
-    await authStore.hydrateFromSession()
-    successMessage.value = 'Address updated successfully!'
+    if (isEdit.value) {
+      await supabase
+        .from('addresses')
+        .update({
+          ...address.value,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', addressId.value)
+    } else {
+      await supabase
+        .from('addresses')
+        .insert([{
+          ...address.value,
+          user_id: userData.user.id,
+        }])
+    }
+
+    successMessage.value = isEdit.value
+      ? 'Address updated successfully!'
+      : 'Address added successfully!'
     showSuccess.value = true
-    setTimeout(() => router.replace({ name: 'profileview', query: { refreshed: Date.now() } }), 2000)
+
+    setTimeout(() => router.replace({ name: 'addresslist', query: { refreshed: Date.now() } }), 1500)
   } catch (e) {
-    successMessage.value = 'Failed to update address: ' + e.message
+    successMessage.value = 'Error: ' + e.message
     showSuccess.value = true
   } finally {
     isLoading.value = false
   }
 }
 
-// Update map preview using Nominatim API
+// Update map using Nominatim
 const updateMap = async () => {
-  const query = `${address.value.house_no} ${address.value.street} ${address.value.barangay}, ${address.value.city}, Philippines`
+  const query = `${address.value.street} ${address.value.barangay}, ${address.value.city}, Philippines`
   if (!address.value.barangay && !address.value.street) return
 
   try {
@@ -108,30 +136,24 @@ const updateMap = async () => {
       const lonNum = parseFloat(lon)
 
       map.value.setView([latNum, lonNum], 15)
-      if (marker.value) {
-        marker.value.setLatLng([latNum, lonNum])
-      } else {
-        marker.value = L.marker([latNum, lonNum]).addTo(map.value)
-      }
+      if (marker.value) marker.value.setLatLng([latNum, lonNum])
+      else marker.value = L.marker([latNum, lonNum]).addTo(map.value)
     }
   } catch (error) {
-    console.error('Error updating map:', error)
+    console.error('Map error:', error)
   }
 }
 
 onMounted(() => {
-  // Init Leaflet map
-  map.value = L.map('map').setView([8.9492, 125.5436], 13) // Default to Butuan
+  map.value = L.map('map').setView([8.9492, 125.5436], 13)
   L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
     attribution: '© OpenStreetMap contributors'
   }).addTo(map.value)
-
   loadAddress()
 })
 
-// Watch changes to address fields and update map
 watch(
-  () => [address.value.street, address.value.barangay, address.value.house_no],
+  () => [address.value.street, address.value.barangay],
   () => updateMap()
 )
 </script>
@@ -140,7 +162,7 @@ watch(
   <v-app>
     <v-app-bar flat density="comfortable" color="#3f83c7">
       <v-btn icon @click="router.back()"><v-icon>mdi-arrow-left</v-icon></v-btn>
-      <v-toolbar-title>Edit Address</v-toolbar-title>
+      <v-toolbar-title>{{ isEdit ? 'Edit Address' : 'Add New Address' }}</v-toolbar-title>
     </v-app-bar>
 
     <v-main>
@@ -158,25 +180,29 @@ watch(
             <v-form @submit.prevent="saveAddress">
               <v-row>
                 <v-col cols="12">
+                  <v-text-field v-model="address.recipient_name" label="Recipient Name" variant="outlined" />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-text-field v-model="address.phone" label="Phone Number" variant="outlined" />
+                </v-col>
+
+                <v-col cols="12">
                   <v-text-field v-model="address.purok" label="Purok" variant="outlined" />
                 </v-col>
+
                 <v-col cols="12">
                   <v-select v-model="address.barangay" :items="barangays" label="Barangay" variant="outlined" />
                 </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="address.building" label="Building No." variant="outlined" />
-                </v-col>
+
                 <v-col cols="12">
                   <v-text-field v-model="address.street" label="Street" variant="outlined" />
                 </v-col>
+
                 <v-col cols="12">
-                  <v-text-field v-model="address.house_no" label="House No." variant="outlined" />
-                </v-col>
-                <v-col cols="12">
-                  <v-text-field v-model="address.postal" label="Postal Code" variant="outlined" />
+                  <v-switch v-model="address.is_default" label="Set as default address" color="primary" />
                 </v-col>
 
-                <!-- Leaflet Map Preview -->
                 <v-col cols="12">
                   <div id="map"></div>
                 </v-col>
@@ -184,7 +210,7 @@ watch(
                 <v-col cols="12" class="text-right">
                   <v-btn type="submit" color="primary" size="large">
                     <v-icon class="me-2">mdi-check</v-icon>
-                    {{ isLoading ? 'Saved' : 'Save Address' }}
+                    {{ isLoading ? 'Saving...' : (isEdit ? 'Save Changes' : 'Save Address') }}
                   </v-btn>
                 </v-col>
               </v-row>
