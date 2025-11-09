@@ -41,11 +41,18 @@ const userIcon = L.icon({
   iconAnchor: [12, 41],
 })
 
-const shopIcon = L.icon({
+const registeredShopIcon = L.icon({
   iconUrl:
     'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
+})
+
+const unregisteredShopIcon = L.icon({
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
+  iconSize: [18, 30], // smaller than registered shops
+  iconAnchor: [9, 30],
 })
 
 /* -------------------- CACHE LOCATION -------------------- */
@@ -209,9 +216,11 @@ const plotShops = () => {
     const distanceKm = getDistanceInKm(userLat, userLng, lat, lng)
     ;(shop as any).distanceKm = distanceKm
 
-    const marker = L.marker([lat, lng], { icon: shopIcon, title: shop.business_name }).addTo(
-      map.value!,
-    )
+    const marker = L.marker([lat, lng], {
+      icon: registeredShopIcon,
+      title: shop.business_name,
+    }).addTo(map.value!)
+
     ;(marker as any).shopId = shop.id
     ;(marker as any).distanceKm = distanceKm
 
@@ -485,46 +494,42 @@ const onSearchKeydown = (e: KeyboardEvent) => {
 const fetchNearbyUnregisteredShops = async (lat: number, lon: number) => {
   try {
     const res = await fetch(
-      `https://api.geoapify.com/v2/places?categories=shop&filter=circle:${lon},${lat},5000&apiKey=${GEOAPIFY_API_KEY}`
-    );
-    const data = await res.json();
-    return data.features || [];
+      `https://api.geoapify.com/v2/places?categories=shop&filter=circle:${lon},${lat},5000&apiKey=${GEOAPIFY_API_KEY}`,
+    )
+    const data = await res.json()
+    return data.features || []
   } catch (err) {
-    console.error('Failed to fetch unregistered shops:', err);
-    return [];
+    console.error('Failed to fetch unregistered shops:', err)
+    return []
   }
-};
+}
 const plotUnregisteredShops = (places: any[]) => {
   for (const place of places) {
-    const lat = place.geometry.coordinates[1];
-    const lon = place.geometry.coordinates[0];
+    const lat = place.geometry.coordinates[1]
+    const lon = place.geometry.coordinates[0]
     const marker = L.marker([lat, lon], {
-      icon: L.icon({
-        iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
-        iconSize: [25, 41],
-        iconAnchor: [12, 41],
-      }),
+      icon: unregisteredShopIcon,
       title: place.properties.name || 'Unregistered Shop',
-    }).addTo(map.value!);
+    }).addTo(map.value!)
 
     marker.bindPopup(`
       <div style="text-align:center;">
         <p><strong>${place.properties.name || 'Unregistered Shop'}</strong></p>
         <p style="margin:2px 0; font-size:14px;">${place.properties.address_line1 || ''}</p>
       </div>
-    `);
+    `)
 
-    shopMarkers.push(marker); // you can separate registered/unregistered markers if you want
+    shopMarkers.push(marker) // still add to the same array
   }
-};
+}
+
 const updateShops = async () => {
-  await fetchShops(); // existing registered shops
+  await fetchShops() // existing registered shops
   if (latitude.value && longitude.value) {
-    const unregistered = await fetchNearbyUnregisteredShops(latitude.value, longitude.value);
-    plotUnregisteredShops(unregistered);
+    const unregistered = await fetchNearbyUnregisteredShops(latitude.value, longitude.value)
+    plotUnregisteredShops(unregistered)
   }
-};
-
+}
 </script>
 <template>
   <v-app>
