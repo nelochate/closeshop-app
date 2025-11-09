@@ -186,7 +186,7 @@ const saveAddress = async () => {
   }
 }
 
-// --- Update Map (with fallback to direct API) ---
+// --- Update Map (using server proxy) ---
 const updateMap = async () => {
   if (!map.value) {
     console.warn('Map not initialized')
@@ -200,7 +200,6 @@ const updateMap = async () => {
   const city = address.value.city || 'Butuan City'
 
   if (!barangay && !street) {
-    // Reset to default view if no address
     map.value.setView([8.9492, 125.5436], 13)
     if (marker.value) {
       map.value.removeLayer(marker.value)
@@ -212,31 +211,17 @@ const updateMap = async () => {
   const query = `${house} ${street} ${purok} ${barangay}, ${city}, Philippines`.trim()
 
   try {
-    let results = []
+    // Use your proxy endpoint
+    const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
 
-    // Try proxy first, then fallback to direct API
-    try {
-      const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
-      if (res.ok) {
-        results = await res.json()
-      } else {
-        throw new Error('Proxy failed')
-      }
-    } catch (proxyError) {
-      console.warn('Proxy failed, trying direct API:', proxyError)
-      // Fallback to direct Nominatim API with proper headers
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=1`,
-        {
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'YourApp/1.0 (your-email@example.com)'
-          }
-        }
-      )
-      if (res.ok) {
-        results = await res.json()
-      }
+    if (!res.ok) {
+      throw new Error(`HTTP error! status: ${res.status}`)
+    }
+
+    const results = await res.json()
+
+    if (results.error) {
+      throw new Error(results.error)
     }
 
     if (results.length > 0) {
@@ -255,13 +240,16 @@ const updateMap = async () => {
     }
   } catch (error) {
     console.error('Error updating map:', error)
+    snackbarMessage.value = 'Map update failed: ' + error.message
+    showMapSnackbar.value = true
   }
 }
 
-// --- Detect user location ---
+// --- Detect user location (using proxy) ---
+// --- Enhanced Current Location Detection with Specifics ---
 const useCurrentLocation = async () => {
   try {
-    snackbarMessage.value = 'Getting your location...'
+    snackbarMessage.value = 'Detecting your precise location...'
     showMapSnackbar.value = true
     isLoading.value = true
 
@@ -270,74 +258,126 @@ const useCurrentLocation = async () => {
     if (permissions.location !== 'granted') {
       const request = await Geolocation.requestPermissions()
       if (request.location !== 'granted') {
-        throw new Error('Location permission denied')
+        throw new Error('Location permission denied. Please enable location services.')
       }
     }
 
+    // Get high-precision coordinates
     const coords = await Geolocation.getCurrentPosition({
       enableHighAccuracy: true,
-      timeout: 10000
+      timeout: 15000,
+      maximumAge: 0
     })
-
+    
     const lat = coords.coords.latitude
     const lng = coords.coords.longitude
+    const accuracy = coords.coords.accuracy
 
-    // Update map view
-    map.value.setView([lat, lng], 15)
+    console.log('Precise coordinates obtained:', { lat, lng, accuracy: accuracy + ' meters' })
+
+    // Update map view with precise location
+    map.value.setView([lat, lng], 18) // Zoom to building level
     if (marker.value) {
       marker.value.setLatLng([lat, lng])
     } else {
       marker.value = L.marker([lat, lng]).addTo(map.value)
+      
+      // Add accuracy circle
+      L.circle([lat, lng], {
+        radius: accuracy,
+        color: 'blue',
+        fillColor: '#1e88e5',
+        fillOpacity: 0.1,
+        weight: 1
+      }).addTo(map.value)
     }
 
-    // Reverse geocode
+    // Enhanced reverse geocoding with specific details
     try {
-      const res = await fetch(
-        `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&addressdetails=1`,
-        {
-          headers: {
-            'Accept': 'application/json',
-            'User-Agent': 'YourApp/1.0 (your-email@example.com)'
-          }
-        }
-      )
+      console.log('Calling enhanced reverse geocoding API...')
+      const res = await fetch(`http://localhost:3000/api/reverse-geocode?lat=${lat}&lon=${lng}`)
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`)
+      }
+      
+      const result = await res.json()
+      console.log('Enhanced address result:', result)
+      
+      if (result.error) {
+        throw new Error(result.error)
+      }
 
-      if (res.ok) {
-        const result = await res.json()
-        if (result.address) {
-          const addr = result.address
-
-          // Update address fields with geocoded data
-          address.value.street = addr.road || addr.footway || ''
-          address.value.barangay = addr.suburb || addr.neighbourhood || addr.village || ''
-          address.value.city = addr.city || addr.town || addr.municipality || 'Butuan City'
-          address.value.province = addr.state || 'Agusan del Norte'
-          address.value.region = addr.region || 'Caraga'
-          address.value.postal_code = addr.postcode || '8600'
-          address.value.house_no = addr.house_number || ''
-
-          snackbarMessage.value = 'Location detected successfully!'
+      if (result.address) {
+        const addr = result.address
+        
+        // Build a detailed location description
+        let locationDescription = ''
+        if (addr.university) locationDescription += `${addr.university}, `
+        if (addr.building) locationDescription += `${addr.building}, `
+        if (addr.specific_place) locationDescription += `${addr.specific_place}, `
+        
+        // Update address fields with enhanced details
+        address.value.recipient_name = '' // Clear for user to fill
+        address.value.phone = '' // Clear for user to fill
+        address.value.house_no = addr.house_number || ''
+        address.value.building = addr.building || addr.specific_place || ''
+        address.value.street = addr.road || ''
+        address.value.purok = addr.purok || ''
+        address.value.barangay = addr.suburb || addr.neighbourhood || addr.village || ''
+        address.value.city = addr.city || 'Butuan City'
+        address.value.province = addr.state || 'Agusan del Norte'
+        address.value.region = addr.region || 'Caraga'
+        address.value.postal_code = addr.postcode || '8600'
+        
+        // Set detailed success message
+        if (addr.university) {
+          snackbarMessage.value = `📍 Detected: ${addr.university}`
+        } else if (addr.building) {
+          snackbarMessage.value = `📍 Detected: ${addr.building}`
+        } else if (addr.specific_place) {
+          snackbarMessage.value = `📍 Detected: ${addr.specific_place}`
         } else {
-          snackbarMessage.value = 'Location detected but address details not found'
+          snackbarMessage.value = '📍 Location detected successfully!'
         }
+        
+        // Additional info for debugging
+        console.log('Enhanced address details:', {
+          university: addr.university,
+          building: addr.building,
+          purok: addr.purok,
+          specific_place: addr.specific_place,
+          full_address: addr.full_display_name
+        })
+
       } else {
-        throw new Error('Reverse geocoding failed')
+        snackbarMessage.value = '📍 Location detected but detailed address not found'
       }
     } catch (geocodeError) {
-      console.error('Reverse geocoding error:', geocodeError)
-      snackbarMessage.value = 'Location detected but address lookup failed'
+      console.error('Enhanced reverse geocoding error:', geocodeError)
+      snackbarMessage.value = '📍 Location detected but detailed address lookup failed. Please fill address manually.'
+      
+      // Fallback: At least set the coordinates
+      address.value.building = `Near coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
     }
 
     showMapSnackbar.value = true
   } catch (error) {
-    console.error('Location error:', error)
-    snackbarMessage.value = 'Unable to detect location: ' + (error.message || 'Unknown error')
+    console.error('Location detection error:', error)
+    
+    if (error.message.includes('permission')) {
+      snackbarMessage.value = '📍 Location access denied. Please enable location permissions in your browser/app settings.'
+    } else if (error.message.includes('timeout')) {
+      snackbarMessage.value = '📍 Location detection timeout. Please try again in an area with better GPS signal.'
+    } else {
+      snackbarMessage.value = '📍 Unable to detect location: ' + (error.message || 'Please try again')
+    }
+    
     showMapSnackbar.value = true
   } finally {
     isLoading.value = false
   }
 }
-
 // --- Lifecycle & Watchers ---
 onMounted(() => {
   // Initialize map with error handling
@@ -461,7 +501,7 @@ watch(addressMode, (newMode) => {
                 <v-col cols="12">
                   <v-text-field
                     v-model="address.building"
-                    label="Building No."
+                    label="Building"
                     variant="outlined"
                   />
                 </v-col>
@@ -540,20 +580,21 @@ watch(addressMode, (newMode) => {
               </v-col>
               <v-col cols="12">
                 <v-text-field
-                  v-model="address.street"
-                  label="Street"
-                  variant="outlined"
-                  readonly
-                />
-              </v-col>
-              <v-col cols="12">
-                <v-text-field
                   v-model="address.barangay"
                   label="Barangay"
                   variant="outlined"
                   readonly
                 />
               </v-col>
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.street"
+                  label="Street"
+                  variant="outlined"
+                  readonly
+                />
+              </v-col>
+
               <v-col cols="12">
                 <v-text-field
                   v-model="address.city"
@@ -591,6 +632,9 @@ watch(addressMode, (newMode) => {
             </v-btn>
           </v-card-text>
         </v-card>
+
+
+        
       </v-container>
     </v-main>
   </v-app>

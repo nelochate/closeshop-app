@@ -76,61 +76,118 @@ onMounted(loadAddresses)
       </v-snackbar>
 
       <v-container>
-        <v-row>
-          <v-col cols="12" v-for="addr in addresses" :key="addr.id">
-            <v-card class="mb-3" outlined>
-              <v-card-text>
-                <div class="d-flex justify-space-between align-center">
-                  <div>
-                    <div class="font-medium">{{ addr.recipient_name }} | {{ addr.phone }}</div>
-                    <div>
-                      {{ addr.purok }}, {{ addr.barangay }}, {{ addr.street }},
-                      {{ addr.building }}, {{ addr.house_no }}, {{ addr.city }}
+        <!-- Saved Addresses List -->
+        <div v-if="addresses.length > 0">
+          <div class="text-h6 font-weight-bold mb-3">Your Saved Addresses</div>
+          
+          <v-row>
+            <v-col cols="12" v-for="addr in addresses" :key="addr.id">
+              <v-card class="mb-3" :class="{ 'border-primary': addr.is_default }" variant="outlined">
+                <v-card-text>
+                  <div class="d-flex justify-space-between align-start">
+                    <div class="flex-grow-1">
+                      <!-- Default Badge -->
+                      <div v-if="addr.is_default" class="d-flex align-center mb-2">
+                        <v-icon color="primary" small class="me-1">mdi-star</v-icon>
+                        <span class="text-primary font-weight-bold text-caption">DEFAULT ADDRESS</span>
+                      </div>
+                      
+                      <!-- Recipient Info -->
+                      <div class="font-weight-medium text-body-1 mb-1">
+                        {{ addr.recipient_name || 'No name provided' }} 
+                        <span v-if="addr.phone">| {{ addr.phone }}</span>
+                      </div>
+                      
+                      <!-- Address Details - Display exactly what was saved -->
+                      <div class="text-body-2 mb-1">
+                        <span v-if="addr.house_no">{{ addr.house_no }}, </span>
+                        <span v-if="addr.building">{{ addr.building }}, </span>
+                        <span v-if="addr.street">{{ addr.street }}, </span>
+                        <span v-if="addr.purok">Purok {{ addr.purok }}, </span>
+                        <span class="font-weight-medium">{{ addr.barangay }}, </span>
+                        {{ addr.city }}
+                      </div>
+                      <div class="text-caption text-grey">
+                        {{ addr.province }}, {{ addr.postal_code }}
+                      </div>
                     </div>
-                    <div>{{ addr.province }}, {{ addr.postal_code }}</div>
-                    <div v-if="addr.is_default" class="text-primary font-medium">Default Address</div>
+                    
+                    <!-- Action Buttons -->
+                    <div class="d-flex flex-column align-end" style="gap: 8px;">
+                      <v-btn 
+                        icon 
+                        size="small" 
+                        color="primary" 
+                        variant="text"
+                        @click="editAddress(addr.id)"
+                      >
+                        <v-icon>mdi-pencil</v-icon>
+                      </v-btn>
+                      <v-btn 
+                        icon 
+                        size="small" 
+                        color="red" 
+                        variant="text"
+                        @click="deleteAddress(addr.id)"
+                      >
+                        <v-icon>mdi-delete</v-icon>
+                      </v-btn>
+                      <v-btn
+                        v-if="!addr.is_default"
+                        size="small"
+                        color="secondary"
+                        variant="text"
+                        @click="setDefaultAddress(addr.id)"
+                      >
+                        Set Default
+                      </v-btn>
+                    </div>
                   </div>
-                  <div class="d-flex flex-column align-end">
-                    <v-btn icon small color="primary" @click="editAddress(addr.id)">
-                      <v-icon>mdi-pencil</v-icon>
-                    </v-btn>
-                    <v-btn icon small color="red" @click="deleteAddress(addr.id)">
-                      <v-icon>mdi-delete</v-icon>
-                    </v-btn>
-                    <v-btn
-                      v-if="!addr.is_default"
-                      text
-                      small
-                      color="secondary"
-                      @click="setDefaultAddress(addr.id)"
-                    >
-                      Set as Default
-                    </v-btn>
-                  </div>
-                </div>
-              </v-card-text>
-            </v-card>
-          </v-col>
+                </v-card-text>
+              </v-card>
+            </v-col>
+          </v-row>
+        </div>
 
-          <v-col cols="12" class="mt-4">
-            <v-btn
-              block
-              color="primary"
-              class="rounded-lg text-white"
-              @click="router.push({ name: 'edit-address' })"
-            >
-              <v-icon class="me-2">mdi-plus</v-icon>
-              Add New Address
-            </v-btn>
-          </v-col>
-        </v-row>
+        <!-- Empty State -->
+        <div v-else class="text-center py-8">
+          <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-map-marker-off</v-icon>
+          <div class="text-h6 text-grey mb-2">No addresses saved yet</div>
+          <div class="text-body-2 text-grey mb-4">Add your first address to get started</div>
+        </div>
+
+        <!-- Add New Address Button -->
+        <v-col cols="12" class="mt-4">
+          <v-btn
+            block
+            color="primary"
+            class="rounded-lg text-white"
+            @click="router.push({ name: 'edit-address' })"
+            size="large"
+          >
+            <v-icon class="me-2">mdi-plus</v-icon>
+            Add New Address
+          </v-btn>
+        </v-col>
       </v-container>
     </v-main>
   </v-app>
 </template>
 
 <style scoped>
+.border-primary {
+  border: 2px solid rgb(63, 131, 199) !important;
+}
+
 .font-medium {
   font-weight: 500;
+}
+
+.v-card {
+  transition: all 0.3s ease;
+}
+
+.v-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 </style>
