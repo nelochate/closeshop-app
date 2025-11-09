@@ -132,9 +132,15 @@ const routes = [
   },
 
   {
+    path: '/my-address',
+    name: 'my-address',
+    component: () => import('@/mainsite/edit/MyAddressView.vue'),
+  },
+  {
     path: '/edit-address',
     name: 'edit-address',
-    component: () => import('@/mainsite/edit/EditAddressView.vue'),
+    component: () => import('@/mainsite/edit/EditAddressForm.vue'),
+    meta: { requiresAuth: true },
   },
 
   // ✅ Catch-all route
