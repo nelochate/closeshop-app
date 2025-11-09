@@ -1,28 +1,32 @@
-
-/*// server.js
+// server.js
 import express from 'express'
-import cors from 'cors'
 import fetch from 'node-fetch'
+import cors from 'cors'
 
 const app = express()
-app.use(cors())
+const PORT = 3000
 
-app.get('/api/reverse', async (req, res) => {
-  const { lat, lon } = req.query
-  if (!lat || !lon) return res.status(400).json({ error: 'Missing coordinates' })
+// Enable CORS for your frontend origin
+app.use(cors({ origin: 'http://localhost:5173' }))
+
+// Simple proxy route for Nominatim (OpenStreetMap)
+app.get('/api/geocode', async (req, res) => {
+  const query = req.query.q
+  if (!query) return res.status(400).json({ error: 'Missing query parameter' })
 
   try {
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`,
-      { headers: { 'User-Agent': 'closeshop-dev/1.0 (example@email.com)' } }
-    )
+    const response = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`, {
+      headers: { 'User-Agent': 'YourAppName/1.0 (your@email.com)' }
+    })
     const data = await response.json()
     res.json(data)
-  } catch (err) {
-    console.error(err)
-    res.status(500).json({ error: 'Failed to fetch reverse geocode' })
+  } catch (error) {
+    console.error('Proxy error:', error)
+    res.status(500).json({ error: 'Server error' })
   }
 })
 
-app.listen(3000, () => console.log('✅ Proxy server running on http://localhost:3000'))
-*/
+// Start the server
+app.listen(PORT, () => {
+  console.log(`✅ Proxy server running on http://localhost:${PORT}`)
+})

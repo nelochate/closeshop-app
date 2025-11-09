@@ -11,7 +11,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint . --fix",
-    "format": "prettier --write src/"
+    "format": "prettier --write src/",
+    "proxy": "node server.js"
   },
   "dependencies": {
     "@capacitor/android": "^7.4.4",
@@ -27,6 +28,8 @@
     "@dataconnect/generated": "file:src/dataconnect-generated",
     "@ionic/pwa-elements": "^3.3.0",
     "@supabase/supabase-js": "^2.57.4",
+    "cors": "^2.8.5",
+    "express": "^5.1.0",
     "leaflet": "^1.9.4",
     "leaflet-control-geocoder": "^3.3.0",
     "leaflet-geosearch": "^4.2.1",
