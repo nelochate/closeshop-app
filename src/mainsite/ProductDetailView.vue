@@ -31,6 +31,9 @@ const varietyImages = ref([]) // store selected variety images
 const productImgRef = ref(null)
 const cartIconRef = ref(null)
 
+// Dialog selections
+const dialogSelectedSize = ref(null)
+const dialogSelectedVariety = ref(null)
 
 // Get the main image
 const mainImage = (imgs) => {
@@ -106,44 +109,77 @@ onMounted(async () => {
   }
 
   // Auto-select if only one option
-  if (product.value.sizes?.length === 1) {
+  if (product.value?.sizes?.length === 1) {
     selectedSize.value = product.value.sizes[0]
   }
 
-  if (product.value.varieties?.length === 1) {
+  if (product.value?.varieties?.length === 1) {
     selectedVariety.value = product.value.varieties[0]
   }
 })
 
-//lahi napd ni
 const confirmAddToCart = async () => {
   if (!product.value) return
+
+  // Use dialog selections if available, otherwise use main selections
+  const finalSize = dialogSelectedSize.value || selectedSize.value
+  const finalVariety = dialogSelectedVariety.value || selectedVariety.value
+
+  if (product.value.has_sizes && !finalSize) {
+    alert('Please select a size')
+    return
+  }
+
+  if (product.value.has_varieties && !finalVariety) {
+    alert('Please select a variety')
+    return
+  }
+
   try {
+    // QUICK FIX: Pass only the product ID string instead of object
     await cart.addToCart(product.value.id, quantity.value)
     animateToCart()
     showAddToCart.value = false
     quantity.value = 1
-    selectedSize.value = null
-    selectedVariety.value = null
+    // Reset dialog selections
+    dialogSelectedSize.value = null
+    dialogSelectedVariety.value = null
   } catch (err) {
     console.error('confirmAddToCart error:', err)
-    alert('❌ Failed to add to cart')
+    alert('❌ Failed to add to cart: ' + (err.message || 'Unknown error'))
   }
 }
 
 const goToCart = async () => {
   if (!product.value) return
   try {
+    // QUICK FIX: Pass only the product ID string instead of object
     await cart.addToCart(product.value.id, 1)
     router.push('/cartview')
   } catch (err) {
     console.error('addToCart error:', err)
+    alert('Failed to add to cart: ' + (err.message || 'Unknown error'))
   }
 }
 
 const checkoutNow = async () => alert('Proceed to checkout!')
-const chatNow = async () => alert('Chat with seller!')
-const shareProduct = async () => alert('Share product!')
+const shareProduct = async () => {
+  if (navigator.share) {
+    try {
+      await navigator.share({
+        title: product.value.prod_name,
+        text: product.value.prod_description,
+        url: window.location.href,
+      })
+    } catch (err) {
+      console.log('Error sharing:', err)
+    }
+  } else {
+    // Fallback: copy to clipboard
+    navigator.clipboard.writeText(window.location.href)
+    alert('Product link copied to clipboard!')
+  }
+}
 
 // Animation
 const animateToCart = () => {
@@ -194,7 +230,6 @@ const goToChat = () => {
 }
 
 //sample rating
-
 const reviews = ref([
   {
     id: 1,
@@ -235,11 +270,10 @@ const previewVarietyImages = (images, index = 0) => {
   openVarietyDialog.value = true
 }
 
-// to store dialog selections
+// Check if current user is the shop owner - FIXED VERSION
 const isOwner = computed(() => {
-  return (
-    user.value && product.value?.shop?.owner_id && user.value.id === product.value.shop.owner_id
-  )
+  if (!user.value || !product.value?.shop?.owner_id) return false
+  return user.value.id === product.value.shop.owner_id
 })
 
 const generateTransactionNumber = () => {
@@ -250,13 +284,25 @@ const generateTransactionNumber = () => {
 
 // to store dialog selection
 const buyNow = async () => {
-  if (!user.value) return alert('Please log in first.')
-  if (!product.value) return alert('Product not loaded')
+  if (!user.value) {
+    alert('Please log in first.')
+    return
+  }
 
-  if (product.value.has_sizes && !selectedSize.value)
-    return alert('Please select a size')
-  if (product.value.has_varieties && !selectedVariety.value)
-    return alert('Please select a variety')
+  if (!product.value) {
+    alert('Product not loaded')
+    return
+  }
+
+  if (product.value.has_sizes && !selectedSize.value) {
+    alert('Please select a size')
+    return
+  }
+
+  if (product.value.has_varieties && !selectedVariety.value) {
+    alert('Please select a variety')
+    return
+  }
 
   try {
     const transactionNumber = generateTransactionNumber()
@@ -285,6 +331,8 @@ const buyNow = async () => {
         product_id: product.value.id,
         quantity: 1,
         price: product.value.price,
+        selected_size: selectedSize.value,
+        selected_variety: selectedVariety.value?.name || selectedVariety.value,
       })
       .select()
 
@@ -310,7 +358,25 @@ const buyNow = async () => {
   }
 }
 
-
+// Add to Cart Dialog
+const addToCartDialog = computed(() => {
+  return {
+    value: showAddToCart.value,
+    product: product.value,
+    quantity: quantity.value,
+    selectedSize: dialogSelectedSize.value,
+    selectedVariety: dialogSelectedVariety.value,
+    onConfirm: confirmAddToCart,
+    onClose: () => {
+      showAddToCart.value = false
+      dialogSelectedSize.value = null
+      dialogSelectedVariety.value = null
+    },
+    'onUpdate:selectedSize': (val) => { dialogSelectedSize.value = val },
+    'onUpdate:selectedVariety': (val) => { dialogSelectedVariety.value = val },
+    'onUpdate:quantity': (val) => { quantity.value = val }
+  }
+})
 </script>
 
 <template>
@@ -371,6 +437,7 @@ const buyNow = async () => {
           <!-- Fallback: Single Image -->
           <v-img
             v-else
+            ref="productImgRef"
             :src="mainImage(product.main_img_urls)"
             class="product-img mb-4"
             contain
@@ -460,6 +527,7 @@ const buyNow = async () => {
 
         <!-- Shop Info -->
         <v-card
+          v-if="product.shop"
           flat
           class="shop-card pa-2 d-flex align-center mb-4"
           @click="goToShop(product.shop.id)"
@@ -537,36 +605,113 @@ const buyNow = async () => {
           </v-btn>
         </v-card-actions>
       </v-card>
-    </v-main>
 
-    <!-- Bottom Nav -->
-    <v-bottom-navigation absolute app class="bottom-nav">
-      <v-row class="w-full pa-0 ma-0" no-gutters>
-        <!-- Only show bottom buttons if NOT owner -->
-        <template v-if="!isOwner">
-          <!-- Chat Now -->
-          <v-col cols="3.5" class="pa-0">
-            <v-btn block class="bottom-btn chat-now-btn" @click="goToChat(product.shop.owner_id)">
-              <v-icon left size="20">mdi-chat-outline</v-icon>
-              Chat Now
+      <!-- Add to Cart Dialog -->
+      <v-dialog v-model="showAddToCart" max-width="500">
+        <v-card>
+          <v-card-title class="d-flex justify-space-between align-center">
+            <span>Add to Cart</span>
+            <v-btn icon @click="showAddToCart = false">
+              <v-icon>mdi-close</v-icon>
             </v-btn>
-          </v-col>
+          </v-card-title>
 
-          <!-- Add to Cart -->
-          <v-col cols="3.5" class="pa-0">
-            <v-btn block class="bottom-btn cart-btn" @click="showAddToCart = true">
-              <v-icon left size="20">mdi-cart-outline</v-icon>
+          <v-card-text>
+            <!-- Quantity Selector -->
+            <div class="mb-4">
+              <p class="font-weight-medium mb-2">Quantity:</p>
+              <div class="d-flex align-center">
+                <v-btn icon @click="quantity > 1 ? quantity-- : null" :disabled="quantity <= 1">
+                  <v-icon>mdi-minus</v-icon>
+                </v-btn>
+                <span class="mx-4">{{ quantity }}</span>
+                <v-btn icon @click="quantity++" :disabled="quantity >= product.stock">
+                  <v-icon>mdi-plus</v-icon>
+                </v-btn>
+                <span class="ml-2 text-caption text-grey">Stock: {{ product.stock }}</span>
+              </div>
+            </div>
+
+            <!-- Sizes in Dialog -->
+            <div v-if="product.sizes && product.sizes.length" class="mb-4">
+              <p class="font-weight-medium mb-2">Size:</p>
+              <v-btn-toggle v-model="dialogSelectedSize" mandatory class="flex-wrap" style="gap: 6px">
+                <v-btn
+                  v-for="size in product.sizes"
+                  :key="size"
+                  :value="size"
+                  variant="outlined"
+                  class="ma-1 rounded-pill text-capitalize"
+                  color="primary"
+                  size="small"
+                >
+                  {{ size }}
+                </v-btn>
+              </v-btn-toggle>
+            </div>
+
+            <!-- Varieties in Dialog -->
+            <div v-if="product.varieties && product.varieties.length" class="mb-4">
+              <p class="font-weight-medium mb-2">Variety:</p>
+              <v-btn-toggle v-model="dialogSelectedVariety" mandatory class="flex-wrap">
+                <v-btn
+                  v-for="variety in product.varieties"
+                  :key="variety.name"
+                  :value="variety"
+                  variant="outlined"
+                  class="ma-1 pa-2 rounded-pill d-flex flex-column align-center"
+                  color="primary"
+                  style="min-width: 80px; max-width: 120px"
+                >
+                  <v-img
+                    v-if="variety.images && variety.images.length"
+                    :src="variety.images[0]"
+                    width="40"
+                    height="40"
+                    class="mb-1 rounded-circle"
+                    cover
+                  />
+                  <span class="text-caption font-weight-medium">{{ variety.name }}</span>
+                </v-btn>
+              </v-btn-toggle>
+            </div>
+          </v-card-text>
+
+          <v-card-actions>
+            <v-btn block color="primary" @click="confirmAddToCart" :disabled="!dialogSelectedSize && product.has_sizes || !dialogSelectedVariety && product.has_varieties">
               Add to Cart
             </v-btn>
-          </v-col>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+    </v-main>
 
-          <!-- Buy Now -->
-          <v-col cols="5" class="pa-0">
-            <v-btn block class="bottom-btn buy-now-btn" color="primary" @click="buyNow">
-              Buy Now
-            </v-btn>
-          </v-col>
-        </template>
+    <!-- Bottom Nav - ALWAYS VISIBLE FOR ALL PRODUCTS -->
+    <v-bottom-navigation class="bottom-nav" height="65" fixed>
+      <v-row class="w-full pa-0 ma-0" no-gutters>
+        <!-- ALWAYS SHOW THESE BUTTONS FOR ALL USERS -->
+        <!-- Chat Now -->
+        <v-col cols="4" class="pa-0">
+          <v-btn block class="bottom-btn chat-now-btn" @click="goToChat" :disabled="!product?.shop?.owner_id">
+            <v-icon left size="20">mdi-chat-outline</v-icon>
+            Chat Now
+          </v-btn>
+        </v-col>
+
+        <!-- Add to Cart -->
+        <v-col cols="4" class="pa-0">
+          <v-btn block class="bottom-btn cart-btn" @click="showAddToCart = true" :disabled="!product">
+            <v-icon left size="20">mdi-cart-outline</v-icon>
+            Add to Cart
+          </v-btn>
+        </v-col>
+
+        <!-- Buy Now -->
+        <v-col cols="4" class="pa-0">
+          <v-btn block class="bottom-btn buy-now-btn" color="primary" @click="buyNow" :disabled="!product">
+            Buy Now
+          </v-btn>
+        </v-col>
       </v-row>
     </v-bottom-navigation>
   </v-app>
@@ -648,31 +793,19 @@ const buyNow = async () => {
 
 /* Bottom Nav */
 .bottom-nav {
-  height: 65px;
-  padding: 0;
-  background-color: #ffffff;
-  box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
-  border-top-left-radius: 0;
-  border-top-right-radius: 0;
-  position: fixed;
+  position: fixed !important;
   bottom: 0;
-  width: 100%;
-  z-index: 100;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background-color: #ffffff !important;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  border-top: 1px solid #eee;
 }
 
-/* Bottom Buttons Modern Style */
 .bottom-btn {
-  height: 100%;
-  font-weight: 600;
-  text-transform: none;
-  box-shadow: none;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  font-size: 0.9rem;
-  border-radius: 0px;
-  transition: transform 0.1s ease-in-out;
+  height: 65px !important;
+  border-radius: 0 !important;
 }
 
 .bottom-btn:hover {
