@@ -69,7 +69,9 @@ async function setupPushNotifications() {
       console.log('✅ Push token (Capacitor):', token.value)
 
       // Optional: Save token to Supabase for your backend
-      const { data: { user } } = await supabase.auth.getUser()
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
       if (user) {
         const { error } = await supabase
           .from('user_fcm_tokens')
@@ -125,7 +127,9 @@ async function fetchShops() {
   try {
     const { data, error } = await supabase
       .from('shops')
-      .select('id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region')
+      .select(
+        'id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region',
+      )
       .order('business_name')
 
     if (error) throw error
@@ -211,8 +215,36 @@ const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
 const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
-</script>
 
+//for embedded survey
+const showSurvey = ref(false)
+const hasAnsweredSurvey = ref(false)
+const showSurveyHint = ref(false)
+
+function openSurvey() {
+  showSurvey.value = true
+}
+
+function markSurveyAnswered() {
+  hasAnsweredSurvey.value = true
+  localStorage.setItem('surveyAnswered', 'true')
+  showSurvey.value = false
+}
+
+onMounted(() => {
+  const saved = localStorage.getItem('surveyAnswered')
+  if (saved === 'true') hasAnsweredSurvey.value = true
+
+  // 💬 Show the hint 3 seconds after loading (only if not answered)
+  if (!hasAnsweredSurvey.value) {
+    setTimeout(() => {
+      showSurveyHint.value = true
+      // Hide automatically after 8 seconds
+      setTimeout(() => (showSurveyHint.value = false), 8000)
+    }, 3000)
+  }
+})
+</script>
 
 <template>
   <v-app>
@@ -220,16 +252,26 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
       <!-- 🔎 Search + Notification -->
       <v-sheet class="hero">
         <div class="hero-row">
-          <v-text-field v-model="searchQuery" class="search-field" variant="solo" rounded="pill" hide-details clearable
-            density="comfortable" placeholder="Search products..." prepend-inner-icon="mdi-magnify"
-            append-inner-icon="mdi-earth" @focus="goToSearch" @input="updateSearch" />
+          <v-text-field
+            v-model="searchQuery"
+            class="search-field"
+            variant="solo"
+            rounded="pill"
+            hide-details
+            clearable
+            density="comfortable"
+            placeholder="Search products..."
+            prepend-inner-icon="mdi-magnify"
+            append-inner-icon="mdi-earth"
+            @focus="goToSearch"
+            @input="updateSearch"
+          />
           <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
             <v-icon size="22">mdi-bell-outline</v-icon>
           </v-btn>
         </div>
       </v-sheet>
       <v-container class="py-4" style="max-width: 720px">
-
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
           <h3 class="section-title">Nearby Stores</h3>
@@ -238,7 +280,12 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
         <div class="scroll-row">
           <template v-if="loading">
-            <v-skeleton-loader v-for="i in 4" :key="'near-skel-' + i" type="image" class="item-card" />
+            <v-skeleton-loader
+              v-for="i in 4"
+              :key="'near-skel-' + i"
+              type="image"
+              class="item-card"
+            />
           </template>
           <template v-else-if="nearby.length === 0">
             <div class="empty-card">
@@ -266,7 +313,12 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
         <template v-if="loading">
           <div class="product-grid">
-            <v-skeleton-loader v-for="i in 6" :key="'prod-skel-' + i" type="image" class="product-card" />
+            <v-skeleton-loader
+              v-for="i in 6"
+              :key="'prod-skel-' + i"
+              type="image"
+              class="product-card"
+            />
           </div>
         </template>
         <template v-else-if="products.length === 0">
@@ -277,7 +329,12 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
         </template>
         <template v-else>
           <div class="product-grid">
-            <div v-for="item in products" :key="item.id" class="product-card" @click="goToProduct(item.id)">
+            <div
+              v-for="item in products"
+              :key="item.id"
+              class="product-card"
+              @click="goToProduct(item.id)"
+            >
               <v-img :src="item.img" class="product-img" cover />
               <div class="product-info">
                 <div class="product-title">{{ item.title }}</div>
@@ -293,6 +350,51 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
         </v-alert>
       </v-container>
     </v-main>
+    <!-- 💬 Floating Survey Button -->
+    <!-- 💬 Floating Survey Button with Hint -->
+    <div v-if="!hasAnsweredSurvey" class="floating-survey-wrapper">
+      <!-- Tooltip Cloud -->
+      <transition name="fade">
+        <div v-if="showSurveyHint" class="survey-hint">
+          💭 Please answer this survey once done exploring the app!
+        </div>
+      </transition>
+
+      <!-- Button -->
+      <v-btn
+        class="floating-survey-btn"
+        icon
+        color="primary"
+        size="large"
+        elevation="8"
+        @click="openSurvey"
+      >
+        <v-icon>mdi-comment-question-outline</v-icon>
+      </v-btn>
+    </div>
+
+    <!-- 🧾 Survey Modal -->
+    <v-dialog v-model="showSurvey" width="700" persistent scrollable>
+      <v-card>
+        <v-card-title class="d-flex justify-space-between align-center">
+          <span class="text-h6">Customer Feedback Survey</span>
+          <v-btn icon="mdi-close" variant="text" @click="showSurvey = false" />
+        </v-card-title>
+        <v-card-text style="padding: 0">
+          <iframe
+            src="https://docs.google.com/forms/d/e/1FAIpQLScgP_QJBFQNeH42g5DKTkDusG-9EMru1XZUJwfVB02hzDS1Xg/viewform?embedded=true"
+            width="100%"
+            height="500"
+            frameborder="0"
+            marginheight="0"
+            marginwidth="0"
+          >
+            Loading…
+          </iframe>
+        </v-card-text>
+      </v-card>
+    </v-dialog>
+
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
@@ -328,7 +430,7 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
 .search-field :deep(.v-field) {
   background: #fff !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
 .search-field :deep(input) {
@@ -341,7 +443,7 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
   min-width: 44px;
   border-radius: 9999px;
   background: #fff !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, .06);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
 .notif-btn :deep(.v-icon) {
@@ -386,7 +488,7 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
   height: 140px;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
   background: #fff;
   scroll-snap-align: start;
   display: flex;
@@ -418,7 +520,7 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
 .avatar-badge {
   border: 2px solid #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .15);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
   flex-shrink: 0;
 }
 
@@ -442,8 +544,8 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
 .item-sub {
   font-size: 10px;
-  opacity: .9;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, .35);
+  opacity: 0.9;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
 .empty-card {
@@ -451,7 +553,7 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
   height: 124px;
   border-radius: 12px;
   background: #fff;
-  box-shadow: 0 6px 18px rgba(0, 0, 0, .06);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -485,7 +587,7 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
   background: #fff;
   border-radius: 8px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, .05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
   display: flex;
   flex-direction: column;
   transition: transform 0.15s ease;
@@ -557,6 +659,96 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
   .product-sold {
     font-size: 11px;
+  }
+}
+/* 💬floating survey*/
+.floating-survey-btn {
+  position: fixed;
+  bottom: 96px; /* just above BottomNav */
+  right: 20px;
+  z-index: 200;
+  border-radius: 50%;
+  background-color: #3f83c7 !important;
+  color: white !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.floating-survey-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+@media (max-width: 600px) {
+  .v-dialog > .v-overlay__content {
+    width: 95% !important;
+    max-width: 95% !important;
+  }
+
+  iframe {
+    height: 400px !important;
+  }
+}
+
+.floating-survey-wrapper {
+  position: fixed;
+  bottom: 96px;
+  right: 20px;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* 💬 Tooltip cloud */
+.survey-hint {
+  background: white;
+  color: #333;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-width: 220px;
+  text-align: center;
+  animation: floatUp 0.4s ease-out;
+  position: relative;
+}
+
+/* little pointer triangle */
+.survey-hint::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  right: 26px;
+  border-width: 6px 6px 0 6px;
+  border-style: solid;
+  border-color: white transparent transparent transparent;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* fade animation for transition */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s;
+}
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* subtle floating motion */
+@keyframes floatUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
   }
 }
 </style>
