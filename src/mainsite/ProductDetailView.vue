@@ -653,45 +653,41 @@ const addToCartDialog = computed(() => {
     <!-- Bottom Nav - ALWAYS VISIBLE FOR ALL PRODUCTS -->
     <v-bottom-navigation class="bottom-nav" height="65" fixed>
       <v-row class="w-full pa-0 ma-0" no-gutters>
-        <!-- ALWAYS SHOW THESE BUTTONS FOR ALL USERS -->
-        <!-- Chat Now -->
-        <v-col cols="4" class="pa-0">
-          <v-btn
-            block
-            class="bottom-btn chat-now-btn"
-            @click="goToChat"
-            :disabled="!product?.shop?.owner_id"
-          >
-            <v-icon left size="20">mdi-chat-outline</v-icon>
-            Chat Now
-          </v-btn>
-        </v-col>
+        <!-- If owner, show only Visit Shop -->
+        <template v-if="isOwner">
+          <v-col cols="12" class="pa-0">
+            <v-btn block color="primary" class="bottom-btn" @click="goToShop(product.shop.id)">
+              <v-icon left size="20">mdi-storefront-outline</v-icon>
+              Visit Shop
+            </v-btn>
+          </v-col>
+        </template>
 
-        <!-- Add to Cart -->
-        <v-col cols="4" class="pa-0">
-          <v-btn
-            block
-            class="bottom-btn cart-btn"
-            @click="showAddToCart = true"
-            :disabled="!product"
-          >
-            <v-icon left size="20">mdi-cart-outline</v-icon>
-            Add to Cart
-          </v-btn>
-        </v-col>
+        <!-- If not owner, show Chat, Add to Cart, Buy Now -->
+        <template v-else>
+          <!-- Chat Now -->
+          <v-col cols="4" class="pa-0">
+            <v-btn block class="bottom-btn chat-now-btn" color="#4caf50" @click="goToChat()">
+              <v-icon left size="20">mdi-chat-outline</v-icon>
+              Chat Now
+            </v-btn>
+          </v-col>
 
-        <!-- Buy Now -->
-        <v-col cols="4" class="pa-0">
-          <v-btn
-            block
-            class="bottom-btn buy-now-btn"
-            color="primary"
-            @click="buyNow"
-            :disabled="!product"
-          >
-            Buy Now
-          </v-btn>
-        </v-col>
+          <!-- Add to Cart -->
+          <v-col cols="4" class="pa-0">
+            <v-btn block class="bottom-btn cart-btn" color="#4caf50" @click="showAddToCart = true">
+              <v-icon left size="20">mdi-cart-outline</v-icon>
+              Add to Cart
+            </v-btn>
+          </v-col>
+
+          <!-- Buy Now -->
+          <v-col cols="4" class="pa-0">
+            <v-btn block class="bottom-btn buy-now-btn" color="#438fda" @click="buyNow()">
+              Buy Now
+            </v-btn>
+          </v-col>
+        </template>
       </v-row>
     </v-bottom-navigation>
   </v-app>
