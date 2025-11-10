@@ -18,7 +18,6 @@ import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import AddItem from '@/mainsite/AddItem.vue'
 import ChatView from '@/mainsite/ChatView.vue'
-import PurchaseView from '@/mainsite/PurchaseView.vue'
 // ✅ Define routes
 const routes = [
   { path: '/', name: 'login', component: LoginView },
@@ -154,6 +153,13 @@ const routes = [
     path: '/search',
     name: 'search',
     component: () => import('@/mainsite/SearchView.vue'),
+  },
+
+  {
+    path: '/purchaseview/:transactionNumber',
+    name: 'purchaseview',
+    component: () => import('@/mainsite/PurchaseView.vue'),
+    props: true,
   },
 ]
 
