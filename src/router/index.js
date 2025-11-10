@@ -18,6 +18,7 @@ import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import AddItem from '@/mainsite/AddItem.vue'
 import ChatView from '@/mainsite/ChatView.vue'
+
 // ✅ Define routes
 const routes = [
   { path: '/', name: 'login', component: LoginView },
@@ -161,6 +162,13 @@ const routes = [
     component: () => import('@/mainsite/PurchaseView.vue'),
     props: true,
   },
+  //for checkout
+  {
+  path: '/checkout-success/:orderId',
+  name: 'checkout-success',
+  component: () => import('@/mainsite/CheckoutSuccess.vue'),
+  props: true,
+}
 ]
 
 // ✅ Use HISTORY mode instead of hash mode

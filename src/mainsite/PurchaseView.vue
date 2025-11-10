@@ -207,9 +207,11 @@ const handleCheckout = async () => {
       status: 'pending',
     })
 
-    showDialog.value = true
-    countdown.value = 300
-    startCountdown()
+    // ✅ Navigate to CheckoutSuccess page
+    router.push({
+      name: 'checkout-success',
+      params: { orderId: order.id },
+    })
   } catch (err) {
     console.error('Error during checkout:', err)
     alert('Something went wrong during checkout.')
@@ -274,6 +276,7 @@ const confirmDateTime = () => {
   }
   showDateTimePicker.value = false
 }
+
 </script>
 
 <template>
