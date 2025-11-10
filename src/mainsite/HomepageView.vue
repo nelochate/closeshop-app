@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
 import { Geolocation } from '@capacitor/geolocation'
-import { PushNotifications } from '@capacitor/push-notifications'
+//import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
 import { Capacitor } from '@capacitor/core'
 
