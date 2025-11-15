@@ -22,10 +22,16 @@ const addressId = ref(route.params.id || null)
 const map = ref(null)
 const marker = ref(null)
 
+// PSGC Data
+const regions = ref([])
+const provinces = ref([])
+const citiesMunicipalities = ref([])
+const barangays = ref([])
+
 const address = ref({
-  region: 'Caraga',
-  province: 'Agusan del Norte',
-  city: 'Butuan City',
+  region: '',
+  province: '',
+  city: '',
   recipient_name: '',
   phone: '',
   purok: '',
@@ -33,32 +39,133 @@ const address = ref({
   building: '',
   street: '',
   house_no: '',
-  postal_code: '8600',
+  postal_code: '',
   is_default: false,
 })
 
-const barangays = [
-  'Agusan Pequeño', 'Ambago', 'Amparo', 'Ampayon', 'Anticala', 'Antongalon', 'Aupagan',
-  'Baan KM 3', 'Baan Riverside Poblacion (Barangay 20)', 'Babag', 'Bading Poblacion (Barangay 22)',
-  'Bancasi', 'Banza', 'Baobaoan', 'Basag', 'Bayanihan Poblacion (Barangay 27)', 'Bilay',
-  'Bitan-agan', 'Bit-os', 'Bobon', 'Bonbon', 'Bugabus', 'Bugsukan', 'Buhangin Poblacion (Barangay 19)',
-  'Cabcabon', 'Camayahan', 'Dagohoy Poblacion (Barangay 7)', 'Dankias', 'De Oro',
-  'Diego Silang Poblacion (Barangay 6)', 'Don Francisco', 'Doongan', 'Dulag', 'Dumalagan',
-  'Florida', 'Golden Ribbon Poblacion (Barangay 2)', 'Holy Redeemer Poblacion (Barangay 23)',
-  'Humabon Poblacion (Barangay 11)', 'Imadejas Poblacion (Barangay 24)', 'Jose Rizal Poblacion (Barangay 25)',
-  'Kinamlutan', 'Lapu-Lapu Poblacion (Barangay 8)', 'Lemon', 'Leon Kilat Poblacion (Barangay 13)',
-  'Libertad', 'Limaha Poblacion (Barangay 14)', 'Los Angeles', 'Lumbocan', 'Maguinda',
-  'Mahay', 'Mahogany Poblacion (Barangay 21)', 'Maibu', 'Mandamo', 'Manila de Bugabus',
-  'Maon Poblacion (Barangay 1)', 'Masao', 'Maug', 'New Society Village Poblacion (Barangay 26)',
-  'Nong-Nong', 'Obrero Poblacion (Barangay 18)', 'Ong Yiu Poblacion (Barangay 16)', 'Pagatpatan',
-  'Pangabugan', 'Pianing', 'Pigdaulan', 'Pinamanculan',
-  'Port Poyohon Poblacion (Barangay 17, New Asia)', 'Rajah Soliman Poblacion (Barangay 4)',
-  'Salvacion', 'San Ignacio Poblacion (Barangay 15)', 'San Mateo', 'Santo Niño',
-  'San Vicente', 'Sikatuna Poblacion (Barangay 10)', 'Silongan Poblacion (Barangay 5)',
-  'Sumile', 'Sumilihon', 'Tagabaca', 'Taguibo', 'Taligaman',
-  'Tandang Sora Poblacion (Barangay 12)', 'Tiniwisan', 'Tungao', 'Urduja Poblacion (Barangay 9)',
-  'Villa Kananga'
-]
+// --- PSGC API Functions ---
+const fetchRegions = async () => {
+  try {
+    const response = await fetch('https://psgc.cloud/api/regions')
+    if (!response.ok) throw new Error('Failed to fetch regions')
+    regions.value = await response.json()
+  } catch (error) {
+    console.error('Error fetching regions:', error)
+    snackbarMessage.value = 'Error loading regions'
+    showMapSnackbar.value = true
+  }
+}
+
+const fetchProvinces = async (regionCode = null) => {
+  try {
+    let url = 'https://psgc.cloud/api/provinces'
+    const response = await fetch(url)
+    if (!response.ok) throw new Error('Failed to fetch provinces')
+    const allProvinces = await response.json()
+
+    // If regionCode is provided, filter provinces by region
+    if (regionCode) {
+      // Note: You might need to adjust filtering logic based on PSGC code structure
+      // Typically region code is the first 2 digits of province code
+      provinces.value = allProvinces.filter(province =>
+        province.code.startsWith(regionCode.substring(0, 2))
+      )
+    } else {
+      provinces.value = allProvinces
+    }
+  } catch (error) {
+    console.error('Error fetching provinces:', error)
+    snackbarMessage.value = 'Error loading provinces'
+    showMapSnackbar.value = true
+  }
+}
+
+const fetchCitiesMunicipalities = async (provinceCode = null) => {
+  try {
+    let url = 'https://psgc.cloud/api/cities'
+    const citiesResponse = await fetch(url)
+    if (!citiesResponse.ok) throw new Error('Failed to fetch cities')
+    const cities = await citiesResponse.json()
+
+    url = 'https://psgc.cloud/api/municipalities'
+    const municipalitiesResponse = await fetch(url)
+    if (!municipalitiesResponse.ok) throw new Error('Failed to fetch municipalities')
+    const municipalities = await municipalitiesResponse.json()
+
+    // Combine cities and municipalities
+    let allCitiesMunis = [...cities, ...municipalities]
+
+    // If provinceCode is provided, filter by province
+    if (provinceCode) {
+      // Typically province code is the first 4 digits of city/municipality code
+      allCitiesMunis = allCitiesMunis.filter(item =>
+        item.code.startsWith(provinceCode.substring(0, 4))
+      )
+    }
+
+    citiesMunicipalities.value = allCitiesMunis.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Error fetching cities/municipalities:', error)
+    snackbarMessage.value = 'Error loading cities/municipalities'
+    showMapSnackbar.value = true
+  }
+}
+
+const fetchBarangays = async (cityCode = null) => {
+  try {
+    const response = await fetch('https://psgc.cloud/api/barangays')
+    if (!response.ok) throw new Error('Failed to fetch barangays')
+    const allBarangays = await response.json()
+
+    // If cityCode is provided, filter barangays by city/municipality
+    if (cityCode) {
+      // Typically city code is the first 6 digits of barangay code
+      barangays.value = allBarangays.filter(barangay =>
+        barangay.code.startsWith(cityCode.substring(0, 6))
+      )
+    } else {
+      barangays.value = allBarangays
+    }
+  } catch (error) {
+    console.error('Error fetching barangays:', error)
+    snackbarMessage.value = 'Error loading barangays'
+    showMapSnackbar.value = true
+  }
+}
+
+// --- Watchers for PSGC Data ---
+watch(() => address.value.region, async (newRegionCode) => {
+  if (newRegionCode) {
+    address.value.province = ''
+    address.value.city = ''
+    address.value.barangay = ''
+    address.value.postal_code = ''
+    await fetchProvinces(newRegionCode)
+  }
+})
+
+watch(() => address.value.province, async (newProvinceCode) => {
+  if (newProvinceCode) {
+    address.value.city = ''
+    address.value.barangay = ''
+    address.value.postal_code = ''
+    await fetchCitiesMunicipalities(newProvinceCode)
+  }
+})
+
+watch(() => address.value.city, async (newCityCode) => {
+  if (newCityCode) {
+    address.value.barangay = ''
+
+    // Set postal code from selected city/municipality
+    const selectedCity = citiesMunicipalities.value.find(city => city.code === newCityCode)
+    if (selectedCity && selectedCity.zip_code) {
+      address.value.postal_code = selectedCity.zip_code
+    }
+
+    await fetchBarangays(newCityCode)
+  }
+})
 
 // --- Load address if editing ---
 const loadAddress = async () => {
@@ -68,6 +175,9 @@ const loadAddress = async () => {
       console.error('User not authenticated:', userError)
       return router.push({ name: 'login' })
     }
+
+    // Load PSGC data first
+    await fetchRegions()
 
     if (addressId.value) {
       const { data, error } = await supabase
@@ -85,13 +195,24 @@ const loadAddress = async () => {
       }
 
       if (data) {
-        // Only assign properties that exist in the address object
+        // Load address data and cascade PSGC data loading
         Object.keys(address.value).forEach(key => {
           if (data[key] !== undefined) {
             address.value[key] = data[key]
           }
         })
         isEdit.value = true
+
+        // Cascade loading of PSGC data based on saved address
+        if (data.region) {
+          await fetchProvinces(data.region)
+          if (data.province) {
+            await fetchCitiesMunicipalities(data.province)
+            if (data.city) {
+              await fetchBarangays(data.city)
+            }
+          }
+        }
 
         // Update map after a short delay to ensure DOM is ready
         setTimeout(() => updateMap(), 500)
@@ -110,8 +231,8 @@ const saveAddress = async () => {
     isLoading.value = true
 
     // Validate required fields
-    if (!address.value.barangay) {
-      throw new Error('Barangay is required')
+    if (!address.value.region || !address.value.province || !address.value.city || !address.value.barangay) {
+      throw new Error('Please complete all address fields (Region, Province, City/Municipality, Barangay)')
     }
 
     const { data: userData, error: userError } = await supabase.auth.getUser()
@@ -119,28 +240,40 @@ const saveAddress = async () => {
       throw new Error('User not authenticated')
     }
 
-    // Prepare address data - only include fields that exist in the table
+    // Get display names for selected codes
+    const regionName = regions.value.find(r => r.code === address.value.region)?.name || ''
+    const provinceName = provinces.value.find(p => p.code === address.value.province)?.name || ''
+    const cityName = citiesMunicipalities.value.find(c => c.code === address.value.city)?.name || ''
+    const barangayName = barangays.value.find(b => b.code === address.value.barangay)?.name || ''
+
+    // Prepare address data
     const addressData = {
       recipient_name: address.value.recipient_name || null,
       phone: address.value.phone || null,
       street: address.value.street || null,
-      city: address.value.city || 'Butuan City',
-      province: address.value.province || 'Agusan del Norte',
-      postal_code: address.value.postal_code || '8600',
-      is_default: address.value.is_default || false,
+      building: address.value.building || null,
+      house_no: address.value.house_no || null,
       purok: address.value.purok || null,
-      barangay: address.value.barangay || null,
+      region: address.value.region,
+      region_name: regionName,
+      province: address.value.province,
+      province_name: provinceName,
+      city: address.value.city,
+      city_name: cityName,
+      barangay: address.value.barangay,
+      barangay_name: barangayName,
+      postal_code: address.value.postal_code || '',
+      is_default: address.value.is_default || false,
       updated_at: new Date().toISOString(),
     }
 
     // Handle default address logic
     if (address.value.is_default) {
-      // Set all other addresses to false
       const { error: updateError } = await supabase
         .from('addresses')
         .update({ is_default: false })
         .eq('user_id', userData.user.id)
-        .neq('id', addressId.value || '00000000-0000-0000-0000-000000000000') // Avoid empty IN clause
+        .neq('id', addressId.value || '00000000-0000-0000-0000-000000000000')
 
       if (updateError) {
         console.error('Error updating default addresses:', updateError)
@@ -149,14 +282,12 @@ const saveAddress = async () => {
 
     let result
     if (isEdit.value && addressId.value) {
-      // Update existing address
       result = await supabase
         .from('addresses')
         .update(addressData)
         .eq('id', addressId.value)
         .eq('user_id', userData.user.id)
     } else {
-      // Insert new address
       result = await supabase
         .from('addresses')
         .insert([{
@@ -186,7 +317,7 @@ const saveAddress = async () => {
   }
 }
 
-// --- Update Map (using server proxy) ---
+// --- Update Map ---
 const updateMap = async () => {
   if (!map.value) {
     console.warn('Map not initialized')
@@ -196,11 +327,12 @@ const updateMap = async () => {
   const house = address.value.house_no || ''
   const street = address.value.street || ''
   const purok = address.value.purok || ''
-  const barangay = address.value.barangay || ''
-  const city = address.value.city || 'Butuan City'
+  const barangayName = barangays.value.find(b => b.code === address.value.barangay)?.name || ''
+  const cityName = citiesMunicipalities.value.find(c => c.code === address.value.city)?.name || ''
+  const provinceName = provinces.value.find(p => p.code === address.value.province)?.name || ''
 
-  if (!barangay && !street) {
-    map.value.setView([8.9492, 125.5436], 13)
+  if (!barangayName && !street && !cityName) {
+    map.value.setView([12.8797, 121.7740], 6) // Default Philippines view
     if (marker.value) {
       map.value.removeLayer(marker.value)
       marker.value = null
@@ -208,10 +340,9 @@ const updateMap = async () => {
     return
   }
 
-  const query = `${house} ${street} ${purok} ${barangay}, ${city}, Philippines`.trim()
+  const query = `${house} ${street} ${purok} ${barangayName}, ${cityName}, ${provinceName}, Philippines`.trim()
 
   try {
-    // Use your proxy endpoint
     const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
 
     if (!res.ok) {
@@ -245,15 +376,13 @@ const updateMap = async () => {
   }
 }
 
-// --- Detect user location (using proxy) ---
-// --- Enhanced Current Location Detection with Specifics ---
+// --- Current Location Detection ---
 const useCurrentLocation = async () => {
   try {
     snackbarMessage.value = 'Detecting your precise location...'
     showMapSnackbar.value = true
     isLoading.value = true
 
-    // Check permissions
     const permissions = await Geolocation.checkPermissions()
     if (permissions.location !== 'granted') {
       const request = await Geolocation.requestPermissions()
@@ -262,133 +391,92 @@ const useCurrentLocation = async () => {
       }
     }
 
-    // Get high-precision coordinates
     const coords = await Geolocation.getCurrentPosition({
       enableHighAccuracy: true,
       timeout: 15000,
       maximumAge: 0
     })
-    
+
     const lat = coords.coords.latitude
     const lng = coords.coords.longitude
-    const accuracy = coords.coords.accuracy
 
-    console.log('Precise coordinates obtained:', { lat, lng, accuracy: accuracy + ' meters' })
-
-    // Update map view with precise location
-    map.value.setView([lat, lng], 18) // Zoom to building level
+    map.value.setView([lat, lng], 18)
     if (marker.value) {
       marker.value.setLatLng([lat, lng])
     } else {
       marker.value = L.marker([lat, lng]).addTo(map.value)
-      
-      // Add accuracy circle
-      L.circle([lat, lng], {
-        radius: accuracy,
-        color: 'blue',
-        fillColor: '#1e88e5',
-        fillOpacity: 0.1,
-        weight: 1
-      }).addTo(map.value)
     }
 
-    // Enhanced reverse geocoding with specific details
     try {
-      console.log('Calling enhanced reverse geocoding API...')
       const res = await fetch(`http://localhost:3000/api/reverse-geocode?lat=${lat}&lon=${lng}`)
-      
+
       if (!res.ok) {
         throw new Error(`HTTP error! status: ${res.status}`)
       }
-      
+
       const result = await res.json()
-      console.log('Enhanced address result:', result)
-      
+
       if (result.error) {
         throw new Error(result.error)
       }
 
       if (result.address) {
         const addr = result.address
-        
-        // Build a detailed location description
-        let locationDescription = ''
-        if (addr.university) locationDescription += `${addr.university}, `
-        if (addr.building) locationDescription += `${addr.building}, `
-        if (addr.specific_place) locationDescription += `${addr.specific_place}, `
-        
-        // Update address fields with enhanced details
-        address.value.recipient_name = '' // Clear for user to fill
-        address.value.phone = '' // Clear for user to fill
+
+        // Reset address fields
+        address.value.recipient_name = ''
+        address.value.phone = ''
         address.value.house_no = addr.house_number || ''
         address.value.building = addr.building || addr.specific_place || ''
         address.value.street = addr.road || ''
         address.value.purok = addr.purok || ''
-        address.value.barangay = addr.suburb || addr.neighbourhood || addr.village || ''
-        address.value.city = addr.city || 'Butuan City'
-        address.value.province = addr.state || 'Agusan del Norte'
-        address.value.region = addr.region || 'Caraga'
-        address.value.postal_code = addr.postcode || '8600'
-        
-        // Set detailed success message
-        if (addr.university) {
-          snackbarMessage.value = `📍 Detected: ${addr.university}`
-        } else if (addr.building) {
-          snackbarMessage.value = `📍 Detected: ${addr.building}`
-        } else if (addr.specific_place) {
-          snackbarMessage.value = `📍 Detected: ${addr.specific_place}`
-        } else {
-          snackbarMessage.value = '📍 Location detected successfully!'
-        }
-        
-        // Additional info for debugging
-        console.log('Enhanced address details:', {
-          university: addr.university,
-          building: addr.building,
-          purok: addr.purok,
-          specific_place: addr.specific_place,
-          full_address: addr.full_display_name
-        })
+
+        // Note: For PSGC integration, you would need to map the reverse geocoded results
+        // to PSGC codes. This is complex and might require additional API calls.
+        // For now, we'll set the names and clear the codes
+        address.value.barangay = '' // Clear code, user will need to select
+        address.value.city = '' // Clear code, user will need to select
+        address.value.province = '' // Clear code, user will need to select
+        address.value.region = '' // Clear code, user will need to select
+        address.value.postal_code = addr.postcode || ''
+
+        snackbarMessage.value = '📍 Location detected! Please complete the address details below.'
 
       } else {
         snackbarMessage.value = '📍 Location detected but detailed address not found'
       }
     } catch (geocodeError) {
-      console.error('Enhanced reverse geocoding error:', geocodeError)
-      snackbarMessage.value = '📍 Location detected but detailed address lookup failed. Please fill address manually.'
-      
-      // Fallback: At least set the coordinates
-      address.value.building = `Near coordinates: ${lat.toFixed(6)}, ${lng.toFixed(6)}`
+      console.error('Reverse geocoding error:', geocodeError)
+      snackbarMessage.value = '📍 Location detected but address lookup failed. Please fill address manually.'
     }
 
     showMapSnackbar.value = true
   } catch (error) {
     console.error('Location detection error:', error)
-    
+
     if (error.message.includes('permission')) {
-      snackbarMessage.value = '📍 Location access denied. Please enable location permissions in your browser/app settings.'
+      snackbarMessage.value = '📍 Location access denied. Please enable location permissions.'
     } else if (error.message.includes('timeout')) {
-      snackbarMessage.value = '📍 Location detection timeout. Please try again in an area with better GPS signal.'
+      snackbarMessage.value = '📍 Location detection timeout. Please try again.'
     } else {
       snackbarMessage.value = '📍 Unable to detect location: ' + (error.message || 'Please try again')
     }
-    
+
     showMapSnackbar.value = true
   } finally {
     isLoading.value = false
   }
 }
+
 // --- Lifecycle & Watchers ---
 onMounted(() => {
-  // Initialize map with error handling
   try {
     const mapElement = document.getElementById('map')
     if (mapElement) {
-      map.value = L.map('map').setView([8.9492, 125.5436], 13)
+      map.value = L.map('map').setView([12.8797, 121.7740], 6) // Philippines view
       L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
         attribution: '© OpenStreetMap contributors'
       }).addTo(map.value)
-
       console.log('Map initialized successfully')
     } else {
       console.error('Map element not found')
@@ -403,23 +491,28 @@ onMounted(() => {
 // Watch for address changes with debounce
 let updateMapTimeout
 watch(
-  () => [address.value.street, address.value.barangay, address.value.house_no, address.value.purok],
+  () => [
+    address.value.street,
+    address.value.barangay,
+    address.value.house_no,
+    address.value.purok,
+    address.value.city,
+    address.value.province
+  ],
   () => {
     if (updateMapTimeout) clearTimeout(updateMapTimeout)
     updateMapTimeout = setTimeout(() => {
       if (addressMode.value === 'manual') {
         updateMap()
       }
-    }, 1000) // Debounce for 1 second
+    }, 1000)
   }
 )
 
-// Watch address mode changes
 watch(addressMode, (newMode) => {
   if (newMode === 'location') {
-    // Reset to default view when switching to location mode
     if (map.value) {
-      map.value.setView([8.9492, 125.5436], 13)
+      map.value.setView([12.8797, 121.7740], 6)
       if (marker.value) {
         map.value.removeLayer(marker.value)
         marker.value = null
@@ -475,22 +568,71 @@ watch(addressMode, (newMode) => {
                     variant="outlined"
                   />
                 </v-col>
+
+                <!-- PSGC Address Fields -->
+                <v-col cols="12">
+                  <v-select
+                    v-model="address.region"
+                    :items="regions"
+                    item-title="name"
+                    item-value="code"
+                    label="Region *"
+                    variant="outlined"
+                    required
+                    :loading="!regions.length"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-select
+                    v-model="address.province"
+                    :items="provinces"
+                    item-title="name"
+                    item-value="code"
+                    label="Province *"
+                    variant="outlined"
+                    required
+                    :disabled="!address.region"
+                    :loading="provinces.length === 0 && address.region"
+                  />
+                </v-col>
+
+                <v-col cols="12">
+                  <v-select
+                    v-model="address.city"
+                    :items="citiesMunicipalities"
+                    item-title="name"
+                    item-value="code"
+                    label="City/Municipality *"
+                    variant="outlined"
+                    required
+                    :disabled="!address.province"
+                    :loading="citiesMunicipalities.length === 0 && address.province"
+                  />
+                </v-col>
+
                 <v-col cols="12">
                   <v-select
                     v-model="address.barangay"
                     :items="barangays"
+                    item-title="name"
+                    item-value="code"
                     label="Barangay *"
                     variant="outlined"
                     required
+                    :disabled="!address.city"
+                    :loading="barangays.length === 0 && address.city"
                   />
                 </v-col>
+
                 <v-col cols="12">
                   <v-text-field
                     v-model="address.purok"
-                    label="Purok"
+                    label="Purok/Subdivision"
                     variant="outlined"
                   />
                 </v-col>
+
                 <v-col cols="12">
                   <v-text-field
                     v-model="address.street"
@@ -498,25 +640,29 @@ watch(addressMode, (newMode) => {
                     variant="outlined"
                   />
                 </v-col>
+
                 <v-col cols="12">
                   <v-text-field
                     v-model="address.building"
-                    label="Building"
+                    label="Building/Apartment"
                     variant="outlined"
                   />
                 </v-col>
+
                 <v-col cols="12">
                   <v-text-field
                     v-model="address.house_no"
-                    label="House No."
+                    label="House/Lot No."
                     variant="outlined"
                   />
                 </v-col>
+
                 <v-col cols="12">
                   <v-text-field
                     v-model="address.postal_code"
                     label="Postal Code"
                     variant="outlined"
+                    readonly
                   />
                 </v-col>
 
@@ -539,7 +685,7 @@ watch(addressMode, (newMode) => {
                     color="primary"
                     size="large"
                     :loading="isLoading"
-                    :disabled="!address.barangay"
+                    :disabled="!address.region || !address.province || !address.city || !address.barangay"
                   >
                     <v-icon class="me-2">mdi-check</v-icon>
                     {{ isLoading ? 'Saving...' : (isEdit ? 'Update Address' : 'Save Address') }}
@@ -578,27 +724,71 @@ watch(addressMode, (newMode) => {
                   variant="outlined"
                 />
               </v-col>
+
+              <!-- PSGC Fields for Location Mode -->
               <v-col cols="12">
-                <v-text-field
-                  v-model="address.barangay"
-                  label="Barangay"
+                <v-select
+                  v-model="address.region"
+                  :items="regions"
+                  item-title="name"
+                  item-value="code"
+                  label="Region *"
                   variant="outlined"
-                  readonly
+                  required
                 />
               </v-col>
+
               <v-col cols="12">
-                <v-text-field
-                  v-model="address.street"
-                  label="Street"
+                <v-select
+                  v-model="address.province"
+                  :items="provinces"
+                  item-title="name"
+                  item-value="code"
+                  label="Province *"
                   variant="outlined"
-                  readonly
+                  required
+                  :disabled="!address.region"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-select
+                  v-model="address.city"
+                  :items="citiesMunicipalities"
+                  item-title="name"
+                  item-value="code"
+                  label="City/Municipality *"
+                  variant="outlined"
+                  required
+                  :disabled="!address.province"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-select
+                  v-model="address.barangay"
+                  :items="barangays"
+                  item-title="name"
+                  item-value="code"
+                  label="Barangay *"
+                  variant="outlined"
+                  required
+                  :disabled="!address.city"
                 />
               </v-col>
 
               <v-col cols="12">
                 <v-text-field
-                  v-model="address.city"
-                  label="City"
+                  v-model="address.street"
+                  label="Street"
+                  variant="outlined"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.postal_code"
+                  label="Postal Code"
                   variant="outlined"
                   readonly
                 />
@@ -624,7 +814,7 @@ watch(addressMode, (newMode) => {
               class="mt-4"
               @click="saveAddress"
               :loading="isLoading"
-              :disabled="!address.barangay"
+              :disabled="!address.region || !address.province || !address.city || !address.barangay"
               size="large"
             >
               <v-icon class="me-2">mdi-check</v-icon>
@@ -632,9 +822,6 @@ watch(addressMode, (newMode) => {
             </v-btn>
           </v-card-text>
         </v-card>
-
-
-        
       </v-container>
     </v-main>
   </v-app>
