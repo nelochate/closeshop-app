@@ -7,6 +7,8 @@ import { Capacitor } from '@capacitor/core'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
+import 'leaflet-routing-machine'
+import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
 
 /* -------------------- STATE -------------------- */
 const activeTab = ref('map')
@@ -23,6 +25,18 @@ const userCity = ref<string | null>(null)
 const lastKnownKey = 'closeshop_last_location'
 const lastKnown = ref<[number, number] | null>(null)
 let lastUpdateTs = 0
+let routingControl: L.Routing.Control | null = null
+const productMatches = ref<any[]>([]) //search
+
+const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+  const R = 6371
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
 
 /* -------------------- GEOAPIFY CONFIG -------------------- */
 const GEOAPIFY_API_KEY = 'b4cb2e0e4f4a4e4fb385fae9418d4da7'
@@ -390,7 +404,11 @@ onUnmounted(() => {
 
 /* -------------------- SHOP LIST CLICK -------------------- */
 const openShop = (shopId: string) => {
+  const shop = shops.value.find((s) => s.id === shopId)
+  if (!shop) return
+
   focusOnShopMarker(shopId)
+  routeToShop(shop) // <-- show route
   showShopMenu.value = false
 }
 
@@ -430,60 +448,98 @@ const highlightMatch = (text: string, term: string) => {
 
 //search narrow
 const smartSearch = async () => {
-  const query = search.value.trim()
+  const query = search.value.trim().toLowerCase()
   if (!query || !map.value) return
 
-  // 1. Check if query matches a shop
-  const matchingShop = shops.value.find((shop) =>
-    (shop.business_name?.toLowerCase() ?? '').includes(query.toLowerCase()),
-  )
+  loading.value = true
+  errorMsg.value = null
 
-  if (matchingShop && matchingShop.latitude && matchingShop.longitude) {
-    const lat = Number(matchingShop.latitude)
-    const lon = Number(matchingShop.longitude)
-    map.value.setView([lat, lon], 16, { animate: true })
+  productMatches.value = []
+  let shopMatches: any[] = []
 
-    const marker = shopMarkers.find((m) => (m as any).shopId === matchingShop.id)
-    if (marker) marker.openPopup()
+  /* ----------------------------
+     1. MATCH SHOPS BY NAME/ADDR
+     ---------------------------- */
+  shopMatches = shops.value.filter((s) => {
+    const name = s.business_name?.toLowerCase() ?? ''
+    const addr = getFullAddress(s)?.toLowerCase() ?? ''
+    return name.includes(query) || addr.includes(query)
+  })
 
+  /* ----------------------------
+     2. MATCH PRODUCTS
+     ---------------------------- */
+  try {
+    const { data: products, error } = await supabase
+      .from('products')
+      .select('id, prod_name, shop_id')
+
+    if (!error && products) {
+      productMatches.value = products.filter((p) => p.prod_name.toLowerCase().includes(query))
+    }
+  } catch {
+    console.warn('Product search failed')
+  }
+
+  /* ----------------------------
+     3. COMBINE UNIQUE SHOP RESULTS
+     ---------------------------- */
+  const resultShops: any[] = []
+
+  // shops directly matched
+  shopMatches.forEach((shop) => {
+    if (!resultShops.some((s) => s.id === shop.id)) {
+      resultShops.push(shop)
+    }
+  })
+
+  // shops from product matches
+  productMatches.value.forEach((prod) => {
+    const parentShop = shops.value.find((s) => s.id === prod.shop_id)
+    if (parentShop && !resultShops.some((s) => s.id === parentShop.id)) {
+      resultShops.push(parentShop)
+    }
+  })
+
+  /* ----------------------------
+     4. SORT BY DISTANCE (NEAREST)
+     ---------------------------- */
+  if (currentPosition.value && resultShops.length > 0) {
+    const { lat: userLat, lng: userLng } = currentPosition.value
+
+    resultShops.sort((a, b) => {
+      const dA = getDistance(userLat, userLng, Number(a.latitude), Number(a.longitude))
+      const dB = getDistance(userLat, userLng, Number(b.latitude), Number(b.longitude))
+      return dA - dB
+    })
+  }
+
+  /* ----------------------------
+     5. SHOW ON MAP
+     ---------------------------- */
+  if (resultShops.length === 0) {
+    errorMsg.value = 'No results found'
     return
   }
 
-  // 2. If no shop found, search the place using Geoapify
-  try {
-    loading.value = true
-    const res = await fetch(
-      `https://api.geoapify.com/v1/geocode/search?text=${encodeURIComponent(query)}&apiKey=${GEOAPIFY_API_KEY}`,
-    )
-    const data = await res.json()
-    const feature = data.features?.[0]
-    if (!feature) {
-      errorMsg.value = 'Location not found.'
-      return
-    }
-
-    const [lat, lon] =
-      feature.properties.lat && feature.properties.lon
-        ? [feature.properties.lat, feature.properties.lon]
-        : [feature.geometry.coordinates[1], feature.geometry.coordinates[0]]
-
-    map.value.setView([lat, lon], 16, { animate: true })
-
-    if (userMarker) userMarker.setLatLng([lat, lon]).bindPopup(query).openPopup()
-    else
-      userMarker = L.marker([lat, lon], { icon: userIcon })
-        .addTo(map.value)
-        .bindPopup(query)
-        .openPopup()
-
-    saveCachedLocation(lat, lon)
-    errorMsg.value = null
-  } catch (err) {
-    console.error(err)
-    errorMsg.value = 'Failed to search location.'
-  } finally {
-    loading.value = false
+  // One result → focus
+  if (resultShops.length === 1) {
+    const s = resultShops[0]
+    map.value.setView([s.latitude, s.longitude], 16, { animate: true })
+    focusOnShopMarker(s.id)
+    return
   }
+
+  // Multiple → zoom out to show all
+  const bounds = L.latLngBounds([])
+  resultShops.forEach((s) => bounds.extend([Number(s.latitude), Number(s.longitude)]))
+  map.value.fitBounds(bounds.pad(0.2))
+
+  /* ----------------------------
+     6. Update filteredShops for UI
+     ---------------------------- */
+  filteredShops.value = resultShops
+  showShopMenu.value = true
 }
 
 const onSearchKeydown = (e: KeyboardEvent) => {
@@ -529,6 +585,47 @@ const updateShops = async () => {
     const unregistered = await fetchNearbyUnregisteredShops(latitude.value, longitude.value)
     plotUnregisteredShops(unregistered)
   }
+}
+
+// for routing
+const routeToShop = (shop: any) => {
+  if (!map.value || !latitude.value || !longitude.value) return
+
+  const start = [Number(latitude.value), Number(longitude.value)]
+  const end = [Number(shop.latitude), Number(shop.longitude)]
+
+  // Remove old route
+  if (routingControl) {
+    map.value.removeControl(routingControl)
+    routingControl = null
+  }
+
+  routingControl = L.Routing.control({
+    waypoints: [L.latLng(start), L.latLng(end)],
+    routeWhileDragging: false,
+    showAlternatives: false,
+    addWaypoints: false,
+    draggableWaypoints: false,
+    fitSelectedRoutes: true,
+    lineOptions: {
+      styles: [
+        { color: '#1E90FF', weight: 6, opacity: 0.9 },
+        { color: 'white', weight: 3, opacity: 0.8 },
+      ],
+    },
+    createMarker: (i, wp) => {
+      if (i === 0) {
+        return L.marker(wp.latLng, { icon: userIcon }).bindPopup('You are here')
+      }
+      return L.marker(wp.latLng, { icon: registeredShopIcon }).bindPopup(shop.business_name)
+    },
+  }).addTo(map.value)
+
+  // Make sure route stays on top
+  routingControl.on('routesfound', () => {
+    const line = (routingControl as any)?._line
+    if (line) line.bringToFront()
+  })
 }
 </script>
 <template>
@@ -595,9 +692,16 @@ const updateShops = async () => {
             </v-avatar>
           </template>
 
-          <v-list-item-title
-            v-html="highlightMatch(shop.business_name, search)"
-          ></v-list-item-title>
+          <v-list-item-title>
+            <span v-html="highlightMatch(shop.business_name, search)"></span>
+
+            <span
+              v-if="productMatches.some((p) => p.shop_id === shop.id)"
+              style="color: green; font-size: 12px"
+            >
+              • Product match available
+            </span>
+          </v-list-item-title>
 
           <v-list-item-subtitle
             v-html="highlightMatch(getFullAddress(shop), search)"
@@ -698,5 +802,23 @@ const updateShops = async () => {
     width: 60px;
     height: 60px;
   }
+}
+
+/* ROUTE LINE FIXES */
+:deep(.leaflet-routing-container) {
+  z-index: 3000 !important;
+}
+
+:deep(.leaflet-control-container) {
+  z-index: 3000 !important;
+}
+
+:deep(.leaflet-routing-alt) {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+:deep(.leaflet-routing-line) {
+  stroke-width: 6px !important;
 }
 </style>
