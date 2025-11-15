@@ -335,7 +335,7 @@ const addToCartDialog = computed(() => {
     <VueEasyLightbox />
 
     <!-- Top Nav -->
-    <v-app-bar color="#438fda" dark flat>
+    <v-app-bar class="app-bar" color="#438fda" dark flat>
       <v-btn icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -694,6 +694,9 @@ const addToCartDialog = computed(() => {
 </template>
 
 <style scoped>
+.app-bar{
+  padding-top: 20px;
+}
 /* Page & Sheet */
 .product-page {
   padding: 0;
@@ -701,6 +704,7 @@ const addToCartDialog = computed(() => {
   background-color: #f5f7fa;
   min-height: 100vh;
   padding-bottom: 70px;
+  padding-top: 60px;
   /* space for bottom nav */
 }
 
