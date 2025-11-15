@@ -23,6 +23,11 @@ const currentOrderId = ref<string>('')
 const transactionNumber = ref('')
 const shopId = ref<string>('your_shop_id_here')
 
+//load transaction number on mount
+onMounted(() => {
+  transactionNumber.value = generateTransactionNumber()
+})
+
 onMounted(() => {
   // Check if the page was navigated with product info
   if (history.state?.items) {
@@ -75,75 +80,58 @@ onMounted(async () => {
     } = await supabase.auth.getUser()
     if (!user) return
 
+    // Fetch profile
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
+
     buyer.value = profile
 
-    const { data: addresses } = await supabase.from('addresses').select('*').eq('user_id', user.id)
-    address.value = addresses?.[0] || null
-
-    const { data: cartItems, error: cartError } = await supabase
-      .from('cart_items')
-      .select('quantity, product_id')
+    // Fetch all addresses of user
+    const { data: allAddresses } = await supabase
+      .from('addresses')
+      .select('*')
       .eq('user_id', user.id)
+      .order('updated_at', { ascending: false })
 
-    if (cartError) return console.error('Error fetching cart items:', cartError)
-    if (!cartItems?.length) return // no items
-
-    const productIds = cartItems.map((c) => c.product_id)
-
-    const { data: products, error: prodError } = await supabase
-      .from('products')
-      .select('id, shop_id, prod_name, price, main_img_urls')
-      .in('id', productIds)
-
-    if (prodError) return console.error('Error fetching products:', prodError)
-
-    items.value = cartItems.map((ci) => {
-      const p = products.find((pr) => pr.id === ci.product_id)
-
-      let image = null
-      if (p?.main_img_urls) {
-        try {
-          const parsed = JSON.parse(p.main_img_urls)
-          image = Array.isArray(parsed) ? parsed[0] : parsed
-        } catch {
-          image = p.main_img_urls
-        }
-      }
-
-      return {
-        id: ci.id,
-        name: p?.prod_name || 'Unknown Product',
-        price: Number(p?.price || 0),
-        quantity: ci.quantity || 1,
-        image: image || '/no-image.png', // fallback image
-      }
-    })
-
-    shopId.value = products[0]?.shop_id || null
-
-    if (shopId.value) {
-      const { data: shop, error: shopError } = await supabase
-        .from('shops')
-        .select('open_time, close_time, meetup_details')
-        .eq('id', shopId.value)
-        .single()
-      if (!shopError && shop) {
-        const [openHour] = shop.open_time?.split(':').map(Number) || [9]
-        const [closeHour] = shop.close_time?.split(':').map(Number) || [19]
-        shopSchedule.value.openHour = openHour
-        shopSchedule.value.closeHour = closeHour
-        shopSchedule.value.meetupDetails = shop.meetup_details || 'No meetup details provided'
-      }
+    if (!allAddresses || allAddresses.length === 0) {
+      address.value = null
+      return
     }
+
+    // CASE 1: User only has ONE address → auto set as default
+    if (allAddresses.length === 1) {
+      const single = allAddresses[0]
+
+      if (!single.is_default) {
+        await supabase.from('addresses').update({ is_default: true }).eq('id', single.id)
+      }
+
+      address.value = { ...single, is_default: true }
+      return
+    }
+
+    // CASE 2: User has multiple → pick the one set as default
+    const defaultAddress = allAddresses.find((a) => a.is_default === true)
+
+    if (defaultAddress) {
+      address.value = defaultAddress
+      return
+    }
+
+    // CASE 3: No default among multiple → fallback to last updated
+    address.value = allAddresses[0]
   } catch (err) {
-    console.error('Unexpected error in onMounted:', err)
-    //testing side
-    console.log('🛒 Raw cartItems:', cartItems)
-    console.log('🧩 Products:', products)
-    console.log('🧠 Mapped items:', items.value)
+    console.error('Error loading address:', err)
   }
 })
+
+// Generate unique transaction number
+const generateTransactionNumber = () => {
+  const timestamp = Date.now().toString(36)
+  const random = Math.floor(Math.random() * 1e6)
+    .toString(36)
+    .padStart(5, '0')
+  return `TX-${timestamp}-${random}`.toUpperCase()
+}
 
 // 🕒 VALIDATION
 const isWithinShopHours = (date: string, time: string) => {
@@ -165,56 +153,52 @@ const isWithinShopHours = (date: string, time: string) => {
 }
 
 // 💳 CHECKOUT
+// Checkout
 const handleCheckout = async () => {
-  if (!buyer.value || !address.value) return alert('Missing user/address info')
+  if (!buyer.value || !address.value) return alert('Missing buyer or address info')
   try {
+    const txNumber = generateTransactionNumber()
+    transactionNumber.value = txNumber
+
+    // Insert order
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
         user_id: buyer.value.id,
         address_id: address.value.id,
-        total_amount: totalPrice.value,
+        total_amount: items.value.reduce((sum, i) => sum + i.price * i.quantity, 0),
         status: 'pending',
-        payment_method: paymentMethod.value,
-        delivery_date: deliveryDate.value || null,
-        delivery_time: deliveryTime.value || null,
-        note: note.value || null,
+        payment_method: 'cash',
+        transaction_number: txNumber,
       })
       .select()
       .single()
-    if (orderError || !order) return alert('Failed to create order')
+    if (orderError) throw orderError
 
-    currentOrderId.value = order.id
-    transactionNumber.value = `TX-${order.id.slice(0, 8).toUpperCase()}`
-
-    await supabase
-      .from('orders')
-      .update({ transaction_number: transactionNumber.value })
-      .eq('id', order.id)
-
+    // Insert order items
     const orderItems = items.value.map((item) => ({
       order_id: order.id,
       product_id: item.id,
-      quantity: item.quantity || 1,
+      quantity: item.quantity,
       price: item.price,
     }))
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-    if (itemsError) return alert('Failed to save order items')
+    if (itemsError) throw itemsError
 
+    // Insert payment record
     await supabase.from('payments').insert({
       order_id: order.id,
-      amount: totalPrice.value,
+      amount: order.total_amount,
       status: 'pending',
     })
 
-    // ✅ Navigate to CheckoutSuccess page
     router.push({
       name: 'checkout-success',
       params: { orderId: order.id },
     })
   } catch (err) {
-    console.error('Error during checkout:', err)
-    alert('Something went wrong during checkout.')
+    console.error('Checkout error:', err)
+    alert('Failed to checkout. Please try again.')
   }
 }
 
@@ -276,7 +260,6 @@ const confirmDateTime = () => {
   }
   showDateTimePicker.value = false
 }
-
 </script>
 
 <template>
@@ -294,8 +277,9 @@ const confirmDateTime = () => {
           <v-card-text>
             <div class="buyer-info">
               <p><strong>Name:</strong> {{ buyer?.first_name }} {{ buyer?.last_name }}</p>
-              <p><strong>Contact:</strong> {{ buyer?.phone }}</p>
-              <p><strong>Address:</strong> {{ address?.street }}, {{ address?.city }}</p>
+              <p><strong>Contact:</strong> {{ address?.phone }}</p>
+
+              <p><strong>Address:</strong> {{ address?.street }}, {{ address?.city_name }}</p>
               <p><strong>Transaction No.:</strong> {{ transactionNumber }}</p>
               <p>
                 <strong>Delivery Schedule:</strong> {{ deliveryDate || 'Not set' }}
