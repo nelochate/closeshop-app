@@ -123,26 +123,55 @@ async function checkNetworkStatus() {
 }
 
 /* 🏪 Fetch Shops */
+/* 🏪 Fetch Approved Shops Sorted by Distance */
 async function fetchShops() {
   try {
+    const userCoords = await Geolocation.getCurrentPosition()
+    const userLat = userCoords.coords.latitude
+    const userLon = userCoords.coords.longitude
+
     const { data, error } = await supabase
       .from('shops')
       .select(
-        'id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region',
+        'id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region, latitude, longitude, status',
       )
-      .order('business_name')
+      .eq('status', 'approved') // ✅ Only approved shops
+      .not('latitude', 'is', null)
+      .not('longitude', 'is', null)
 
     if (error) throw error
 
-    nearby.value = (data || []).map((s) => ({
-      id: s.id,
-      title: s.business_name,
-      img: s.physical_store || PLACEHOLDER_IMG,
-      logo: s.logo_url,
-      address: [s.building, s.street, s.barangay, s.city, s.province, s.region]
-        .filter(Boolean)
-        .join(', '),
-    }))
+    // Compute distance
+    function distance(lat1, lon1, lat2, lon2) {
+      const R = 6371 // km
+      const dLat = ((lat2 - lat1) * Math.PI) / 180
+      const dLon = ((lon2 - lon1) * Math.PI) / 180
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((lat1 * Math.PI) / 180) *
+          Math.cos((lat2 * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2)
+      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+    }
+
+    // Map stores & compute distance
+    let mapped = data.map((s) => {
+      const dist = distance(userLat, userLon, s.latitude, s.longitude)
+      return {
+        id: s.id,
+        title: s.business_name,
+        img: s.physical_store || PLACEHOLDER_IMG,
+        logo: s.logo_url,
+        address: [s.building, s.street, s.barangay, s.city, s.province].filter(Boolean).join(', '),
+        distance: dist, // in km
+      }
+    })
+
+    // Sort nearest → farthest
+    mapped.sort((a, b) => a.distance - b.distance)
+
+    nearby.value = mapped
   } catch (err) {
     console.error('fetchShops error:', err)
     errorMsg.value = err.message
@@ -150,21 +179,30 @@ async function fetchShops() {
   }
 }
 
-/* 🛍️ Fetch Products */
+/* 🛍️ Fetch Products from Approved Shops */
 async function fetchProducts() {
   try {
     const { data, error } = await supabase
       .from('products')
-      .select('id, prod_name, price, main_img_urls, shop_id, sold')
+      .select(`
+        id,
+        prod_name,
+        price,
+        main_img_urls,
+        sold,
+        shop_id,
+        shops!inner (status)
+      `)
+      .eq('shops.status', 'approved')   // ✅ Only shops approved
 
     if (error) throw error
 
-    products.value = (data || []).map((p) => ({
+    products.value = (data || []).map(p => ({
       id: p.id,
-      title: p.prod_name || 'Untitled product',
+      title: p.prod_name,
       price: p.price,
       img: extractImage(p.main_img_urls),
-      sold: p.sold || 0,
+      sold: p.sold || 0
     }))
   } catch (err) {
     console.error('fetchProducts error:', err)
@@ -784,5 +822,4 @@ onMounted(() => {
     padding: 12px;
   }
 }
-
 </style>
