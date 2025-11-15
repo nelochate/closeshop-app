@@ -62,7 +62,7 @@ async function setupPushNotifications() {
     }
 
     // Step 2: Register with APNS/FCM (handled internally by Capacitor)
-   // await PushNotifications.register()
+    // await PushNotifications.register()
 
     // Step 3: Handle successful registration (token received)
     PushNotifications.addListener('registration', async (token) => {
@@ -373,18 +373,31 @@ onMounted(() => {
       </v-btn>
     </div>
 
-    <!-- 🧾 Survey Modal -->
-    <v-dialog v-model="showSurvey" width="700" persistent scrollable>
-      <v-card>
-        <v-card-title class="d-flex justify-space-between align-center">
+    <!-- 🧾 Survey Modal Fullscreen -->
+    <v-dialog
+      v-model="showSurvey"
+      fullscreen
+      persistent
+      scrollable
+      transition="dialog-bottom-transition"
+    >
+      <v-card class="survey-fullscreen-card">
+        <!-- Header -->
+        <v-card-title
+          class="d-flex justify-space-between align-center px-4 py-3"
+          style="background: #3f83c7; color: white"
+        >
           <span class="text-h6">Customer Feedback Survey</span>
-          <v-btn icon="mdi-close" variant="text" @click="showSurvey = false" />
+          <v-btn icon variant="text" color="white" @click="showSurvey = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
         </v-card-title>
-        <v-card-text style="padding: 0">
+
+        <!-- Iframe Container -->
+        <v-card-text class="p-0" style="flex: 1; display: flex; overflow: hidden">
           <iframe
             src="https://docs.google.com/forms/d/e/1FAIpQLScgP_QJBFQNeH42g5DKTkDusG-9EMru1XZUJwfVB02hzDS1Xg/viewform?embedded=true"
-            width="100%"
-            height="500"
+            style="border: 0; width: 100%; height: 100%"
             frameborder="0"
             marginheight="0"
             marginwidth="0"
@@ -751,4 +764,25 @@ onMounted(() => {
     opacity: 1;
   }
 }
+
+/* Make the fullscreen card stretch to full height */
+.survey-fullscreen-card {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+/* Optional: smooth fade/slide animation */
+.v-dialog__content {
+  background: rgba(0, 0, 0, 0.4); /* dim background */
+}
+
+/* Mobile adjustments */
+@media (max-width: 600px) {
+  .survey-fullscreen-card v-card-title {
+    font-size: 16px;
+    padding: 12px;
+  }
+}
+
 </style>
