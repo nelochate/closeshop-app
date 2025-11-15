@@ -16,7 +16,6 @@ const shopId = ref<string | null>((route.params.id as string) || null)
 // -------------------- STATES --------------------
 const currentShopId = ref<string | null>(null)
 const uploading = ref(false)
-const pickerTarget = ref<'logo' | 'physical' | null>(null)
 const showPicker = ref(false)
 const saving = ref(false)
 const snackbar = ref(false)
@@ -33,6 +32,9 @@ const physicalUrl = ref<string | null>(null)
 const deliveryOptions = ref<string[]>([])
 const meetUpDetails = ref('')
 const fullAddress = ref('')
+const validIdFrontUrl = ref<string | null>(null)
+const validIdBackUrl = ref<string | null>(null)
+const pickerTarget = ref<'logo' | 'physical' | 'valid_id_front' | 'valid_id_back' | null>(null)
 
 // -------------------- ADDRESS --------------------
 const addressOption = ref<'manual' | 'map'>('manual')
@@ -148,7 +150,13 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     const blob = await response.blob()
     const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
 
-    const bucket = pickerTarget.value === 'physical' ? 'physical_store' : 'Profile'
+    const bucket =
+      pickerTarget.value === 'physical'
+        ? 'physical_store'
+        : pickerTarget.value === 'valid_id_front' || pickerTarget.value === 'valid_id_back'
+          ? 'valid_id'
+          : 'Profile'
+
     const fileName = `${user.id}/${Date.now()}.png`
 
     const { data, error } = await supabase.storage.from(bucket).upload(fileName, file, {
@@ -166,6 +174,17 @@ const pickImage = async (source: 'camera' | 'gallery') => {
           .from('shops')
           .update({ physical_store: newUrl })
           .eq('id', currentShopId.value)
+    } else if (pickerTarget.value === 'valid_id_front') {
+      validIdFrontUrl.value = newUrl
+      if (currentShopId.value)
+        await supabase
+          .from('shops')
+          .update({ valid_id_front: newUrl })
+          .eq('id', currentShopId.value)
+    } else if (pickerTarget.value === 'valid_id_back') {
+      validIdBackUrl.value = newUrl
+      if (currentShopId.value)
+        await supabase.from('shops').update({ valid_id_back: newUrl }).eq('id', currentShopId.value)
     } else {
       avatarUrl.value = newUrl
       if (currentShopId.value)
@@ -379,7 +398,6 @@ const getLocation = () => {
   )
 }
 
-
 // -------------------- SAVE SHOP --------------------
 const saveShop = async () => {
   if (saving.value) return
@@ -404,8 +422,8 @@ const saveShop = async () => {
       physical_store: physicalUrl.value,
       latitude: latitude.value,
       longitude: longitude.value,
-      open_time: openTime.value,
-      close_time: closeTime.value,
+      open_time: openTime.value || null, // ✅ send null if empty
+      close_time: closeTime.value || null, // ✅ send null if empty
       barangay: address.barangay.value,
       building: address.building.value,
       street: address.street.value,
@@ -417,6 +435,9 @@ const saveShop = async () => {
       delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
+      status: 'pending', // ✅ new field
+      valid_id_front: validIdFrontUrl.value,
+      valid_id_back: validIdBackUrl.value,
     }
 
     if (!currentShopId.value) {
@@ -671,7 +692,7 @@ onMounted(async () => {
           </v-btn>
         </div>
 
-    <!-- <v-btn
+        <!-- <v-btn
           color="secondary"
           @click="() => saveCoordinates(latitude!, longitude!)"
           class="save-location"
@@ -691,6 +712,38 @@ onMounted(async () => {
             outlined
             readonly
           />
+        </div>
+
+        <!--for the camera valid id-->
+        <div class="valid-id-upload mt-4">
+          <v-btn
+            color="primary"
+            @click="
+              () => {
+                pickerTarget = 'valid_id_front'
+                showPicker = true
+              }
+            "
+            class="mr-2"
+          >
+            Upload Valid ID (Front)
+          </v-btn>
+          <v-btn
+            color="primary"
+            @click="
+              () => {
+                pickerTarget = 'valid_id_back'
+                showPicker = true
+              }
+            "
+          >
+            Upload Valid ID (Back)
+          </v-btn>
+
+          <div class="mt-2">
+            <v-img v-if="validIdFrontUrl" :src="validIdFrontUrl" max-height="150" class="mr-2" />
+            <v-img v-if="validIdBackUrl" :src="validIdBackUrl" max-height="150" />
+          </div>
         </div>
 
         <v-btn block color="#3f83c7" :loading="saving" @click="saveShop" class="mt-4 text-white">
@@ -716,7 +769,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.app-bar{
+.app-bar {
   padding-top: 22px;
 }
 /* ===== Cover Section ===== */
