@@ -630,45 +630,41 @@ const routeToShop = (shop: any) => {
 </script>
 <template>
   <v-app>
-    <v-app-bar class="searchshop" color="#3f83c7" flat>
-      <v-text-field
-        v-model="search"
-        label="Search shops or places..."
-        hide-details
-        density="comfortable"
-        variant="outlined"
-        @keydown="onSearchKeydown"
-      >
-        <template #append>
-          <v-btn icon @click="smartSearch">
-            <v-icon>mdi-magnify</v-icon>
+  <v-sheet class="hero">
+        <div class="hero-row">
+          <v-text-field
+            v-model="search"
+            class="search-field"
+            variant="solo"
+            rounded="pill"
+            hide-details
+            clearable
+            density="comfortable"
+            placeholder="Search product or shop..."
+            append-inner-icon="mdi-earth"
+          />
+          <v-btn class="search-btn" icon aria-label="Search" @click="">
+            <v-icon size="22">mdi-magnify</v-icon>
           </v-btn>
-        </template>
-      </v-text-field>
-    </v-app-bar>
+        </div>
+      </v-sheet>
 
     <v-main>
       <div id="map"></div>
-
       <div class="map-buttons" v-if="!showShopMenu">
-        <v-btn icon :loading="locating" @click="recenterToUser"
-          ><v-icon>mdi-crosshairs-gps</v-icon></v-btn
-        >
+        <v-btn icon :loading="locating" @click="recenterToUser"><v-icon>mdi-crosshairs-gps</v-icon></v-btn>
         <v-menu location="top" transition="scale-transition" color="#ffffff">
           <template #activator="{ props }">
             <v-btn icon v-bind="props"><v-icon>mdi-dots-vertical</v-icon></v-btn>
           </template>
-          <v-list-item @click="showWithinCity"
-            ><v-list-item-title>Display Within City (Nearby)</v-list-item-title></v-list-item
-          >
-          <v-list-item @click="showOutsideCity"
-            ><v-list-item-title>Display Outside City (Explore More)</v-list-item-title></v-list-item
-          >
+          <v-list-item @click="showWithinCity"><v-list-item-title>Display Within City
+              (Nearby)</v-list-item-title></v-list-item>
+          <v-list-item @click="showOutsideCity"><v-list-item-title>Display Outside City (Explore
+              More)</v-list-item-title></v-list-item>
         </v-menu>
 
-        <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip"
-          >🌏 Exploring Outside City</v-chip
-        >
+        <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip">🌏 Exploring Outside
+          City</v-chip>
         <v-btn icon @click="showShopMenu = true"><v-icon>mdi-menu</v-icon></v-btn>
       </div>
 
@@ -686,26 +682,19 @@ const routeToShop = (shop: any) => {
         <v-list-item v-for="shop in filteredShops" :key="shop.id" @click="openShop(shop.id)">
           <template #prepend>
             <v-avatar size="40">
-              <img
-                :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'"
-              />
+              <img :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'" />
             </v-avatar>
           </template>
 
           <v-list-item-title>
             <span v-html="highlightMatch(shop.business_name, search)"></span>
 
-            <span
-              v-if="productMatches.some((p) => p.shop_id === shop.id)"
-              style="color: green; font-size: 12px"
-            >
+            <span v-if="productMatches.some((p) => p.shop_id === shop.id)" style="color: green; font-size: 12px">
               • Product match available
             </span>
           </v-list-item-title>
 
-          <v-list-item-subtitle
-            v-html="highlightMatch(getFullAddress(shop), search)"
-          ></v-list-item-subtitle>
+          <v-list-item-subtitle v-html="highlightMatch(getFullAddress(shop), search)"></v-list-item-subtitle>
 
           <v-list-item-subtitle v-if="shop.distanceKm">
             {{ shop.distanceKm.toFixed(2) }} km away
@@ -719,6 +708,38 @@ const routeToShop = (shop: any) => {
 </template>
 
 <style scoped>
+.hero {
+  background: #3f83c7;
+  border-radius: 0;
+  padding-top: env(safe-area-inset-top);
+  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  margin: 0;
+  width: 100%;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.hero-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.search-field {
+  flex: 1;
+}
+
+.search-field :deep(.v-field) {
+  background: #fff !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+}
+
+.search-field :deep(input) {
+  font-size: 14px;
+}
+
+
 #map {
   position: absolute;
   top: var(--v-toolbar-height, 64px);
@@ -726,7 +747,7 @@ const routeToShop = (shop: any) => {
   left: 0;
   right: 0;
   width: 100%;
-  min-height: 300px; /* smaller minimum height for mobile */
+  min-height: 00px; /* smaller minimum height for mobile */
   height: calc(100vh - var(--v-toolbar-height, 64px) - var(--v-bottom-navigation-height, 56px));
 }
 
@@ -767,7 +788,7 @@ const routeToShop = (shop: any) => {
 /* -------------------- MOBILE MEDIA QUERIES -------------------- */
 @media (max-width: 768px) {
   #map {
-    top: var(--v-toolbar-height, 56px);
+    top: var(--v-toolbar-height, 90px);
     bottom: var(--v-bottom-navigation-height, 56px);
   }
 
@@ -802,7 +823,6 @@ const routeToShop = (shop: any) => {
     width: 60px;
     height: 60px;
   }
-}
 
 /* ROUTE LINE FIXES */
 :deep(.leaflet-routing-container) {
@@ -820,5 +840,6 @@ const routeToShop = (shop: any) => {
 
 :deep(.leaflet-routing-line) {
   stroke-width: 6px !important;
+}
 }
 </style>
