@@ -283,79 +283,24 @@ const generateTransactionNumber = () => {
 }
 
 // to store dialog selection
-const buyNow = async () => {
-  if (!user.value) {
-    alert('Please log in first.')
-    return
+const buyNow = () => {
+  if (!product.value) return alert('Product not loaded')
+
+  const item = {
+    id: product.value.id,
+    name: product.value.prod_name,
+    price: product.value.price,
+    quantity: 1, // default
+    size: selectedSize.value || null,
+    variety: selectedVariety.value || null,
+    image: mainImage(product.value.main_img_urls),
   }
 
-  if (!product.value) {
-    alert('Product not loaded')
-    return
-  }
-
-  if (product.value.has_sizes && !selectedSize.value) {
-    alert('Please select a size')
-    return
-  }
-
-  if (product.value.has_varieties && !selectedVariety.value) {
-    alert('Please select a variety')
-    return
-  }
-
-  try {
-    const transactionNumber = generateTransactionNumber()
-
-    // 1️⃣ Insert order with transaction number
-    const { data: orderData, error: orderError } = await supabase
-      .from('orders')
-      .insert({
-        user_id: user.value.id,
-        total_amount: product.value.price,
-        payment_method: 'cash',
-        status: 'pending',
-        transaction_number: transactionNumber, // <--- new column
-      })
-      .select()
-
-    if (orderError) throw orderError
-    const order = orderData?.[0]
-    if (!order) throw new Error('Order insert failed.')
-
-    // 2️⃣ Insert order item
-    const { data: itemData, error: itemError } = await supabase
-      .from('order_items')
-      .insert({
-        order_id: order.id,
-        product_id: product.value.id,
-        quantity: 1,
-        price: product.value.price,
-        selected_size: selectedSize.value,
-        selected_variety: selectedVariety.value?.name || selectedVariety.value,
-      })
-      .select()
-
-    if (itemError) throw itemError
-
-    // 3️⃣ Insert payment record
-    const { data: paymentData, error: paymentError } = await supabase
-      .from('payments')
-      .insert({
-        order_id: order.id,
-        amount: product.value.price,
-        status: 'pending',
-      })
-      .select()
-
-    if (paymentError) throw paymentError
-
-    // ✅ Navigate to purchase page
-    router.push(`/purchaseview/${transactionNumber}`)
-  } catch (err) {
-    console.error('Buy Now Error:', err)
-    alert(`Failed to process order. ${err.message || ''}`)
-  }
+  router.push({
+    name: 'purchaseview', // this matches your route
+    params: { id: product.value.id }, // must match /purchaseview/:id
+    state: { items: [item], shopId: product.value.shop.id },
+  })
 }
 
 // Add to Cart Dialog
@@ -372,9 +317,15 @@ const addToCartDialog = computed(() => {
       dialogSelectedSize.value = null
       dialogSelectedVariety.value = null
     },
-    'onUpdate:selectedSize': (val) => { dialogSelectedSize.value = val },
-    'onUpdate:selectedVariety': (val) => { dialogSelectedVariety.value = val },
-    'onUpdate:quantity': (val) => { quantity.value = val }
+    'onUpdate:selectedSize': (val) => {
+      dialogSelectedSize.value = val
+    },
+    'onUpdate:selectedVariety': (val) => {
+      dialogSelectedVariety.value = val
+    },
+    'onUpdate:quantity': (val) => {
+      quantity.value = val
+    },
   }
 })
 </script>
@@ -635,7 +586,12 @@ const addToCartDialog = computed(() => {
             <!-- Sizes in Dialog -->
             <div v-if="product.sizes && product.sizes.length" class="mb-4">
               <p class="font-weight-medium mb-2">Size:</p>
-              <v-btn-toggle v-model="dialogSelectedSize" mandatory class="flex-wrap" style="gap: 6px">
+              <v-btn-toggle
+                v-model="dialogSelectedSize"
+                mandatory
+                class="flex-wrap"
+                style="gap: 6px"
+              >
                 <v-btn
                   v-for="size in product.sizes"
                   :key="size"
@@ -678,7 +634,15 @@ const addToCartDialog = computed(() => {
           </v-card-text>
 
           <v-card-actions>
-            <v-btn block color="primary" @click="confirmAddToCart" :disabled="!dialogSelectedSize && product.has_sizes || !dialogSelectedVariety && product.has_varieties">
+            <v-btn
+              block
+              color="primary"
+              @click="confirmAddToCart"
+              :disabled="
+                (!dialogSelectedSize && product.has_sizes) ||
+                (!dialogSelectedVariety && product.has_varieties)
+              "
+            >
               Add to Cart
             </v-btn>
           </v-card-actions>
@@ -689,29 +653,41 @@ const addToCartDialog = computed(() => {
     <!-- Bottom Nav - ALWAYS VISIBLE FOR ALL PRODUCTS -->
     <v-bottom-navigation class="bottom-nav" height="65" fixed>
       <v-row class="w-full pa-0 ma-0" no-gutters>
-        <!-- ALWAYS SHOW THESE BUTTONS FOR ALL USERS -->
-        <!-- Chat Now -->
-        <v-col cols="4" class="pa-0">
-          <v-btn block class="bottom-btn chat-now-btn" @click="goToChat" :disabled="!product?.shop?.owner_id">
-            <v-icon left size="20">mdi-chat-outline</v-icon>
-            Chat Now
-          </v-btn>
-        </v-col>
+        <!-- If owner, show only Visit Shop -->
+        <template v-if="isOwner">
+          <v-col cols="12" class="pa-0">
+            <v-btn block color="primary" class="bottom-btn" @click="goToShop(product.shop.id)">
+              <v-icon left size="20">mdi-storefront-outline</v-icon>
+              Visit Shop
+            </v-btn>
+          </v-col>
+        </template>
 
-        <!-- Add to Cart -->
-        <v-col cols="4" class="pa-0">
-          <v-btn block class="bottom-btn cart-btn" @click="showAddToCart = true" :disabled="!product">
-            <v-icon left size="20">mdi-cart-outline</v-icon>
-            Add to Cart
-          </v-btn>
-        </v-col>
+        <!-- If not owner, show Chat, Add to Cart, Buy Now -->
+        <template v-else>
+          <!-- Chat Now -->
+          <v-col cols="4" class="pa-0">
+            <v-btn block class="bottom-btn chat-now-btn" color="#4caf50" @click="goToChat()">
+              <v-icon left size="20">mdi-chat-outline</v-icon>
+              Chat Now
+            </v-btn>
+          </v-col>
 
-        <!-- Buy Now -->
-        <v-col cols="4" class="pa-0">
-          <v-btn block class="bottom-btn buy-now-btn" color="primary" @click="buyNow" :disabled="!product">
-            Buy Now
-          </v-btn>
-        </v-col>
+          <!-- Add to Cart -->
+          <v-col cols="4" class="pa-0">
+            <v-btn block class="bottom-btn cart-btn" color="#4caf50" @click="showAddToCart = true">
+              <v-icon left size="20">mdi-cart-outline</v-icon>
+              Add to Cart
+            </v-btn>
+          </v-col>
+
+          <!-- Buy Now -->
+          <v-col cols="4" class="pa-0">
+            <v-btn block class="bottom-btn buy-now-btn" color="#438fda" @click="buyNow()">
+              Buy Now
+            </v-btn>
+          </v-col>
+        </template>
       </v-row>
     </v-bottom-navigation>
   </v-app>
