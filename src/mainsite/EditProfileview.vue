@@ -157,15 +157,22 @@ const pickImage = async (source) => {
       resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
     })
-    if (photo.webPath) {
+
+    if (photo?.webPath) {
       const response = await fetch(photo.webPath)
       const blob = await response.blob()
       await uploadAvatar(blob)
     }
-    showPicker.value = false
   } catch (error) {
-    console.error(error)
-    showSuccessMessage('Failed to select image')
+    if (error.message.includes('User cancelled')) {
+      // User closed camera without taking photo
+      console.log('Camera closed by user')
+    } else {
+      console.error(error)
+      showSuccessMessage('Failed to select image')
+    }
+  } finally {
+    showPicker.value = false
   }
 }
 
@@ -320,16 +327,24 @@ const fullName = computed(() => {
 
     <!-- Bottom Sheet for Image Picker -->
     <v-bottom-sheet v-model="showPicker">
-      <v-list>
-        <v-list-item @click="pickImage('camera')">
-          <v-icon icon="mdi-camera" class="me-3"></v-icon>
-          <v-list-item-title>Take Photo</v-list-item-title>
-        </v-list-item>
-        <v-list-item @click="pickImage('gallery')">
-          <v-icon icon="mdi-image" class="me-3"></v-icon>
-          <v-list-item-title>Choose from Gallery</v-list-item-title>
-        </v-list-item>
-      </v-list>
+      <v-card flat>
+        <v-card-title class="d-flex justify-end">
+          <v-btn icon @click="showPicker = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+
+        <v-list>
+          <v-list-item @click="pickImage('camera')">
+            <v-icon icon="mdi-camera" class="me-3"></v-icon>
+            <v-list-item-title>Take Photo</v-list-item-title>
+          </v-list-item>
+          <v-list-item @click="pickImage('gallery')">
+            <v-icon icon="mdi-image" class="me-3"></v-icon>
+            <v-list-item-title>Choose from Gallery</v-list-item-title>
+          </v-list-item>
+        </v-list>
+      </v-card>
     </v-bottom-sheet>
   </v-app>
 </template>
