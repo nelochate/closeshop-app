@@ -19,8 +19,8 @@ const addressMode = ref('manual')
 const isEdit = ref(false)
 const addressId = ref(route.params.id || null)
 
-const map = ref(null)
-const marker = ref(null)
+const map = ref<any>(null)
+const marker = ref<any>(null)
 
 // PSGC Data
 const regions = ref([])
@@ -29,18 +29,18 @@ const citiesMunicipalities = ref([])
 const barangays = ref([])
 
 const address = ref({
-  region: '',
-  province: '',
-  city: '',
   recipient_name: '',
   phone: '',
-  purok: '',
-  barangay: '',
-  building: '',
   street: '',
+  purok: '',
+  building: '',
   house_no: '',
   postal_code: '',
   is_default: false,
+  region_name: '',
+  province_name: '',
+  city_name: '',
+  barangay_name: '',
 })
 
 // --- PSGC API Functions ---
@@ -48,7 +48,6 @@ const fetchRegions = async () => {
   try {
     const res = await fetch('https://psgc.cloud/api/regions')
     if (!res.ok) throw new Error('Failed to fetch regions')
-
     const data = await res.json()
     regions.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
@@ -59,15 +58,13 @@ const fetchRegions = async () => {
 }
 
 const fetchProvinces = async (regionCode: string) => {
+  if (!regionCode) {
+    provinces.value = []
+    return
+  }
   try {
-    if (!regionCode) {
-      provinces.value = []
-      return
-    }
-
     const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
     if (!res.ok) throw new Error('Failed to fetch provinces')
-
     const data = await res.json()
     provinces.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
@@ -77,18 +74,16 @@ const fetchProvinces = async (regionCode: string) => {
   }
 }
 
-
-
 const fetchCitiesMunicipalities = async (provinceCode: string) => {
+  if (!provinceCode) {
+    citiesMunicipalities.value = []
+    return
+  }
   try {
-    if (!provinceCode) {
-      citiesMunicipalities.value = []
-      return
-    }
-
-    const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
+    const res = await fetch(
+      `https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`,
+    )
     if (!res.ok) throw new Error('Failed to fetch cities/municipalities')
-
     const data = await res.json()
     citiesMunicipalities.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
@@ -98,17 +93,14 @@ const fetchCitiesMunicipalities = async (provinceCode: string) => {
   }
 }
 
-
 const fetchBarangays = async (cityCode: string) => {
+  if (!cityCode) {
+    barangays.value = []
+    return
+  }
   try {
-    if (!cityCode) {
-      barangays.value = []
-      return
-    }
-
     const res = await fetch(`https://psgc.cloud/api/cities/${cityCode}/barangays`)
     if (!res.ok) throw new Error('Failed to fetch barangays')
-
     const data = await res.json()
     barangays.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
@@ -118,153 +110,134 @@ const fetchBarangays = async (cityCode: string) => {
   }
 }
 
-
-
-// --- Watchers for PSGC Data ---
-watch(() => address.value.region, async (newRegionCode) => {
-  if (newRegionCode) {
+// --- Watchers for PSGC Cascading ---
+watch(
+  () => address.value.region,
+  async (newRegion) => {
     address.value.province = ''
     address.value.city = ''
     address.value.barangay = ''
     address.value.postal_code = ''
-    await fetchProvinces(newRegionCode)
-  }
-})
+    if (newRegion) await fetchProvinces(newRegion)
+  },
+)
 
-watch(() => address.value.province, async (newProvinceCode) => {
-  if (newProvinceCode) {
+watch(
+  () => address.value.province,
+  async (newProvince) => {
     address.value.city = ''
     address.value.barangay = ''
     address.value.postal_code = ''
-    await fetchCitiesMunicipalities(newProvinceCode)
-  }
-})
+    if (newProvince) await fetchCitiesMunicipalities(newProvince)
+  },
+)
 
-watch(() => address.value.city, async (newCityCode) => {
-  if (newCityCode) {
+watch(
+  () => address.value.city,
+  async (newCity) => {
     address.value.barangay = ''
+    const selectedCity = citiesMunicipalities.value.find((c) => c.code === newCity)
+    if (selectedCity?.zip_code) address.value.postal_code = selectedCity.zip_code
+    if (newCity) await fetchBarangays(newCity)
+  },
+)
 
-    // Set postal code from selected city/municipality
-    const selectedCity = citiesMunicipalities.value.find(city => city.code === newCityCode)
-    if (selectedCity && selectedCity.zip_code) {
-      address.value.postal_code = selectedCity.zip_code
-    }
-
-    await fetchBarangays(newCityCode)
-  }
-})
-
-// --- Load address if editing ---
+// --- Load Address for Edit ---
 const loadAddress = async () => {
   try {
     const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData?.user) {
-      console.error('User not authenticated:', userError)
-      return router.push({ name: 'login' })
-    }
+    if (userError || !userData?.user) return router.push({ name: 'login' })
 
-    // Load PSGC data first
     await fetchRegions()
 
-    if (addressId.value) {
-      const { data, error } = await supabase
-        .from('addresses')
-        .select('*')
-        .eq('id', addressId.value)
-        .eq('user_id', userData.user.id)
-        .single()
+    if (!addressId.value) return
 
-      if (error) {
-        console.error('Load address error:', error)
-        snackbarMessage.value = 'Error loading address'
-        showMapSnackbar.value = true
-        return
-      }
+    const { data, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('id', addressId.value)
+      .eq('user_id', userData.user.id)
+      .single()
 
-      if (data) {
-        // Load address data and cascade PSGC data loading
-        Object.keys(address.value).forEach(key => {
-          if (data[key] !== undefined) {
-            address.value[key] = data[key]
-          }
-        })
-        isEdit.value = true
-
-        // Cascade loading of PSGC data based on saved address
-        if (data.region) {
-          await fetchProvinces(data.region)
-          if (data.province) {
-            await fetchCitiesMunicipalities(data.province)
-            if (data.city) {
-              await fetchBarangays(data.city)
-            }
-          }
-        }
-
-        // Update map after a short delay to ensure DOM is ready
-        setTimeout(() => updateMap(), 500)
-      }
+    if (error || !data) {
+      snackbarMessage.value = 'Error loading address'
+      showMapSnackbar.value = true
+      return
     }
-  } catch (error) {
-    console.error('Unexpected error in loadAddress:', error)
+
+    Object.assign(address.value, data)
+    isEdit.value = true
+
+    if (data.region_name) {
+      const selectedRegion = regions.value.find((r) => r.name === data.region_name)
+      if (selectedRegion) await fetchProvinces(selectedRegion.code)
+    }
+
+    if (data.province_name) {
+      const selectedProvince = provinces.value.find((p) => p.name === data.province_name)
+      if (selectedProvince) await fetchCitiesMunicipalities(selectedProvince.code)
+    }
+
+    if (data.city_name) {
+      const selectedCity = citiesMunicipalities.value.find((c) => c.name === data.city_name)
+      if (selectedCity) await fetchBarangays(selectedCity.code)
+    }
+
+    setTimeout(() => updateMap(), 500)
+  } catch (err) {
+    console.error(err)
     snackbarMessage.value = 'Unexpected error loading address'
     showMapSnackbar.value = true
   }
 }
 
-// --- Save address ---
+// --- Save Address ---
 const saveAddress = async () => {
   try {
     isLoading.value = true
-
-    // Validate required fields
-    if (!address.value.region || !address.value.province || !address.value.city || !address.value.barangay) {
-      throw new Error('Please complete all address fields (Region, Province, City/Municipality, Barangay)')
-    }
+    if (
+      !address.value.region ||
+      !address.value.province ||
+      !address.value.city ||
+      !address.value.barangay
+    )
+      throw new Error('Complete all required address fields')
 
     const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData?.user) {
-      throw new Error('User not authenticated')
-    }
+    if (userError || !userData?.user) throw new Error('User not authenticated')
 
-    // Get display names for selected codes
-    const regionName = regions.value.find(r => r.code === address.value.region)?.name || ''
-    const provinceName = provinces.value.find(p => p.code === address.value.province)?.name || ''
-    const cityName = citiesMunicipalities.value.find(c => c.code === address.value.city)?.name || ''
-    const barangayName = barangays.value.find(b => b.code === address.value.barangay)?.name || ''
+    // ✅ Get human-readable names for all PSGC fields
+    const regionName = regions.value.find((r) => r.code === address.value.region)?.name || ''
+    const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || ''
+    const cityName =
+      citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || ''
+    const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || ''
 
-    // Prepare address data
     const addressData = {
-      recipient_name: address.value.recipient_name || null,
-      phone: address.value.phone || null,
-      street: address.value.street || null,
-      building: address.value.building || null,
-      house_no: address.value.house_no || null,
-      purok: address.value.purok || null,
-      region: address.value.region,
-      region_name: regionName,
-      province: address.value.province,
-      province_name: provinceName,
-      city: address.value.city,
-      city_name: cityName,
-      barangay: address.value.barangay,
-      barangay_name: barangayName,
-      postal_code: address.value.postal_code || '',
-      is_default: address.value.is_default || false,
+      user_id: userData.user.id,
+      recipient_name: address.value.recipient_name,
+      phone: address.value.phone,
+      street: address.value.street,
+      purok: address.value.purok,
+      building: address.value.building,
+      house_no: address.value.house_no,
+      postal_code: address.value.postal_code,
+      is_default: address.value.is_default,
+      region_name: regions.value.find((r) => r.code === address.value.region)?.name || '',
+      province_name: provinces.value.find((p) => p.code === address.value.province)?.name || '',
+      city_name: citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || '',
+      barangay_name: barangays.value.find((b) => b.code === address.value.barangay)?.name || '',
       updated_at: new Date().toISOString(),
+      created_at: isEdit.value ? undefined : new Date().toISOString(),
     }
 
-    // Handle default address logic
+    // Default address logic
     if (address.value.is_default) {
-      const { error: updateError } = await supabase
+      await supabase
         .from('addresses')
         .update({ is_default: false })
         .eq('user_id', userData.user.id)
-        .neq('id', addressId.value || '00000000-0000-0000-0000-000000000000')
-
-      if (updateError) {
-        console.error('Error updating default addresses:', updateError)
-      }
+        .neq('id', addressId.value || '')
     }
 
     let result
@@ -277,27 +250,22 @@ const saveAddress = async () => {
     } else {
       result = await supabase
         .from('addresses')
-        .insert([{
-          ...addressData,
-          user_id: userData.user.id,
-          created_at: new Date().toISOString(),
-        }])
+        .insert([
+          { ...addressData, user_id: userData.user.id, created_at: new Date().toISOString() },
+        ])
     }
 
-    if (result.error) {
-      throw new Error(result.error.message || 'Failed to save address')
-    }
+    if (result.error) throw new Error(result.error.message)
 
-    successMessage.value = isEdit.value ? 'Address updated successfully!' : 'Address added successfully!'
+    successMessage.value = isEdit.value
+      ? 'Address updated successfully!'
+      : 'Address added successfully!'
     showSuccess.value = true
 
-    setTimeout(() => {
-      router.replace({ name: 'my-address', query: { refreshed: Date.now() } })
-    }, 1500)
-
-  } catch (error) {
-    console.error('Save address error:', error)
-    successMessage.value = 'Error: ' + (error.message || 'Failed to save address')
+    setTimeout(() => router.replace({ name: 'my-address', query: { refreshed: Date.now() } }), 1500)
+  } catch (err: any) {
+    console.error(err)
+    successMessage.value = 'Error: ' + (err.message || 'Failed to save address')
     showSuccess.value = true
   } finally {
     isLoading.value = false
@@ -306,20 +274,16 @@ const saveAddress = async () => {
 
 // --- Update Map ---
 const updateMap = async () => {
-  if (!map.value) {
-    console.warn('Map not initialized')
-    return
-  }
-
+  if (!map.value) return
   const house = address.value.house_no || ''
   const street = address.value.street || ''
   const purok = address.value.purok || ''
-  const barangayName = barangays.value.find(b => b.code === address.value.barangay)?.name || ''
-  const cityName = citiesMunicipalities.value.find(c => c.code === address.value.city)?.name || ''
-  const provinceName = provinces.value.find(p => p.code === address.value.province)?.name || ''
+  const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || ''
+  const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || ''
+  const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || ''
 
   if (!barangayName && !street && !cityName) {
-    map.value.setView([12.8797, 121.7740], 6) // Default Philippines view
+    map.value.setView([12.8797, 121.774], 6)
     if (marker.value) {
       map.value.removeLayer(marker.value)
       marker.value = null
@@ -327,43 +291,28 @@ const updateMap = async () => {
     return
   }
 
-  const query = `${house} ${street} ${purok} ${barangayName}, ${cityName}, ${provinceName}, Philippines`.trim()
+  const query =
+    `${house} ${street} ${purok} ${barangayName}, ${cityName}, ${provinceName}, Philippines`.trim()
 
   try {
     const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
-
-    if (!res.ok) {
-      throw new Error(`HTTP error! status: ${res.status}`)
-    }
-
     const results = await res.json()
-
-    if (results.error) {
-      throw new Error(results.error)
-    }
-
     if (results.length > 0) {
       const { lat, lon } = results[0]
       const latNum = parseFloat(lat)
       const lonNum = parseFloat(lon)
-
       map.value.setView([latNum, lonNum], 15)
-      if (marker.value) {
-        marker.value.setLatLng([latNum, lonNum])
-      } else {
-        marker.value = L.marker([latNum, lonNum]).addTo(map.value)
-      }
-    } else {
-      console.warn('No results found for query:', query)
+      if (marker.value) marker.value.setLatLng([latNum, lonNum])
+      else marker.value = L.marker([latNum, lonNum]).addTo(map.value)
     }
-  } catch (error) {
-    console.error('Error updating map:', error)
-    snackbarMessage.value = 'Map update failed: ' + error.message
+  } catch (err) {
+    console.error(err)
+    snackbarMessage.value = 'Map update failed: ' + err.message
     showMapSnackbar.value = true
   }
 }
 
-// --- Current Location Detection ---
+// --- Current Location ---
 const useCurrentLocation = async () => {
   try {
     snackbarMessage.value = 'Detecting your precise location...'
@@ -373,110 +322,52 @@ const useCurrentLocation = async () => {
     const permissions = await Geolocation.checkPermissions()
     if (permissions.location !== 'granted') {
       const request = await Geolocation.requestPermissions()
-      if (request.location !== 'granted') {
-        throw new Error('Location permission denied. Please enable location services.')
-      }
+      if (request.location !== 'granted') throw new Error('Location permission denied.')
     }
 
-    const coords = await Geolocation.getCurrentPosition({
-      enableHighAccuracy: true,
-      timeout: 15000,
-      maximumAge: 0
-    })
-
+    const coords = await Geolocation.getCurrentPosition({ enableHighAccuracy: true })
     const lat = coords.coords.latitude
     const lng = coords.coords.longitude
 
     map.value.setView([lat, lng], 18)
-    if (marker.value) {
-      marker.value.setLatLng([lat, lng])
-    } else {
-      marker.value = L.marker([lat, lng]).addTo(map.value)
+    if (marker.value) marker.value.setLatLng([lat, lng])
+    else marker.value = L.marker([lat, lng]).addTo(map.value)
+
+    const res = await fetch(`http://localhost:3000/api/reverse-geocode?lat=${lat}&lon=${lng}`)
+    const result = await res.json()
+    if (result.address) {
+      const addr = result.address
+      address.value.house_no = addr.house_number || ''
+      address.value.building = addr.building || addr.specific_place || ''
+      address.value.street = addr.road || ''
+      address.value.purok = addr.purok || ''
+      address.value.postal_code = addr.postcode || ''
+      snackbarMessage.value = '📍 Location detected! Please complete remaining details.'
     }
-
-    try {
-      const res = await fetch(`http://localhost:3000/api/reverse-geocode?lat=${lat}&lon=${lng}`)
-
-      if (!res.ok) {
-        throw new Error(`HTTP error! status: ${res.status}`)
-      }
-
-      const result = await res.json()
-
-      if (result.error) {
-        throw new Error(result.error)
-      }
-
-      if (result.address) {
-        const addr = result.address
-
-        // Reset address fields
-        address.value.recipient_name = ''
-        address.value.phone = ''
-        address.value.house_no = addr.house_number || ''
-        address.value.building = addr.building || addr.specific_place || ''
-        address.value.street = addr.road || ''
-        address.value.purok = addr.purok || ''
-
-        // Note: For PSGC integration, you would need to map the reverse geocoded results
-        // to PSGC codes. This is complex and might require additional API calls.
-        // For now, we'll set the names and clear the codes
-        address.value.barangay = '' // Clear code, user will need to select
-        address.value.city = '' // Clear code, user will need to select
-        address.value.province = '' // Clear code, user will need to select
-        address.value.region = '' // Clear code, user will need to select
-        address.value.postal_code = addr.postcode || ''
-
-        snackbarMessage.value = '📍 Location detected! Please complete the address details below.'
-
-      } else {
-        snackbarMessage.value = '📍 Location detected but detailed address not found'
-      }
-    } catch (geocodeError) {
-      console.error('Reverse geocoding error:', geocodeError)
-      snackbarMessage.value = '📍 Location detected but address lookup failed. Please fill address manually.'
-    }
-
     showMapSnackbar.value = true
-  } catch (error) {
-    console.error('Location detection error:', error)
-
-    if (error.message.includes('permission')) {
-      snackbarMessage.value = '📍 Location access denied. Please enable location permissions.'
-    } else if (error.message.includes('timeout')) {
-      snackbarMessage.value = '📍 Location detection timeout. Please try again.'
-    } else {
-      snackbarMessage.value = '📍 Unable to detect location: ' + (error.message || 'Please try again')
-    }
-
+  } catch (err: any) {
+    console.error(err)
+    snackbarMessage.value = '📍 ' + (err.message || 'Unable to detect location.')
     showMapSnackbar.value = true
   } finally {
     isLoading.value = false
   }
 }
 
-// --- Lifecycle & Watchers ---
+// --- Lifecycle ---
 onMounted(() => {
-  try {
-    const mapElement = document.getElementById('map')
-    if (mapElement) {
-      map.value = L.map('map').setView([12.8797, 121.7740], 6) // Philippines view
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors'
-      }).addTo(map.value)
-      console.log('Map initialized successfully')
-    } else {
-      console.error('Map element not found')
-    }
-  } catch (mapError) {
-    console.error('Error initializing map:', mapError)
+  const mapElement = document.getElementById('map')
+  if (mapElement) {
+    map.value = L.map('map').setView([12.8797, 121.774], 6)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map.value)
   }
-
   loadAddress()
 })
 
-// Watch for address changes with debounce
-let updateMapTimeout
+// --- Watch for address changes ---
+let updateMapTimeout: any
 watch(
   () => [
     address.value.street,
@@ -484,26 +375,22 @@ watch(
     address.value.house_no,
     address.value.purok,
     address.value.city,
-    address.value.province
+    address.value.province,
   ],
   () => {
     if (updateMapTimeout) clearTimeout(updateMapTimeout)
     updateMapTimeout = setTimeout(() => {
-      if (addressMode.value === 'manual') {
-        updateMap()
-      }
+      if (addressMode.value === 'manual') updateMap()
     }, 1000)
-  }
+  },
 )
 
-watch(addressMode, (newMode) => {
-  if (newMode === 'location') {
-    if (map.value) {
-      map.value.setView([12.8797, 121.7740], 6)
-      if (marker.value) {
-        map.value.removeLayer(marker.value)
-        marker.value = null
-      }
+watch(addressMode, (mode) => {
+  if (mode === 'location' && map.value) {
+    map.value.setView([12.8797, 121.774], 6)
+    if (marker.value) {
+      map.value.removeLayer(marker.value)
+      marker.value = null
     }
   }
 })
@@ -562,7 +449,6 @@ watch(addressMode, (newMode) => {
                     label="Region *"
                     variant="outlined"
                     required
-                   
                   />
                 </v-col>
 
