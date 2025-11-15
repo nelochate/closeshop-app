@@ -167,7 +167,16 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
 const fetchShops = async () => {
   try {
     loading.value = true
-    const { data, error } = await supabase.from('shops').select(`
+
+    // Get user's current position for distance calculation
+    const userLat = latitude.value ?? lastKnown.value?.[0] ?? 0
+    const userLng = longitude.value ?? lastKnown.value?.[1] ?? 0
+
+    // Fetch approved shops
+    const { data, error } = await supabase
+      .from('shops')
+      .select(
+        `
         id,
         business_name,
         latitude,
@@ -181,10 +190,33 @@ const fetchShops = async () => {
         barangay,
         city,
         province,
-        postal
-      `)
+        postal,
+        status,
+        products:products(id, prod_name, price, main_img_urls)
+      `,
+      )
+      .eq('status', 'approved') // ✅ Only approved shops
+
     if (error) throw error
-    shops.value = data || []
+    if (!data) {
+      shops.value = []
+      return
+    }
+
+    // Compute distance for sorting
+    const mapped = data.map((s) => {
+      const lat = Number(s.latitude)
+      const lng = Number(s.longitude)
+      const distanceKm = getDistanceInKm(userLat, userLng, lat, lng)
+      return {
+        ...s,
+        distanceKm,
+      }
+    })
+
+    // Sort nearest → farthest
+    shops.value = mapped.sort((a, b) => (a.distanceKm ?? 999) - (b.distanceKm ?? 999))
+
     plotShops()
   } catch (e) {
     console.error(e)
@@ -214,8 +246,6 @@ const getFullAddress = (shop: any) => {
 /* -------------------- PLOT SHOPS -------------------- */
 const plotShops = () => {
   if (!map.value || !map.value._loaded) return
-  if (!shops.value.length) return
-
   shopMarkers.forEach((m) => map.value?.removeLayer(m))
   shopMarkers = []
 
@@ -224,44 +254,34 @@ const plotShops = () => {
     const lng = Number(shop.longitude)
     if (!isFinite(lat) || !isFinite(lng)) continue
 
-    const imageUrl = shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'
-    const userLat = latitude.value ? Number(latitude.value) : (lastKnown.value?.[0] ?? 0)
-    const userLng = longitude.value ? Number(longitude.value) : (lastKnown.value?.[1] ?? 0)
-    const distanceKm = getDistanceInKm(userLat, userLng, lat, lng)
-    ;(shop as any).distanceKm = distanceKm
-
     const marker = L.marker([lat, lng], {
       icon: registeredShopIcon,
       title: shop.business_name,
     }).addTo(map.value!)
 
-    ;(marker as any).shopId = shop.id
-    ;(marker as any).distanceKm = distanceKm
+    // Build HTML for products
+    const productList = (shop.products || [])
+      .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
+      .join('')
 
     marker.bindPopup(`
       <div style="text-align:center;">
-        <img src="${imageUrl}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
+        <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
         <p><strong>${shop.business_name}</strong></p>
         <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
-        <p style="margin:2px 0; font-size:14px;">${distanceKm.toFixed(2)} km away</p>
+        <p style="margin:2px 0; font-size:14px;">${shop.distanceKm.toFixed(2)} km away</p>
+        ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;">${productList}</ul>` : ''}
         <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;">View Shop</button>
       </div>
     `)
 
     marker.on('popupopen', () => {
       const btn = document.getElementById(`view-${shop.id}`)
-      if (btn)
-        btn.onclick = () => {
-          router.push(`/shop/${shop.id}`)
-          marker.closePopup()
-        }
+      if (btn) btn.onclick = () => router.push(`/shop/${shop.id}`)
     })
 
     shopMarkers.push(marker)
   }
-
-  shops.value.sort((a, b) => ((a as any).distanceKm ?? 999) - ((b as any).distanceKm ?? 999))
-  if (userCity.value) updateMarkerVisibility()
 }
 
 /* -------------------- FOCUS ON SHOP -------------------- */
@@ -630,41 +650,46 @@ const routeToShop = (shop: any) => {
 </script>
 <template>
   <v-app>
-  <v-sheet class="hero">
-        <div class="hero-row">
-          <v-text-field
-            v-model="search"
-            class="search-field"
-            variant="solo"
-            rounded="pill"
-            hide-details
-            clearable
-            density="comfortable"
-            placeholder="Search product or shop..."
-            append-inner-icon="mdi-earth"
-          />
-          <v-btn class="search-btn" icon aria-label="Search" @click="">
-            <v-icon size="22">mdi-magnify</v-icon>
-          </v-btn>
-        </div>
-      </v-sheet>
+    <v-sheet class="hero">
+      <div class="hero-row">
+        <v-text-field
+          v-model="search"
+          class="search-field"
+          variant="solo"
+          rounded="pill"
+          hide-details
+          clearable
+          density="comfortable"
+          placeholder="Search product or shop..."
+          append-inner-icon="mdi-earth"
+        />
+        <v-btn class="search-btn" icon aria-label="Search" @click="">
+          <v-icon size="22">mdi-magnify</v-icon>
+        </v-btn>
+      </div>
+    </v-sheet>
 
     <v-main>
       <div id="map"></div>
       <div class="map-buttons" v-if="!showShopMenu">
-        <v-btn icon :loading="locating" @click="recenterToUser"><v-icon>mdi-crosshairs-gps</v-icon></v-btn>
+        <v-btn icon :loading="locating" @click="recenterToUser"
+          ><v-icon>mdi-crosshairs-gps</v-icon></v-btn
+        >
         <v-menu location="top" transition="scale-transition" color="#ffffff">
           <template #activator="{ props }">
             <v-btn icon v-bind="props"><v-icon>mdi-dots-vertical</v-icon></v-btn>
           </template>
-          <v-list-item @click="showWithinCity"><v-list-item-title>Display Within City
-              (Nearby)</v-list-item-title></v-list-item>
-          <v-list-item @click="showOutsideCity"><v-list-item-title>Display Outside City (Explore
-              More)</v-list-item-title></v-list-item>
+          <v-list-item @click="showWithinCity"
+            ><v-list-item-title>Display Within City (Nearby)</v-list-item-title></v-list-item
+          >
+          <v-list-item @click="showOutsideCity"
+            ><v-list-item-title>Display Outside City (Explore More)</v-list-item-title></v-list-item
+          >
         </v-menu>
 
-        <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip">🌏 Exploring Outside
-          City</v-chip>
+        <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip"
+          >🌏 Exploring Outside City</v-chip
+        >
         <v-btn icon @click="showShopMenu = true"><v-icon>mdi-menu</v-icon></v-btn>
       </div>
 
@@ -682,19 +707,26 @@ const routeToShop = (shop: any) => {
         <v-list-item v-for="shop in filteredShops" :key="shop.id" @click="openShop(shop.id)">
           <template #prepend>
             <v-avatar size="40">
-              <img :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'" />
+              <img
+                :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'"
+              />
             </v-avatar>
           </template>
 
           <v-list-item-title>
             <span v-html="highlightMatch(shop.business_name, search)"></span>
 
-            <span v-if="productMatches.some((p) => p.shop_id === shop.id)" style="color: green; font-size: 12px">
+            <span
+              v-if="productMatches.some((p) => p.shop_id === shop.id)"
+              style="color: green; font-size: 12px"
+            >
               • Product match available
             </span>
           </v-list-item-title>
 
-          <v-list-item-subtitle v-html="highlightMatch(getFullAddress(shop), search)"></v-list-item-subtitle>
+          <v-list-item-subtitle
+            v-html="highlightMatch(getFullAddress(shop), search)"
+          ></v-list-item-subtitle>
 
           <v-list-item-subtitle v-if="shop.distanceKm">
             {{ shop.distanceKm.toFixed(2) }} km away
@@ -738,7 +770,6 @@ const routeToShop = (shop: any) => {
 .search-field :deep(input) {
   font-size: 14px;
 }
-
 
 #map {
   position: absolute;
@@ -824,22 +855,22 @@ const routeToShop = (shop: any) => {
     height: 60px;
   }
 
-/* ROUTE LINE FIXES */
-:deep(.leaflet-routing-container) {
-  z-index: 3000 !important;
-}
+  /* ROUTE LINE FIXES */
+  :deep(.leaflet-routing-container) {
+    z-index: 3000 !important;
+  }
 
-:deep(.leaflet-control-container) {
-  z-index: 3000 !important;
-}
+  :deep(.leaflet-control-container) {
+    z-index: 3000 !important;
+  }
 
-:deep(.leaflet-routing-alt) {
-  max-height: 120px;
-  overflow-y: auto;
-}
+  :deep(.leaflet-routing-alt) {
+    max-height: 120px;
+    overflow-y: auto;
+  }
 
-:deep(.leaflet-routing-line) {
-  stroke-width: 6px !important;
-}
+  :deep(.leaflet-routing-line) {
+    stroke-width: 6px !important;
+  }
 }
 </style>

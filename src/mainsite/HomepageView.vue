@@ -179,7 +179,6 @@ async function fetchShops() {
   }
 }
 
-/* 🛍️ Fetch Products */
 /* 🛍️ Fetch Products from Approved Shops */
 async function fetchProducts() {
   try {
