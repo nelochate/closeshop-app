@@ -4,6 +4,7 @@ import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import BottomNav from '@/common/layout/BottomNav.vue'
+
 const activeTab = ref('account')
 
 // Router and store
@@ -11,21 +12,69 @@ const router = useRouter()
 const authStore = useAuthUserStore()
 
 // Reactive state
-const avatarUrl = ref(null)   // User avatar image URL
-const user = ref(null)        // Authenticated user object
-const fullName = ref('')      // Full name string
-const hasShop = ref(false)    // Boolean: does the user own a shop?
+const avatarUrl = ref(null)
+const user = ref(null)
+const fullName = ref('')
+const hasShop = ref(false)
+
+// Shopee-style navigation items
+const navItems = ref([
+  {
+    id: 'my-purchases',
+    title: 'My Purchases',
+    icon: 'mdi-package-variant',
+    color: '#354d7c',
+    count: 0
+  },
+  {
+    id: 'to-pay',
+    title: 'To Pay',
+    icon: 'mdi-credit-card-outline',
+    color: '#354d7c',
+    count: 0
+  },
+
+  {
+    id: 'to-receive',
+    title: 'To Receive',
+    icon: 'mdi-package-down',
+    color: '##354d7c',
+    count: 0
+  },
+  {
+    id: 'completed',
+    title: 'Completed',
+    icon: 'mdi-check-circle-outline',
+    color: '#354d7c',
+    count: 0
+  },
+  {
+    id: 'cancelled',
+    title: 'Cancelled',
+    icon: 'mdi-close-circle-outline',
+    color: '#354d7c',
+    count: 0
+  },
+
+  {
+    id: 'reviews',
+    title: 'To Review',
+    icon: 'mdi-star-outline',
+    color: '#354d7c',
+    count: 0
+  }
+])
+
+const selectedSection = ref('my-purchases')
 
 // Load the user info
 const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
-    // ✅ Use store data if already available
     user.value = authStore.userData
     fullName.value =
       `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
     avatarUrl.value = authStore.profile.avatar_url || null
   } else {
-    // ✅ Fallback: fetch directly from Supabase if store empty
     const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
       console.error('No user found:', error?.message)
@@ -60,12 +109,69 @@ const checkUserShop = async () => {
   }
 }
 
-// --------- REACTIVITY (watchers & lifecycle) ---------
+// Load order counts for each section
+const loadOrderCounts = async () => {
+  if (!user.value?.id) return
+
+  try {
+    // Example: Fetch order counts from your orders table
+    const { data: orders, error } = await supabase
+      .from('orders')
+      .select('status, id')
+      .eq('user_id', user.value.id)
+
+    if (error) {
+      console.error('Error loading order counts:', error)
+      return
+    }
+
+    // Update counts based on order status
+    navItems.value = navItems.value.map(item => {
+      let count = 0
+      switch (item.id) {
+        case 'to-pay':
+          count = orders.filter(order => order.status === 'pending_payment').length
+          break
+        case 'to-ship':
+          count = orders.filter(order => order.status === 'paid').length
+          break
+        case 'to-receive':
+          count = orders.filter(order => order.status === 'shipped').length
+          break
+        case 'completed':
+          count = orders.filter(order => order.status === 'completed').length
+          break
+        case 'cancelled':
+          count = orders.filter(order => order.status === 'cancelled').length
+          break
+        case 'refunds':
+          count = orders.filter(order => order.status === 'refund_requested').length
+          break
+        case 'reviews':
+          count = orders.filter(order => order.status === 'to_review').length
+          break
+        default:
+          count = orders.length // My Purchases shows total
+      }
+      return { ...item, count }
+    })
+  } catch (err) {
+    console.error('Error loading order counts:', err)
+  }
+}
+
+// Navigation handler
+const handleNavClick = (itemId) => {
+  selectedSection.value = itemId
+  // You can add additional logic here, like fetching orders for the selected section
+  console.log('Navigated to:', itemId)
+}
 
 // Run when component mounts
 onMounted(async () => {
-  await loadUser()       // Load user info
-  await checkUserShop()  // Then check shop status
+  await loadUser()
+  await checkUserShop()
+  await loadOrderCounts()
 })
 
 // Watch for user changes → re-check shop ownership
@@ -74,6 +180,7 @@ watch(
   async (newId) => {
     if (newId) {
       await checkUserShop()
+      await loadOrderCounts()
     }
   },
 )
@@ -109,18 +216,14 @@ onBeforeRouteUpdate((to, from, next) => {
   next()
 })
 
-// Shop button logic → one button with 2 states
+// Shop button logic
 const goShopOrBuild = () => {
   if (hasShop.value) {
-    router.push('/usershop')    // ✅ Go to existing shop
+    router.push('/usershop')
   } else {
-    router.push('/shop-build')  // ✅ Go to create new shop
+    router.push('/shop-build')
   }
 }
-
-// Purchase sections (dropdown menu)
-const purchaseSections = ['My purchases', 'Cancelled', 'Purchased done']
-const selectedSection = ref(purchaseSections[0])
 </script>
 
 <template>
@@ -135,29 +238,25 @@ const selectedSection = ref(purchaseSections[0])
         </v-btn>
       </div>
 
-
       <!-- Settings Icon - Top Right -->
       <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
         <v-icon size="29">mdi-cog-outline</v-icon>
       </v-btn>
 
       <!-- Profile Header -->
-      <!-- Profile Header -->
       <div class="profile-header">
-        <!-- ONE ROW: avatar | (name over email) -->
         <div class="profile-inline">
           <div class="avatar-container">
             <v-avatar size="80" color="grey-lighten-3">
               <v-img v-if="avatarUrl" :src="avatarUrl" cover />
               <v-icon v-else size="40">mdi-account</v-icon>
             </v-avatar>
-
-          <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
+            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
               <v-icon class="edit-icon">mdi-pencil</v-icon>
             </v-btn>
           </div>
 
-          <!-- Name above Email (stacked), but both stay to the RIGHT of avatar -->
+          <!-- Name above Email -->
           <div class="info-block">
             <h2 class="name-row">{{ fullName || 'Loading...' }}</h2>
             <p class="email-row">{{ user?.email || '...' }}</p>
@@ -165,22 +264,104 @@ const selectedSection = ref(purchaseSections[0])
         </div>
       </div>
 
-
       <v-divider thickness="2" class="my-4"></v-divider>
 
-      <!-- Dropdown for Sections -->
-      <div class="content-section">
-        <v-select v-model="selectedSection" :items="purchaseSections" label="Purchase Status" variant="outlined"
-          density="comfortable" />
+      <!-- Shopee-style Icon Navigation -->
+      <div class="shopee-nav-section">
+        <div class="nav-grid">
+          <div 
+            v-for="item in navItems" 
+            :key="item.id"
+            class="nav-item"
+            :class="{ 'active': selectedSection === item.id }"
+            @click="handleNavClick(item.id)"
+          >
+            <div class="nav-icon-container">
+              <v-icon 
+                :color="selectedSection === item.id ? item.color : '#757575'"
+                size="28"
+              >
+                {{ item.icon }}
+              </v-icon>
+              <div v-if="item.count > 0" class="badge">
+                {{ item.count > 99 ? '99+' : item.count }}
+              </div>
+            </div>
+            <span class="nav-title">{{ item.title }}</span>
+          </div>
+        </div>
+      </div>
 
-        <!-- Purchase sections content -->
+      <!-- Content Section -->
+      <div class="content-section">
         <v-expand-transition>
-          <div v-if="selectedSection === 'My purchases'" class="mypurchases">
-            <!-- Your purchase cards here -->
+          <div v-if="selectedSection === 'my-purchases'" class="section-content">
+            <!-- My Purchases Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-shopping-outline</v-icon>
+              <p class="empty-text">No purchases yet</p>
+              <v-btn color="primary" @click="router.push('/')">
+                Start Shopping
+              </v-btn>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'to-pay'" class="section-content">
+            <!-- To Pay Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-credit-card-outline</v-icon>
+              <p class="empty-text">No pending payments</p>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'to-ship'" class="section-content">
+            <!-- To Ship Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-truck-outline</v-icon>
+              <p class="empty-text">No orders to ship</p>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'to-receive'" class="section-content">
+            <!-- To Receive Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-package-down</v-icon>
+              <p class="empty-text">No packages to receive</p>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'completed'" class="section-content">
+            <!-- Completed Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-check-circle-outline</v-icon>
+              <p class="empty-text">No completed orders</p>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'cancelled'" class="section-content">
+            <!-- Cancelled Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-close-circle-outline</v-icon>
+              <p class="empty-text">No cancelled orders</p>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'refunds'" class="section-content">
+            <!-- Refunds Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-cash-refund</v-icon>
+              <p class="empty-text">No refund requests</p>
+            </div>
+          </div>
+
+          <div v-else-if="selectedSection === 'reviews'" class="section-content">
+            <!-- Reviews Content -->
+            <div class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-star-outline</v-icon>
+              <p class="empty-text">No reviews pending</p>
+            </div>
           </div>
         </v-expand-transition>
-
-        <!-- Other sections... -->
       </div>
     </v-main>
 
@@ -273,41 +454,133 @@ const selectedSection = ref(purchaseSections[0])
   font-size: 16px;
 }
 
-.profile-info {
+.profile-inline {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: nowrap;
+}
+
+.info-block {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  min-width: 0;
-  text-align: left;
-  flex: 1;
+  gap: 4px;
+  flex: 1 1 auto;
 }
 
-.name {
+.name-row {
   margin: 0;
   font-size: 1.6rem;
-  font-weight: 100;
-  color: #ffffff;
-  letter-spacing: 0.5px;
+  font-weight: 200;
+  letter-spacing: 0.3px;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-.email {
+.email-row {
   margin: 0;
   font-size: 0.95rem;
   color: #e0e7ef;
-  font-weight: 400;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Shopee-style Navigation */
+.shopee-nav-section {
+  padding: 16px;
+  background: white;
+}
+
+.nav-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+}
+
+.nav-item {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  position: relative;
+}
+
+.nav-item:hover {
+  background-color: #f8f9fa;
+}
+
+.nav-item.active {
+  background-color: #fff2f0;
+}
+
+.nav-icon-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
+}
+
+.badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #354d7c !important;
+  color: white;
+  border-radius: 10px;
+  padding: 2px 6px;
+  font-size: 10px;
+  font-weight: 600;
+  min-width: 18px;
+  text-align: center;
+  line-height: 1;
+}
+
+.nav-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-align: center;
+  color: #333;
+  line-height: 1.2;
+}
+
+.nav-item.active .nav-title {
+  color: #354d7c!important;
+  font-weight: 600;
 }
 
 /* Content Section */
 .content-section {
-  padding: 0 16px 16px 16px;
+  padding: 16px;
+  min-height: 300px;
 }
 
-/* v-select styling */
-:deep(.v-select) {
-  border-radius: 10px;
-  font-weight: 500;
-  font-size: 0.95rem;
-  color: #333;
+.section-content {
+  width: 100%;
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 60px 20px;
+  text-align: center;
+  color: #757575;
+}
+
+.empty-text {
+  margin: 16px 0;
+  font-size: 1rem;
+  color: #999;
 }
 
 /* Responsive styles */
@@ -321,6 +594,10 @@ const selectedSection = ref(purchaseSections[0])
   .settings-btn {
     width: 44px;
     height: 44px;
+  }
+
+  .name-row {
+    font-size: 1.4rem;
   }
 }
 
@@ -341,23 +618,22 @@ const selectedSection = ref(purchaseSections[0])
     margin-top: 15px;
   }
 
-  .v-avatar {
-    width: 70px !important;
-    height: 70px !important;
+  .nav-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
   }
 
-  .name {
-    font-size: 1.4rem;
+  .nav-item {
+    padding: 10px 6px;
   }
 
-  .email {
-    font-size: 0.9rem;
+  .nav-icon-container {
+    width: 42px;
+    height: 42px;
   }
 
-  .shop-btn {
-    font-size: 0.85rem;
-    padding: 5px 16px;
-    height: 40px;
+  .nav-title {
+    font-size: 0.7rem;
   }
 }
 
@@ -388,72 +664,6 @@ const selectedSection = ref(purchaseSections[0])
     min-width: 120px;
   }
 
-  .shop-btn .v-icon {
-    margin-right: 4px;
-  }
-}
-
-/* More responsive styles for avatar and profile info */
-
-/* Animation for buttons */
-.shop-btn,
-.settings-btn,
-.edit-btn {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-/* Ensure proper spacing for main content */
-.v-main {
-  position: relative;
-}
-
-/* Keep avatar + info in one horizontal row */
-.profile-inline {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  flex-wrap: nowrap;
-
-}
-
-/* Right side: vertical stack (name over email) that never leaves avatar's row */
-.info-block {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1 1 auto;
-}
-
-/* Name on one line with ellipsis */
-.name-row {
-  margin: 0;
-  font-size: 1.6rem;
-  font-weight: 200;
-  letter-spacing: 0.3px;
-  color: #fff;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Email on one line with ellipsis, below name */
-.email-row {
-  margin: 0;
-  font-size: 0.95rem;
-  color: #e0e7ef;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-/* Responsive font tweaks */
-@media (max-width: 1024px) {
-  .name-row {
-    font-size: 1.4rem;
-  }
-}
-
-@media (max-width: 600px) {
   .name-row {
     font-size: 1.1rem;
   }
@@ -461,5 +671,53 @@ const selectedSection = ref(purchaseSections[0])
   .email-row {
     font-size: 0.85rem;
   }
+
+  .nav-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 8px;
+  }
+
+  .nav-item {
+    padding: 8px 4px;
+  }
+
+  .nav-icon-container {
+    width: 36px;
+    height: 36px;
+  }
+
+  .nav-title {
+    font-size: 0.65rem;
+  }
+
+  .badge {
+    font-size: 9px;
+    padding: 1px 4px;
+    min-width: 16px;
+  }
+}
+
+@media (max-width: 380px) {
+  .nav-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+
+  .nav-title {
+    font-size: 0.6rem;
+  }
+}
+
+/* Animation for buttons and nav items */
+.shop-btn,
+.settings-btn,
+.edit-btn,
+.nav-item {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Ensure proper spacing for main content */
+.v-main {
+  position: relative;
 }
 </style>
