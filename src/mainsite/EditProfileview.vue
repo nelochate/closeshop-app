@@ -64,12 +64,12 @@ const loadUserAddress = async () => {
     const { data: userData } = await supabase.auth.getUser()
     if (!userData?.user) return
 
-    const userId = userData.user.id // Ensure this is a string
+    const userId = userData.user.id
 
     const { data: address, error } = await supabase
       .from('addresses')
       .select('*')
-      .eq('user_id', userId) // <-- pass UUID as string
+      .eq('user_id', userId)
       .order('updated_at', { ascending: false })
       .limit(1)
       .single()
@@ -78,7 +78,25 @@ const loadUserAddress = async () => {
 
     if (address) {
       const a = address
-      userAddress.value = `${a.house_no || ''} ${a.street || ''}, ${a.building || ''}, ${a.purok || ''}, ${a.barangay || ''}, ${a.city || ''}`.replace(/(^[ ,]+)|([ ,]+$)/g, '').replace(/,{2,}/g, ',')
+      // Construct full address string
+      userAddress.value = [
+        a.house_no,
+        a.street,
+        a.building,
+        a.purok,
+        a.barangay_name,
+        a.city_name,
+        a.province_name,
+        a.region_name,
+        a.postal_code,
+      ]
+        .filter((part) => part && part.trim() !== '')
+        .join(', ')
+
+      // ✅ Set phone number from latest address if not set already
+      if (!formData.value.phone && a.phone) {
+        formData.value.phone = a.phone
+      }
     } else {
       userAddress.value = 'No address set'
     }
@@ -88,23 +106,28 @@ const loadUserAddress = async () => {
   }
 }
 
-
 // Upload avatar
 async function uploadAvatar(file) {
   if (!file) return
   try {
     uploading.value = true
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (!user) throw new Error('No authenticated user found')
 
     let fileExt = file.name ? file.name.split('.').pop() : 'jpg'
     const fileName = `${Date.now()}.${fileExt}`
     const filePath = `${user.id}/${fileName}`
 
-    const { error: uploadError } = await supabase.storage.from('avatars').upload(filePath, file, { upsert: true })
+    const { error: uploadError } = await supabase.storage
+      .from('avatars')
+      .upload(filePath, file, { upsert: true })
     if (uploadError) throw uploadError
 
-    const { data: { publicUrl } } = supabase.storage.from('avatars').getPublicUrl(filePath)
+    const {
+      data: { publicUrl },
+    } = supabase.storage.from('avatars').getPublicUrl(filePath)
 
     await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id)
 
@@ -160,10 +183,13 @@ const saveProfile = async () => {
       },
     })
 
-    await supabase.from('profiles').update({
-      phone: formData.value.phone,
-      updated_at: new Date().toISOString(),
-    }).eq('id', userData.user.id)
+    await supabase
+      .from('profiles')
+      .update({
+        phone: formData.value.phone,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', userData.user.id)
 
     await authStore.hydrateFromSession()
     showSuccessAndRedirect('Profile updated successfully!')
@@ -188,27 +214,6 @@ const fullName = computed(() => {
   const first = formData.value.firstName || ''
   const last = formData.value.lastName || ''
   return `${first} ${last}`.trim()
-})
-
-// Mask phone (show only last 2 digits)
-const maskedPhone = computed(() => {
-  if (!formData.value.phone) return ''
-  const phone = formData.value.phone
-  return phone.replace(/.(?=.{2})/g, '*')
-})
-
-// Mask email (show first & last char + domain)
-const maskedEmail = computed(() => {
-  if (!formData.value.email) return ''
-  const [local, domain] = formData.value.email.split('@')
-  if (!local || !domain) return formData.value.email
-  return (
-    local[0] +
-    '*****' +
-    local[local.length - 1] +
-    '@' +
-    domain
-  )
 })
 </script>
 
@@ -238,8 +243,15 @@ const maskedEmail = computed(() => {
                 <v-img v-if="avatarUrl" :src="avatarUrl" cover />
                 <v-icon v-else size="60" color="grey-darken-2">mdi-account</v-icon>
               </v-avatar>
-              <v-btn icon size="small" color="primary" class="edit-btn" elevation="4"
-                @click="showPicker = true" :loading="uploading">
+              <v-btn
+                icon
+                size="small"
+                color="primary"
+                class="edit-btn"
+                elevation="4"
+                @click="showPicker = true"
+                :loading="uploading"
+              >
                 <v-icon size="18">mdi-pencil</v-icon>
               </v-btn>
             </div>
@@ -269,7 +281,7 @@ const maskedEmail = computed(() => {
                       <!-- Phone -->
                       <v-list-item class="list-item" @click="router.push({ name: 'edit-phone' })">
                         <v-list-item-title class="font-medium">Phone</v-list-item-title>
-                        <v-list-item-subtitle>{{ maskedPhone }}</v-list-item-subtitle>
+                        <v-list-item-subtitle>{{ formData.phone }}</v-list-item-subtitle>
                         <template #append>
                           <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
                         </template>
@@ -280,7 +292,7 @@ const maskedEmail = computed(() => {
                       <!-- Email -->
                       <v-list-item class="list-item" @click="router.push({ name: 'edit-email' })">
                         <v-list-item-title class="font-medium">Email</v-list-item-title>
-                        <v-list-item-subtitle>{{ maskedEmail }}</v-list-item-subtitle>
+                        <v-list-item-subtitle>{{ formData.email }}</v-list-item-subtitle>
                         <template #append>
                           <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
                         </template>
