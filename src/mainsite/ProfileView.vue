@@ -38,7 +38,7 @@ const navItems = ref([
     id: 'to-receive',
     title: 'To Receive',
     icon: 'mdi-package-down',
-    color: '##354d7c',
+    color: '#354d7c',
     count: 0
   },
   {
