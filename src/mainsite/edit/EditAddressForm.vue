@@ -46,9 +46,11 @@ const address = ref({
 // --- PSGC API Functions ---
 const fetchRegions = async () => {
   try {
-    const res = await fetch('https://psgc.gitlab.io/api/regions')
+    const res = await fetch('https://psgc.cloud/api/regions')
     if (!res.ok) throw new Error('Failed to fetch regions')
-    regions.value = await res.json()
+
+    const data = await res.json()
+    regions.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
     console.error(err)
     snackbarMessage.value = 'Error loading regions'
@@ -56,14 +58,18 @@ const fetchRegions = async () => {
   }
 }
 
-const fetchProvinces = async (regionCode: string = '') => {
+const fetchProvinces = async (regionCode: string) => {
   try {
-    const res = await fetch('https://psgc.gitlab.io/api/provinces')
+    if (!regionCode) {
+      provinces.value = []
+      return
+    }
+
+    const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
     if (!res.ok) throw new Error('Failed to fetch provinces')
-    let data = await res.json()
-    provinces.value = regionCode
-      ? data.filter((p: any) => p.code.startsWith(regionCode.substring(0, 2)))
-      : data
+
+    const data = await res.json()
+    provinces.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
     console.error(err)
     snackbarMessage.value = 'Error loading provinces'
@@ -71,23 +77,20 @@ const fetchProvinces = async (regionCode: string = '') => {
   }
 }
 
-const fetchCitiesMunicipalities = async (provinceCode: string = '') => {
+
+
+const fetchCitiesMunicipalities = async (provinceCode: string) => {
   try {
-    const [citiesRes, munisRes] = await Promise.all([
-      fetch('https://psgc.gitlab.io/api/cities'),
-      fetch('https://psgc.gitlab.io/api/municipalities')
-    ])
-    if (!citiesRes.ok || !munisRes.ok) throw new Error('Failed to fetch cities/municipalities')
-    let cities = await citiesRes.json()
-    let municipalities = await munisRes.json()
+    if (!provinceCode) {
+      citiesMunicipalities.value = []
+      return
+    }
 
-    let all = [...cities, ...municipalities]
+    const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
+    if (!res.ok) throw new Error('Failed to fetch cities/municipalities')
 
-    citiesMunicipalities.value = provinceCode
-      ? all.filter((c: any) => c.code.startsWith(provinceCode.substring(0, 4)))
-      : all
-
-    citiesMunicipalities.value.sort((a: any, b: any) => a.name.localeCompare(b.name))
+    const data = await res.json()
+    citiesMunicipalities.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
     console.error(err)
     snackbarMessage.value = 'Error loading cities/municipalities'
@@ -95,20 +98,26 @@ const fetchCitiesMunicipalities = async (provinceCode: string = '') => {
   }
 }
 
-const fetchBarangays = async (cityCode: string = '') => {
+
+const fetchBarangays = async (cityCode: string) => {
   try {
-    const res = await fetch('https://psgc.gitlab.io/api/barangays')
+    if (!cityCode) {
+      barangays.value = []
+      return
+    }
+
+    const res = await fetch(`https://psgc.cloud/api/cities/${cityCode}/barangays`)
     if (!res.ok) throw new Error('Failed to fetch barangays')
-    let data = await res.json()
-    barangays.value = cityCode
-      ? data.filter((b: any) => b.code.startsWith(cityCode.substring(0, 6)))
-      : data
+
+    const data = await res.json()
+    barangays.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
   } catch (err) {
     console.error(err)
     snackbarMessage.value = 'Error loading barangays'
     showMapSnackbar.value = true
   }
 }
+
 
 
 // --- Watchers for PSGC Data ---
@@ -553,7 +562,7 @@ watch(addressMode, (newMode) => {
                     label="Region *"
                     variant="outlined"
                     required
-                    :loading="!regions.length"
+                   
                   />
                 </v-col>
 
@@ -567,7 +576,6 @@ watch(addressMode, (newMode) => {
                     variant="outlined"
                     required
                     :disabled="!address.region"
-                    :loading="provinces.length === 0 && address.region"
                   />
                 </v-col>
 
@@ -581,7 +589,6 @@ watch(addressMode, (newMode) => {
                     variant="outlined"
                     required
                     :disabled="!address.province"
-                    :loading="citiesMunicipalities.length === 0 && address.province"
                   />
                 </v-col>
 
@@ -595,7 +602,6 @@ watch(addressMode, (newMode) => {
                     variant="outlined"
                     required
                     :disabled="!address.city"
-                    :loading="barangays.length === 0 && address.city"
                   />
                 </v-col>
 
