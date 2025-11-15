@@ -1,4 +1,4 @@
-<script setup>
+<script setup lang="ts">
 import { ref, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
@@ -46,92 +46,70 @@ const address = ref({
 // --- PSGC API Functions ---
 const fetchRegions = async () => {
   try {
-    const response = await fetch('https://psgc.cloud/api/regions')
-    if (!response.ok) throw new Error('Failed to fetch regions')
-    regions.value = await response.json()
-  } catch (error) {
-    console.error('Error fetching regions:', error)
+    const res = await fetch('https://psgc.gitlab.io/api/regions')
+    if (!res.ok) throw new Error('Failed to fetch regions')
+    regions.value = await res.json()
+  } catch (err) {
+    console.error(err)
     snackbarMessage.value = 'Error loading regions'
     showMapSnackbar.value = true
   }
 }
 
-const fetchProvinces = async (regionCode = null) => {
+const fetchProvinces = async (regionCode: string = '') => {
   try {
-    let url = 'https://psgc.cloud/api/provinces'
-    const response = await fetch(url)
-    if (!response.ok) throw new Error('Failed to fetch provinces')
-    const allProvinces = await response.json()
-
-    // If regionCode is provided, filter provinces by region
-    if (regionCode) {
-      // Note: You might need to adjust filtering logic based on PSGC code structure
-      // Typically region code is the first 2 digits of province code
-      provinces.value = allProvinces.filter(province =>
-        province.code.startsWith(regionCode.substring(0, 2))
-      )
-    } else {
-      provinces.value = allProvinces
-    }
-  } catch (error) {
-    console.error('Error fetching provinces:', error)
+    const res = await fetch('https://psgc.gitlab.io/api/provinces')
+    if (!res.ok) throw new Error('Failed to fetch provinces')
+    let data = await res.json()
+    provinces.value = regionCode
+      ? data.filter((p: any) => p.code.startsWith(regionCode.substring(0, 2)))
+      : data
+  } catch (err) {
+    console.error(err)
     snackbarMessage.value = 'Error loading provinces'
     showMapSnackbar.value = true
   }
 }
 
-const fetchCitiesMunicipalities = async (provinceCode = null) => {
+const fetchCitiesMunicipalities = async (provinceCode: string = '') => {
   try {
-    let url = 'https://psgc.cloud/api/cities'
-    const citiesResponse = await fetch(url)
-    if (!citiesResponse.ok) throw new Error('Failed to fetch cities')
-    const cities = await citiesResponse.json()
+    const [citiesRes, munisRes] = await Promise.all([
+      fetch('https://psgc.gitlab.io/api/cities'),
+      fetch('https://psgc.gitlab.io/api/municipalities')
+    ])
+    if (!citiesRes.ok || !munisRes.ok) throw new Error('Failed to fetch cities/municipalities')
+    let cities = await citiesRes.json()
+    let municipalities = await munisRes.json()
 
-    url = 'https://psgc.cloud/api/municipalities'
-    const municipalitiesResponse = await fetch(url)
-    if (!municipalitiesResponse.ok) throw new Error('Failed to fetch municipalities')
-    const municipalities = await municipalitiesResponse.json()
+    let all = [...cities, ...municipalities]
 
-    // Combine cities and municipalities
-    let allCitiesMunis = [...cities, ...municipalities]
+    citiesMunicipalities.value = provinceCode
+      ? all.filter((c: any) => c.code.startsWith(provinceCode.substring(0, 4)))
+      : all
 
-    // If provinceCode is provided, filter by province
-    if (provinceCode) {
-      // Typically province code is the first 4 digits of city/municipality code
-      allCitiesMunis = allCitiesMunis.filter(item =>
-        item.code.startsWith(provinceCode.substring(0, 4))
-      )
-    }
-
-    citiesMunicipalities.value = allCitiesMunis.sort((a, b) => a.name.localeCompare(b.name))
-  } catch (error) {
-    console.error('Error fetching cities/municipalities:', error)
+    citiesMunicipalities.value.sort((a: any, b: any) => a.name.localeCompare(b.name))
+  } catch (err) {
+    console.error(err)
     snackbarMessage.value = 'Error loading cities/municipalities'
     showMapSnackbar.value = true
   }
 }
 
-const fetchBarangays = async (cityCode = null) => {
+const fetchBarangays = async (cityCode: string = '') => {
   try {
-    const response = await fetch('https://psgc.cloud/api/barangays')
-    if (!response.ok) throw new Error('Failed to fetch barangays')
-    const allBarangays = await response.json()
-
-    // If cityCode is provided, filter barangays by city/municipality
-    if (cityCode) {
-      // Typically city code is the first 6 digits of barangay code
-      barangays.value = allBarangays.filter(barangay =>
-        barangay.code.startsWith(cityCode.substring(0, 6))
-      )
-    } else {
-      barangays.value = allBarangays
-    }
-  } catch (error) {
-    console.error('Error fetching barangays:', error)
+    const res = await fetch('https://psgc.gitlab.io/api/barangays')
+    if (!res.ok) throw new Error('Failed to fetch barangays')
+    let data = await res.json()
+    barangays.value = cityCode
+      ? data.filter((b: any) => b.code.startsWith(cityCode.substring(0, 6)))
+      : data
+  } catch (err) {
+    console.error(err)
     snackbarMessage.value = 'Error loading barangays'
     showMapSnackbar.value = true
   }
 }
+
 
 // --- Watchers for PSGC Data ---
 watch(() => address.value.region, async (newRegionCode) => {
@@ -562,11 +540,7 @@ watch(addressMode, (newMode) => {
                   />
                 </v-col>
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="address.phone"
-                    label="Phone Number"
-                    variant="outlined"
-                  />
+                  <v-text-field v-model="address.phone" label="Phone Number" variant="outlined" />
                 </v-col>
 
                 <!-- PSGC Address Fields -->
@@ -634,11 +608,7 @@ watch(addressMode, (newMode) => {
                 </v-col>
 
                 <v-col cols="12">
-                  <v-text-field
-                    v-model="address.street"
-                    label="Street"
-                    variant="outlined"
-                  />
+                  <v-text-field v-model="address.street" label="Street" variant="outlined" />
                 </v-col>
 
                 <v-col cols="12">
@@ -676,7 +646,9 @@ watch(addressMode, (newMode) => {
 
                 <v-col cols="12">
                   <div id="map" class="map-wrapper"></div>
-                  <p class="text-caption mt-2 text-grey">Map will update automatically as you fill in address details</p>
+                  <p class="text-caption mt-2 text-grey">
+                    Map will update automatically as you fill in address details
+                  </p>
                 </v-col>
 
                 <v-col cols="12" class="text-right">
@@ -685,10 +657,12 @@ watch(addressMode, (newMode) => {
                     color="primary"
                     size="large"
                     :loading="isLoading"
-                    :disabled="!address.region || !address.province || !address.city || !address.barangay"
+                    :disabled="
+                      !address.region || !address.province || !address.city || !address.barangay
+                    "
                   >
                     <v-icon class="me-2">mdi-check</v-icon>
-                    {{ isLoading ? 'Saving...' : (isEdit ? 'Update Address' : 'Save Address') }}
+                    {{ isLoading ? 'Saving...' : isEdit ? 'Update Address' : 'Save Address' }}
                   </v-btn>
                 </v-col>
               </v-row>
@@ -718,11 +692,7 @@ watch(addressMode, (newMode) => {
                 />
               </v-col>
               <v-col cols="12">
-                <v-text-field
-                  v-model="address.phone"
-                  label="Phone Number"
-                  variant="outlined"
-                />
+                <v-text-field v-model="address.phone" label="Phone Number" variant="outlined" />
               </v-col>
 
               <!-- PSGC Fields for Location Mode -->
@@ -778,11 +748,7 @@ watch(addressMode, (newMode) => {
               </v-col>
 
               <v-col cols="12">
-                <v-text-field
-                  v-model="address.street"
-                  label="Street"
-                  variant="outlined"
-                />
+                <v-text-field v-model="address.street" label="Street" variant="outlined" />
               </v-col>
 
               <v-col cols="12">
