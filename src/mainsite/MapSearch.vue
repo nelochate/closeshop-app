@@ -7,6 +7,9 @@ import { Capacitor } from '@capacitor/core'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
+import 'leaflet-routing-machine'
+import 'leaflet-routing-machine/dist/leaflet-routing-machine.css'
+
 
 /* -------------------- STATE -------------------- */
 const activeTab = ref('map')
@@ -23,6 +26,8 @@ const userCity = ref<string | null>(null)
 const lastKnownKey = 'closeshop_last_location'
 const lastKnown = ref<[number, number] | null>(null)
 let lastUpdateTs = 0
+let routingControl: L.Routing.Control | null = null
+
 
 /* -------------------- GEOAPIFY CONFIG -------------------- */
 const GEOAPIFY_API_KEY = 'b4cb2e0e4f4a4e4fb385fae9418d4da7'
@@ -390,7 +395,11 @@ onUnmounted(() => {
 
 /* -------------------- SHOP LIST CLICK -------------------- */
 const openShop = (shopId: string) => {
+  const shop = shops.value.find(s => s.id === shopId)
+  if (!shop) return
+
   focusOnShopMarker(shopId)
+  routeToShop(shop)   // <-- show route
   showShopMenu.value = false
 }
 
@@ -530,6 +539,51 @@ const updateShops = async () => {
     plotUnregisteredShops(unregistered)
   }
 }
+
+// for routing
+const routeToShop = (shop: any) => {
+  if (!map.value || !latitude.value || !longitude.value) return
+
+  const start = [Number(latitude.value), Number(longitude.value)]
+  const end = [Number(shop.latitude), Number(shop.longitude)]
+
+  // Remove old route
+  if (routingControl) {
+    map.value.removeControl(routingControl)
+    routingControl = null
+  }
+
+  routingControl = L.Routing.control({
+    waypoints: [L.latLng(start), L.latLng(end)],
+    routeWhileDragging: false,
+    showAlternatives: false,
+    addWaypoints: false,
+    draggableWaypoints: false,
+    fitSelectedRoutes: true,
+    lineOptions: {
+      styles: [
+        { color: '#1E90FF', weight: 6, opacity: 0.9 },
+        { color: 'white', weight: 3, opacity: 0.8 }
+      ]
+    },
+    createMarker: (i, wp) => {
+      if (i === 0) {
+        return L.marker(wp.latLng, { icon: userIcon })
+          .bindPopup("You are here")
+      }
+      return L.marker(wp.latLng, { icon: registeredShopIcon })
+        .bindPopup(shop.business_name)
+    }
+  }).addTo(map.value)
+
+  // Make sure route stays on top
+  routingControl.on('routesfound', () => {
+    const line = (routingControl as any)?._line
+    if (line) line.bringToFront()
+  })
+}
+
+
 </script>
 <template>
   <v-app>
@@ -698,5 +752,23 @@ const updateShops = async () => {
     width: 60px;
     height: 60px;
   }
+}
+
+/* ROUTE LINE FIXES */
+:deep(.leaflet-routing-container) {
+  z-index: 3000 !important;
+}
+
+:deep(.leaflet-control-container) {
+  z-index: 3000 !important;
+}
+
+:deep(.leaflet-routing-alt) {
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+:deep(.leaflet-routing-line) {
+  stroke-width: 6px !important;
 }
 </style>
