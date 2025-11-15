@@ -17,6 +17,10 @@ const user = ref(null)
 const fullName = ref('')
 const hasShop = ref(false)
 
+//for navigation items
+const sectionItems = ref([]) // Holds items for the selected section
+const isLoadingSection = ref(false)
+
 // Shopee-style navigation items
 const navItems = ref([
   {
@@ -24,14 +28,14 @@ const navItems = ref([
     title: 'My Purchases',
     icon: 'mdi-package-variant',
     color: '#354d7c',
-    count: 0
+    count: 0,
   },
   {
     id: 'to-pay',
     title: 'To Pay',
     icon: 'mdi-credit-card-outline',
     color: '#354d7c',
-    count: 0
+    count: 0,
   },
 
   {
@@ -39,21 +43,21 @@ const navItems = ref([
     title: 'To Receive',
     icon: 'mdi-package-down',
     color: '##354d7c',
-    count: 0
+    count: 0,
   },
   {
     id: 'completed',
     title: 'Completed',
     icon: 'mdi-check-circle-outline',
     color: '#354d7c',
-    count: 0
+    count: 0,
   },
   {
     id: 'cancelled',
     title: 'Cancelled',
     icon: 'mdi-close-circle-outline',
     color: '#354d7c',
-    count: 0
+    count: 0,
   },
 
   {
@@ -61,8 +65,8 @@ const navItems = ref([
     title: 'To Review',
     icon: 'mdi-star-outline',
     color: '#354d7c',
-    count: 0
-  }
+    count: 0,
+  },
 ])
 
 const selectedSection = ref('my-purchases')
@@ -114,7 +118,6 @@ const loadOrderCounts = async () => {
   if (!user.value?.id) return
 
   try {
-    // Example: Fetch order counts from your orders table
     const { data: orders, error } = await supabase
       .from('orders')
       .select('status, id')
@@ -125,33 +128,30 @@ const loadOrderCounts = async () => {
       return
     }
 
-    // Update counts based on order status
-    navItems.value = navItems.value.map(item => {
+    navItems.value = navItems.value.map((item) => {
       let count = 0
       switch (item.id) {
         case 'to-pay':
-          count = orders.filter(order => order.status === 'pending_payment').length
+          count = orders.filter((o) => o.status === 'pending').length
           break
         case 'to-ship':
-          count = orders.filter(order => order.status === 'paid').length
+          count = orders.filter((o) => o.status === 'paid').length
           break
         case 'to-receive':
-          count = orders.filter(order => order.status === 'shipped').length
+          count = orders.filter((o) => o.status === 'shipped').length
           break
         case 'completed':
-          count = orders.filter(order => order.status === 'completed').length
+          count = orders.filter((o) => o.status === 'delivered').length
           break
         case 'cancelled':
-          count = orders.filter(order => order.status === 'cancelled').length
-          break
-        case 'refunds':
-          count = orders.filter(order => order.status === 'refund_requested').length
+          count = orders.filter((o) => o.status === 'cancelled').length
           break
         case 'reviews':
-          count = orders.filter(order => order.status === 'to_review').length
+          // Count orders that are delivered but not reviewed yet
+          count = orders.filter((o) => o.status === 'delivered').length // can refine later
           break
         default:
-          count = orders.length // My Purchases shows total
+          count = orders.length
       }
       return { ...item, count }
     })
@@ -161,10 +161,9 @@ const loadOrderCounts = async () => {
 }
 
 // Navigation handler
-const handleNavClick = (itemId) => {
+const handleNavClick = async (itemId) => {
   selectedSection.value = itemId
-  // You can add additional logic here, like fetching orders for the selected section
-  console.log('Navigated to:', itemId)
+  await loadSectionItems(itemId)
 }
 
 // Run when component mounts
@@ -224,6 +223,88 @@ const goShopOrBuild = () => {
     router.push('/shop-build')
   }
 }
+// Load items for the selected section
+const loadSectionItems = async (sectionId) => {
+  if (!user.value?.id) return
+  isLoadingSection.value = true
+
+  try {
+    let query = supabase
+      .from('orders')
+      .select(
+        `
+        id,
+        status,
+        total_amount,
+        created_at,
+        order_items (
+          id,
+          product_id,
+          quantity,
+          price,
+          selected_size,
+          selected_variety,
+          products (
+            prod_name,
+            main_img_urls
+          )
+        )
+      `,
+      )
+      .eq('user_id', user.value.id)
+
+    switch (sectionId) {
+      case 'to-pay':
+        query = query.eq('status', 'pending')
+        break
+      case 'to-ship':
+        query = query.eq('status', 'paid')
+        break
+      case 'to-receive':
+        query = query.eq('status', 'shipped')
+        break
+      case 'completed':
+        query = query.eq('status', 'delivered')
+        break
+      case 'cancelled':
+        query = query.eq('status', 'cancelled')
+        break
+      case 'reviews':
+        query = query.eq('status', 'delivered')
+        break
+      case 'my-purchases':
+      default:
+        break
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error loading section items:', error)
+      sectionItems.value = []
+    } else {
+      // Flatten order_items for display
+      sectionItems.value = data.flatMap((order) =>
+        order.order_items.map((item) => ({
+          id: item.id,
+          order_id: order.id,
+          status: order.status,
+          quantity: item.quantity,
+          price: item.price,
+          product_name: item.products?.prod_name,
+          product_img: item.products?.main_img_urls?.[0] || null,
+          selected_size: item.selected_size,
+          selected_variety: item.selected_variety,
+        })),
+      )
+    }
+  } catch (err) {
+    console.error('Error fetching section items:', err)
+    sectionItems.value = []
+  } finally {
+    isLoadingSection.value = false
+  }
+}
 </script>
 
 <template>
@@ -251,7 +332,13 @@ const goShopOrBuild = () => {
               <v-img v-if="avatarUrl" :src="avatarUrl" cover />
               <v-icon v-else size="40">mdi-account</v-icon>
             </v-avatar>
-            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
+            <v-btn
+              class="edit-btn"
+              color="primary"
+              icon
+              elevation="4"
+              @click="router.push('/edit-profile')"
+            >
               <v-icon class="edit-icon">mdi-pencil</v-icon>
             </v-btn>
           </div>
@@ -269,18 +356,15 @@ const goShopOrBuild = () => {
       <!-- Shopee-style Icon Navigation -->
       <div class="shopee-nav-section">
         <div class="nav-grid">
-          <div 
-            v-for="item in navItems" 
+          <div
+            v-for="item in navItems"
             :key="item.id"
             class="nav-item"
-            :class="{ 'active': selectedSection === item.id }"
+            :class="{ active: selectedSection === item.id }"
             @click="handleNavClick(item.id)"
           >
             <div class="nav-icon-container">
-              <v-icon 
-                :color="selectedSection === item.id ? item.color : '#757575'"
-                size="28"
-              >
+              <v-icon :color="selectedSection === item.id ? item.color : '#757575'" size="28">
                 {{ item.icon }}
               </v-icon>
               <div v-if="item.count > 0" class="badge">
@@ -295,70 +379,45 @@ const goShopOrBuild = () => {
       <!-- Content Section -->
       <div class="content-section">
         <v-expand-transition>
-          <div v-if="selectedSection === 'my-purchases'" class="section-content">
-            <!-- My Purchases Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-shopping-outline</v-icon>
-              <p class="empty-text">No purchases yet</p>
-              <v-btn color="primary" @click="router.push('/')">
+          <div v-if="isLoadingSection" class="section-content">
+            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+          </div>
+
+          <div v-else class="section-content">
+            <v-row v-if="sectionItems.length > 0" dense>
+              <v-col v-for="order in sectionItems" :key="order.id" cols="12" sm="6" md="4">
+                <v-card outlined>
+                  <v-img v-if="order.product_img" :src="order.product_img" height="150px" cover />
+                  <v-card-title>{{ order.product_name || 'Product' }}</v-card-title>
+                  <v-card-subtitle>Status: {{ order.status }}</v-card-subtitle>
+                  <v-card-text>
+                    Quantity: {{ order.quantity }} <br />
+                    Price: ₱{{ order.price }} <br />
+                    <span v-if="order.selected_size">Size: {{ order.selected_size }}</span>
+                    <span v-if="order.selected_variety">Variety: {{ order.selected_variety }}</span>
+                  </v-card-text>
+                  <v-card-actions>
+                    <v-btn color="primary" text @click="router.push(`/order/${order.order_id}`)">
+                      View
+                    </v-btn>
+                  </v-card-actions>
+                </v-card>
+              </v-col>
+            </v-row>
+
+            <div v-else class="empty-state">
+              <v-icon size="64" color="grey-lighten-1">mdi-cart-off</v-icon>
+              <p class="empty-text">No items in this section</p>
+
+              <!-- Show Start Shopping button only for My Purchases -->
+              <v-btn
+                v-if="selectedSection === 'my-purchases'"
+                color="primary"
+                class="mt-4"
+                @click="router.push('/')"
+              >
                 Start Shopping
               </v-btn>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'to-pay'" class="section-content">
-            <!-- To Pay Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-credit-card-outline</v-icon>
-              <p class="empty-text">No pending payments</p>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'to-ship'" class="section-content">
-            <!-- To Ship Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-truck-outline</v-icon>
-              <p class="empty-text">No orders to ship</p>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'to-receive'" class="section-content">
-            <!-- To Receive Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-package-down</v-icon>
-              <p class="empty-text">No packages to receive</p>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'completed'" class="section-content">
-            <!-- Completed Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-check-circle-outline</v-icon>
-              <p class="empty-text">No completed orders</p>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'cancelled'" class="section-content">
-            <!-- Cancelled Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-close-circle-outline</v-icon>
-              <p class="empty-text">No cancelled orders</p>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'refunds'" class="section-content">
-            <!-- Refunds Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-cash-refund</v-icon>
-              <p class="empty-text">No refund requests</p>
-            </div>
-          </div>
-
-          <div v-else-if="selectedSection === 'reviews'" class="section-content">
-            <!-- Reviews Content -->
-            <div class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-star-outline</v-icon>
-              <p class="empty-text">No reviews pending</p>
             </div>
           </div>
         </v-expand-transition>
@@ -553,7 +612,7 @@ const goShopOrBuild = () => {
 }
 
 .nav-item.active .nav-title {
-  color: #354d7c!important;
+  color: #354d7c !important;
   font-weight: 600;
 }
 
