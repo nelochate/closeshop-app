@@ -267,34 +267,38 @@ const confirmDateTime = () => {
     <v-main>
       <v-app-bar color="#438fda" dark flat>
         <v-btn icon @click="router.back()"><v-icon>mdi-arrow-left</v-icon></v-btn>
-        <v-toolbar-title>Transaction Process</v-toolbar-title>
+        <v-toolbar-title class="app-bar-title">Transaction Process</v-toolbar-title>
       </v-app-bar>
 
-      <v-container fluid class="py-4">
+      <v-container fluid class="py-4 px-3 main-content">
         <!-- Buyer Info -->
-        <v-card outlined class="mb-4">
-          <v-card-title>Delivery Details</v-card-title>
-          <v-card-text>
+        <v-card outlined class="mb-4 card-elevated">
+          <v-card-title class="card-title">Delivery Details</v-card-title>
+          <v-card-text class="card-content">
             <div class="buyer-info">
               <p><strong>Name:</strong> {{ buyer?.first_name }} {{ buyer?.last_name }}</p>
               <p><strong>Contact:</strong> {{ address?.phone }}</p>
-
-              <p><strong>Address:</strong> {{ address?.street }}, {{ address?.city_name }}</p>
+              <p class="address-line">
+                <strong>Address:</strong> {{ address?.street }}, {{ address?.city_name }}
+              </p>
               <p><strong>Transaction No.:</strong> {{ transactionNumber }}</p>
               <p>
                 <strong>Delivery Schedule:</strong> {{ deliveryDate || 'Not set' }}
                 {{ deliveryTime ? `at ${deliveryTime}` : '' }}
               </p>
-              <p v-if="scheduleError" class="text-red-600 mt-1">{{ scheduleError }}</p>
-              <div class="mt-2 flex gap-2">
-                <v-btn size="small" color="primary" variant="tonal">Change Address</v-btn>
+              <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
+              <div class="button-group mt-2">
+                <v-btn size="small" color="primary" variant="tonal" class="action-btn"
+                  >Change Address</v-btn
+                >
                 <v-btn
                   size="small"
                   color="primary"
                   variant="tonal"
                   @click="showDateTimePicker = true"
+                  class="action-btn"
                 >
-                  Change Delivery Schedule
+                  Change Schedule
                 </v-btn>
               </div>
             </div>
@@ -302,26 +306,36 @@ const confirmDateTime = () => {
         </v-card>
 
         <!-- Items -->
-        <v-card outlined class="mb-4">
-          <v-card-title>Items to Purchase</v-card-title>
-          <v-list>
-            <v-list-item v-for="item in items" :key="item.id">
-              <v-list-item-avatar>
-                <v-img :src="item.image" alt="product" />
+        <v-card outlined class="mb-4 card-elevated">
+          <v-card-title class="card-title">Items to Purchase</v-card-title>
+          <v-list class="item-list">
+            <v-list-item v-for="item in items" :key="item.id" class="list-item">
+              <v-list-item-avatar class="item-avatar">
+                <v-img :src="item.image" alt="product" class="product-image" />
               </v-list-item-avatar>
 
-              <v-list-item-content>
-                <v-list-item-title>{{ item.name }}</v-list-item-title>
-                <v-list-item-subtitle>₱{{ item.price }}</v-list-item-subtitle>
+              <v-list-item-content class="item-content">
+                <v-list-item-title class="item-name">{{ item.name }}</v-list-item-title>
+                <v-list-item-subtitle class="item-price">₱{{ item.price }}</v-list-item-subtitle>
               </v-list-item-content>
 
-              <v-list-item-action>
-                <div class="d-flex align-center gap-2">
-                  <v-btn size="small" color="error" variant="tonal" @click="decreaseQty(item)"
+              <v-list-item-action class="item-actions">
+                <div class="quantity-controls">
+                  <v-btn
+                    size="x-small"
+                    color="error"
+                    variant="tonal"
+                    @click="decreaseQty(item)"
+                    class="qty-btn"
                     >−</v-btn
                   >
-                  <span>{{ item.quantity }}</span>
-                  <v-btn size="small" color="primary" variant="tonal" @click="increaseQty(item)"
+                  <span class="quantity-display">{{ item.quantity }}</span>
+                  <v-btn
+                    size="x-small"
+                    color="primary"
+                    variant="tonal"
+                    @click="increaseQty(item)"
+                    class="qty-btn"
                     >+</v-btn
                   >
                 </div>
@@ -329,12 +343,12 @@ const confirmDateTime = () => {
             </v-list-item>
           </v-list>
           <v-divider></v-divider>
-          <v-card-text class="text-right font-bold">Total: ₱{{ totalPrice }}</v-card-text>
+          <v-card-text class="total-price">Total: ₱{{ totalPrice }}</v-card-text>
         </v-card>
 
         <!-- Note -->
-        <v-card outlined class="mb-4">
-          <v-card-title>Message to Seller</v-card-title>
+        <v-card outlined class="mb-4 card-elevated">
+          <v-card-title class="card-title">Message to Seller</v-card-title>
           <v-card-text>
             <v-textarea
               v-model="note"
@@ -342,6 +356,8 @@ const confirmDateTime = () => {
               auto-grow
               rows="2"
               outlined
+              dense
+              class="note-textarea"
             ></v-textarea>
           </v-card-text>
         </v-card>
@@ -355,110 +371,136 @@ const confirmDateTime = () => {
           label="Select delivery option"
           outlined
           dense
+          class="delivery-select"
         ></v-select>
 
         <!-- Payment Method -->
-        <v-card outlined class="mb-4">
-          <v-card-title>Payment Method</v-card-title>
+        <v-card outlined class="mb-4 card-elevated">
+          <v-card-title class="card-title">Payment Method</v-card-title>
           <v-card-text>
-            <v-radio-group v-model="paymentMethod">
+            <v-radio-group v-model="paymentMethod" class="payment-radio-group">
               <v-radio label="Cash on Delivery (Default)" value="cash" />
             </v-radio-group>
           </v-card-text>
         </v-card>
-
-        <div class="text-center mt-6">
-          <v-btn color="primary" size="large" @click="handleCheckout">Checkout</v-btn>
-        </div>
       </v-container>
 
+      <!-- Fixed Bottom Navigation -->
+      <div class="bottom-nav-fixed">
+        <div class="bottom-nav-content">
+          <div class="total-section">
+            <div class="total-label">Total Amount:</div>
+            <div class="total-amount">₱{{ totalPrice }}</div>
+          </div>
+          <v-btn 
+            color="primary" 
+            size="large" 
+            @click="handleCheckout" 
+            class="place-order-btn"
+            :disabled="!items.length"
+            block
+          >
+            Place Order
+          </v-btn>
+        </div>
+      </div>
+
       <!-- Confirmation Dialog -->
-      <v-dialog v-model="showDialog" max-width="500">
+      <v-dialog v-model="showDialog" max-width="500" class="confirmation-dialog">
         <v-card>
-          <v-card-title class="text-center">Checkout Successful</v-card-title>
-          <v-card-text>
+          <v-card-title class="dialog-title">Checkout Successful</v-card-title>
+          <v-card-text class="dialog-content">
             <p>Note: You have <strong>5 minutes</strong> to cancel this order.</p>
-            <p class="text-center text-red-600 font-bold text-lg mt-3">
+            <p class="countdown-timer">
               Time Remaining: {{ formatTime(countdown) }}
             </p>
           </v-card-text>
-          <v-card-actions class="justify-center">
-            <v-btn color="error" variant="outlined" :disabled="countdown <= 0" @click="handleCancel"
+          <v-card-actions class="dialog-actions">
+            <v-btn
+              color="error"
+              variant="outlined"
+              :disabled="countdown <= 0"
+              @click="handleCancel"
+              class="cancel-btn"
               >Cancel Order</v-btn
             >
-            <v-btn color="primary" @click="showDialog = false">OK</v-btn>
+            <v-btn color="primary" @click="showDialog = false" class="ok-btn">OK</v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
 
       <!-- Date & Time Picker -->
-      <v-dialog v-model="showDateTimePicker" max-width="420">
-        <v-card class="rounded-xl elevation-10 pa-4">
-          <v-card-title class="justify-center text-h6 font-bold text-primary"
-            >Select Delivery Schedule</v-card-title
-          >
-          <v-card-text>
+      <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
+        <v-card class="datetime-card">
+          <v-card-title class="datetime-title">Select Delivery Schedule</v-card-title>
+          <v-card-text class="datetime-content">
             <v-date-picker
               v-model="deliveryDate"
               color="primary"
               elevation="0"
               show-adjacent-months
-              rounded="xl"
+              class="date-picker"
             ></v-date-picker>
             <v-divider class="my-4"></v-divider>
-            <div class="text-center mb-2 text-subtitle-1 font-bold">Select Time</div>
-            <div class="d-flex justify-center align-center gap-4">
-              <div class="time-wheel">
-                <v-virtual-scroll :items="hours12" height="160" item-height="40">
-                  <template #default="{ item }">
-                    <div
-                      class="time-item"
-                      :class="{ active: item === selectedHour }"
-                      @click="selectHour(item)"
-                    >
-                      {{ item }}
-                    </div>
-                  </template>
-                </v-virtual-scroll>
+            <div class="time-section">
+              <div class="time-label">Select Time</div>
+              <div class="time-wheels">
+                <div class="time-wheel">
+                  <v-virtual-scroll :items="hours12" height="160" item-height="40">
+                    <template #default="{ item }">
+                      <div
+                        class="time-item"
+                        :class="{ active: item === selectedHour }"
+                        @click="selectHour(item)"
+                      >
+                        {{ item }}
+                      </div>
+                    </template>
+                  </v-virtual-scroll>
+                </div>
+                <div class="time-separator">:</div>
+                <div class="time-wheel">
+                  <v-virtual-scroll :items="minutes" height="160" item-height="40">
+                    <template #default="{ item }">
+                      <div
+                        class="time-item"
+                        :class="{ active: item === selectedMinute }"
+                        @click="selectMinute(item)"
+                      >
+                        {{ item }}
+                      </div>
+                    </template>
+                  </v-virtual-scroll>
+                </div>
               </div>
-              <div class="text-h5 font-bold text-gray-500">:</div>
-              <div class="time-wheel">
-                <v-virtual-scroll :items="minutes" height="160" item-height="40">
-                  <template #default="{ item }">
-                    <div
-                      class="time-item"
-                      :class="{ active: item === selectedMinute }"
-                      @click="selectMinute(item)"
-                    >
-                      {{ item }}
-                    </div>
-                  </template>
-                </v-virtual-scroll>
+              <div class="period-toggle">
+                <v-btn-toggle
+                  v-model="selectedPeriod"
+                  color="primary"
+                  rounded="pill"
+                  divided
+                  class="period-buttons"
+                >
+                  <v-btn value="AM" class="period-btn">AM</v-btn>
+                  <v-btn value="PM" class="period-btn">PM</v-btn>
+                </v-btn-toggle>
               </div>
-            </div>
-            <div class="text-center mt-3">
-              <v-btn-toggle
-                v-model="selectedPeriod"
-                color="primary"
-                rounded="pill"
-                divided
-                class="mx-auto"
-              >
-                <v-btn value="AM">AM</v-btn>
-                <v-btn value="PM">PM</v-btn>
-              </v-btn-toggle>
-            </div>
-            <div class="text-center mt-4">
-              <div class="text-h6 font-bold">Selected Schedule</div>
-              <div class="text-h5 text-primary mt-1">
-                {{ deliveryDate || 'Not set' }} — {{ selectedHour }}:{{ selectedMinute }}
-                {{ selectedPeriod }}
+              <div class="selected-schedule">
+                <div class="schedule-label">Selected Schedule</div>
+                <div class="schedule-display">
+                  {{ deliveryDate || 'Not set' }} — {{ selectedHour }}:{{ selectedMinute }}
+                  {{ selectedPeriod }}
+                </div>
               </div>
             </div>
           </v-card-text>
-          <v-card-actions class="justify-end">
-            <v-btn text @click="showDateTimePicker = false">Cancel</v-btn>
-            <v-btn color="primary" variant="flat" @click="confirmDateTime">Confirm</v-btn>
+          <v-card-actions class="datetime-actions">
+            <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn"
+              >Cancel</v-btn
+            >
+            <v-btn color="primary" variant="flat" @click="confirmDateTime" class="confirm-datetime-btn"
+              >Confirm</v-btn
+            >
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -467,63 +509,305 @@ const confirmDateTime = () => {
 </template>
 
 <style scoped>
-.buyer-info p {
-  margin: 4px 0;
+/* Global Styles */
+:root {
+  --primary-color: #438fda;
+  --error-color: #dc2626;
+  --success-color: #10b981;
+  --text-primary: #333;
+  --text-secondary: #666;
+  --border-color: #e0e0e0;
+  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
-.text-center {
+
+/* Main Content */
+.main-content {
+  padding-bottom: 100px !important; /* Space for fixed bottom nav */
+}
+
+/* Container & Layout */
+.px-3 {
+  padding-left: 12px;
+  padding-right: 12px;
+}
+
+.card-elevated {
+  box-shadow: var(--card-shadow) !important;
+  border-radius: 12px !important;
+}
+
+.card-title {
+  font-size: 1.1rem !important;
+  font-weight: 600 !important;
+  padding: 16px 20px 8px !important;
+  color: var(--text-primary);
+}
+
+.card-content {
+  padding: 8px 20px 16px !important;
+}
+
+/* Buyer Info */
+.buyer-info p {
+  margin: 6px 0;
+  font-size: 0.9rem;
+  line-height: 1.4;
+}
+
+.address-line {
+  word-break: break-word;
+}
+
+.text-red {
+  color: var(--error-color);
+  font-size: 0.85rem;
+}
+
+.button-group {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.action-btn {
+  font-size: 0.8rem !important;
+  min-width: auto !important;
+}
+
+/* Items List */
+.item-list {
+  padding: 0 !important;
+}
+
+.list-item {
+  padding: 12px 16px !important;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.list-item:last-child {
+  border-bottom: none;
+}
+
+.item-avatar {
+  min-width: 50px !important;
+  width: 50px !important;
+  height: 50px !important;
+}
+
+.product-image {
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.item-content {
+  padding: 0 12px !important;
+  min-width: 0;
+}
+
+.item-name {
+  font-size: 0.95rem !important;
+  font-weight: 500 !important;
+  line-height: 1.3;
+  margin-bottom: 4px;
+}
+
+.item-price {
+  font-size: 0.9rem !important;
+  color: var(--primary-color) !important;
+  font-weight: 600 !important;
+}
+
+.item-actions {
+  margin: 0 !important;
+  min-width: auto;
+}
+
+.quantity-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.qty-btn {
+  min-width: 32px !important;
+  width: 32px !important;
+  height: 32px !important;
+  font-size: 0.9rem !important;
+  font-weight: bold;
+}
+
+.quantity-display {
+  min-width: 24px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+
+.total-price {
+  text-align: right;
+  font-weight: 700 !important;
+  font-size: 1.1rem !important;
+  color: var(--text-primary);
+  padding: 16px 20px !important;
+}
+
+/* Note Textarea */
+.note-textarea {
+  font-size: 0.9rem;
+}
+
+/* Delivery Select */
+.delivery-select {
+  margin-bottom: 16px;
+}
+
+/* Payment Method */
+.payment-radio-group {
+  margin-top: 0;
+}
+
+/* Fixed Bottom Navigation */
+.bottom-nav-fixed {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-top: 1px solid var(--border-color);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+  padding: 12px 16px;
+}
+
+.bottom-nav-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  max-width: 800px;
+  margin: 0 auto;
+}
+
+.total-section {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  flex: 1;
+}
+
+.total-label {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+  margin-bottom: 2px;
+}
+
+.total-amount {
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  line-height: 1.2;
+}
+
+.place-order-btn {
+  min-width: 140px;
+  font-weight: 600;
+  text-transform: none;
+  border-radius: 8px;
+  height: 48px;
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+
+/* Dialog Styles */
+.confirmation-dialog .dialog-title {
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.2rem;
+}
+
+.dialog-content {
+  text-align: center;
+  padding: 16px 24px;
+}
+
+.countdown-timer {
+  color: var(--error-color);
+  font-weight: 700;
+  font-size: 1.1rem;
+  margin: 12px 0 0 0;
+}
+
+.dialog-actions {
+  justify-content: center;
+  gap: 12px;
+  padding: 0 24px 16px;
+}
+
+.cancel-btn, .ok-btn {
+  min-width: 120px;
+}
+
+/* Date Time Picker */
+.datetime-dialog {
+  max-width: 95vw !important;
+}
+
+.datetime-card {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+.datetime-title {
+  text-align: center;
+  font-weight: 700 !important;
+  font-size: 1.1rem !important;
+  color: var(--primary-color);
+  padding: 20px 20px 0 !important;
+}
+
+.datetime-content {
+  padding: 16px 20px;
+}
+
+.date-picker {
+  width: 100%;
+}
+
+.time-section {
   text-align: center;
 }
-.text-red-600 {
-  color: #dc2626;
+
+.time-label {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 12px;
+  color: var(--text-primary);
 }
-.mt-3 {
-  margin-top: 1rem;
-}
-.mt-6 {
-  margin-top: 1.5rem;
-}
-.flex {
+
+.time-wheels {
   display: flex;
-}
-.gap-2 {
-  gap: 8px;
-}
-.font-bold {
-  font-weight: bold;
-}
-.text-right {
-  text-align: right;
-}
-
-.digital-time-picker {
-  font-size: 1.5rem; /* Bigger numbers */
-  font-weight: bold;
-}
-
-.digital-time-picker .v-time-picker-clock__item {
-  border-radius: 50%;
-}
-
-.digital-time-picker .v-time-picker-clock__item--selected {
-  background-color: #438fda !important; /* Primary highlight */
-  color: white !important;
-}
-.gap-2 {
-  gap: 8px;
-}
-.mx-2 {
-  margin: 0 8px;
+  justify-content: center;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
 }
 
 .time-wheel {
-  width: 70px;
-  background: #f5f7fa;
-  border-radius: 14px;
-  border: 1px solid #e0e0e0;
-  overflow-y: auto;
+  width: 60px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
   text-align: center;
-  scroll-behavior: smooth;
   box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+}
+
+.time-separator {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text-secondary);
 }
 
 .time-item {
@@ -531,31 +815,248 @@ const confirmDateTime = () => {
   line-height: 40px;
   cursor: pointer;
   font-weight: 500;
-  color: #555;
+  color: var(--text-secondary);
   transition: all 0.25s ease;
-  border-radius: 8px;
+  border-radius: 6px;
   margin: 2px;
+  font-size: 0.95rem;
 }
 
 .time-item:hover {
   background-color: #e3f2fd;
-  color: #1976d2;
+  color: var(--primary-color);
 }
 
 .time-item.active {
-  background-color: #438fda;
+  background-color: var(--primary-color);
   color: white;
-  font-weight: bold;
+  font-weight: 600;
   transform: scale(1.05);
 }
 
-.v-btn-toggle {
-  border: 1px solid #ddd;
+.period-toggle {
+  margin: 16px 0;
+}
+
+.period-buttons {
+  border: 1px solid var(--border-color);
   background: #f9fafb;
 }
 
-.v-btn-toggle .v-btn {
-  font-weight: bold;
+.period-btn {
+  font-weight: 600;
   text-transform: none;
+  font-size: 0.9rem;
+}
+
+.selected-schedule {
+  margin-top: 16px;
+}
+
+.schedule-label {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+}
+
+.schedule-display {
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--primary-color);
+  line-height: 1.3;
+}
+
+.datetime-actions {
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px 20px;
+}
+
+.cancel-datetime-btn, .confirm-datetime-btn {
+  min-width: 80px;
+}
+
+/* App Bar */
+.app-bar-title {
+  font-size: 1.1rem !important;
+  font-weight: 600;
+}
+
+/* Responsive Design */
+@media (max-width: 600px) {
+  .px-3 {
+    padding-left: 8px;
+    padding-right: 8px;
+  }
+
+  .card-title {
+    font-size: 1rem !important;
+    padding: 14px 16px 6px !important;
+  }
+
+  .card-content {
+    padding: 6px 16px 14px !important;
+  }
+
+  .item-avatar {
+    min-width: 45px !important;
+    width: 45px !important;
+    height: 45px !important;
+  }
+
+  .item-name {
+    font-size: 0.9rem !important;
+  }
+
+  .item-price {
+    font-size: 0.85rem !important;
+  }
+
+  .qty-btn {
+    min-width: 28px !important;
+    width: 28px !important;
+    height: 28px !important;
+  }
+
+  .quantity-display {
+    font-size: 0.9rem;
+  }
+
+  .total-price {
+    font-size: 1rem !important;
+    padding: 14px 16px !important;
+  }
+
+  /* Bottom Nav Mobile */
+  .bottom-nav-fixed {
+    padding: 10px 12px;
+  }
+
+  .bottom-nav-content {
+    gap: 12px;
+  }
+
+  .total-label {
+    font-size: 0.8rem;
+  }
+
+  .total-amount {
+    font-size: 1.2rem;
+  }
+
+  .place-order-btn {
+    min-width: 120px;
+    height: 44px;
+    font-size: 0.95rem;
+  }
+
+  .datetime-dialog {
+    margin: 8px !important;
+  }
+
+  .datetime-title {
+    font-size: 1rem !important;
+    padding: 16px 16px 0 !important;
+  }
+
+  .datetime-content {
+    padding: 12px 16px;
+  }
+
+  .time-wheel {
+    width: 55px;
+  }
+
+  .time-item {
+    height: 36px;
+    line-height: 36px;
+    font-size: 0.9rem;
+  }
+
+  .schedule-display {
+    font-size: 1rem;
+  }
+
+  .button-group {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .action-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 400px) {
+  .list-item {
+    padding: 10px 12px !important;
+  }
+
+  .item-avatar {
+    min-width: 40px !important;
+    width: 40px !important;
+    height: 40px !important;
+  }
+
+  .item-content {
+    padding: 0 8px !important;
+  }
+
+  .time-wheels {
+    gap: 8px;
+  }
+
+  .time-wheel {
+    width: 50px;
+  }
+
+  .time-separator {
+    font-size: 1.1rem;
+  }
+
+  .datetime-actions {
+    padding: 12px 16px 16px;
+  }
+
+  .bottom-nav-content {
+    flex-direction: column;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .total-section {
+    align-items: center;
+    text-align: center;
+  }
+
+  .place-order-btn {
+    min-width: 100%;
+  }
+}
+
+/* Animation for buttons and interactive elements */
+.qty-btn,
+.action-btn,
+.place-order-btn,
+.time-item,
+.period-btn,
+.cancel-btn,
+.ok-btn,
+.cancel-datetime-btn,
+.confirm-datetime-btn {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Ensure proper spacing and alignment */
+.v-main {
+  background-color: #f8fafc;
+  position: relative;
+}
+
+.v-container {
+  max-width: 800px;
+  margin: 0 auto;
 }
 </style>
