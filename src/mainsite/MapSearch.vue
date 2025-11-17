@@ -67,7 +67,6 @@ const fetchDebounceMs = 350
 const { latitude, longitude, requestPermission, startWatching, stopWatching } = useGeolocation()
 let userMarker: L.Marker | null = null
 let shopMarkers: L.Marker[] = [] // registered shop markers
-let unregisteredMarkers: L.Marker[] = [] // unregistered places markers
 const locating = ref(false)
 let fetchTimeout: number | null = null
 
@@ -84,13 +83,6 @@ const registeredShopIcon = L.icon({
     'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
-})
-
-const unregisteredShopIcon = L.icon({
-  iconUrl:
-    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-green.png',
-  iconSize: [18, 30],
-  iconAnchor: [9, 30],
 })
 
 /* -------------------- CACHE LOCATION -------------------- */
@@ -303,15 +295,6 @@ const clearShopMarkers = () => {
   shopMarkers = []
 }
 
-const clearUnregisteredMarkers = () => {
-  unregisteredMarkers.forEach((m) => {
-    try {
-      map.value?.removeLayer(m)
-    } catch {}
-  })
-  unregisteredMarkers = []
-}
-
 const plotShops = () => {
   if (!map.value || !map.value._loaded) return
   clearShopMarkers()
@@ -355,51 +338,6 @@ const plotShops = () => {
 
   // apply current filters so map only shows what the user expects
   applyFiltersToMarkers()
-}
-
-/* -------------------- FETCH NEARBY UNREGISTERED SHOPS -------------------- */
-const fetchNearbyUnregisteredShops = async (lat: number, lon: number) => {
-  try {
-    const url = `https://api.geoapify.com/v2/places?categories=building.commercial&filter=circle:${lon},${lat},5000&apiKey=${GEOAPIFY_API_KEY}`
-    const res = await fetch(url)
-    if (!res.ok) {
-      console.error('Geoapify places error', res.status, await res.text())
-      return []
-    }
-    const data = await res.json()
-    return data.features || []
-  } catch (err) {
-    console.error('Failed to fetch unregistered shops:', err)
-    return []
-  }
-}
-const plotUnregisteredShops = (features: any[]) => {
-  if (!map.value) return
-  clearUnregisteredMarkers()
-
-  for (const f of features) {
-    // Geoapify returns geometry.coordinates [lon, lat] OR properties may contain lat/lon
-    const lat = f.geometry?.coordinates?.[1] ?? f.properties?.lat
-    const lon = f.geometry?.coordinates?.[0] ?? f.properties?.lon
-
-    if (!lat || !lon) continue
-
-    const marker = L.marker([lat, lon], {
-      icon: unregisteredShopIcon,
-      title: f.properties?.name ?? 'Unregistered Shop',
-    })
-
-    marker.bindPopup(`
-      <div style="text-align:center;">
-        <p><strong>${f.properties?.name ?? 'Unregistered Shop'}</strong></p>
-        <p style="margin:2px 0; font-size:14px;">${f.properties?.address_line1 ?? ''}</p>
-        <small>Not registered on CloseShop</small>
-      </div>
-    `)
-
-    marker.addTo(map.value)
-    unregisteredMarkers.push(marker)
-  }
 }
 
 /* -------------------- FILTER PIPELINE (Option A: combine all) -------------------- */
@@ -486,6 +424,7 @@ const focusOnShopMarker = async (shopId: string) => {
   const coords = await getRoute([userLat, userLng], [Number(shop.latitude), Number(shop.longitude)])
   if (coords) drawRoute(coords)
 }
+
 /* -------------------- SEARCH / SMART SEARCH -------------------- */
 const filteredShops = ref<any[]>([])
 
@@ -606,20 +545,10 @@ const onSearchKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter') smartSearch()
 }
 
-/* -------------------- UPDATE SHOPS (registered + unregistered) -------------------- */
+/* -------------------- UPDATE SHOPS -------------------- */
 const updateShops = async () => {
   // fetch registered shops (debounced)
   fetchShops()
-
-  // unregistered: display around user if possible
-  const lat = Number(latitude.value ?? lastKnown.value?.[0] ?? 0)
-  const lon = Number(longitude.value ?? lastKnown.value?.[1] ?? 0)
-  if (isFinite(lat) && isFinite(lon) && lat !== 0 && lon !== 0) {
-    const unreg = await fetchNearbyUnregisteredShops(lat, lon)
-    plotUnregisteredShops(unreg)
-  } else {
-    clearUnregisteredMarkers()
-  }
 }
 
 /* -------------------- USER LOCATION TRACKING -------------------- */
@@ -832,71 +761,318 @@ const openShop = async (shopId: string) => {
 </template>
 
 <style scoped>
-/* (same styles as before — unchanged) */
+/* Base responsive adjustments */
+:deep(.v-application__wrap) {
+  min-height: 100vh !important;
+}
+
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding-top: env(safe-area-inset-top);
-  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  padding-top: max(16px, env(safe-area-inset-top));
+  padding: clamp(20px, 8vw, 35px) clamp(12px, 4vw, 16px) clamp(8px, 3vw, 12px);
   margin: 0;
   width: 100%;
   position: sticky;
   top: 0;
-  z-index: 10;
+  z-index: 1000;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
 }
+
 .hero-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: clamp(8px, 3vw, 12px);
+  max-width: 1200px;
+  margin: 0 auto;
 }
+
 .search-field {
   flex: 1;
+  min-width: 0; /* Prevent flex item overflow */
 }
+
 .search-field :deep(.v-field) {
   background: #fff !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
+  border: 1px solid #e2e8f0;
+  min-height: 48px;
 }
+
 .search-field :deep(input) {
-  font-size: 14px;
+  font-size: clamp(14px, 4vw, 16px);
+  padding: 8px 4px;
 }
+
+.search-field :deep(.v-field__append-inner) {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.search-btn {
+  background: #1e40af !important;
+  color: white !important;
+  min-width: 48px !important;
+  width: clamp(48px, 12vw, 56px) !important;
+  height: clamp(48px, 12vw, 56px) !important;
+  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+  border: none;
+}
+
+.search-btn .v-icon {
+  font-size: clamp(18px, 5vw, 22px);
+}
+
+/* Map container with safe area support */
 #map {
   position: absolute;
-  top: var(--v-toolbar-height, 64px);
-  bottom: var(--v-bottom-navigation-height, 56px);
+  top: 0;
+  bottom: var(--bottom-nav-height, 70px);
   left: 0;
   right: 0;
   width: 100%;
-  height: calc(100vh - var(--v-toolbar-height, 64px) - var(--v-bottom-navigation-height, 56px));
+  height: calc(100vh - var(--bottom-nav-height, 70px));
+  z-index: 1;
 }
+
+/* Ensure bottom nav doesn't cover content */
+:deep(.v-bottom-navigation) {
+  --bottom-nav-height: 70px;
+  height: var(--bottom-nav-height) !important;
+  padding-bottom: env(safe-area-inset-bottom);
+  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1);
+  z-index: 1000;
+}
+
+/* Map buttons - responsive positioning */
 .map-buttons {
   position: fixed;
-  bottom: 5vh;
-  right: 5vw;
+  bottom: calc(var(--bottom-nav-height, 70px) + clamp(16px, 5vw, 24px));
+  right: clamp(12px, 4vw, 20px);
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: clamp(6px, 2vw, 10px);
   z-index: 2000;
 }
+
 .map-buttons .v-btn {
   background: white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
-  width: 48px;
-  height: 48px;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+  width: clamp(44px, 11vw, 52px);
+  height: clamp(44px, 11vw, 52px);
+  border: 1px solid #e2e8f0;
 }
+
+.map-buttons .v-btn .v-icon {
+  font-size: clamp(18px, 4.5vw, 20px);
+}
+
 .mode-chip {
   position: fixed;
-  bottom: 12vh;
-  right: 5vw;
+  bottom: calc(var(--bottom-nav-height, 70px) + clamp(80px, 25vw, 120px));
+  right: clamp(12px, 4vw, 20px);
   z-index: 2100;
-  font-weight: 500;
-  padding: 0.25rem 0.5rem;
-  font-size: 0.8rem;
-}
-.highlight {
-  background-color: #ffe066;
   font-weight: 600;
-  border-radius: 2px;
-  padding: 0 2px;
+  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
+  font-size: clamp(0.7rem, 3vw, 0.8rem);
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  color: white;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
+  backdrop-filter: blur(10px);
+  border: none;
 }
-/* mobile adjustments omitted for brevity — keep as previous */
+
+/* Shop menu drawer improvements */
+:deep(.v-navigation-drawer) {
+  margin-top: 0 !important;
+}
+
+:deep(.v-navigation-drawer__content) {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+:deep(.v-toolbar) {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #1e40af) !important;
+}
+
+:deep(.v-toolbar-title) {
+  font-size: clamp(1rem, 4vw, 1.25rem);
+  font-weight: 600;
+}
+
+/* Shop list items */
+:deep(.v-list-item) {
+  padding-top: clamp(8px, 2vw, 12px);
+  padding-bottom: clamp(8px, 2vw, 12px);
+  border-bottom: 1px solid #f1f5f9;
+}
+
+:deep(.v-avatar) {
+  width: clamp(36px, 10vw, 44px) !important;
+  height: clamp(36px, 10vw, 44px) !important;
+  min-width: clamp(36px, 10vw, 44px) !important;
+}
+
+:deep(.v-list-item-title) {
+  font-size: clamp(0.9rem, 3.5vw, 1rem);
+  line-height: 1.3;
+  margin-bottom: 2px;
+}
+
+:deep(.v-list-item-subtitle) {
+  font-size: clamp(0.75rem, 3vw, 0.85rem);
+  line-height: 1.2;
+  opacity: 0.8;
+}
+
+/* Alert improvements */
+.v-alert {
+  margin: clamp(8px, 2vw, 16px);
+  font-size: clamp(0.8rem, 3.5vw, 0.9rem);
+  border-radius: 12px;
+  border: 1px solid;
+}
+
+/* Highlight for search matches */
+.highlight {
+  background-color: #fef3c7;
+  font-weight: 700;
+  border-radius: 3px;
+  padding: 1px 3px;
+  color: #92400e;
+}
+
+/* Leaflet popup improvements for mobile */
+:deep(.leaflet-popup-content) {
+  margin: clamp(10px, 3vw, 16px);
+  font-size: clamp(12px, 3.5vw, 14px);
+  line-height: 1.4;
+}
+
+:deep(.leaflet-popup-content-wrapper) {
+  border-radius: 12px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+}
+
+:deep(.leaflet-popup-content button) {
+  font-size: clamp(12px, 3.5vw, 14px);
+  padding: clamp(6px, 2vw, 8px) clamp(10px, 3vw, 14px);
+  margin-top: 8px;
+}
+
+:deep(.leaflet-popup-content img) {
+  width: clamp(60px, 20vw, 80px) !important;
+  height: clamp(60px, 20vw, 80px) !important;
+}
+
+/* Safe area support for notched devices */
+.safe-area-top {
+  padding-top: env(safe-area-inset-top);
+}
+
+.safe-area-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Loading states */
+:deep(.v-progress-linear) {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3000;
+}
+
+/* Responsive typography scale */
+@media (max-width: 360px) {
+  .hero {
+    padding: 12px 10px 6px;
+  }
+  
+  .hero-row {
+    gap: 6px;
+  }
+  
+  .map-buttons {
+    bottom: 70px;
+    right: 8px;
+  }
+  
+  .map-buttons .v-btn {
+    width: 40px;
+    height: 40px;
+  }
+}
+
+@media (min-width: 768px) {
+  #map {
+    bottom: var(--bottom-nav-height, 80px);
+    height: calc(100vh - var(--bottom-nav-height, 80px));
+  }
+  
+  :deep(.v-bottom-navigation) {
+    --bottom-nav-height: 80px;
+  }
+  
+  .map-buttons {
+    bottom: calc(80px + 24px);
+    right: 24px;
+  }
+}
+
+/* Landscape orientation support */
+@media (max-height: 500px) and (orientation: landscape) {
+  .hero {
+    padding: 12px 16px 8px;
+    position: relative;
+  }
+  
+  #map {
+    top: 0;
+    height: 100vh;
+  }
+  
+  .map-buttons {
+    bottom: 20px;
+    right: 16px;
+  }
+  
+  .mode-chip {
+    bottom: 80px;
+  }
+}
+
+/* High DPI screen support */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
+  .map-buttons .v-btn {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+  }
+  
+  .search-field :deep(.v-field) {
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  :deep(.v-menu__content),
+  :deep(.v-navigation-drawer) {
+    transition-duration: 0.1s !important;
+  }
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .map-buttons .v-btn {
+    background: #374151;
+    border-color: #4b5563;
+    color: #f9fafb;
+  }
+  
+  .highlight {
+    background-color: #f59e0b;
+    color: #7c2d12;
+  }
+}
 </style>
