@@ -31,20 +31,116 @@ function updateSearch() {
 }
 
 /* 🧭 Location Permission */
+/* 🧭 Smart Location Permission with Fallbacks */
 async function requestLocationPermission() {
   try {
+    console.log('📍 Requesting location permission...')
+
+    // Check current permission status first
+    const currentPerm = await Geolocation.checkPermissions()
+    if (currentPerm.location === 'granted') {
+      console.log('📍 Location already granted')
+      return true
+    }
+
+    // Request permission
     const perm = await Geolocation.requestPermissions()
     if (perm.location === 'granted') {
-      const coords = await Geolocation.getCurrentPosition()
-      console.log('📍 User location:', coords.coords)
-      return coords.coords
+      console.log('📍 Location permission granted')
+      return true
     } else {
-      alert('Please enable location permission to see nearby shops.')
-      return null
+      console.warn('📍 Location permission denied by user')
+      return false
     }
   } catch (err) {
-    console.error('Error requesting location:', err)
-    return null
+    console.error('📍 Error requesting location permission:', err)
+    return false
+  }
+}
+
+/* 📍 Smart Location Fetching with Fallbacks */
+async function getUserLocation() {
+  let coords = null
+  let accuracy = 'unknown'
+
+  try {
+    console.log('📍 Attempting high accuracy location...')
+
+    // Strategy 1: High accuracy (GPS) - 10 second timeout
+    coords = await Geolocation.getCurrentPosition({
+      enableHighAccuracy: true,
+      timeout: 10000, // 10 seconds for GPS
+      maximumAge: 0, // Don't use cached position
+    })
+    accuracy = 'high'
+    console.log('📍 High accuracy location acquired:', coords.coords)
+  } catch (highAccuracyError) {
+    console.warn('📍 High accuracy failed, trying standard accuracy...', highAccuracyError)
+
+    try {
+      // Strategy 2: Standard accuracy (WiFi/cell) - 5 second timeout
+      coords = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: false, // Faster but less accurate
+        timeout: 5000, // 5 seconds
+        maximumAge: 300000, // Accept position up to 5 minutes old
+      })
+      accuracy = 'medium'
+      console.log('📍 Standard accuracy location acquired:', coords.coords)
+    } catch (standardError) {
+      console.warn('📍 Standard accuracy failed, using last known position...', standardError)
+
+      // Strategy 3: Last known position from localStorage
+      const lastKnown = getLastKnownLocation()
+      if (lastKnown) {
+        coords = { coords: lastKnown }
+        accuracy = 'cached'
+        console.log('📍 Using cached location:', lastKnown)
+      } else {
+        throw new Error('All location methods failed')
+      }
+    }
+  }
+
+  // Save successful location for future fallback
+  if (coords && coords.coords && accuracy !== 'cached') {
+    saveLastKnownLocation(coords.coords)
+  }
+
+  return {
+    coords: coords?.coords,
+    accuracy,
+    timestamp: Date.now(),
+  }
+}
+
+/* 💾 Cache Location Helpers */
+function getLastKnownLocation() {
+  try {
+    const cached = localStorage.getItem('lastKnownLocation')
+    if (cached) {
+      const { latitude, longitude, timestamp } = JSON.parse(cached)
+      // Only use if less than 1 hour old
+      if (Date.now() - timestamp < 3600000) {
+        return { latitude, longitude }
+      }
+    }
+  } catch (e) {
+    console.warn('Could not read cached location', e)
+  }
+  return null
+}
+
+function saveLastKnownLocation(coords) {
+  try {
+    const locationData = {
+      latitude: coords.latitude,
+      longitude: coords.longitude,
+      accuracy: coords.accuracy,
+      timestamp: Date.now(),
+    }
+    localStorage.setItem('lastKnownLocation', JSON.stringify(locationData))
+  } catch (e) {
+    console.warn('Could not save location cache', e)
   }
 }
 
@@ -122,28 +218,42 @@ async function checkNetworkStatus() {
   }
 }
 
-/* 🏪 Fetch Shops */
-/* 🏪 Fetch Approved Shops Sorted by Distance */
+/* 🏪 Fetch Shops with Smart Location Handling */
 async function fetchShops() {
-  try {
-    const userCoords = await Geolocation.getCurrentPosition()
-    const userLat = userCoords.coords.latitude
-    const userLon = userCoords.coords.longitude
+  let userLat = null
+  let userLon = null
+  let locationAccuracy = 'none'
 
+  try {
+    // Get user location with fallbacks
+    const locationResult = await getUserLocation()
+    if (locationResult.coords) {
+      userLat = locationResult.coords.latitude
+      userLon = locationResult.coords.longitude
+      locationAccuracy = locationResult.accuracy
+    }
+
+    console.log(`📍 Using location with accuracy: ${locationAccuracy}`)
+  } catch (locationError) {
+    console.warn('📍 Could not get user location, showing all shops:', locationError)
+    // Continue without location - we'll show all shops
+  }
+
+  try {
     const { data, error } = await supabase
       .from('shops')
       .select(
         'id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region, latitude, longitude, status',
       )
-      .eq('status', 'approved') // ✅ Only approved shops
+      .eq('status', 'approved')
       .not('latitude', 'is', null)
       .not('longitude', 'is', null)
 
     if (error) throw error
 
-    // Compute distance
-    function distance(lat1, lon1, lat2, lon2) {
-      const R = 6371 // km
+    // Compute distance only if we have user location
+    function calculateDistance(lat1, lon1, lat2, lon2) {
+      const R = 6371 // Earth radius in km
       const dLat = ((lat2 - lat1) * Math.PI) / 180
       const dLon = ((lon2 - lon1) * Math.PI) / 180
       const a =
@@ -155,36 +265,51 @@ async function fetchShops() {
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     }
 
-    // Map stores & compute distance
     let mapped = data.map((s) => {
-      const dist = distance(userLat, userLon, s.latitude, s.longitude)
+      let distance = null
+      let distanceAccuracy = 'unknown'
+
+      if (userLat && userLon && s.latitude && s.longitude) {
+        distance = calculateDistance(userLat, userLon, s.latitude, s.longitude)
+        distanceAccuracy = locationAccuracy
+      }
+
       return {
         id: s.id,
         title: s.business_name,
         img: s.physical_store || PLACEHOLDER_IMG,
         logo: s.logo_url,
         address: [s.building, s.street, s.barangay, s.city, s.province].filter(Boolean).join(', '),
-        distance: dist, // in km
+        distance,
+        distanceAccuracy,
+        hasExactLocation: !!(s.latitude && s.longitude),
       }
     })
 
-    // Sort nearest → farthest
-    mapped.sort((a, b) => a.distance - b.distance)
+    // Sort by distance if available, otherwise keep original order
+    if (userLat && userLon) {
+      mapped.sort((a, b) => {
+        // Put shops with unknown distance at the end
+        if (a.distance === null) return 1
+        if (b.distance === null) return -1
+        return a.distance - b.distance
+      })
+    }
 
     nearby.value = mapped
   } catch (err) {
     console.error('fetchShops error:', err)
-    errorMsg.value = err.message
+    errorMsg.value = 'Failed to load shops'
     nearby.value = []
   }
 }
-
 /* 🛍️ Fetch Products from Approved Shops */
 async function fetchProducts() {
   try {
     const { data, error } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         price,
@@ -192,17 +317,18 @@ async function fetchProducts() {
         sold,
         shop_id,
         shops!inner (status)
-      `)
-      .eq('shops.status', 'approved')   // ✅ Only shops approved
+      `,
+      )
+      .eq('shops.status', 'approved') // ✅ Only shops approved
 
     if (error) throw error
 
-    products.value = (data || []).map(p => ({
+    products.value = (data || []).map((p) => ({
       id: p.id,
       title: p.prod_name,
       price: p.price,
       img: extractImage(p.main_img_urls),
-      sold: p.sold || 0
+      sold: p.sold || 0,
     }))
   } catch (err) {
     console.error('fetchProducts error:', err)
@@ -227,6 +353,7 @@ function extractImage(main_img_urls) {
 }
 
 /* 🚀 Main Lifecycle */
+/* 🚀 Main Lifecycle */
 onMounted(async () => {
   try {
     loading.value = true
@@ -235,14 +362,34 @@ onMounted(async () => {
     // Only run these on mobile builds
     if (Capacitor.isNativePlatform()) {
       await checkNetworkStatus()
-      await requestLocationPermission()
-      await setupPushNotifications() // ✅ replaces Firebase-based token code
+
+      // Request location in background - don't block UI
+      const locationPromise = requestLocationPermission()
+        .then((hasPermission) => {
+          if (hasPermission) {
+            console.log('📍 Location permission granted, will use for sorting')
+          }
+          return hasPermission
+        })
+        .catch((err) => {
+          console.warn('📍 Location setup completed with warnings:', err)
+          return false
+        })
+
+      await setupPushNotifications()
+
+      // Wait a bit for location if possible, but don't block
+      await Promise.race([
+        locationPromise,
+        new Promise((resolve) => setTimeout(resolve, 2000)), // Max 2 second wait
+      ])
     }
 
-    // Load data
+    // Load shops and products in parallel
     await Promise.all([fetchShops(), fetchProducts()])
   } catch (err) {
     console.error('❌ Error in onMounted:', err)
+    errorMsg.value = 'Failed to load app data'
   } finally {
     loading.value = false
   }
@@ -282,6 +429,27 @@ onMounted(() => {
     }, 3000)
   }
 })
+
+// Add these helper functions
+const locationAccuracy = ref('none')
+
+const getLocationStatusColor = (accuracy) => {
+  switch(accuracy) {
+    case 'high': return 'success'
+    case 'medium': return 'warning' 
+    case 'cached': return 'info'
+    default: return 'default'
+  }
+}
+
+const getLocationStatusText = (accuracy) => {
+  switch(accuracy) {
+    case 'high': return 'Accurate'
+    case 'medium': return 'Approximate'
+    case 'cached': return 'Last Known'
+    default: return 'No Location'
+  }
+}
 </script>
 
 <template>
@@ -313,7 +481,17 @@ onMounted(() => {
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
           <h3 class="section-title">Nearby Stores</h3>
-          <button class="see-more" @click="seeMoreNearby">See more</button>
+          <div class="location-status">
+            <v-chip
+              v-if="locationAccuracy !== 'none'"
+              :color="getLocationStatusColor(locationAccuracy)"
+              size="small"
+            >
+              <v-icon small class="mr-1">mdi-crosshairs-gps</v-icon>
+              {{ getLocationStatusText(locationAccuracy) }}
+            </v-chip>
+            <button class="see-more" @click="seeMoreNearby">See more</button>
+          </div>
         </div>
 
         <div class="scroll-row">
@@ -822,4 +1000,6 @@ onMounted(() => {
     padding: 12px;
   }
 }
+
+
 </style>
