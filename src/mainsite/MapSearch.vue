@@ -8,6 +8,10 @@ import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
 
+/* -------------------- MAPBOX CONFIG -------------------- */
+const MAPBOX_ACCESS_TOKEN =
+  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+
 /* -------------------- ROUTE OPTIONS INTERFACE -------------------- */
 interface RouteOption {
   coords: [number, number][]
@@ -17,22 +21,44 @@ interface RouteOption {
   color: string
 }
 
-/* -------------------- MULTIPLE ROUTING VIA OSRM -------------------- */
-const getRouteOptions = async (start: [number, number], end: [number, number]): Promise<RouteOption[]> => {
+/* -------------------- MULTIPLE ROUTING VIA MAPBOX -------------------- */
+const getRouteOptions = async (
+  start: [number, number],
+  end: [number, number],
+): Promise<RouteOption[]> => {
   try {
-    // OSRM format: lon,lat;lon,lat - request alternatives
-    const coordinates = `${start[1]},${start[0]};${end[1]},${end[0]}`
-    const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&alternatives=true`
+    // Check network connectivity
+    if (!navigator.onLine) {
+      throw new Error('No internet connection')
+    }
 
-    const res = await fetch(url)
+    // Mapbox format: lon,lat;lon,lat
+    const coordinates = `${start[1]},${start[0]};${end[1]},${end[0]}`
+    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=true&geometries=geojson&steps=false&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`
+
+    // Add timeout for mobile networks
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+    })
+
+    clearTimeout(timeoutId)
+
     if (!res.ok) {
-      console.error('OSRM routing error', res.status)
-      return []
+      console.error('Mapbox routing error', res.status, res.statusText)
+      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
     }
 
     const data = await res.json()
 
     if (!data.routes || data.routes.length === 0) {
+      console.warn('No routes found from Mapbox')
       return []
     }
 
@@ -41,21 +67,21 @@ const getRouteOptions = async (start: [number, number], end: [number, number]): 
 
     data.routes.forEach((route: any, index: number) => {
       if (route.geometry && route.geometry.coordinates) {
-        // OSRM returns [lon, lat] coordinates
+        // Mapbox returns [lon, lat] coordinates
         const coords = route.geometry.coordinates.map((coord: [number, number]) => [
-          coord[1],
-          coord[0],
+          coord[1], // lat
+          coord[0], // lon
         ])
-        
+
         const distance = route.distance // meters
         const duration = route.duration // seconds
-        
+
         routeOptions.push({
           coords,
           distance,
           duration,
           summary: `Route ${index + 1}`,
-          color: colors[index % colors.length]
+          color: colors[index % colors.length],
         })
       }
     })
@@ -63,8 +89,24 @@ const getRouteOptions = async (start: [number, number], end: [number, number]): 
     // Sort by distance (shortest first)
     return routeOptions.sort((a, b) => a.distance - b.distance)
   } catch (err) {
-    console.error('OSRM routing failed', err)
-    return []
+    console.error('Mapbox routing failed:', err)
+
+    // Provide fallback route
+    return [createStraightLineRoute(start, end)]
+  }
+}
+
+/* -------------------- FALLBACK ROUTE CREATION -------------------- */
+const createStraightLineRoute = (start: [number, number], end: [number, number]): RouteOption => {
+  const distance = getDistanceKm(start[0], start[1], end[0], end[1]) * 1000
+  const estimatedDuration = (distance / 1000) * 120 // Rough estimate: 2 min per km
+
+  return {
+    coords: [start, end],
+    distance,
+    duration: estimatedDuration,
+    summary: 'Direct Route (Fallback)',
+    color: '#3b82f6',
   }
 }
 
@@ -87,24 +129,16 @@ const drawRouteOptions = (routes: RouteOption[]) => {
       // Create route polyline
       const routeLayer = L.polyline(route.coords, {
         color: route.color,
-        weight: index === 0 ? 6 : 4, // Thicker for primary route
+        weight: index === 0 ? 6 : 4,
         opacity: 0.8,
         lineCap: 'round',
         lineJoin: 'round',
-        dashArray: index === 0 ? null : '5, 5', // Dashed for alternative routes
+        dashArray: index === 0 ? null : '5, 5',
       }).addTo(map.value)
 
       // Add click event to select route
       routeLayer.on('click', () => {
         selectRoute(index)
-      })
-
-      // Add hover effects
-      routeLayer.on('mouseover', function () {
-        this.setStyle({ weight: 6 })
-      })
-      routeLayer.on('mouseout', function () {
-        this.setStyle({ weight: index === 0 ? 6 : 4 })
       })
 
       currentRouteLayers.push(routeLayer)
@@ -113,10 +147,10 @@ const drawRouteOptions = (routes: RouteOption[]) => {
       if (route.coords.length > 1) {
         const midIndex = Math.floor(route.coords.length / 2)
         const midPoint = route.coords[midIndex]
-        
+
         const distanceKm = (route.distance / 1000).toFixed(1)
         const durationMin = Math.round(route.duration / 60)
-        
+
         const marker = L.marker(midPoint, {
           icon: L.divIcon({
             html: `
@@ -135,24 +169,22 @@ const drawRouteOptions = (routes: RouteOption[]) => {
             `,
             className: 'route-label',
             iconSize: [100, 20],
-            iconAnchor: [50, 10]
-          })
+            iconAnchor: [50, 10],
+          }),
         }).addTo(map.value)
 
         currentRouteMarkers.push(marker)
       }
-
     } catch (error) {
       console.error('Error drawing route:', error)
     }
   })
 
-  // Fit map to show all routes
-  const bounds = L.latLngBounds(routes.flatMap(route => route.coords))
+  // Fit map to show all routes without animation
+  const bounds = L.latLngBounds(routes.flatMap((route) => route.coords))
   if (bounds.isValid()) {
     map.value.fitBounds(bounds.pad(0.1), {
-      animate: true,
-      duration: 1,
+      animate: false,
       padding: [20, 20],
     })
   }
@@ -162,7 +194,7 @@ const drawRouteOptions = (routes: RouteOption[]) => {
 const selectRoute = (index: number) => {
   selectedRouteIndex.value = index
   const route = routeOptions.value[index]
-  
+
   if (!route || !map.value) return
 
   // Highlight selected route
@@ -171,13 +203,13 @@ const selectRoute = (index: number) => {
       layer.setStyle({
         weight: 8,
         opacity: 1,
-        color: route.color
+        color: route.color,
       })
     } else {
       layer.setStyle({
         weight: 3,
         opacity: 0.5,
-        color: route.color
+        color: route.color,
       })
     }
   })
@@ -185,18 +217,18 @@ const selectRoute = (index: number) => {
   // Show route details
   const distanceKm = (route.distance / 1000).toFixed(1)
   const durationMin = Math.round(route.duration / 60)
-  
+
   errorMsg.value = `Selected: ${distanceKm} km • ${durationMin} min • ${route.summary}`
 }
 
 /* -------------------- CLEAR ALL ROUTES -------------------- */
 const clearAllRoutes = () => {
-  currentRouteLayers.forEach(layer => {
+  currentRouteLayers.forEach((layer) => {
     if (map.value && map.value.hasLayer(layer)) {
       map.value.removeLayer(layer)
     }
   })
-  currentRouteMarkers.forEach(marker => {
+  currentRouteMarkers.forEach((marker) => {
     if (map.value && map.value.hasLayer(marker)) {
       map.value.removeLayer(marker)
     }
@@ -226,6 +258,7 @@ let lastUpdateTs = 0
 const productMatches = ref<any[]>([])
 const routeLoading = ref(false)
 const filteredShops = ref<any[]>([])
+const mapInitialized = ref(false) // Add this flag
 
 /* -------------------- CONFIG -------------------- */
 const fetchDebounceMs = 350
@@ -246,7 +279,8 @@ const userIcon = L.icon({
 })
 
 const registeredShopIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
 })
@@ -275,28 +309,61 @@ function saveCachedLocation(lat: number, lng: number) {
 }
 
 /* -------------------- MAP INITIALIZATION -------------------- */
-const initializeMap = () => {
-  if (map.value && map.value._loaded) {
-    try {
-      map.value.remove()
-    } catch (e) {
-      console.warn(e)
+const initializeMap = (): Promise<void> => {
+  return new Promise((resolve) => {
+    // Clean up existing map properly
+    if (map.value) {
+      try {
+        map.value.remove()
+      } catch (e) {
+        console.warn('Error removing existing map:', e)
+      }
+      map.value = null
     }
-  }
 
-  map.value = L.map('map', { center: [8.95, 125.53], zoom: 13 })
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-  }).addTo(map.value)
+    // Small delay to ensure DOM is ready
+    setTimeout(() => {
+      try {
+        const mapContainer = document.getElementById('map')
+        if (!mapContainer) {
+          console.error('Map container not found')
+          resolve()
+          return
+        }
 
-  loadCachedLocation()
-  const placeholder = lastKnown.value ?? [8.95, 125.53]
-  userMarker = L.marker(placeholder, { icon: userIcon })
-    .addTo(map.value)
-    .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
-    .openPopup()
+        map.value = L.map('map', {
+          center: [8.95, 125.53],
+          zoom: 13,
+          zoomAnimation: false,
+          fadeAnimation: false,
+          markerZoomAnimation: false,
+        })
 
-  setTimeout(() => map.value?.invalidateSize(), 500)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+        }).addTo(map.value)
+
+        loadCachedLocation()
+        const placeholder = lastKnown.value ?? [8.95, 125.53]
+
+        userMarker = L.marker(placeholder, { icon: userIcon })
+          .addTo(map.value)
+          .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
+          .openPopup()
+
+        // Wait for map to be fully ready
+        map.value.whenReady(() => {
+          console.log('Map is fully ready')
+          map.value?.invalidateSize(true)
+          mapInitialized.value = true
+          resolve()
+        })
+      } catch (error) {
+        console.error('Error initializing map:', error)
+        resolve()
+      }
+    }, 100)
+  })
 }
 
 /* -------------------- USER CITY BOUNDARY - SIMPLIFIED -------------------- */
@@ -304,21 +371,19 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
   if (!map.value) return
 
   try {
-    // Use OpenStreetMap Nominatim for reverse geocoding (free, no API key needed)
     const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`
     const osmRes = await fetch(osmUrl, {
       headers: { 'User-Agent': 'CloseShop-App' },
     })
 
     if (!osmRes.ok) {
-      console.warn('Reverse geocoding failed')
+      console.warn('Reverse geolocation failed')
       return
     }
 
     const osmData = await osmRes.json()
     const address = osmData.address
 
-    // Extract city name from OSM response
     const cityName = address.city || address.town || address.village || address.municipality
 
     if (!cityName) {
@@ -330,7 +395,6 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
     console.log('Detected city:', cityName)
   } catch (e) {
     console.error('Failed to detect city boundary:', e)
-    // Silently fail - this is not critical functionality
   }
 }
 
@@ -559,7 +623,7 @@ const focusOnShopMarker = async (shopId: string) => {
   const userLng = Number(longitude.value ?? lastKnown.value?.[1])
 
   if (!isFinite(userLat) || !isFinite(userLng)) {
-    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: true })
+    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: false })
     marker.openPopup()
     return
   }
@@ -570,39 +634,49 @@ const focusOnShopMarker = async (shopId: string) => {
   try {
     clearAllRoutes()
 
-    // Center map between user and shop
+    // Center map between user and shop without animation first
     const bounds = L.latLngBounds([
       [userLat, userLng],
       [Number(shop.latitude), Number(shop.longitude)],
     ])
 
-    map.value.fitBounds(bounds.pad(0.2), { animate: true })
+    map.value.fitBounds(bounds.pad(0.2), {
+      animate: false,
+      padding: [20, 20],
+    })
 
-    // Get multiple route options
+    // Get multiple route options using Mapbox
     const routes = await getRouteOptions(
       [userLat, userLng],
-      [Number(shop.latitude), Number(shop.longitude)]
+      [Number(shop.latitude), Number(shop.longitude)],
     )
 
     if (routes.length > 0) {
       routeOptions.value = routes
       drawRouteOptions(routes)
-      
+
       // Auto-select the shortest route
       selectRoute(0)
-      
+
       // Show route selection menu
       showRouteMenu.value = true
+
+      // Show success message
+      if (routes[0].summary.includes('Fallback')) {
+        errorMsg.value = 'Using direct route (routing service unavailable)'
+      } else {
+        errorMsg.value = `Found ${routes.length} route options`
+      }
     } else {
       errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
-      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: true })
+      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: false })
     }
 
     marker.openPopup()
   } catch (error) {
     console.error('Error focusing on shop:', error)
-    errorMsg.value = 'Error calculating routes: ' + error.message
-    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: true })
+    errorMsg.value = 'Error calculating routes: ' + (error as Error).message
+    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: false })
     marker.openPopup()
   } finally {
     routeLoading.value = false
@@ -743,7 +817,7 @@ const recenterToUser = async () => {
   try {
     clearAllRoutes()
     await new Promise((r) => setTimeout(r, 100))
-    map.value.setView([latitude.value, longitude.value], 16, { animate: true })
+    map.value.setView([latitude.value, longitude.value], 16, { animate: false })
   } finally {
     locating.value = false
   }
@@ -751,24 +825,30 @@ const recenterToUser = async () => {
 
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
-  initializeMap()
-  if (Capacitor.getPlatform() !== 'web') await requestPermission()
   try {
+    // Wait for map to initialize first
+    await initializeMap()
+
+    if (Capacitor.getPlatform() !== 'web') await requestPermission()
+
     const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 5000 })
     const quickLat = pos.coords.latitude
     const quickLng = pos.coords.longitude
+
+    // Now safely use the map
     if (map.value) {
-      if (!userMarker)
+      if (!userMarker) {
         userMarker = L.marker([quickLat, quickLng], { icon: userIcon })
           .addTo(map.value)
           .bindPopup('You are here')
           .openPopup()
-      else {
+      } else {
         userMarker.setLatLng([quickLat, quickLng])
         userMarker.setPopupContent('You are here')
       }
-      map.value.setView([quickLat, quickLng], 16, { animate: true })
+      map.value.setView([quickLat, quickLng], 16, { animate: false })
     }
+
     saveCachedLocation(quickLat, quickLng)
     void highlightUserCityBoundary(quickLat, quickLng)
     void updateShops()
@@ -776,9 +856,6 @@ onMounted(async () => {
     console.warn('Quick geolocation failed:', err)
     void fetchShops()
   }
-  map.value?.whenReady(async () => {
-    await startWatching()
-  })
 })
 
 onUnmounted(() => {
@@ -828,7 +905,6 @@ watch([search, shops], () => {
   applyFiltersToMarkers()
 })
 </script>
-
 <template>
   <v-app>
     <v-sheet class="hero">
@@ -913,37 +989,30 @@ watch([search, shops], () => {
       <v-divider></v-divider>
 
       <v-list>
-        <v-list-item 
-          v-for="(route, index) in routeOptions" 
+        <v-list-item
+          v-for="(route, index) in routeOptions"
           :key="index"
           @click="selectRoute(index)"
           :class="{ 'selected-route': selectedRouteIndex === index }"
         >
           <template #prepend>
-            <div 
-              class="route-color-indicator"
-              :style="{ backgroundColor: route.color }"
-            ></div>
+            <div class="route-color-indicator" :style="{ backgroundColor: route.color }"></div>
           </template>
 
           <v-list-item-title>
             Route {{ index + 1 }}
-            <v-chip v-if="index === 0" size="x-small" color="green" class="ml-2">
-              Fastest
-            </v-chip>
+            <v-chip v-if="index === 0" size="x-small" color="green" class="ml-2"> Fastest </v-chip>
           </v-list-item-title>
 
           <v-list-item-subtitle>
-            <div style="display: flex; justify-content: space-between; width: 100%;">
+            <div style="display: flex; justify-content: space-between; width: 100%">
               <span>{{ (route.distance / 1000).toFixed(1) }} km</span>
               <span>{{ Math.round(route.duration / 60) }} min</span>
             </div>
           </v-list-item-subtitle>
 
           <template #append>
-            <v-icon v-if="selectedRouteIndex === index" color="primary">
-              mdi-check-circle
-            </v-icon>
+            <v-icon v-if="selectedRouteIndex === index" color="primary"> mdi-check-circle </v-icon>
           </template>
         </v-list-item>
       </v-list>
