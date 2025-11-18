@@ -126,66 +126,146 @@ const drawRouteOptions = (routes: RouteOption[]) => {
 
   routes.forEach((route, index) => {
     try {
-      // Create route polyline
+      // Create route polyline with interactive styling
       const routeLayer = L.polyline(route.coords, {
         color: route.color,
-        weight: index === 0 ? 6 : 4,
+        weight: index === 0 ? 6 : 4, // Thicker for primary route
         opacity: 0.8,
         lineCap: 'round',
         lineJoin: 'round',
-        dashArray: index === 0 ? null : '5, 5',
+        className: `route-line route-${index}`,
       }).addTo(map.value)
 
       // Add click event to select route
-      routeLayer.on('click', () => {
+      routeLayer.on('click', (e) => {
         selectRoute(index)
+        routeLayer.bringToFront()
+      })
+
+      // Add hover effects
+      routeLayer.on('mouseover', function () {
+        this.setStyle({
+          weight: this.options.weight + 2,
+          opacity: 1,
+        })
+        routeLayer.bringToFront()
+      })
+
+      routeLayer.on('mouseout', function () {
+        const isSelected = selectedRouteIndex.value === index
+        this.setStyle({
+          weight: isSelected ? 8 : index === 0 ? 6 : 4,
+          opacity: isSelected ? 1 : 0.8,
+        })
       })
 
       currentRouteLayers.push(routeLayer)
 
-      // Add distance/duration markers at midpoint
-      if (route.coords.length > 1) {
-        const midIndex = Math.floor(route.coords.length / 2)
-        const midPoint = route.coords[midIndex]
+      // Add start marker (user location)
+      const startMarker = L.marker([route.coords[0][0], route.coords[0][1]], {
+        icon: L.divIcon({
+          html: `
+            <div style="
+              background: #3b82f6;
+              color: white;
+              padding: 4px 8px;
+              border-radius: 12px;
+              font-size: 11px;
+              font-weight: bold;
+              white-space: nowrap;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+              border: 2px solid white;
+            ">
+              Start
+            </div>
+          `,
+          className: 'route-end-marker',
+          iconSize: [50, 20],
+          iconAnchor: [25, 10],
+        }),
+      }).addTo(map.value)
 
-        const distanceKm = (route.distance / 1000).toFixed(1)
-        const durationMin = Math.round(route.duration / 60)
-
-        const marker = L.marker(midPoint, {
+      // Add end marker (shop location)
+      const endMarker = L.marker(
+        [route.coords[route.coords.length - 1][0], route.coords[route.coords.length - 1][1]],
+        {
           icon: L.divIcon({
             html: `
-              <div style="
-                background: ${route.color};
-                color: white;
-                padding: 4px 8px;
-                border-radius: 12px;
-                font-size: 12px;
-                font-weight: bold;
-                white-space: nowrap;
-                box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-              ">
-                ${distanceKm} km • ${durationMin} min
-              </div>
-            `,
-            className: 'route-label',
-            iconSize: [100, 20],
-            iconAnchor: [50, 10],
+            <div style="
+              background: #ef4444;
+              color: white;
+              padding: 4px 8px;
+              border-radius: 12px;
+              font-size: 11px;
+              font-weight: bold;
+              white-space: nowrap;
+              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+              border: 2px solid white;
+            ">
+              Shop
+            </div>
+          `,
+            className: 'route-end-marker',
+            iconSize: [50, 20],
+            iconAnchor: [25, 10],
           }),
-        }).addTo(map.value)
+        },
+      ).addTo(map.value)
 
-        currentRouteMarkers.push(marker)
+      currentRouteMarkers.push(startMarker, endMarker)
+
+      // Add info markers along the route
+      const segmentCount = 3
+      for (let i = 1; i < segmentCount; i++) {
+        const segmentIndex = Math.floor((route.coords.length * i) / segmentCount)
+        if (segmentIndex < route.coords.length) {
+          const segmentPoint = route.coords[segmentIndex]
+
+          const distanceKm = (route.distance / 1000).toFixed(1)
+          const durationMin = Math.round(route.duration / 60)
+
+          const infoMarker = L.marker(segmentPoint, {
+            icon: L.divIcon({
+              html: `
+                <div style="
+                  background: ${route.color};
+                  color: white;
+                  padding: 6px 10px;
+                  border-radius: 16px;
+                  font-size: 11px;
+                  font-weight: bold;
+                  white-space: nowrap;
+                  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+                  border: 2px solid white;
+                  backdrop-filter: blur(4px);
+                ">
+                  Route ${index + 1}<br>
+                  ${distanceKm} km • ${durationMin} min
+                </div>
+              `,
+              className: 'route-info-marker',
+              iconSize: [80, 40],
+              iconAnchor: [40, 20],
+            }),
+          }).addTo(map.value)
+
+          currentRouteMarkers.push(infoMarker)
+        }
       }
     } catch (error) {
       console.error('Error drawing route:', error)
     }
   })
 
-  // Fit map to show all routes without animation
+  // Auto-select the first route
+  selectRoute(0)
+
+  // Fit map to show all routes with some padding
   const bounds = L.latLngBounds(routes.flatMap((route) => route.coords))
   if (bounds.isValid()) {
-    map.value.fitBounds(bounds.pad(0.1), {
+    map.value.fitBounds(bounds.pad(0.15), {
       animate: false,
-      padding: [20, 20],
+      padding: [30, 30],
     })
   }
 }
@@ -197,28 +277,34 @@ const selectRoute = (index: number) => {
 
   if (!route || !map.value) return
 
-  // Highlight selected route
+  // Highlight selected route and dim others
   currentRouteLayers.forEach((layer, i) => {
     if (i === index) {
+      // Selected route - bold and full opacity
       layer.setStyle({
         weight: 8,
         opacity: 1,
-        color: route.color,
+        color: route.color
       })
+      layer.bringToFront()
     } else {
+      // Other routes - thinner and semi-transparent
       layer.setStyle({
         weight: 3,
-        opacity: 0.5,
-        color: route.color,
+        opacity: 0.4,
+        color: route.color
       })
     }
   })
 
-  // Show route details
+  // Update route info display
   const distanceKm = (route.distance / 1000).toFixed(1)
   const durationMin = Math.round(route.duration / 60)
+  
+  errorMsg.value = `Selected: Route ${index + 1} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`
 
-  errorMsg.value = `Selected: ${distanceKm} km • ${durationMin} min • ${route.summary}`
+  // Show route menu to allow switching if needed
+  showRouteMenu.value = true
 }
 
 /* -------------------- CLEAR ALL ROUTES -------------------- */
@@ -258,7 +344,7 @@ let lastUpdateTs = 0
 const productMatches = ref<any[]>([])
 const routeLoading = ref(false)
 const filteredShops = ref<any[]>([])
-const mapInitialized = ref(false) // Add this flag
+const mapInitialized = ref(false)
 
 /* -------------------- CONFIG -------------------- */
 const fetchDebounceMs = 350
@@ -653,19 +739,13 @@ const focusOnShopMarker = async (shopId: string) => {
 
     if (routes.length > 0) {
       routeOptions.value = routes
-      drawRouteOptions(routes)
-
-      // Auto-select the shortest route
-      selectRoute(0)
-
-      // Show route selection menu
-      showRouteMenu.value = true
-
+      drawRouteOptions(routes) // This now displays all routes on map
+      
       // Show success message
       if (routes[0].summary.includes('Fallback')) {
         errorMsg.value = 'Using direct route (routing service unavailable)'
       } else {
-        errorMsg.value = `Found ${routes.length} route options`
+        errorMsg.value = `Found ${routes.length} route options. Click on any route to select it.`
       }
     } else {
       errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
@@ -905,6 +985,7 @@ watch([search, shops], () => {
   applyFiltersToMarkers()
 })
 </script>
+
 <template>
   <v-app>
     <v-sheet class="hero">
@@ -980,10 +1061,10 @@ watch([search, shops], () => {
       </v-alert>
     </v-main>
 
-    <!-- Route Selection Menu -->
-    <v-navigation-drawer v-model="showRouteMenu" location="right" temporary width="320">
+    <!-- Enhanced Route Selection Menu -->
+    <v-navigation-drawer v-model="showRouteMenu" location="right" temporary width="350">
       <v-toolbar flat color="primary" dark>
-        <v-toolbar-title>Route Options ({{ routeOptions.length }})</v-toolbar-title>
+        <v-toolbar-title>Route Comparison ({{ routeOptions.length }})</v-toolbar-title>
         <v-btn icon @click="showRouteMenu = false"><v-icon>mdi-close</v-icon></v-btn>
       </v-toolbar>
       <v-divider></v-divider>
@@ -996,26 +1077,50 @@ watch([search, shops], () => {
           :class="{ 'selected-route': selectedRouteIndex === index }"
         >
           <template #prepend>
-            <div class="route-color-indicator" :style="{ backgroundColor: route.color }"></div>
+            <div 
+              class="route-color-indicator"
+              :style="{ 
+                backgroundColor: route.color,
+                border: selectedRouteIndex === index ? '2px solid #3b82f6' : '2px solid transparent'
+              }"
+            ></div>
           </template>
 
-          <v-list-item-title>
-            Route {{ index + 1 }}
-            <v-chip v-if="index === 0" size="x-small" color="green" class="ml-2"> Fastest </v-chip>
+          <v-list-item-title class="d-flex align-center">
+            <strong>Route {{ index + 1 }}</strong>
+            <v-chip v-if="index === 0" size="x-small" color="green" class="ml-2">
+              Fastest
+            </v-chip>
+            <v-chip v-if="selectedRouteIndex === index" size="x-small" color="blue" class="ml-1">
+              Selected
+            </v-chip>
           </v-list-item-title>
 
           <v-list-item-subtitle>
-            <div style="display: flex; justify-content: space-between; width: 100%">
-              <span>{{ (route.distance / 1000).toFixed(1) }} km</span>
-              <span>{{ Math.round(route.duration / 60) }} min</span>
+            <div style="display: flex; justify-content: space-between; width: 100%; margin-bottom: 4px;">
+              <span><v-icon small>mdi-map-marker-distance</v-icon> {{ (route.distance / 1000).toFixed(1) }} km</span>
+              <span><v-icon small>mdi-clock-outline</v-icon> {{ Math.round(route.duration / 60) }} min</span>
+            </div>
+            <div v-if="index > 0" style="font-size: 0.7rem; color: #666;">
+              +{{ ((route.distance - routeOptions[0].distance) / 1000).toFixed(1) }} km vs fastest
             </div>
           </v-list-item-subtitle>
 
           <template #append>
-            <v-icon v-if="selectedRouteIndex === index" color="primary"> mdi-check-circle </v-icon>
+            <v-icon v-if="selectedRouteIndex === index" color="primary">
+              mdi-check-circle
+            </v-icon>
           </template>
         </v-list-item>
       </v-list>
+
+      <v-divider></v-divider>
+      
+      <div class="pa-3">
+        <p class="text-caption text-medium-emphasis">
+          💡 <strong>Tip:</strong> Click on any route on the map to select it, or use this menu to compare options.
+        </p>
+      </div>
     </v-navigation-drawer>
 
     <!-- Shop Menu -->
@@ -1426,5 +1531,31 @@ watch([search, shops], () => {
     background-color: #f59e0b;
     color: #7c2d12;
   }
+}
+
+/* Route styling improvements */
+:deep(.route-line) {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+:deep(.route-line:hover) {
+  filter: brightness(1.2);
+}
+
+:deep(.route-end-marker) {
+  background: transparent !important;
+  border: none !important;
+}
+
+:deep(.route-info-marker) {
+  background: transparent !important;
+  border: none !important;
+  pointer-events: none; /* Make info markers non-interactive */
+}
+
+/* Selected route highlight */
+:deep(.route-line.selected) {
+  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
 }
 </style>
