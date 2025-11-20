@@ -568,7 +568,7 @@ const plotShops = () => {
       console.log(`Skipping non-approved shop: ${shop.business_name} (${shop.status})`)
       continue
     }
-    
+
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
     if (!isFinite(lat) || !isFinite(lng)) continue
@@ -669,69 +669,97 @@ const applyFiltersToMarkers = () => {
   })
 }
 
-/* -------------------- FOCUS ON SHOP -------------------- */
+/* -------------------- FOCUS ON SHOP MARKER -------------------- */
 const focusOnShopMarker = async (shopId: string) => {
-  const marker = shopMarkers.find((m: any) => m.shopId === shopId)
-  if (!marker || !map.value) return
+  console.log('Focusing on shop:', shopId)
+
+  // First, try to find the shop in regular shop markers
+  let marker = shopMarkers.find((m: any) => m.shopId === shopId)
+
+  // If not found in regular markers, try search result markers
+  if (!marker) {
+    marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
+  }
+
+  if (!marker || !map.value) {
+    console.error('Marker not found for shop:', shopId)
+    return
+  }
 
   const shop = marker.shopData
-  if (!shop || !shop.latitude || !shop.longitude) return
+  if (!shop || !shop.latitude || !shop.longitude) {
+    console.error('Shop data incomplete:', shop)
+    return
+  }
 
   const userLat = Number(latitude.value ?? lastKnown.value?.[0])
   const userLng = Number(longitude.value ?? lastKnown.value?.[1])
 
-  if (!isFinite(userLat) || !isFinite(userLng)) {
-    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: false })
-    marker.openPopup()
-    return
-  }
+  // If we have user location, show route options
+  if (isFinite(userLat) && isFinite(userLng)) {
+    routeLoading.value = true
+    errorMsg.value = null
 
-  routeLoading.value = true
-  errorMsg.value = null
+    try {
+      clearAllRoutes()
 
-  try {
-    clearAllRoutes()
+      const bounds = L.latLngBounds([
+        [userLat, userLng],
+        [Number(shop.latitude), Number(shop.longitude)],
+      ])
 
-    const bounds = L.latLngBounds([
-      [userLat, userLng],
-      [Number(shop.latitude), Number(shop.longitude)],
-    ])
+      map.value.fitBounds(bounds.pad(0.2), {
+        animate: true,
+        duration: 0.5,
+        padding: [20, 20],
+      })
 
-    map.value.fitBounds(bounds.pad(0.2), {
-      animate: false,
-      padding: [20, 20],
-    })
+      const routes = await getRouteOptions(
+        [userLat, userLng],
+        [Number(shop.latitude), Number(shop.longitude)],
+      )
 
-    const routes = await getRouteOptions(
-      [userLat, userLng],
-      [Number(shop.latitude), Number(shop.longitude)],
-    )
+      if (routes.length > 0) {
+        routeOptions.value = routes
+        drawRouteOptions(routes)
 
-    if (routes.length > 0) {
-      routeOptions.value = routes
-      drawRouteOptions(routes)
-
-      if (routes[0].summary.includes('Fallback')) {
-        errorMsg.value = 'Using direct route (routing service unavailable)'
+        if (routes[0].summary.includes('Fallback')) {
+          errorMsg.value = 'Using direct route (routing service unavailable)'
+        } else {
+          errorMsg.value = `Found ${routes.length} route options. Click on any route to select it.`
+        }
       } else {
-        errorMsg.value = `Found ${routes.length} route options. Click on any route to select it.`
+        errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
+        // Fallback: just center on the shop
+        map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+          animate: true,
+          duration: 0.5,
+        })
       }
-    } else {
-      errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
-      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: false })
-    }
 
+      // Open the marker popup
+      marker.openPopup()
+    } catch (error) {
+      console.error('Error focusing on shop:', error)
+      errorMsg.value = 'Error calculating routes: ' + (error as Error).message
+      // Fallback: just center on the shop
+      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+        animate: true,
+        duration: 0.5,
+      })
+      marker.openPopup()
+    } finally {
+      routeLoading.value = false
+    }
+  } else {
+    // If no user location, just center on the shop
+    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+      animate: true,
+      duration: 0.5,
+    })
     marker.openPopup()
-  } catch (error) {
-    console.error('Error focusing on shop:', error)
-    errorMsg.value = 'Error calculating routes: ' + (error as Error).message
-    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, { animate: false })
-    marker.openPopup()
-  } finally {
-    routeLoading.value = false
   }
 }
-
 /* -------------------- ENHANCED SEARCH SYSTEM -------------------- */
 let searchResultMarkers: L.Marker[] = []
 
@@ -1115,10 +1143,17 @@ const fitMapToSearchResults = (results: any[]) => {
   }
 }
 
+/* -------------------- FOCUS ON SEARCH RESULT -------------------- */
 const focusOnSearchResult = async (shopId: string, index: number) => {
-  const marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
-  if (!marker || !map.value) return
+  console.log('Focusing on search result:', shopId, 'index:', index)
 
+  const marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
+  if (!marker || !map.value) {
+    console.error('Search result marker not found for shop:', shopId)
+    return
+  }
+
+  // Highlight the selected search result
   searchResultMarkers.forEach((m, i) => {
     const isSelected = i === index
     const icon = createSearchResultIcon(m.shopData, i + 1)
@@ -1132,8 +1167,79 @@ const focusOnSearchResult = async (shopId: string, index: number) => {
     }
   })
 
-  const latLng = marker.getLatLng()
-  map.value.setView(latLng, 16, { animate: true, duration: 0.5 })
+  const shop = marker.shopData
+  if (!shop || !shop.latitude || !shop.longitude) {
+    console.error('Shop data incomplete:', shop)
+    return
+  }
+
+  const userLat = Number(latitude.value ?? lastKnown.value?.[0])
+  const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+
+  // If we have user location, show route options
+  if (isFinite(userLat) && isFinite(userLng)) {
+    routeLoading.value = true
+    errorMsg.value = null
+
+    try {
+      clearAllRoutes()
+
+      const bounds = L.latLngBounds([
+        [userLat, userLng],
+        [Number(shop.latitude), Number(shop.longitude)],
+      ])
+
+      map.value.fitBounds(bounds.pad(0.2), {
+        animate: true,
+        duration: 0.5,
+        padding: [20, 20],
+      })
+
+      const routes = await getRouteOptions(
+        [userLat, userLng],
+        [Number(shop.latitude), Number(shop.longitude)],
+      )
+
+      if (routes.length > 0) {
+        routeOptions.value = routes
+        drawRouteOptions(routes)
+
+        if (routes[0].summary.includes('Fallback')) {
+          errorMsg.value = 'Using direct route (routing service unavailable)'
+        } else {
+          errorMsg.value = `Found ${routes.length} route options. Click on any route to select it.`
+        }
+      } else {
+        errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
+        // Fallback: just center on the shop
+        map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+          animate: true,
+          duration: 0.5,
+        })
+      }
+
+      // Open the marker popup
+      marker.openPopup()
+    } catch (error) {
+      console.error('Error focusing on search result:', error)
+      errorMsg.value = 'Error calculating routes: ' + (error as Error).message
+      // Fallback: just center on the shop
+      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+        animate: true,
+        duration: 0.5,
+      })
+      marker.openPopup()
+    } finally {
+      routeLoading.value = false
+    }
+  } else {
+    // If no user location, just center on the shop
+    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+      animate: true,
+      duration: 0.5,
+    })
+    marker.openPopup()
+  }
 }
 
 /* -------------------- SEARCH UTILITIES -------------------- */
@@ -1258,12 +1364,12 @@ watch([search, shops], () => {
   let results: any[] = []
 
   if (!term) {
-    results = [...shops.value].filter(shop => shop.status === 'approved')
+    results = [...shops.value].filter((shop) => shop.status === 'approved')
   } else {
     results = shops.value.filter((shop) => {
       // Only include approved shops
       if (shop.status !== 'approved') return false
-      
+
       const name = shop.business_name?.toLowerCase() ?? ''
       const addr = getFullAddress(shop).toLowerCase()
       return name.includes(term) || addr.includes(term)
@@ -1282,8 +1388,22 @@ const toggleShopMenu = () => {
   showShopMenu.value = !showShopMenu.value
   if (showShopMenu.value && !isSearchMode.value) {
     // When opening menu without search, show all shops
-    filteredShops.value = [...shops.value].filter(shop => shop.status === 'approved')
+    filteredShops.value = [...shops.value].filter((shop) => shop.status === 'approved')
   }
+}
+
+/* -------------------- HANDLE SHOP CLICK -------------------- */
+const handleShopClick = async (shopId: string, index: number) => {
+  console.log('Shop clicked:', shopId, 'isSearchMode:', isSearchMode.value)
+  
+  if (isSearchMode.value) {
+    await focusOnSearchResult(shopId, index)
+  } else {
+    await focusOnShopMarker(shopId)
+  }
+  
+  // Optionally close the drawer after selection
+  // showShopMenu.value = false
 }
 </script>
 <template>
@@ -1379,7 +1499,7 @@ const toggleShopMenu = () => {
           <div>
             <div>{{ isSearchMode ? 'Search Results' : 'All Shops' }}</div>
             <div style="font-size: 0.8rem; opacity: 0.8">
-              {{ filteredShops.length }} {{ isSearchMode ? 'results' : 'shops' }} • 
+              {{ filteredShops.length }} {{ isSearchMode ? 'results' : 'shops' }} •
               {{ isSearchMode ? 'Search results' : 'Sorted by distance' }}
             </div>
           </div>
@@ -1394,16 +1514,19 @@ const toggleShopMenu = () => {
         <v-list-item
           v-for="(shop, index) in filteredShops"
           :key="shop.id"
-          @click="isSearchMode ? focusOnSearchResult(shop.id, index) : focusOnShopMarker(shop.id)"
+          @click="handleShopClick(shop.id, index)"
           class="search-result-item"
+          style="cursor: pointer"
         >
           <template #prepend>
             <div
               class="result-index"
               :style="{
-                backgroundColor: isSearchMode 
-                  ? (shop.matchType === 'product' ? '#10b981' : '#3b82f6')
-                  : '#3b82f6'
+                backgroundColor: isSearchMode
+                  ? shop.matchType === 'product'
+                    ? '#10b981'
+                    : '#3b82f6'
+                  : '#3b82f6',
               }"
             >
               {{ index + 1 }}
@@ -1417,17 +1540,28 @@ const toggleShopMenu = () => {
           </template>
 
           <v-list-item-title class="d-flex align-center">
-            <span v-html="isSearchMode ? highlightMatch(shop.business_name, search) : shop.business_name"></span>
-            <v-chip v-if="isSearchMode && shop.matchType === 'product'" size="x-small" color="green" class="ml-2">
+            <span
+              v-html="
+                isSearchMode ? highlightMatch(shop.business_name, search) : shop.business_name
+              "
+            ></span>
+            <v-chip
+              v-if="isSearchMode && shop.matchType === 'product'"
+              size="x-small"
+              color="green"
+              class="ml-2"
+            >
               Product
             </v-chip>
-            <v-chip v-else-if="isSearchMode" size="x-small" color="blue" class="ml-2"> 
-              Place 
+            <v-chip v-else-if="isSearchMode" size="x-small" color="blue" class="ml-2">
+              Place
             </v-chip>
           </v-list-item-title>
 
           <v-list-item-subtitle
-            v-html="isSearchMode ? highlightMatch(getFullAddress(shop), search) : getFullAddress(shop)"
+            v-html="
+              isSearchMode ? highlightMatch(getFullAddress(shop), search) : getFullAddress(shop)
+            "
           ></v-list-item-subtitle>
 
           <v-list-item-subtitle v-if="shop.distanceKm && isFinite(shop.distanceKm)">
