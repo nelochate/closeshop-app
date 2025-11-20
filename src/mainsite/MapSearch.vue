@@ -562,6 +562,12 @@ const plotShops = () => {
   clearShopMarkers()
 
   for (const shop of shops.value) {
+    // Double-check status before plotting
+    if (shop.status !== 'approved') {
+      console.log(`Skipping non-approved shop: ${shop.business_name} (${shop.status})`)
+      continue
+    }
+    
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
     if (!isFinite(lat) || !isFinite(lng)) continue
@@ -633,6 +639,12 @@ const applyFiltersToMarkers = () => {
   shopMarkers.forEach((marker: any) => {
     const shop = marker.shopData
     if (!shop) return
+
+    // Ensure only approved shops are shown
+    if (shop.status !== 'approved') {
+      if (map.value) map.value.removeLayer(marker)
+      return
+    }
 
     let passesCity = true
     const shopCityNorm = normalizeCity(shop.city)
@@ -1243,9 +1255,12 @@ watch([search, shops], () => {
   let results: any[] = []
 
   if (!term) {
-    results = [...shops.value]
+    results = [...shops.value].filter(shop => shop.status === 'approved')
   } else {
     results = shops.value.filter((shop) => {
+      // Only include approved shops
+      if (shop.status !== 'approved') return false
+      
       const name = shop.business_name?.toLowerCase() ?? ''
       const addr = getFullAddress(shop).toLowerCase()
       return name.includes(term) || addr.includes(term)
@@ -1259,7 +1274,6 @@ watch([search, shops], () => {
   applyFiltersToMarkers()
 })
 </script>
-
 <template>
   <v-app>
     <v-sheet class="hero">
