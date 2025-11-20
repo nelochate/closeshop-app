@@ -318,6 +318,7 @@ const productMatches = ref<any[]>([])
 const routeLoading = ref(false)
 const filteredShops = ref<any[]>([])
 const mapInitialized = ref(false)
+const isSearchMode = ref(false) // Track if we're in search mode
 
 /* -------------------- CONFIG -------------------- */
 const fetchDebounceMs = 350
@@ -745,6 +746,7 @@ const clearSearchMarkers = () => {
 
 const clearSearch = () => {
   search.value = ''
+  isSearchMode.value = false
   filteredShops.value = [...shops.value]
   showShopMenu.value = false
   clearSearchMarkers()
@@ -765,6 +767,7 @@ const smartSearch = async () => {
   loading.value = true
   errorMsg.value = null
   productMatches.value = []
+  isSearchMode.value = true
 
   try {
     const userCityNorm = normalizeCity(userCity.value)
@@ -805,7 +808,7 @@ const smartSearch = async () => {
     if (resultShops.length === 0) {
       errorMsg.value = `No results found for "${query}"`
       filteredShops.value = []
-      showShopMenu.value = false
+      showShopMenu.value = true // Keep menu open to show no results
       clearSearchMarkers()
     } else {
       const placeCount = placeMatches.length
@@ -1273,6 +1276,15 @@ watch([search, shops], () => {
 
   applyFiltersToMarkers()
 })
+
+/* -------------------- TOGGLE SHOP MENU -------------------- */
+const toggleShopMenu = () => {
+  showShopMenu.value = !showShopMenu.value
+  if (showShopMenu.value && !isSearchMode.value) {
+    // When opening menu without search, show all shops
+    filteredShops.value = [...shops.value].filter(shop => shop.status === 'approved')
+  }
+}
 </script>
 <template>
   <v-app>
@@ -1350,7 +1362,7 @@ watch([search, shops], () => {
         <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip">
           🌏 Exploring Outside City
         </v-chip>
-        <v-btn icon @click="showShopMenu = !showShopMenu">
+        <v-btn icon @click="toggleShopMenu">
           <v-icon>mdi-menu</v-icon>
         </v-btn>
       </div>
@@ -1360,14 +1372,15 @@ watch([search, shops], () => {
       </v-alert>
     </v-main>
 
-    <!-- Enhanced Shop Menu Drawer -->
+    <!-- Enhanced Shop Menu Drawer - Dual Purpose -->
     <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="380">
       <v-toolbar flat color="primary" dark>
         <v-toolbar-title>
           <div>
-            <div>Search Results</div>
+            <div>{{ isSearchMode ? 'Search Results' : 'All Shops' }}</div>
             <div style="font-size: 0.8rem; opacity: 0.8">
-              {{ filteredShops.length }} results • Sorted by distance
+              {{ filteredShops.length }} {{ isSearchMode ? 'results' : 'shops' }} • 
+              {{ isSearchMode ? 'Search results' : 'Sorted by distance' }}
             </div>
           </div>
         </v-toolbar-title>
@@ -1381,14 +1394,16 @@ watch([search, shops], () => {
         <v-list-item
           v-for="(shop, index) in filteredShops"
           :key="shop.id"
-          @click="focusOnSearchResult(shop.id, index)"
+          @click="isSearchMode ? focusOnSearchResult(shop.id, index) : focusOnShopMarker(shop.id)"
           class="search-result-item"
         >
           <template #prepend>
             <div
               class="result-index"
               :style="{
-                backgroundColor: shop.matchType === 'product' ? '#10b981' : '#3b82f6',
+                backgroundColor: isSearchMode 
+                  ? (shop.matchType === 'product' ? '#10b981' : '#3b82f6')
+                  : '#3b82f6'
               }"
             >
               {{ index + 1 }}
@@ -1402,15 +1417,17 @@ watch([search, shops], () => {
           </template>
 
           <v-list-item-title class="d-flex align-center">
-            <span v-html="highlightMatch(shop.business_name, search)"></span>
-            <v-chip v-if="shop.matchType === 'product'" size="x-small" color="green" class="ml-2">
+            <span v-html="isSearchMode ? highlightMatch(shop.business_name, search) : shop.business_name"></span>
+            <v-chip v-if="isSearchMode && shop.matchType === 'product'" size="x-small" color="green" class="ml-2">
               Product
             </v-chip>
-            <v-chip v-else size="x-small" color="blue" class="ml-2"> Place </v-chip>
+            <v-chip v-else-if="isSearchMode" size="x-small" color="blue" class="ml-2"> 
+              Place 
+            </v-chip>
           </v-list-item-title>
 
           <v-list-item-subtitle
-            v-html="highlightMatch(getFullAddress(shop), search)"
+            v-html="isSearchMode ? highlightMatch(getFullAddress(shop), search) : getFullAddress(shop)"
           ></v-list-item-subtitle>
 
           <v-list-item-subtitle v-if="shop.distanceKm && isFinite(shop.distanceKm)">
@@ -1427,9 +1444,13 @@ watch([search, shops], () => {
       </v-list>
 
       <div v-else class="pa-4 text-center">
-        <v-icon size="48" color="grey-lighten-1">mdi-magnify</v-icon>
-        <div class="text-body-1 text-grey mt-2">No search results</div>
-        <div class="text-caption text-grey">Try a different search term</div>
+        <v-icon size="48" color="grey-lighten-1">mdi-store-outline</v-icon>
+        <div class="text-body-1 text-grey mt-2">
+          {{ isSearchMode ? 'No search results found' : 'No shops available' }}
+        </div>
+        <div class="text-caption text-grey">
+          {{ isSearchMode ? 'Try a different search term' : 'Check back later for new shops' }}
+        </div>
       </div>
     </v-navigation-drawer>
 
