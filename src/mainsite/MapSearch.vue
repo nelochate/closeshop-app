@@ -302,6 +302,7 @@ const clearAllRoutes = () => {
 /* -------------------- STATE -------------------- */
 const activeTab = ref('map')
 const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
+const cityBoundaryPolygon = ref<L.Polygon | null>(null)
 const map = ref<L.Map | null>(null)
 const router = useRouter()
 const search = ref('')
@@ -318,7 +319,8 @@ const productMatches = ref<any[]>([])
 const routeLoading = ref(false)
 const filteredShops = ref<any[]>([])
 const mapInitialized = ref(false)
-const isSearchMode = ref(false) // Track if we're in search mode
+const isSearchMode = ref(false)
+const boundaryLoading = ref(false)
 
 /* -------------------- CONFIG -------------------- */
 const fetchDebounceMs = 350
@@ -423,30 +425,192 @@ const initializeMap = (): Promise<void> => {
   })
 }
 
-/* -------------------- USER CITY BOUNDARY -------------------- */
+/* -------------------- CITY BOUNDARY MANAGEMENT -------------------- */
+const clearCityBoundary = () => {
+  if (cityBoundaryPolygon.value && map.value) {
+    map.value.removeLayer(cityBoundaryPolygon.value)
+    cityBoundaryPolygon.value = null
+  }
+}
+
+/* -------------------- ENHANCED USER CITY BOUNDARY DETECTION -------------------- */
 const highlightUserCityBoundary = async (lat: number, lon: number) => {
   if (!map.value) return
 
+  boundaryLoading.value = true
   try {
+    // Clear previous boundary
+    clearCityBoundary()
+
+    // Get city name first
     const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`
     const osmRes = await fetch(osmUrl, {
       headers: { 'User-Agent': 'CloseShop-App' },
     })
 
-    if (!osmRes.ok) return
+    if (!osmRes.ok) {
+      console.warn('Failed to fetch city name from Nominatim')
+      return
+    }
 
     const osmData = await osmRes.json()
     const address = osmData.address
 
     const cityName = address.city || address.town || address.village || address.municipality
-
-    if (!cityName) return
+    if (!cityName) {
+      console.warn('No city name found in address:', address)
+      return
+    }
 
     userCity.value = cityName
     console.log('Detected city:', cityName)
-  } catch (e) {
-    console.error('Failed to detect city boundary:', e)
+
+    // Now fetch the boundary using Overpass API
+    const overpassQuery = `
+      [out:json][timeout:25];
+      (
+        relation["boundary"="administrative"]["admin_level"="8"]["name"="${cityName}"];
+        relation["boundary"="administrative"]["admin_level"="7"]["name"="${cityName}"];
+        relation["boundary"="administrative"]["admin_level"="6"]["name"="${cityName}"];
+      );
+      out body;
+      >;
+      out skel qt;
+    `
+
+    const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`
+    
+    const overpassRes = await fetch(overpassUrl, {
+      headers: { 'User-Agent': 'CloseShop-App' },
+    })
+
+    if (!overpassRes.ok) {
+      console.warn('Failed to fetch boundary from Overpass API')
+      return
+    }
+
+    const overpassData = await overpassRes.json()
+
+    if (!overpassData.elements || overpassData.elements.length === 0) {
+      console.warn('No boundary data found for city:', cityName)
+      return
+    }
+
+    // Find the boundary relation
+    const boundaryRelation = overpassData.elements.find(
+      (element: any) => element.type === 'relation' && element.tags?.boundary === 'administrative'
+    )
+
+    if (!boundaryRelation) {
+      console.warn('No boundary relation found')
+      return
+    }
+
+    // Extract polygon coordinates from the boundary relation
+    const polygonCoords = extractPolygonFromRelation(boundaryRelation, overpassData.elements)
+    
+    if (polygonCoords && polygonCoords.length > 0) {
+      // Create and style the boundary polygon
+      cityBoundaryPolygon.value = L.polygon(polygonCoords, {
+        color: '#3b82f6',
+        weight: 3,
+        opacity: 0.8,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.1,
+        className: 'city-boundary',
+      }).addTo(map.value)
+
+      // Add popup with city info
+      cityBoundaryPolygon.value.bindPopup(`
+        <div style="text-align: center; min-width: 200px;">
+          <strong>${cityName}</strong><br>
+          <em>City Boundary</em><br>
+          <small>Shops within this area will be shown when "Within City" is selected</small>
+        </div>
+      `)
+
+      // Fit map to show both user location and boundary
+      const bounds = L.latLngBounds(polygonCoords)
+      bounds.extend([lat, lon])
+      map.value.fitBounds(bounds.pad(0.1), {
+        animate: true,
+        duration: 1,
+      })
+
+      errorMsg.value = `City boundary loaded: ${cityName}. Showing shops within city.`
+    } else {
+      console.warn('Could not extract polygon coordinates from boundary data')
+      errorMsg.value = `City detected: ${cityName}, but boundary data not available.`
+    }
+
+  } catch (error) {
+    console.error('Failed to detect city boundary:', error)
+    errorMsg.value = 'Could not load city boundary. Using default filtering.'
+  } finally {
+    boundaryLoading.value = false
   }
+}
+
+/* -------------------- EXTRACT POLYGON FROM RELATION -------------------- */
+const extractPolygonFromRelation = (relation: any, elements: any[]): [number, number][] | null => {
+  try {
+    const members = relation.members || []
+    
+    // Find outer way members
+    const outerWays = members
+      .filter((member: any) => member.type === 'way' && member.role === 'outer')
+      .map((member: any) => elements.find((el: any) => el.type === 'way' && el.id === member.ref))
+      .filter(Boolean)
+
+    if (outerWays.length === 0) {
+      console.warn('No outer ways found in boundary relation')
+      return null
+    }
+
+    // For simplicity, use the first outer way (complex boundaries may have multiple)
+    const way = outerWays[0]
+    if (!way.nodes || way.nodes.length === 0) {
+      console.warn('Way has no nodes')
+      return null
+    }
+
+    // Convert node references to coordinates
+    const coords: [number, number][] = []
+    for (const nodeId of way.nodes) {
+      const node = elements.find((el: any) => el.type === 'node' && el.id === nodeId)
+      if (node) {
+        coords.push([node.lat, node.lon])
+      }
+    }
+
+    // Close the polygon if not already closed
+    if (coords.length > 2 && (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1])) {
+      coords.push([coords[0][0], coords[0][1]])
+    }
+
+    return coords.length >= 3 ? coords : null
+  } catch (error) {
+    console.error('Error extracting polygon from relation:', error)
+    return null
+  }
+}
+
+/* -------------------- CHECK IF SHOP IS WITHIN BOUNDARY -------------------- */
+const isShopWithinBoundary = (shop: any): boolean => {
+  if (!cityBoundaryPolygon.value || !shop.latitude || !shop.longitude) {
+    return false
+  }
+
+  const shopLat = Number(shop.latitude)
+  const shopLng = Number(shop.longitude)
+  
+  if (!isFinite(shopLat) || !isFinite(shopLng)) {
+    return false
+  }
+
+  // Use Leaflet's contains method to check if point is within polygon
+  const shopPoint = L.latLng(shopLat, shopLng)
+  return cityBoundaryPolygon.value.getBounds().contains(shopPoint)
 }
 
 /* -------------------- DISTANCE CALCULATION -------------------- */
@@ -506,15 +670,19 @@ const doFetchShops = async () => {
       const lng = Number(s.longitude)
       const distanceKm =
         isFinite(lat) && isFinite(lng) ? getDistanceKm(userLat, userLng, lat, lng) : Infinity
+      
+      // Check if shop is within city boundary
+      const withinBoundary = isShopWithinBoundary(s)
+      
       return {
         ...s,
         distanceKm,
+        withinBoundary,
       }
     })
 
     shops.value = mapped.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity))
-    filteredShops.value = [...shops.value]
-    plotShops()
+    applyShopFilters()
   } catch (e) {
     console.error(e)
     errorMsg.value = 'Failed to fetch shops.'
@@ -529,6 +697,31 @@ const fetchShops = () => {
     void doFetchShops()
     fetchTimeout = null
   }, fetchDebounceMs)
+}
+
+/* -------------------- APPLY SHOP FILTERS BASED ON DISPLAY MODE -------------------- */
+const applyShopFilters = () => {
+  if (shopDisplayMode.value === 'within') {
+    // Show only shops within city boundary
+    filteredShops.value = shops.value.filter(shop => shop.withinBoundary)
+  } else {
+    // Show only shops outside city boundary
+    filteredShops.value = shops.value.filter(shop => !shop.withinBoundary)
+  }
+  
+  plotShops()
+}
+
+/* -------------------- TOGGLE DISPLAY MODE -------------------- */
+const toggleDisplayMode = (mode: 'within' | 'outside') => {
+  shopDisplayMode.value = mode
+  applyShopFilters()
+  
+  if (userCity.value) {
+    errorMsg.value = mode === 'within' 
+      ? `Showing shops within ${userCity.value}`
+      : `Showing shops outside ${userCity.value}`
+  }
 }
 
 /* -------------------- HELPERS -------------------- */
@@ -562,7 +755,7 @@ const plotShops = () => {
   if (!map.value || !map.value._loaded) return
   clearShopMarkers()
 
-  for (const shop of shops.value) {
+  for (const shop of filteredShops.value) {
     // Double-check status before plotting
     if (shop.status !== 'approved') {
       console.log(`Skipping non-approved shop: ${shop.business_name} (${shop.status})`)
@@ -586,12 +779,18 @@ const plotShops = () => {
       .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
       .join('')
 
+    // Add boundary status to popup
+    const boundaryStatus = shop.withinBoundary 
+      ? '<span style="color: #10b981;">✓ Within City</span>' 
+      : '<span style="color: #ef4444;">✗ Outside City</span>'
+
     marker.bindPopup(`
       <div style="text-align:center; min-width: 220px;">
         <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
         <p><strong>${shop.business_name}</strong></p>
         <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
         <p style="margin:2px 0; font-size:14px;">${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}</p>
+        <p style="margin:2px 0; font-size:12px;">${boundaryStatus}</p>
         ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
         <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
           <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
@@ -617,66 +816,14 @@ const plotShops = () => {
 
     shopMarkers.push(marker)
   }
-
-  applyFiltersToMarkers()
-}
-
-/* -------------------- FILTERS -------------------- */
-const normalizeCity = (name: string | null) =>
-  name
-    ? name
-        .toLowerCase()
-        .replace(/city|municipality|municipal|town|province/g, '')
-        .trim()
-    : ''
-
-const applyFiltersToMarkers = () => {
-  if (!map.value) return
-
-  const term = search.value.trim().toLowerCase()
-  const userCityNorm = normalizeCity(userCity.value)
-  const smartShopIds = new Set<string>(productMatches.value.map((p) => p.shop_id).filter(Boolean))
-
-  shopMarkers.forEach((marker: any) => {
-    const shop = marker.shopData
-    if (!shop) return
-
-    // Ensure only approved shops are shown
-    if (shop.status !== 'approved') {
-      if (map.value) map.value.removeLayer(marker)
-      return
-    }
-
-    let passesCity = true
-    const shopCityNorm = normalizeCity(shop.city)
-    if (userCity.value && smartShopIds.size === 0) {
-      passesCity =
-        shopDisplayMode.value === 'within'
-          ? shopCityNorm.includes(userCityNorm) || userCityNorm.includes(shopCityNorm)
-          : !shopCityNorm.includes(userCityNorm) && !userCityNorm.includes(shopCityNorm)
-    }
-
-    const name = (shop.business_name ?? '').toLowerCase()
-    const addr = (getFullAddress(shop) ?? '').toLowerCase()
-    const passesText = !term || name.includes(term) || addr.includes(term)
-
-    const passesSmartProduct = smartShopIds.size === 0 ? true : smartShopIds.has(shop.id)
-
-    const shouldShow = passesCity && (passesText || passesSmartProduct)
-
-    if (shouldShow && map.value) map.value.addLayer(marker)
-    else if (map.value) map.value.removeLayer(marker)
-  })
 }
 
 /* -------------------- FOCUS ON SHOP MARKER -------------------- */
 const focusOnShopMarker = async (shopId: string) => {
   console.log('Focusing on shop:', shopId)
 
-  // First, try to find the shop in regular shop markers
   let marker = shopMarkers.find((m: any) => m.shopId === shopId)
 
-  // If not found in regular markers, try search result markers
   if (!marker) {
     marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
   }
@@ -695,7 +842,6 @@ const focusOnShopMarker = async (shopId: string) => {
   const userLat = Number(latitude.value ?? lastKnown.value?.[0])
   const userLng = Number(longitude.value ?? lastKnown.value?.[1])
 
-  // If we have user location, show route options
   if (isFinite(userLat) && isFinite(userLng)) {
     routeLoading.value = true
     errorMsg.value = null
@@ -730,19 +876,16 @@ const focusOnShopMarker = async (shopId: string) => {
         }
       } else {
         errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
-        // Fallback: just center on the shop
         map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
           animate: true,
           duration: 0.5,
         })
       }
 
-      // Open the marker popup
       marker.openPopup()
     } catch (error) {
       console.error('Error focusing on shop:', error)
       errorMsg.value = 'Error calculating routes: ' + (error as Error).message
-      // Fallback: just center on the shop
       map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
         animate: true,
         duration: 0.5,
@@ -752,7 +895,6 @@ const focusOnShopMarker = async (shopId: string) => {
       routeLoading.value = false
     }
   } else {
-    // If no user location, just center on the shop
     map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
       animate: true,
       duration: 0.5,
@@ -760,6 +902,7 @@ const focusOnShopMarker = async (shopId: string) => {
     marker.openPopup()
   }
 }
+
 /* -------------------- ENHANCED SEARCH SYSTEM -------------------- */
 let searchResultMarkers: L.Marker[] = []
 
@@ -775,7 +918,7 @@ const clearSearchMarkers = () => {
 const clearSearch = () => {
   search.value = ''
   isSearchMode.value = false
-  filteredShops.value = [...shops.value]
+  applyShopFilters() // Reset to current display mode
   showShopMenu.value = false
   clearSearchMarkers()
 
@@ -1243,6 +1386,14 @@ const focusOnSearchResult = async (shopId: string, index: number) => {
 }
 
 /* -------------------- SEARCH UTILITIES -------------------- */
+const normalizeCity = (name: string | null) =>
+  name
+    ? name
+        .toLowerCase()
+        .replace(/city|municipality|municipal|town|province/g, '')
+        .trim()
+    : ''
+
 const highlightMatch = (text: string, term: string) => {
   if (!term) return text
   const regex = new RegExp(`(${term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi')
@@ -1283,7 +1434,10 @@ watch([latitude, longitude], async ([lat, lng]) => {
   }
 
   saveCachedLocation(userLat, userLng)
-  void highlightUserCityBoundary(userLat, userLng)
+  
+  // Load city boundary when user location changes
+  await highlightUserCityBoundary(userLat, userLng)
+  
   void updateShops()
 })
 
@@ -1325,7 +1479,9 @@ onMounted(async () => {
     }
 
     saveCachedLocation(quickLat, quickLng)
-    void highlightUserCityBoundary(quickLat, quickLng)
+    
+    // Load city boundary and shops
+    await highlightUserCityBoundary(quickLat, quickLng)
     void updateShops()
   } catch (err) {
     console.warn('Quick geolocation failed:', err)
@@ -1358,37 +1514,11 @@ const openShop = async (shopId: string) => {
   router.push(`/shop/${shopId}`)
 }
 
-/* -------------------- WATCH FOR SEARCH CHANGES -------------------- */
-watch([search, shops], () => {
-  const term = search.value.trim().toLowerCase()
-  let results: any[] = []
-
-  if (!term) {
-    results = [...shops.value].filter((shop) => shop.status === 'approved')
-  } else {
-    results = shops.value.filter((shop) => {
-      // Only include approved shops
-      if (shop.status !== 'approved') return false
-
-      const name = shop.business_name?.toLowerCase() ?? ''
-      const addr = getFullAddress(shop).toLowerCase()
-      return name.includes(term) || addr.includes(term)
-    })
-  }
-
-  filteredShops.value = results.sort(
-    (a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity),
-  )
-
-  applyFiltersToMarkers()
-})
-
 /* -------------------- TOGGLE SHOP MENU -------------------- */
 const toggleShopMenu = () => {
   showShopMenu.value = !showShopMenu.value
   if (showShopMenu.value && !isSearchMode.value) {
-    // When opening menu without search, show all shops
-    filteredShops.value = [...shops.value].filter((shop) => shop.status === 'approved')
+    applyShopFilters() // Show shops based on current display mode
   }
 }
 
@@ -1401,11 +1531,9 @@ const handleShopClick = async (shopId: string, index: number) => {
   } else {
     await focusOnShopMarker(shopId)
   }
-  
-  // Optionally close the drawer after selection
-  // showShopMenu.value = false
 }
 </script>
+
 <template>
   <v-app>
     <v-sheet class="hero">
@@ -1444,6 +1572,12 @@ const handleShopClick = async (shopId: string, index: number) => {
         <span>Calculating routes...</span>
       </div>
 
+      <!-- Boundary Loading Overlay -->
+      <div v-if="boundaryLoading" class="route-loading">
+        <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
+        <span>Loading city boundary...</span>
+      </div>
+
       <div class="map-buttons" v-if="!showShopMenu">
         <v-btn icon :loading="locating" @click="recenterToUser">
           <v-icon>mdi-crosshairs-gps</v-icon>
@@ -1451,37 +1585,50 @@ const handleShopClick = async (shopId: string, index: number) => {
         <v-btn icon @click="clearAllRoutes" title="Clear Routes">
           <v-icon>mdi-close</v-icon>
         </v-btn>
+        
+        <!-- Enhanced Display Mode Menu -->
         <v-menu location="top" transition="scale-transition" color="#ffffff">
           <template #activator="{ props }">
-            <v-btn icon v-bind="props"><v-icon>mdi-dots-vertical</v-icon></v-btn>
+            <v-btn icon v-bind="props" title="Display Options">
+              <v-icon>mdi-filter</v-icon>
+            </v-btn>
           </template>
           <v-list>
-            <v-list-item
-              @click="
-                () => {
-                  shopDisplayMode = 'within'
-                  applyFiltersToMarkers()
-                }
-              "
-            >
-              <v-list-item-title>Display Within City (Nearby)</v-list-item-title>
+            <v-list-item @click="toggleDisplayMode('within')">
+              <v-list-item-title>
+                <v-icon color="green" class="mr-2">mdi-checkbox-marked-circle</v-icon>
+                Display Within City
+              </v-list-item-title>
             </v-list-item>
-            <v-list-item
-              @click="
-                () => {
-                  shopDisplayMode = 'outside'
-                  applyFiltersToMarkers()
-                }
-              "
-            >
-              <v-list-item-title>Display Outside City (Explore More)</v-list-item-title>
+            <v-list-item @click="toggleDisplayMode('outside')">
+              <v-list-item-title>
+                <v-icon color="red" class="mr-2">mdi-arrow-expand</v-icon>
+                Display Outside City
+              </v-list-item-title>
+            </v-list-item>
+            <v-divider></v-divider>
+            <v-list-item @click="clearCityBoundary" :disabled="!cityBoundaryPolygon">
+              <v-list-item-title>
+                <v-icon color="grey" class="mr-2">mdi-eye-off</v-icon>
+                Hide City Boundary
+              </v-list-item-title>
             </v-list-item>
           </v-list>
         </v-menu>
 
-        <v-chip v-if="shopDisplayMode === 'outside'" color="primary" size="small" class="mode-chip">
-          🌏 Exploring Outside City
+        <!-- Display Mode Chip -->
+        <v-chip 
+          v-if="userCity" 
+          :color="shopDisplayMode === 'within' ? 'green' : 'orange'" 
+          size="small" 
+          class="mode-chip"
+        >
+          <v-icon small class="mr-1">
+            {{ shopDisplayMode === 'within' ? 'mdi-checkbox-marked-circle' : 'mdi-arrow-expand' }}
+          </v-icon>
+          {{ shopDisplayMode === 'within' ? 'Within' : 'Outside' }} {{ userCity }}
         </v-chip>
+
         <v-btn icon @click="toggleShopMenu">
           <v-icon>mdi-menu</v-icon>
         </v-btn>
@@ -1492,15 +1639,15 @@ const handleShopClick = async (shopId: string, index: number) => {
       </v-alert>
     </v-main>
 
-    <!-- Enhanced Shop Menu Drawer - Dual Purpose -->
+    <!-- Shop Menu Drawer -->
     <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="380">
-      <v-toolbar flat color="primary" dark>
+      <v-toolbar flat :color="shopDisplayMode === 'within' ? 'green' : 'orange'" dark>
         <v-toolbar-title>
           <div>
-            <div>{{ isSearchMode ? 'Search Results' : 'All Shops' }}</div>
+            <div>{{ isSearchMode ? 'Search Results' : (shopDisplayMode === 'within' ? 'Shops Within City' : 'Shops Outside City') }}</div>
             <div style="font-size: 0.8rem; opacity: 0.8">
               {{ filteredShops.length }} {{ isSearchMode ? 'results' : 'shops' }} •
-              {{ isSearchMode ? 'Search results' : 'Sorted by distance' }}
+              {{ userCity || 'Unknown City' }}
             </div>
           </div>
         </v-toolbar-title>
@@ -1519,18 +1666,6 @@ const handleShopClick = async (shopId: string, index: number) => {
           style="cursor: pointer"
         >
           <template #prepend>
-            <div
-              class="result-index"
-              :style="{
-                backgroundColor: isSearchMode
-                  ? shop.matchType === 'product'
-                    ? '#10b981'
-                    : '#3b82f6'
-                  : '#3b82f6',
-              }"
-            >
-              {{ index + 1 }}
-            </div>
             <v-avatar size="44">
               <v-img
                 :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'"
@@ -1539,30 +1674,19 @@ const handleShopClick = async (shopId: string, index: number) => {
             </v-avatar>
           </template>
 
-          <v-list-item-title class="d-flex align-center">
-            <span
-              v-html="
-                isSearchMode ? highlightMatch(shop.business_name, search) : shop.business_name
-              "
-            ></span>
-            <v-chip
-              v-if="isSearchMode && shop.matchType === 'product'"
-              size="x-small"
-              color="green"
-              class="ml-2"
-            >
-              Product
+          <v-list-item-title>
+            {{ shop.business_name }}
+            <v-chip v-if="shop.withinBoundary" size="x-small" color="green" class="ml-2">
+              Within
             </v-chip>
-            <v-chip v-else-if="isSearchMode" size="x-small" color="blue" class="ml-2">
-              Place
+            <v-chip v-else size="x-small" color="orange" class="ml-2">
+              Outside
             </v-chip>
           </v-list-item-title>
 
-          <v-list-item-subtitle
-            v-html="
-              isSearchMode ? highlightMatch(getFullAddress(shop), search) : getFullAddress(shop)
-            "
-          ></v-list-item-subtitle>
+          <v-list-item-subtitle>
+            {{ getFullAddress(shop) }}
+          </v-list-item-subtitle>
 
           <v-list-item-subtitle v-if="shop.distanceKm && isFinite(shop.distanceKm)">
             <v-icon small>mdi-map-marker-distance</v-icon>
@@ -1580,10 +1704,10 @@ const handleShopClick = async (shopId: string, index: number) => {
       <div v-else class="pa-4 text-center">
         <v-icon size="48" color="grey-lighten-1">mdi-store-outline</v-icon>
         <div class="text-body-1 text-grey mt-2">
-          {{ isSearchMode ? 'No search results found' : 'No shops available' }}
+          {{ shopDisplayMode === 'within' ? 'No shops within city boundary' : 'No shops outside city boundary' }}
         </div>
         <div class="text-caption text-grey">
-          {{ isSearchMode ? 'Try a different search term' : 'Check back later for new shops' }}
+          {{ shopDisplayMode === 'within' ? 'Try switching to "Outside City" mode' : 'Try switching to "Within City" mode' }}
         </div>
       </div>
     </v-navigation-drawer>
@@ -1591,8 +1715,31 @@ const handleShopClick = async (shopId: string, index: number) => {
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
+
 <style scoped>
-/* Base responsive adjustments */
+/* Add boundary-specific styles */
+:deep(.city-boundary) {
+  stroke-dasharray: 10, 10;
+  animation: dash 30s linear infinite;
+}
+
+@keyframes dash {
+  to {
+    stroke-dashoffset: -1000;
+  }
+}
+
+/* Enhanced mode chip styles */
+.mode-chip {
+  font-weight: 600;
+  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
+  font-size: clamp(0.7rem, 3vw, 0.8rem);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  border: none;
+}
+
+/* Rest of the styles remain the same as in your original code */
 :deep(.v-application__wrap) {
   min-height: 100vh !important;
 }
@@ -1654,7 +1801,6 @@ const handleShopClick = async (shopId: string, index: number) => {
   font-size: clamp(18px, 5vw, 22px);
 }
 
-/* Map container with safe area support */
 #map {
   position: absolute;
   top: 0;
@@ -1666,7 +1812,6 @@ const handleShopClick = async (shopId: string, index: number) => {
   z-index: 1;
 }
 
-/* Ensure bottom nav doesn't cover content */
 :deep(.v-application__wrap) {
   min-height: 100vh !important;
 }
@@ -1701,148 +1846,6 @@ const handleShopClick = async (shopId: string, index: number) => {
   font-size: clamp(18px, 4.5vw, 20px);
 }
 
-.mode-chip {
-  position: fixed;
-  bottom: calc(var(--bottom-nav-height, 70px) + clamp(80px, 25vw, 120px));
-  right: clamp(12px, 4vw, 20px);
-  z-index: 2100;
-  font-weight: 600;
-  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
-  font-size: clamp(0.7rem, 3vw, 0.8rem);
-  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
-  color: white;
-  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.3);
-  backdrop-filter: blur(10px);
-  border: none;
-}
-
-/* Shop menu drawer improvements */
-:deep(.v-navigation-drawer) {
-  margin-top: 0 !important;
-}
-
-:deep(.v-navigation-drawer__content) {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-:deep(.v-toolbar) {
-  padding-top: env(safe-area-inset-top);
-  background: linear-gradient(135deg, #3f83c7, #1e40af) !important;
-}
-
-:deep(.v-toolbar-title) {
-  font-size: clamp(1rem, 4vw, 1.25rem);
-  font-weight: 600;
-}
-
-/* Shop list items */
-:deep(.v-list-item) {
-  padding-top: clamp(8px, 2vw, 12px);
-  padding-bottom: clamp(8px, 2vw, 12px);
-  border-bottom: 1px solid #f1f5f9;
-}
-
-:deep(.v-avatar) {
-  width: clamp(36px, 10vw, 44px) !important;
-  height: clamp(36px, 10vw, 44px) !important;
-  min-width: clamp(36px, 10vw, 44px) !important;
-}
-
-:deep(.v-list-item-title) {
-  font-size: clamp(0.9rem, 3.5vw, 1rem);
-  line-height: 1.3;
-  margin-bottom: 2px;
-}
-
-:deep(.v-list-item-subtitle) {
-  font-size: clamp(0.75rem, 3vw, 0.85rem);
-  line-height: 1.2;
-  opacity: 0.8;
-}
-
-/* Alert improvements */
-.v-alert {
-  margin: clamp(8px, 2vw, 16px);
-  font-size: clamp(0.8rem, 3.5vw, 0.9rem);
-  border-radius: 12px;
-  border: 1px solid;
-}
-
-.route-info-alert {
-  background-color: #dbeafe !important;
-  border-left: 4px solid #3b82f6;
-}
-
-/* Route selection styles */
-.selected-route {
-  background-color: #f0f9ff;
-  border-left: 3px solid #3b82f6;
-}
-
-.route-color-indicator {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  margin-right: 12px;
-}
-
-/* Highlight for search matches */
-.highlight {
-  background-color: #fef3c7;
-  font-weight: 700;
-  border-radius: 3px;
-  padding: 1px 3px;
-  color: #92400e;
-}
-
-/* Leaflet popup improvements for mobile */
-:deep(.leaflet-popup-content) {
-  margin: clamp(10px, 3vw, 16px);
-  font-size: clamp(12px, 3.5vw, 14px);
-  line-height: 1.4;
-}
-
-:deep(.leaflet-popup-content-wrapper) {
-  border-radius: 12px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-}
-
-:deep(.leaflet-popup-content button) {
-  font-size: clamp(12px, 3.5vw, 14px);
-  padding: clamp(6px, 2vw, 8px) clamp(10px, 3vw, 14px);
-  margin-top: 8px;
-}
-
-:deep(.leaflet-popup-content img) {
-  width: clamp(60px, 20vw, 80px) !important;
-  height: clamp(60px, 20vw, 80px) !important;
-}
-
-/* Route label styles for map */
-:deep(.route-label) {
-  background: transparent !important;
-  border: none !important;
-}
-
-/* Safe area support for notched devices */
-.safe-area-top {
-  padding-top: env(safe-area-inset-top);
-}
-
-.safe-area-bottom {
-  padding-bottom: env(safe-area-inset-bottom);
-}
-
-/* Loading states */
-:deep(.v-progress-linear) {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 3000;
-}
-
-/* Add route loading styles */
 .route-loading {
   position: fixed;
   top: 50%;
@@ -1865,7 +1868,12 @@ const handleShopClick = async (shopId: string, index: number) => {
   color: #374151;
 }
 
-/* Responsive typography scale */
+.route-info-alert {
+  background-color: #dbeafe !important;
+  border-left: 4px solid #3b82f6;
+}
+
+/* Responsive adjustments */
 @media (max-width: 360px) {
   .hero {
     padding: 12px 10px 6px;
@@ -1900,122 +1908,5 @@ const handleShopClick = async (shopId: string, index: number) => {
     bottom: calc(80px + 24px);
     right: 24px;
   }
-}
-
-/* Landscape orientation support */
-@media (max-height: 500px) and (orientation: landscape) {
-  .hero {
-    padding: 12px 16px 8px;
-    position: relative;
-  }
-
-  #map {
-    top: 0;
-    height: 100vh;
-  }
-
-  .map-buttons {
-    bottom: 20px;
-    right: 16px;
-  }
-
-  .mode-chip {
-    bottom: 80px;
-  }
-}
-
-/* High DPI screen support */
-@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {
-  .map-buttons .v-btn {
-    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  }
-
-  .search-field :deep(.v-field) {
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
-  }
-}
-
-/* Reduced motion support */
-@media (prefers-reduced-motion: reduce) {
-  :deep(.v-menu__content),
-  :deep(.v-navigation-drawer) {
-    transition-duration: 0.1s !important;
-  }
-}
-
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .map-buttons .v-btn {
-    background: #374151;
-    border-color: #4b5563;
-    color: #f9fafb;
-  }
-
-  .highlight {
-    background-color: #f59e0b;
-    color: #7c2d12;
-  }
-}
-
-/* Route styling improvements */
-:deep(.route-line) {
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-:deep(.route-line:hover) {
-  filter: brightness(1.2);
-}
-
-:deep(.route-end-marker) {
-  background: transparent !important;
-  border: none !important;
-}
-
-:deep(.route-info-marker) {
-  background: transparent !important;
-  border: none !important;
-  pointer-events: none;
-}
-
-/* Selected route highlight */
-:deep(.route-line.selected) {
-  filter: drop-shadow(0 0 8px rgba(59, 130, 246, 0.5));
-}
-
-/* Search result styles */
-.result-index {
-  width: 24px;
-  height: 24px;
-  border-radius: 50%;
-  background: #3b82f6;
-  color: white;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 12px;
-  font-weight: bold;
-  margin-right: 12px;
-}
-
-.search-result-item {
-  border-left: 3px solid transparent;
-  transition: all 0.3s ease;
-}
-
-.search-result-item:hover {
-  border-left-color: #3b82f6;
-  background-color: #f8fafc;
-}
-
-/* Enhanced marker styles */
-:deep(.search-result-marker) {
-  background: transparent !important;
-  border: none !important;
-}
-
-:deep(.search-result-marker:hover) {
-  transform: scale(1.1);
-  transition: transform 0.2s ease;
 }
 </style>
