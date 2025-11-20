@@ -19,9 +19,11 @@ interface RouteOption {
   duration: number // in seconds
   summary: string
   color: string
+  type: 'driving' | 'walking' | 'cycling' // Add route type
 }
 
 /* -------------------- MULTIPLE ROUTING VIA MAPBOX -------------------- */
+/* -------------------- MULTIPLE ROUTING VIA MAPBOX WITH DIFFERENT PROFILES -------------------- */
 const getRouteOptions = async (
   start: [number, number],
   end: [number, number],
@@ -32,81 +34,124 @@ const getRouteOptions = async (
       throw new Error('No internet connection')
     }
 
-    // Mapbox format: lon,lat;lon,lat
-    const coordinates = `${start[1]},${start[0]};${end[1]},${end[0]}`
-    const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?alternatives=true&geometries=geojson&steps=false&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`
-
-    // Add timeout for mobile networks
-    const controller = new AbortController()
-    const timeoutId = setTimeout(() => controller.abort(), 15000) // 15 second timeout
-
-    const res = await fetch(url, {
-      signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-      },
-    })
-
-    clearTimeout(timeoutId)
-
-    if (!res.ok) {
-      console.error('Mapbox routing error', res.status, res.statusText)
-      throw new Error(`HTTP ${res.status}: ${res.statusText}`)
-    }
-
-    const data = await res.json()
-
-    if (!data.routes || data.routes.length === 0) {
-      console.warn('No routes found from Mapbox')
-      return []
-    }
-
     const routeOptions: RouteOption[] = []
-    const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6']
+    const profiles = [
+      { type: 'driving' as const, color: '#3b82f6', name: 'Driving' },
+      { type: 'walking' as const, color: '#10b981', name: 'Walking' },
+      { type: 'cycling' as const, color: '#f59e0b', name: 'Cycling' },
+    ]
 
-    data.routes.forEach((route: any, index: number) => {
-      if (route.geometry && route.geometry.coordinates) {
-        // Mapbox returns [lon, lat] coordinates
-        const coords = route.geometry.coordinates.map((coord: [number, number]) => [
-          coord[1], // lat
-          coord[0], // lon
-        ])
+    // Get routes for each profile type
+    for (const profile of profiles) {
+      try {
+        // Mapbox format: lon,lat;lon,lat
+        const coordinates = `${start[1]},${start[0]};${end[1]},${end[0]}`
+        const url = `https://api.mapbox.com/directions/v5/mapbox/${profile.type}/${coordinates}?alternatives=false&geometries=geojson&steps=false&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`
 
-        const distance = route.distance // meters
-        const duration = route.duration // seconds
+        // Add timeout for mobile networks
+        const controller = new AbortController()
+        const timeoutId = setTimeout(() => controller.abort(), 10000) // 10 second timeout per request
 
-        routeOptions.push({
-          coords,
-          distance,
-          duration,
-          summary: `Route ${index + 1}`,
-          color: colors[index % colors.length],
+        const res = await fetch(url, {
+          signal: controller.signal,
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
         })
-      }
-    })
 
-    // Sort by distance (shortest first)
-    return routeOptions.sort((a, b) => a.distance - b.distance)
+        clearTimeout(timeoutId)
+
+        if (!res.ok) {
+          console.warn(`Mapbox ${profile.type} routing failed:`, res.status)
+          continue // Skip this profile if it fails
+        }
+
+        const data = await res.json()
+
+        if (!data.routes || data.routes.length === 0) {
+          console.warn(`No ${profile.type} routes found from Mapbox`)
+          continue
+        }
+
+        const route = data.routes[0] // Take the primary route for this profile
+
+        if (route.geometry && route.geometry.coordinates) {
+          // Mapbox returns [lon, lat] coordinates
+          const coords = route.geometry.coordinates.map((coord: [number, number]) => [
+            coord[1], // lat
+            coord[0], // lon
+          ])
+
+          const distance = route.distance // meters
+          const duration = route.duration // seconds
+
+          routeOptions.push({
+            coords,
+            distance,
+            duration,
+            summary: `${profile.name} Route`,
+            color: profile.color,
+            type: profile.type,
+          })
+        }
+      } catch (err) {
+        console.warn(`Failed to get ${profile.type} route:`, err)
+        // Continue to next profile instead of failing completely
+      }
+    }
+
+    // If no routes were found from Mapbox, provide fallback
+    if (routeOptions.length === 0) {
+      console.warn('All routing profiles failed, using fallback')
+      return [createStraightLineRoute(start, end, 'driving')]
+    }
+
+    // Sort by duration (fastest first)
+    return routeOptions.sort((a, b) => a.duration - b.duration)
   } catch (err) {
     console.error('Mapbox routing failed:', err)
-
     // Provide fallback route
-    return [createStraightLineRoute(start, end)]
+    return [createStraightLineRoute(start, end, 'driving')]
   }
 }
 
-/* -------------------- FALLBACK ROUTE CREATION -------------------- */
-const createStraightLineRoute = (start: [number, number], end: [number, number]): RouteOption => {
+/* -------------------- UPDATED FALLBACK ROUTE CREATION -------------------- */
+const createStraightLineRoute = (
+  start: [number, number],
+  end: [number, number],
+  type: 'driving' | 'walking' | 'cycling',
+): RouteOption => {
   const distance = getDistanceKm(start[0], start[1], end[0], end[1]) * 1000
-  const estimatedDuration = (distance / 1000) * 120 // Rough estimate: 2 min per km
+
+  // Different speed estimates for different route types
+  const speedEstimates = {
+    driving: 40, // km/h
+    walking: 5, // km/h
+    cycling: 15, // km/h
+  }
+
+  const estimatedDuration = (distance / 1000 / speedEstimates[type]) * 3600 // seconds
+
+  const typeNames = {
+    driving: 'Driving',
+    walking: 'Walking',
+    cycling: 'Cycling',
+  }
+
+  const colors = {
+    driving: '#3b82f6',
+    walking: '#10b981',
+    cycling: '#f59e0b',
+  }
 
   return {
     coords: [start, end],
     distance,
     duration: estimatedDuration,
-    summary: 'Direct Route (Fallback)',
-    color: '#3b82f6',
+    summary: `${typeNames[type]} Route (Fallback)`,
+    color: colors[type],
+    type,
   }
 }
 
@@ -117,7 +162,7 @@ const selectedRouteIndex = ref<number | null>(null)
 const routeOptions = ref<RouteOption[]>([])
 const showRouteMenu = ref(false)
 
-/* -------------------- DRAW MULTIPLE ROUTES -------------------- */
+/* -------------------- UPDATED DRAW MULTIPLE ROUTES -------------------- */
 const drawRouteOptions = (routes: RouteOption[]) => {
   if (!map.value || !routes.length) return
 
@@ -161,103 +206,59 @@ const drawRouteOptions = (routes: RouteOption[]) => {
 
       currentRouteLayers.push(routeLayer)
 
-      // Add start marker (user location)
-      const startMarker = L.marker([route.coords[0][0], route.coords[0][1]], {
-        icon: L.divIcon({
-          html: `
-            <div style="
-              background: #3b82f6;
-              color: white;
-              padding: 4px 8px;
-              border-radius: 12px;
-              font-size: 11px;
-              font-weight: bold;
-              white-space: nowrap;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-              border: 2px solid white;
-            ">
-              Start
-            </div>
-          `,
-          className: 'route-end-marker',
-          iconSize: [50, 20],
-          iconAnchor: [25, 10],
-        }),
-      }).addTo(map.value)
+      // Enhanced info markers with more details
+      const distanceKm = (route.distance / 1000).toFixed(1)
+      const durationMin = Math.round(route.duration / 60)
 
-      // Add end marker (shop location)
-      const endMarker = L.marker(
-        [route.coords[route.coords.length - 1][0], route.coords[route.coords.length - 1][1]],
-        {
+      // Add detailed info marker at midpoint
+      const midpointIndex = Math.floor(route.coords.length / 2)
+      if (midpointIndex < route.coords.length) {
+        const midpoint = route.coords[midpointIndex]
+
+        // Icons for different route types
+        const typeIcons = {
+          driving: '🚗',
+          walking: '🚶',
+          cycling: '🚴',
+        }
+
+        const infoMarker = L.marker(midpoint, {
           icon: L.divIcon({
             html: `
-            <div style="
-              background: #ef4444;
-              color: white;
-              padding: 4px 8px;
-              border-radius: 12px;
-              font-size: 11px;
-              font-weight: bold;
-              white-space: nowrap;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-              border: 2px solid white;
-            ">
-              Shop
-            </div>
-          `,
-            className: 'route-end-marker',
-            iconSize: [50, 20],
-            iconAnchor: [25, 10],
-          }),
-        },
-      ).addTo(map.value)
-
-      currentRouteMarkers.push(startMarker, endMarker)
-
-      // Add info markers along the route
-      const segmentCount = 3
-      for (let i = 1; i < segmentCount; i++) {
-        const segmentIndex = Math.floor((route.coords.length * i) / segmentCount)
-        if (segmentIndex < route.coords.length) {
-          const segmentPoint = route.coords[segmentIndex]
-
-          const distanceKm = (route.distance / 1000).toFixed(1)
-          const durationMin = Math.round(route.duration / 60)
-
-          const infoMarker = L.marker(segmentPoint, {
-            icon: L.divIcon({
-              html: `
-                <div style="
-                  background: ${route.color};
-                  color: white;
-                  padding: 6px 10px;
-                  border-radius: 16px;
-                  font-size: 11px;
-                  font-weight: bold;
-                  white-space: nowrap;
-                  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-                  border: 2px solid white;
-                  backdrop-filter: blur(4px);
-                ">
-                  Route ${index + 1}<br>
+              <div style="
+                background: ${route.color};
+                color: white;
+                padding: 8px 12px;
+                border-radius: 20px;
+                font-size: 12px;
+                font-weight: bold;
+                white-space: nowrap;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+                border: 3px solid white;
+                backdrop-filter: blur(4px);
+                text-align: center;
+              ">
+                <div>${typeIcons[route.type]} ${route.summary}</div>
+                <div style="font-size: 10px; opacity: 0.9;">
                   ${distanceKm} km • ${durationMin} min
                 </div>
-              `,
-              className: 'route-info-marker',
-              iconSize: [80, 40],
-              iconAnchor: [40, 20],
-            }),
-          }).addTo(map.value)
+                ${index === 0 ? '<div style="font-size: 9px; color: #fef08a;">★ FASTEST</div>' : ''}
+              </div>
+            `,
+            className: 'route-info-marker',
+            iconSize: [100, 50],
+            iconAnchor: [50, 25],
+          }),
+        }).addTo(map.value)
 
-          currentRouteMarkers.push(infoMarker)
-        }
+        currentRouteMarkers.push(infoMarker)
       }
     } catch (error) {
       console.error('Error drawing route:', error)
     }
   })
 
-  // Auto-select the first route
+  // Auto-select the first route (fastest)
   selectRoute(0)
 
   // Fit map to show all routes with some padding
@@ -270,7 +271,7 @@ const drawRouteOptions = (routes: RouteOption[]) => {
   }
 }
 
-/* -------------------- SELECT ROUTE -------------------- */
+/* -------------------- UPDATED SELECT ROUTE -------------------- */
 const selectRoute = (index: number) => {
   selectedRouteIndex.value = index
   const route = routeOptions.value[index]
@@ -284,7 +285,7 @@ const selectRoute = (index: number) => {
       layer.setStyle({
         weight: 8,
         opacity: 1,
-        color: route.color
+        color: route.color,
       })
       layer.bringToFront()
     } else {
@@ -292,19 +293,22 @@ const selectRoute = (index: number) => {
       layer.setStyle({
         weight: 3,
         opacity: 0.4,
-        color: route.color
+        color: route.color,
       })
     }
   })
 
-  // Update route info display
+  // Update route info display with more details
   const distanceKm = (route.distance / 1000).toFixed(1)
   const durationMin = Math.round(route.duration / 60)
   
-  errorMsg.value = `Selected: Route ${index + 1} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`
+  const typeIcons = {
+    driving: '🚗',
+    walking: '🚶', 
+    cycling: '🚴'
+  }
 
-  // Show route menu to allow switching if needed
-  showRouteMenu.value = true
+  errorMsg.value = `Selected: ${typeIcons[route.type]} ${route.summary} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`
 }
 
 /* -------------------- CLEAR ALL ROUTES -------------------- */
@@ -740,8 +744,8 @@ const focusOnShopMarker = async (shopId: string) => {
     if (routes.length > 0) {
       routeOptions.value = routes
       drawRouteOptions(routes) // This now displays all routes on map
-      
-      // Show success message
+
+      // Show success message - REMOVED drawer opening
       if (routes[0].summary.includes('Fallback')) {
         errorMsg.value = 'Using direct route (routing service unavailable)'
       } else {
@@ -1061,7 +1065,7 @@ watch([search, shops], () => {
       </v-alert>
     </v-main>
 
-    <!-- Enhanced Route Selection Menu -->
+    <!-- Enhanced Route Selection Menu 
     <v-navigation-drawer v-model="showRouteMenu" location="right" temporary width="350">
       <v-toolbar flat color="primary" dark>
         <v-toolbar-title>Route Comparison ({{ routeOptions.length }})</v-toolbar-title>
@@ -1122,7 +1126,7 @@ watch([search, shops], () => {
         </p>
       </div>
     </v-navigation-drawer>
-
+  -->
     <!-- Shop Menu -->
     <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="320">
       <v-toolbar flat color="primary" dark>
