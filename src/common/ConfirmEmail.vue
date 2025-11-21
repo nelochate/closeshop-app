@@ -1,3 +1,13 @@
+<script setup>
+import { useRouter } from 'vue-router'
+
+const router = useRouter()
+
+const goToLogin = () => {
+  // This will navigate to your login page using the route name
+  router.push({ name: 'login' })
+}
+</script>
 <template>
   <v-container
     class="d-flex flex-column align-center justify-center fill-height px-4"
@@ -17,7 +27,7 @@
           color="#2e73b8"
           variant="flat"
           class="text-white"
-          to="/"
+          @click="goToLogin"
         >
           Go to Login
         </v-btn>
@@ -25,6 +35,8 @@
     </v-card>
   </v-container>
 </template>
+
+
 
 <style scoped>
 .text-primary {
