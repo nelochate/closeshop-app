@@ -168,6 +168,12 @@ const routes = [
   name: 'checkout-success',
   component: () => import('@/mainsite/CheckoutSuccess.vue'),
   props: true,
+},
+{
+  path: '/rateview/:orderId',
+  name: 'rateview',
+  component: () => import('@/mainsite/RateView.vue'),
+  props: true,
 }
 ]
 
