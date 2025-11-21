@@ -21,17 +21,23 @@ const currentOrderId = ref<string>('')
 const transactionNumber = ref('')
 const shopId = ref<string>('your_shop_id_here')
 
-// 🕒 Initialize with current date and time
+// 🕒 Initialize with current LOCAL date and time
 const now = new Date()
-const deliveryDate = ref<string>(now.toISOString().split('T')[0])
-const deliveryTime = ref<string>(
-  `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
-)
+// Get local date parts to avoid timezone issues
+const year = now.getFullYear()
+const month = (now.getMonth() + 1).toString().padStart(2, '0')
+const day = now.getDate().toString().padStart(2, '0')
+const deliveryDate = ref<string>(`${year}-${month}-${day}`)
 
-// Time picker defaults based on current time
+// Get local time
+const hours = now.getHours().toString().padStart(2, '0')
+const currentMinutes = now.getMinutes().toString().padStart(2, '0') // ← Renamed to avoid conflict
+const deliveryTime = ref<string>(`${hours}:${currentMinutes}`)
+
+// Time picker defaults based on current local time
 const currentHour12 = now.getHours() % 12 || 12
 const selectedHour = ref(currentHour12.toString().padStart(2, '0'))
-const selectedMinute = ref(now.getMinutes().toString().padStart(2, '0'))
+const selectedMinute = ref(currentMinutes) // ← Using the renamed variable
 const selectedPeriod = ref<'AM' | 'PM'>(now.getHours() >= 12 ? 'PM' : 'AM')
 
 //load transaction number on mount
