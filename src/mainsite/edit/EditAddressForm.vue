@@ -21,6 +21,7 @@ const addressId = ref(route.params.id || null)
 
 const map = ref<any>(null)
 const marker = ref<any>(null)
+const fullscreenControl = ref<any>(null)
 
 // PSGC Data
 const regions = ref([])
@@ -43,7 +44,51 @@ const address = ref({
   barangay_name: '',
 })
 
-// --- PSGC API Functions ---
+// --- Custom Fullscreen Control ---
+const createFullscreenControl = () => {
+  const FullscreenControl = L.Control.extend({
+    options: {
+      position: 'topright'
+    },
+    onAdd: function() {
+      const container = L.DomUtil.create('div', 'leaflet-bar leaflet-control')
+      const button = L.DomUtil.create('a', 'leaflet-control-fullscreen', container)
+      button.innerHTML = '⛶'
+      button.href = '#'
+      button.title = 'Toggle fullscreen'
+      
+      L.DomEvent.on(button, 'click', L.DomEvent.stopPropagation)
+      L.DomEvent.on(button, 'click', L.DomEvent.preventDefault)
+      L.DomEvent.on(button, 'click', this.toggleFullscreen, this)
+      
+      return container
+    },
+    toggleFullscreen: function() {
+      const mapContainer = map.value.getContainer()
+      if (!document.fullscreenElement) {
+        if (mapContainer.requestFullscreen) {
+          mapContainer.requestFullscreen()
+        } else if ((mapContainer as any).webkitRequestFullscreen) {
+          (mapContainer as any).webkitRequestFullscreen()
+        } else if ((mapContainer as any).msRequestFullscreen) {
+          (mapContainer as any).msRequestFullscreen()
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen()
+        } else if ((document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen()
+        } else if ((document as any).msExitFullscreen) {
+          (document as any).msExitFullscreen()
+        }
+      }
+    }
+  })
+  
+  return new FullscreenControl()
+}
+
+// --- PSGC API Functions (KEPT INTACT) ---
 const fetchRegions = async () => {
   try {
     const res = await fetch('https://psgc.cloud/api/regions')
@@ -110,7 +155,23 @@ const fetchBarangays = async (cityCode: string) => {
   }
 }
 
-// --- Watchers for PSGC Cascading ---
+// --- Progressive Zoom Logic ---
+const updateMapZoom = () => {
+  if (!map.value) return
+
+  let zoomLevel = 6 // Default zoom for Philippines
+  
+  // Progressive zoom based on filled address fields
+  if (address.value.region) zoomLevel = 7
+  if (address.value.province) zoomLevel = 9
+  if (address.value.city) zoomLevel = 12
+  if (address.value.barangay) zoomLevel = 15
+  if (address.value.street || address.value.purok || address.value.house_no) zoomLevel = 17
+
+  return zoomLevel
+}
+
+// --- Watchers for PSGC Cascading (KEPT INTACT) ---
 watch(
   () => address.value.region,
   async (newRegion) => {
@@ -118,7 +179,13 @@ watch(
     address.value.city = ''
     address.value.barangay = ''
     address.value.postal_code = ''
-    if (newRegion) await fetchProvinces(newRegion)
+    if (newRegion) {
+      await fetchProvinces(newRegion)
+      if (map.value) {
+        const zoomLevel = updateMapZoom()
+        map.value.setZoom(zoomLevel)
+      }
+    }
   },
 )
 
@@ -128,7 +195,13 @@ watch(
     address.value.city = ''
     address.value.barangay = ''
     address.value.postal_code = ''
-    if (newProvince) await fetchCitiesMunicipalities(newProvince)
+    if (newProvince) {
+      await fetchCitiesMunicipalities(newProvince)
+      if (map.value) {
+        const zoomLevel = updateMapZoom()
+        map.value.setZoom(zoomLevel)
+      }
+    }
   },
 )
 
@@ -138,16 +211,52 @@ watch(
     address.value.barangay = ''
     const selectedCity = citiesMunicipalities.value.find((c) => c.code === newCity)
     if (selectedCity?.zip_code) address.value.postal_code = selectedCity.zip_code
-    if (newCity) await fetchBarangays(newCity)
+    if (newCity) {
+      await fetchBarangays(newCity)
+      if (map.value) {
+        const zoomLevel = updateMapZoom()
+        map.value.setZoom(zoomLevel)
+      }
+    }
   },
 )
+
+// --- Get User Profile ID ---
+const getUserProfileId = async () => {
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userError || !userData?.user) throw new Error('User not authenticated')
+
+    // Get the profile ID that matches the auth user
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', userData.user.id)
+      .single()
+
+    if (profileError) {
+      // If profile doesn't exist, create one
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert([{ id: userData.user.id }])
+        .select()
+        .single()
+
+      if (createError) throw new Error('Failed to create user profile')
+      return newProfile.id
+    }
+
+    return profile.id
+  } catch (err) {
+    console.error('Error getting user profile:', err)
+    throw err
+  }
+}
 
 // --- Load Address for Edit ---
 const loadAddress = async () => {
   try {
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData?.user) return router.push({ name: 'login' })
-
+    const profileId = await getUserProfileId()
     await fetchRegions()
 
     if (!addressId.value) return
@@ -156,7 +265,7 @@ const loadAddress = async () => {
       .from('addresses')
       .select('*')
       .eq('id', addressId.value)
-      .eq('user_id', userData.user.id)
+      .eq('user_id', profileId)
       .single()
 
     if (error || !data) {
@@ -203,18 +312,16 @@ const saveAddress = async () => {
     )
       throw new Error('Complete all required address fields')
 
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData?.user) throw new Error('User not authenticated')
+    const profileId = await getUserProfileId()
 
-    // ✅ Get human-readable names for all PSGC fields
+    // ✅ Get human-readable names for all PSGC fields using PSGC Cloud API data
     const regionName = regions.value.find((r) => r.code === address.value.region)?.name || ''
     const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || ''
-    const cityName =
-      citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || ''
+    const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || ''
     const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || ''
 
     const addressData = {
-      user_id: userData.user.id,
+      user_id: profileId,
       recipient_name: address.value.recipient_name,
       phone: address.value.phone,
       street: address.value.street,
@@ -223,20 +330,19 @@ const saveAddress = async () => {
       house_no: address.value.house_no,
       postal_code: address.value.postal_code,
       is_default: address.value.is_default,
-      region_name: regions.value.find((r) => r.code === address.value.region)?.name || '',
-      province_name: provinces.value.find((p) => p.code === address.value.province)?.name || '',
-      city_name: citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || '',
-      barangay_name: barangays.value.find((b) => b.code === address.value.barangay)?.name || '',
+      region_name: regionName,
+      province_name: provinceName,
+      city_name: cityName,
+      barangay_name: barangayName,
       updated_at: new Date().toISOString(),
-      created_at: isEdit.value ? undefined : new Date().toISOString(),
     }
 
-    // Default address logic
+    // Handle default address logic
     if (address.value.is_default) {
       await supabase
         .from('addresses')
         .update({ is_default: false })
-        .eq('user_id', userData.user.id)
+        .eq('user_id', profileId)
         .neq('id', addressId.value || '')
     }
 
@@ -246,16 +352,26 @@ const saveAddress = async () => {
         .from('addresses')
         .update(addressData)
         .eq('id', addressId.value)
-        .eq('user_id', userData.user.id)
+        .eq('user_id', profileId)
     } else {
       result = await supabase
         .from('addresses')
         .insert([
-          { ...addressData, user_id: userData.user.id, created_at: new Date().toISOString() },
+          { 
+            ...addressData, 
+            user_id: profileId, 
+            created_at: new Date().toISOString() 
+          }
         ])
     }
 
-    if (result.error) throw new Error(result.error.message)
+    if (result.error) {
+      // Handle unique constraint violation for default addresses
+      if (result.error.code === '23505' && result.error.message.includes('one_default_address_per_user')) {
+        throw new Error('You can only have one default address. Please unset your current default address first.')
+      }
+      throw new Error(result.error.message)
+    }
 
     successMessage.value = isEdit.value
       ? 'Address updated successfully!'
@@ -272,7 +388,7 @@ const saveAddress = async () => {
   }
 }
 
-// --- Update Map ---
+// --- Update Map with Public Geocoding Service ---
 const updateMap = async () => {
   if (!map.value) return
   const house = address.value.house_no || ''
@@ -295,19 +411,62 @@ const updateMap = async () => {
     `${house} ${street} ${purok} ${barangayName}, ${cityName}, ${provinceName}, Philippines`.trim()
 
   try {
-    const res = await fetch(`http://localhost:3000/api/geocode?q=${encodeURIComponent(query)}`)
+    // Use Nominatim (OpenStreetMap) geocoding service
+    const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1`)
     const results = await res.json()
     if (results.length > 0) {
       const { lat, lon } = results[0]
       const latNum = parseFloat(lat)
       const lonNum = parseFloat(lon)
-      map.value.setView([latNum, lonNum], 15)
-      if (marker.value) marker.value.setLatLng([latNum, lonNum])
-      else marker.value = L.marker([latNum, lonNum]).addTo(map.value)
+      const zoomLevel = updateMapZoom()
+      
+      map.value.setView([latNum, lonNum], zoomLevel)
+      
+      if (marker.value) {
+        marker.value.setLatLng([latNum, lonNum])
+      } else {
+        // Create draggable marker
+        marker.value = L.marker([latNum, lonNum], { 
+          draggable: true,
+          autoPan: true
+        }).addTo(map.value)
+        
+        // Add dragend event to update address when marker is moved
+        marker.value.on('dragend', function(event: any) {
+          const marker = event.target
+          const position = marker.getLatLng()
+          reverseGeocode(position.lat, position.lng)
+        })
+      }
+    }
+  } catch (err: any) {
+    console.error(err)
+    snackbarMessage.value = 'Map update failed: ' + (err.message || 'Geocoding service error')
+    showMapSnackbar.value = true
+  }
+}
+
+// --- Reverse Geocoding for Dragged Marker ---
+const reverseGeocode = async (lat: number, lng: number) => {
+  try {
+    // Use Nominatim reverse geocoding
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
+    const result = await res.json()
+    if (result.address) {
+      const addr = result.address
+      // Update address fields with reverse geocoded data
+      address.value.house_no = addr.house_number || address.value.house_no
+      address.value.building = addr.building || addr.specific_place || address.value.building
+      address.value.street = addr.road || address.value.street
+      address.value.purok = addr.purok || address.value.purok
+      address.value.postal_code = addr.postcode || address.value.postal_code
+      
+      snackbarMessage.value = '📍 Marker moved! Address details updated.'
+      showMapSnackbar.value = true
     }
   } catch (err) {
-    console.error(err)
-    snackbarMessage.value = 'Map update failed: ' + err.message
+    console.error('Reverse geocoding failed:', err)
+    snackbarMessage.value = 'Unable to get address details for this location'
     showMapSnackbar.value = true
   }
 }
@@ -330,20 +489,26 @@ const useCurrentLocation = async () => {
     const lng = coords.coords.longitude
 
     map.value.setView([lat, lng], 18)
-    if (marker.value) marker.value.setLatLng([lat, lng])
-    else marker.value = L.marker([lat, lng]).addTo(map.value)
-
-    const res = await fetch(`http://localhost:3000/api/reverse-geocode?lat=${lat}&lon=${lng}`)
-    const result = await res.json()
-    if (result.address) {
-      const addr = result.address
-      address.value.house_no = addr.house_number || ''
-      address.value.building = addr.building || addr.specific_place || ''
-      address.value.street = addr.road || ''
-      address.value.purok = addr.purok || ''
-      address.value.postal_code = addr.postcode || ''
-      snackbarMessage.value = '📍 Location detected! Please complete remaining details.'
+    
+    if (marker.value) {
+      marker.value.setLatLng([lat, lng])
+    } else {
+      marker.value = L.marker([lat, lng], { 
+        draggable: true,
+        autoPan: true
+      }).addTo(map.value)
+      
+      marker.value.on('dragend', function(event: any) {
+        const marker = event.target
+        const position = marker.getLatLng()
+        reverseGeocode(position.lat, position.lng)
+      })
     }
+
+    // Reverse geocode the current location
+    await reverseGeocode(lat, lng)
+    
+    snackbarMessage.value = '📍 Location detected! You can drag the marker for better accuracy.'
     showMapSnackbar.value = true
   } catch (err: any) {
     console.error(err)
@@ -362,6 +527,33 @@ onMounted(() => {
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       attribution: '© OpenStreetMap contributors',
     }).addTo(map.value)
+    
+    // Add custom fullscreen control
+    fullscreenControl.value = createFullscreenControl()
+    map.value.addControl(fullscreenControl.value)
+    
+    // Add click event to map to place/move marker
+    map.value.on('click', function(e: any) {
+      const { lat, lng } = e.latlng
+      
+      if (marker.value) {
+        marker.value.setLatLng([lat, lng])
+      } else {
+        marker.value = L.marker([lat, lng], { 
+          draggable: true,
+          autoPan: true
+        }).addTo(map.value)
+        
+        marker.value.on('dragend', function(event: any) {
+          const marker = event.target
+          const position = marker.getLatLng()
+          reverseGeocode(position.lat, position.lng)
+        })
+      }
+      
+      // Reverse geocode the clicked location
+      reverseGeocode(lat, lng)
+    })
   }
   loadAddress()
 })
@@ -433,13 +625,19 @@ watch(addressMode, (mode) => {
                     v-model="address.recipient_name"
                     label="Recipient Name"
                     variant="outlined"
+                    maxlength="100"
                   />
                 </v-col>
                 <v-col cols="12">
-                  <v-text-field v-model="address.phone" label="Phone Number" variant="outlined" />
+                  <v-text-field 
+                    v-model="address.phone" 
+                    label="Phone Number" 
+                    variant="outlined"
+                    maxlength="20"
+                  />
                 </v-col>
 
-                <!-- PSGC Address Fields -->
+                <!-- PSGC Address Fields (USING PSGC CLOUD API) -->
                 <v-col cols="12">
                   <v-select
                     v-model="address.region"
@@ -525,6 +723,7 @@ watch(addressMode, (mode) => {
                     label="Postal Code"
                     variant="outlined"
                     readonly
+                    maxlength="20"
                   />
                 </v-col>
 
@@ -539,7 +738,7 @@ watch(addressMode, (mode) => {
                 <v-col cols="12">
                   <div id="map" class="map-wrapper"></div>
                   <p class="text-caption mt-2 text-grey">
-                    Map will update automatically as you fill in address details
+                    📍 Map zooms in as you fill details. Click/tap on map or drag marker to adjust location.
                   </p>
                 </v-col>
 
@@ -581,13 +780,19 @@ watch(addressMode, (mode) => {
                   v-model="address.recipient_name"
                   label="Recipient Name"
                   variant="outlined"
+                  maxlength="100"
                 />
               </v-col>
               <v-col cols="12">
-                <v-text-field v-model="address.phone" label="Phone Number" variant="outlined" />
+                <v-text-field 
+                  v-model="address.phone" 
+                  label="Phone Number" 
+                  variant="outlined"
+                  maxlength="20"
+                />
               </v-col>
 
-              <!-- PSGC Fields for Location Mode -->
+              <!-- PSGC Fields for Location Mode (USING PSGC CLOUD API) -->
               <v-col cols="12">
                 <v-select
                   v-model="address.region"
@@ -649,13 +854,16 @@ watch(addressMode, (mode) => {
                   label="Postal Code"
                   variant="outlined"
                   readonly
+                  maxlength="20"
                 />
               </v-col>
             </v-row>
 
             <v-col cols="12" class="mt-4">
               <div id="map" class="map-wrapper"></div>
-              <p class="text-caption mt-2 text-grey">Your detected location will appear here</p>
+              <p class="text-caption mt-2 text-grey">
+                📍 Drag the marker or click/tap on map for precise location adjustment
+              </p>
             </v-col>
 
             <v-col cols="12">
@@ -692,15 +900,37 @@ watch(addressMode, (mode) => {
   border-radius: 12px;
   margin-top: 10px;
   border: 1px solid #e0e0e0;
+  position: relative;
 }
 
 :deep(.leaflet-container) {
   border-radius: 12px;
 }
 
+:deep(.leaflet-control-fullscreen) {
+  background: white;
+  border: 2px solid rgba(0,0,0,0.2);
+  border-radius: 4px;
+  width: 30px;
+  height: 30px;
+  line-height: 30px;
+  text-align: center;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+:deep(.leaflet-control-fullscreen:hover) {
+  background: #f4f4f4;
+}
+
 :deep(.leaflet-container:fullscreen) {
   width: 100vw;
   height: 100vh;
   border-radius: 0;
+}
+
+:deep(.leaflet-marker-draggable) {
+  cursor: move;
 }
 </style>
