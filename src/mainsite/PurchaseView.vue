@@ -14,14 +14,25 @@ const address = ref<any>(null)
 const deliveryOption = ref('meetup')
 const paymentMethod = ref('cash')
 const note = ref('')
-const deliveryDate = ref<string>('')
-const deliveryTime = ref<string>('')
 const showDateTimePicker = ref(false)
 const showDialog = ref(false)
 const countdown = ref(300)
 const currentOrderId = ref<string>('')
 const transactionNumber = ref('')
 const shopId = ref<string>('your_shop_id_here')
+
+// 🕒 Initialize with current date and time
+const now = new Date()
+const deliveryDate = ref<string>(now.toISOString().split('T')[0])
+const deliveryTime = ref<string>(
+  `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`,
+)
+
+// Time picker defaults based on current time
+const currentHour12 = now.getHours() % 12 || 12
+const selectedHour = ref(currentHour12.toString().padStart(2, '0'))
+const selectedMinute = ref(now.getMinutes().toString().padStart(2, '0'))
+const selectedPeriod = ref<'AM' | 'PM'>(now.getHours() >= 12 ? 'PM' : 'AM')
 
 //load transaction number on mount
 onMounted(() => {
@@ -232,9 +243,6 @@ const deliveryOptionsDisplay = computed(() =>
 // 🕓 TIME PICKER (12-hour)
 const hours12 = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'))
 const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'))
-const selectedHour = ref('09')
-const selectedMinute = ref('00')
-const selectedPeriod = ref<'AM' | 'PM'>('AM')
 
 const updateTime = () => {
   let hourNum = parseInt(selectedHour.value)
@@ -242,14 +250,22 @@ const updateTime = () => {
   if (selectedPeriod.value === 'AM' && hourNum === 12) hourNum = 0
   deliveryTime.value = `${hourNum.toString().padStart(2, '0')}:${selectedMinute.value}`
 }
+
 const selectHour = (hour: string) => {
   selectedHour.value = hour
   updateTime()
 }
+
 const selectMinute = (minute: string) => {
   selectedMinute.value = minute
   updateTime()
 }
+
+// Initialize time on component mount and watch for changes
+onMounted(() => {
+  updateTime() // Set initial time
+})
+
 watch(selectedPeriod, updateTime)
 
 const confirmDateTime = () => {
@@ -260,8 +276,19 @@ const confirmDateTime = () => {
   }
   showDateTimePicker.value = false
 }
-</script>
 
+// Format date for display (optional)
+const formattedDate = computed(() => {
+  if (!deliveryDate.value) return 'Not set'
+  const date = new Date(deliveryDate.value)
+  return date.toLocaleDateString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+})
+</script>
 <template>
   <v-app>
     <v-main>
@@ -283,7 +310,7 @@ const confirmDateTime = () => {
               </p>
               <p><strong>Transaction No.:</strong> {{ transactionNumber }}</p>
               <p>
-                <strong>Delivery Schedule:</strong> {{ deliveryDate || 'Not set' }}
+                <strong>Delivery Schedule:</strong> {{ formattedDate }}
                 {{ deliveryTime ? `at ${deliveryTime}` : '' }}
               </p>
               <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
@@ -304,7 +331,6 @@ const confirmDateTime = () => {
             </div>
           </v-card-text>
         </v-card>
-
         <!-- Items -->
         <v-card outlined class="mb-4 card-elevated">
           <v-card-title class="card-title">Items to Purchase</v-card-title>
@@ -392,10 +418,10 @@ const confirmDateTime = () => {
             <div class="total-label">Total Amount:</div>
             <div class="total-amount">₱{{ totalPrice }}</div>
           </div>
-          <v-btn 
-            color="primary" 
-            size="large" 
-            @click="handleCheckout" 
+          <v-btn
+            color="primary"
+            size="large"
+            @click="handleCheckout"
             class="place-order-btn"
             :disabled="!items.length"
             block
@@ -411,9 +437,7 @@ const confirmDateTime = () => {
           <v-card-title class="dialog-title">Checkout Successful</v-card-title>
           <v-card-text class="dialog-content">
             <p>Note: You have <strong>5 minutes</strong> to cancel this order.</p>
-            <p class="countdown-timer">
-              Time Remaining: {{ formatTime(countdown) }}
-            </p>
+            <p class="countdown-timer">Time Remaining: {{ formatTime(countdown) }}</p>
           </v-card-text>
           <v-card-actions class="dialog-actions">
             <v-btn
@@ -498,7 +522,11 @@ const confirmDateTime = () => {
             <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn"
               >Cancel</v-btn
             >
-            <v-btn color="primary" variant="flat" @click="confirmDateTime" class="confirm-datetime-btn"
+            <v-btn
+              color="primary"
+              variant="flat"
+              @click="confirmDateTime"
+              class="confirm-datetime-btn"
               >Confirm</v-btn
             >
           </v-card-actions>
@@ -745,7 +773,8 @@ const confirmDateTime = () => {
   padding: 0 24px 16px;
 }
 
-.cancel-btn, .ok-btn {
+.cancel-btn,
+.ok-btn {
   min-width: 120px;
 }
 
@@ -873,7 +902,8 @@ const confirmDateTime = () => {
   padding: 16px 20px 20px;
 }
 
-.cancel-datetime-btn, .confirm-datetime-btn {
+.cancel-datetime-btn,
+.confirm-datetime-btn {
   min-width: 80px;
 }
 
