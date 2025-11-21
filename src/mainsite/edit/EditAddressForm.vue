@@ -88,7 +88,7 @@ const createFullscreenControl = () => {
   return new FullscreenControl()
 }
 
-// --- PSGC API Functions (KEPT INTACT) ---
+// --- PSGC API Functions (KEPT INTACT - NEVER REMOVED) ---
 const fetchRegions = async () => {
   try {
     const res = await fetch('https://psgc.cloud/api/regions')
@@ -155,6 +155,35 @@ const fetchBarangays = async (cityCode: string) => {
   }
 }
 
+// --- PSGC Code Matching Functions (USING PSGC CLOUD API DATA) ---
+const findRegionCode = (regionName: string) => {
+  return regions.value.find((r: any) => 
+    r.name.toLowerCase().includes(regionName.toLowerCase()) ||
+    regionName.toLowerCase().includes(r.name.toLowerCase())
+  )?.code || ''
+}
+
+const findProvinceCode = (provinceName: string) => {
+  return provinces.value.find((p: any) => 
+    p.name.toLowerCase().includes(provinceName.toLowerCase()) ||
+    provinceName.toLowerCase().includes(p.name.toLowerCase())
+  )?.code || ''
+}
+
+const findCityCode = (cityName: string) => {
+  return citiesMunicipalities.value.find((c: any) => 
+    c.name.toLowerCase().includes(cityName.toLowerCase()) ||
+    cityName.toLowerCase().includes(c.name.toLowerCase())
+  )?.code || ''
+}
+
+const findBarangayCode = (barangayName: string) => {
+  return barangays.value.find((b: any) => 
+    b.name.toLowerCase().includes(barangayName.toLowerCase()) ||
+    barangayName.toLowerCase().includes(b.name.toLowerCase())
+  )?.code || ''
+}
+
 // --- Progressive Zoom Logic ---
 const updateMapZoom = () => {
   if (!map.value) return
@@ -171,7 +200,7 @@ const updateMapZoom = () => {
   return zoomLevel
 }
 
-// --- Watchers for PSGC Cascading (KEPT INTACT) ---
+// --- Watchers for PSGC Cascading (KEPT INTACT - USING PSGC CLOUD API) ---
 watch(
   () => address.value.region,
   async (newRegion) => {
@@ -471,10 +500,10 @@ const reverseGeocode = async (lat: number, lng: number) => {
   }
 }
 
-// --- Current Location ---
+// --- Enhanced Current Location Detection ---
 const useCurrentLocation = async () => {
   try {
-    snackbarMessage.value = 'Detecting your precise location...'
+    snackbarMessage.value = 'Detecting your precise location and address...'
     showMapSnackbar.value = true
     isLoading.value = true
 
@@ -488,6 +517,7 @@ const useCurrentLocation = async () => {
     const lat = coords.coords.latitude
     const lng = coords.coords.longitude
 
+    // Set map view and marker
     map.value.setView([lat, lng], 18)
     
     if (marker.value) {
@@ -505,10 +535,10 @@ const useCurrentLocation = async () => {
       })
     }
 
-    // Reverse geocode the current location
-    await reverseGeocode(lat, lng)
+    // Enhanced reverse geocoding to fill all address fields
+    await enhancedReverseGeocode(lat, lng)
     
-    snackbarMessage.value = '📍 Location detected! You can drag the marker for better accuracy.'
+    snackbarMessage.value = '📍 Location detected! Address fields have been automatically filled.'
     showMapSnackbar.value = true
   } catch (err: any) {
     console.error(err)
@@ -516,6 +546,103 @@ const useCurrentLocation = async () => {
     showMapSnackbar.value = true
   } finally {
     isLoading.value = false
+  }
+}
+
+// --- Enhanced Reverse Geocoding for Current Location ---
+const enhancedReverseGeocode = async (lat: number, lng: number) => {
+  try {
+    // Use Nominatim reverse geocoding with more details
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`)
+    const result = await res.json()
+    
+    if (result.address) {
+      const addr = result.address
+      
+      // Clear existing address data first
+      address.value.region = ''
+      address.value.province = ''
+      address.value.city = ''
+      address.value.barangay = ''
+      address.value.street = ''
+      address.value.purok = ''
+      address.value.building = ''
+      address.value.house_no = ''
+      address.value.postal_code = ''
+      
+      // Update address fields with reverse geocoded data
+      address.value.house_no = addr.house_number || ''
+      address.value.building = addr.building || addr.specific_place || ''
+      address.value.street = addr.road || ''
+      address.value.purok = addr.purok || ''
+      address.value.postal_code = addr.postcode || ''
+      
+      // Extract and match Philippine administrative divisions
+      const regionName = addr.state || addr.region || ''
+      const provinceName = addr.state_district || addr.province || ''
+      const cityName = addr.city || addr.town || addr.municipality || ''
+      const barangayName = addr.suburb || addr.village || addr.neighbourhood || ''
+      
+      // Ensure we have regions data loaded from PSGC Cloud API
+      if (regions.value.length === 0) {
+        await fetchRegions()
+      }
+      
+      // Find and set region code using PSGC Cloud API data
+      if (regionName) {
+        const regionCode = findRegionCode(regionName)
+        if (regionCode) {
+          address.value.region = regionCode
+          await fetchProvinces(regionCode) // Uses PSGC Cloud API
+          
+          // Find and set province code using PSGC Cloud API data
+          if (provinceName) {
+            setTimeout(async () => {
+              const provinceCode = findProvinceCode(provinceName)
+              if (provinceCode) {
+                address.value.province = provinceCode
+                await fetchCitiesMunicipalities(provinceCode) // Uses PSGC Cloud API
+                
+                // Find and set city code using PSGC Cloud API data
+                if (cityName) {
+                  setTimeout(async () => {
+                    const cityCode = findCityCode(cityName)
+                    if (cityCode) {
+                      address.value.city = cityCode
+                      await fetchBarangays(cityCode) // Uses PSGC Cloud API
+                      
+                      // Find and set barangay code using PSGC Cloud API data
+                      if (barangayName) {
+                        setTimeout(() => {
+                          const barangayCode = findBarangayCode(barangayName)
+                          if (barangayCode) {
+                            address.value.barangay = barangayCode
+                          }
+                        }, 500)
+                      }
+                    }
+                  }, 500)
+                }
+              }
+            }, 500)
+          }
+        }
+      }
+      
+      console.log('Enhanced reverse geocoding result:', {
+        raw: addr,
+        matched: {
+          region: address.value.region,
+          province: address.value.province,
+          city: address.value.city,
+          barangay: address.value.barangay
+        }
+      })
+    }
+  } catch (err) {
+    console.error('Enhanced reverse geocoding failed:', err)
+    snackbarMessage.value = 'Unable to get complete address details for this location'
+    showMapSnackbar.value = true
   }
 }
 
@@ -612,6 +739,9 @@ watch(addressMode, (mode) => {
               <v-radio label="Manual Input" value="manual" />
               <v-radio label="Use My Current Location" value="location" />
             </v-radio-group>
+            <p class="text-caption text-grey mt-2" v-if="addressMode === 'location'">
+              Click the button below to detect your current location and automatically fill all address fields using PSGC data.
+            </p>
           </v-card-text>
         </v-card>
 
@@ -637,7 +767,7 @@ watch(addressMode, (mode) => {
                   />
                 </v-col>
 
-                <!-- PSGC Address Fields (USING PSGC CLOUD API) -->
+                <!-- PSGC Address Fields (USING PSGC CLOUD API - NEVER REMOVED) -->
                 <v-col cols="12">
                   <v-select
                     v-model="address.region"
@@ -769,10 +899,16 @@ watch(addressMode, (mode) => {
               @click="useCurrentLocation"
               :loading="isLoading"
               variant="outlined"
+              block
+              size="large"
             >
               <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
-              Detect My Location
+              {{ isLoading ? 'Detecting Location...' : 'Detect My Location & Fill Address' }}
             </v-btn>
+
+            <p class="text-caption text-grey mt-2">
+              This will use your device's GPS to detect your exact location and automatically populate all address fields using PSGC Cloud API data.
+            </p>
 
             <v-row class="mt-4">
               <v-col cols="12">
@@ -792,7 +928,7 @@ watch(addressMode, (mode) => {
                 />
               </v-col>
 
-              <!-- PSGC Fields for Location Mode (USING PSGC CLOUD API) -->
+              <!-- PSGC Fields for Location Mode (USING PSGC CLOUD API - NEVER REMOVED) -->
               <v-col cols="12">
                 <v-select
                   v-model="address.region"
@@ -850,6 +986,30 @@ watch(addressMode, (mode) => {
 
               <v-col cols="12">
                 <v-text-field
+                  v-model="address.purok"
+                  label="Purok/Subdivision"
+                  variant="outlined"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.building"
+                  label="Building/Apartment"
+                  variant="outlined"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-text-field
+                  v-model="address.house_no"
+                  label="House/Lot No."
+                  variant="outlined"
+                />
+              </v-col>
+
+              <v-col cols="12">
+                <v-text-field
                   v-model="address.postal_code"
                   label="Postal Code"
                   variant="outlined"
@@ -862,7 +1022,7 @@ watch(addressMode, (mode) => {
             <v-col cols="12" class="mt-4">
               <div id="map" class="map-wrapper"></div>
               <p class="text-caption mt-2 text-grey">
-                📍 Drag the marker or click/tap on map for precise location adjustment
+                📍 Your detected location will appear here. You can drag the marker or click/tap on map for precise adjustment.
               </p>
             </v-col>
 
@@ -884,7 +1044,7 @@ watch(addressMode, (mode) => {
               size="large"
             >
               <v-icon class="me-2">mdi-check</v-icon>
-              {{ isLoading ? 'Saving...' : 'Save Current Location' }}
+              {{ isLoading ? 'Saving...' : 'Save Current Location Address' }}
             </v-btn>
           </v-card-text>
         </v-card>
