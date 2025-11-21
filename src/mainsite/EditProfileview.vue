@@ -96,17 +96,18 @@ const loadUserAddress = async () => {
       // ✅ Set phone number from latest address if not set already
       if (!formData.value.phone && a.phone) {
         formData.value.phone = a.phone
+        
       }
     } else {
-      userAddress.value = 'No address set'
+      userAddress.value = 'Add address'
     }
   } catch (error) {
     console.error('Error loading user address:', error)
-    userAddress.value = 'Failed to load address'
+    userAddress.value = 'Add address'
   }
 }
 
-// Upload avatar
+// Upload avatar with improved error handling
 async function uploadAvatar(file) {
   if (!file) return
   try {
@@ -122,21 +123,29 @@ async function uploadAvatar(file) {
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(filePath, file, { upsert: true })
+      .upload(filePath, file, { 
+        upsert: true,
+        cacheControl: '3600'
+      })
+    
     if (uploadError) throw uploadError
 
     const {
       data: { publicUrl },
     } = supabase.storage.from('avatars').getPublicUrl(filePath)
 
-    await supabase.from('profiles').update({ avatar_url: publicUrl }).eq('id', user.id)
+    const { error: updateError } = await supabase.from('profiles')
+      .update({ avatar_url: publicUrl })
+      .eq('id', user.id)
+
+    if (updateError) throw updateError
 
     avatarUrl.value = `${publicUrl}?t=${Date.now()}`
     if (authStore.profile) authStore.profile.avatar_url = publicUrl
     showSuccessMessage('Profile picture updated successfully!')
   } catch (error) {
-    console.error(error)
-    showSuccessMessage('Failed to upload profile picture')
+    console.error('Error uploading avatar:', error)
+    showSuccessMessage('Failed to upload profile picture. Please try again.')
   } finally {
     uploading.value = false
   }
@@ -148,31 +157,46 @@ const showSuccessMessage = (message) => {
   setTimeout(() => (showSuccess.value = false), 3000)
 }
 
-// Pick image
+// Improved image picker with better error handling
 const pickImage = async (source) => {
   try {
+    showPicker.value = false // Close picker immediately when option is selected
+    
     const photo = await Camera.getPhoto({
       quality: 90,
-      allowEditing: true,
-      resultType: CameraResultType.Uri,
+      allowEditing: false, // Set to false for better UX
+      resultType: CameraResultType.DataUrl, // Use DataUrl for better compatibility
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
+      width: 500,
+      height: 500,
+      correctOrientation: true
     })
 
-    if (photo?.webPath) {
-      const response = await fetch(photo.webPath)
+    if (photo?.dataUrl) {
+      // Convert DataUrl to blob
+      const response = await fetch(photo.dataUrl)
       const blob = await response.blob()
-      await uploadAvatar(blob)
+      
+      // Create a file object with proper name and type
+      const file = new File([blob], `avatar-${Date.now()}.jpg`, { 
+        type: 'image/jpeg',
+        lastModified: Date.now()
+      })
+      
+      await uploadAvatar(file)
     }
   } catch (error) {
-    if (error.message.includes('User cancelled')) {
-      // User closed camera without taking photo
-      console.log('Camera closed by user')
+    if (error.message.includes('User cancelled') || error.message === 'User cancelled photos app') {
+      // User closed camera or gallery without selecting
+      console.log('User cancelled image selection')
+    } else if (error.message.includes('No photos')) {
+      showSuccessMessage('No photos found in gallery')
+    } else if (error.message.includes('Permission')) {
+      showSuccessMessage('Camera permission is required to take photos')
     } else {
-      console.error(error)
-      showSuccessMessage('Failed to select image')
+      console.error('Error picking image:', error)
+      showSuccessMessage('Failed to select image. Please try again.')
     }
-  } finally {
-    showPicker.value = false
   }
 }
 
@@ -222,6 +246,11 @@ const fullName = computed(() => {
   const last = formData.value.lastName || ''
   return `${first} ${last}`.trim()
 })
+
+// Computed property for phone display
+const displayPhone = computed(() => {
+  return formData.value.phone || 'Add phone number'
+})
 </script>
 
 <template>
@@ -258,6 +287,7 @@ const fullName = computed(() => {
                 elevation="4"
                 @click="showPicker = true"
                 :loading="uploading"
+                :disabled="uploading"
               >
                 <v-icon size="18">mdi-pencil</v-icon>
               </v-btn>
@@ -288,7 +318,11 @@ const fullName = computed(() => {
                       <!-- Phone -->
                       <v-list-item class="list-item" @click="router.push({ name: 'edit-phone' })">
                         <v-list-item-title class="font-medium">Phone</v-list-item-title>
-                        <v-list-item-subtitle>{{ formData.phone }}</v-list-item-subtitle>
+                        <v-list-item-subtitle 
+                          :class="{ 'text-grey': !formData.phone }"
+                        >
+                          {{ displayPhone }}
+                        </v-list-item-subtitle>
                         <template #append>
                           <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
                         </template>
@@ -310,7 +344,11 @@ const fullName = computed(() => {
                       <!-- Address -->
                       <v-list-item class="list-item" @click="router.push({ name: 'my-address' })">
                         <v-list-item-title class="font-medium">Address</v-list-item-title>
-                        <v-list-item-subtitle>{{ userAddress }}</v-list-item-subtitle>
+                        <v-list-item-subtitle 
+                          :class="{ 'text-grey': userAddress === 'Add address' }"
+                        >
+                          {{ userAddress }}
+                        </v-list-item-subtitle>
                         <template #append>
                           <v-icon color="grey-darken-1">mdi-chevron-right</v-icon>
                         </template>
@@ -325,25 +363,58 @@ const fullName = computed(() => {
       </v-container>
     </v-main>
 
-    <!-- Bottom Sheet for Image Picker -->
-    <v-bottom-sheet v-model="showPicker">
-      <v-card flat>
-        <v-card-title class="d-flex justify-end">
-          <v-btn icon @click="showPicker = false">
+    <!-- Improved Bottom Sheet for Image Picker -->
+    <v-bottom-sheet v-model="showPicker" inset>
+      <v-card class="bottom-sheet-card" rounded="t-xl">
+        <v-card-title class="d-flex justify-space-between align-center pa-4">
+          <span class="text-h6 font-weight-bold">Change Profile Photo</span>
+          <v-btn icon @click="showPicker = false" variant="text">
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-card-title>
 
-        <v-list>
-          <v-list-item @click="pickImage('camera')">
-            <v-icon icon="mdi-camera" class="me-3"></v-icon>
-            <v-list-item-title>Take Photo</v-list-item-title>
+        <v-divider></v-divider>
+
+        <v-list class="py-0">
+          <v-list-item 
+            @click="pickImage('camera')"
+            class="pa-4 list-item-action"
+          >
+            <template #prepend>
+              <v-avatar color="primary" variant="tonal" size="40" rounded>
+                <v-icon color="primary">mdi-camera</v-icon>
+              </v-avatar>
+            </template>
+            <v-list-item-title class="font-weight-medium">Take Photo</v-list-item-title>
+            <v-list-item-subtitle>Use your camera to take a new photo</v-list-item-subtitle>
           </v-list-item>
-          <v-list-item @click="pickImage('gallery')">
-            <v-icon icon="mdi-image" class="me-3"></v-icon>
-            <v-list-item-title>Choose from Gallery</v-list-item-title>
+
+          <v-divider />
+
+          <v-list-item 
+            @click="pickImage('gallery')"
+            class="pa-4 list-item-action"
+          >
+            <template #prepend>
+              <v-avatar color="secondary" variant="tonal" size="40" rounded>
+                <v-icon color="secondary">mdi-image-multiple</v-icon>
+              </v-avatar>
+            </template>
+            <v-list-item-title class="font-weight-medium">Choose from Gallery</v-list-item-title>
+            <v-list-item-subtitle>Select a photo from your gallery</v-list-item-subtitle>
           </v-list-item>
         </v-list>
+
+        <v-card-actions class="pa-4">
+          <v-btn 
+            block 
+            variant="text" 
+            @click="showPicker = false"
+            class="cancel-btn"
+          >
+            Cancel
+          </v-btn>
+        </v-card-actions>
       </v-card>
     </v-bottom-sheet>
   </v-app>
@@ -380,6 +451,7 @@ const fullName = computed(() => {
   border: 2px solid white;
   border-radius: 50%;
   transition: transform 0.2s ease;
+  background-color: #3f83c7;
 }
 .edit-btn:hover {
   transform: scale(1.1);
@@ -391,6 +463,11 @@ const fullName = computed(() => {
 .list-item {
   padding-top: 14px;
   padding-bottom: 14px;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+.list-item:hover {
+  background-color: #f5f5f5;
 }
 .v-list-item-title {
   font-weight: 500;
@@ -399,5 +476,31 @@ const fullName = computed(() => {
 .v-list-item-subtitle {
   font-size: 14px;
   color: #555;
+}
+.text-grey {
+  color: #9e9e9e !important;
+  font-style: italic;
+}
+
+/* Bottom Sheet Styles */
+.bottom-sheet-card {
+  border-radius: 16px 16px 0 0 !important;
+}
+.list-item-action {
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+}
+.list-item-action:hover {
+  background-color: #f8f9fa;
+}
+.cancel-btn {
+  border-radius: 10px;
+  font-weight: 600;
+}
+
+/* Loading state for avatar button */
+.edit-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 </style>
