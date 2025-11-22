@@ -370,7 +370,7 @@ function saveCachedLocation(lat: number, lng: number) {
   }
 }
 
-/* -------------------- MAP INITIALIZATION -------------------- */
+/* -------------------- ENHANCED MAP INITIALIZATION -------------------- */
 const initializeMap = (): Promise<void> => {
   return new Promise((resolve) => {
     if (map.value) {
@@ -394,9 +394,9 @@ const initializeMap = (): Promise<void> => {
         map.value = L.map('map', {
           center: [8.95, 125.53],
           zoom: 13,
-          zoomAnimation: false,
-          fadeAnimation: false,
-          markerZoomAnimation: false,
+          zoomAnimation: true, // Enable animations for smoother recentering
+          fadeAnimation: true,
+          markerZoomAnimation: true,
         })
 
         L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
@@ -410,6 +410,11 @@ const initializeMap = (): Promise<void> => {
           .addTo(map.value)
           .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
           .openPopup()
+
+        // Add click handler for debug
+        map.value.on('click', (e) => {
+          console.log('Map clicked at:', e.latlng)
+        })
 
         map.value.whenReady(() => {
           console.log('Map is fully ready')
@@ -442,36 +447,40 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
     // Clear previous boundary
     clearCityBoundary()
 
-    // Get city name first
-    const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&zoom=10`
+    // Get city name first using Nominatim
+    const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`
     const osmRes = await fetch(osmUrl, {
-      headers: { 'User-Agent': 'CloseShop-App' },
+      headers: { 'User-Agent': 'CloseShop-App/1.0' },
     })
 
     if (!osmRes.ok) {
       console.warn('Failed to fetch city name from Nominatim')
+      userCity.value = null
       return
     }
 
     const osmData = await osmRes.json()
     const address = osmData.address
 
-    const cityName = address.city || address.town || address.village || address.municipality
+    // Try different address fields for city name
+    const cityName =
+      address.city || address.town || address.village || address.municipality || address.county
+
     if (!cityName) {
       console.warn('No city name found in address:', address)
+      userCity.value = null
       return
     }
 
     userCity.value = cityName
     console.log('Detected city:', cityName)
 
-    // Now fetch the boundary using Overpass API
+    // Now fetch the boundary using Overpass API - simplified query
     const overpassQuery = `
-      [out:json][timeout:25];
+      [out:json][timeout:30];
       (
-        relation["boundary"="administrative"]["admin_level"="8"]["name"="${cityName}"];
-        relation["boundary"="administrative"]["admin_level"="7"]["name"="${cityName}"];
-        relation["boundary"="administrative"]["admin_level"="6"]["name"="${cityName}"];
+        relation["boundary"="administrative"]["name"="${cityName}"];
+        way["boundary"="administrative"]["name"="${cityName}"];
       );
       out body;
       >;
@@ -479,9 +488,9 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
     `
 
     const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`
-    
+
     const overpassRes = await fetch(overpassUrl, {
-      headers: { 'User-Agent': 'CloseShop-App' },
+      headers: { 'User-Agent': 'CloseShop-App/1.0' },
     })
 
     if (!overpassRes.ok) {
@@ -496,19 +505,9 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
       return
     }
 
-    // Find the boundary relation
-    const boundaryRelation = overpassData.elements.find(
-      (element: any) => element.type === 'relation' && element.tags?.boundary === 'administrative'
-    )
+    // Extract polygon coordinates from the boundary data
+    const polygonCoords = extractPolygonCoordinates(overpassData.elements)
 
-    if (!boundaryRelation) {
-      console.warn('No boundary relation found')
-      return
-    }
-
-    // Extract polygon coordinates from the boundary relation
-    const polygonCoords = extractPolygonFromRelation(boundaryRelation, overpassData.elements)
-    
     if (polygonCoords && polygonCoords.length > 0) {
       // Create and style the boundary polygon
       cityBoundaryPolygon.value = L.polygon(polygonCoords, {
@@ -540,77 +539,113 @@ const highlightUserCityBoundary = async (lat: number, lon: number) => {
       errorMsg.value = `City boundary loaded: ${cityName}. Showing shops within city.`
     } else {
       console.warn('Could not extract polygon coordinates from boundary data')
-      errorMsg.value = `City detected: ${cityName}, but boundary data not available.`
+      errorMsg.value = `City detected: ${cityName}, but boundary data not available. Using city name for filtering.`
     }
-
   } catch (error) {
     console.error('Failed to detect city boundary:', error)
+    userCity.value = null
     errorMsg.value = 'Could not load city boundary. Using default filtering.'
   } finally {
     boundaryLoading.value = false
   }
 }
 
-/* -------------------- EXTRACT POLYGON FROM RELATION -------------------- */
-const extractPolygonFromRelation = (relation: any, elements: any[]): [number, number][] | null => {
+/* -------------------- SIMPLIFIED POLYGON EXTRACTION -------------------- */
+const extractPolygonCoordinates = (elements: any[]): [number, number][] | null => {
   try {
-    const members = relation.members || []
-    
-    // Find outer way members
-    const outerWays = members
-      .filter((member: any) => member.type === 'way' && member.role === 'outer')
-      .map((member: any) => elements.find((el: any) => el.type === 'way' && el.id === member.ref))
-      .filter(Boolean)
+    // Find boundary relation or way
+    const boundaryElement = elements.find(
+      (element: any) => element.type === 'relation' || element.type === 'way',
+    )
 
-    if (outerWays.length === 0) {
-      console.warn('No outer ways found in boundary relation')
+    if (!boundaryElement) {
       return null
     }
 
-    // For simplicity, use the first outer way (complex boundaries may have multiple)
-    const way = outerWays[0]
-    if (!way.nodes || way.nodes.length === 0) {
-      console.warn('Way has no nodes')
-      return null
-    }
+    let coords: [number, number][] = []
 
-    // Convert node references to coordinates
-    const coords: [number, number][] = []
-    for (const nodeId of way.nodes) {
-      const node = elements.find((el: any) => el.type === 'node' && el.id === nodeId)
-      if (node) {
-        coords.push([node.lat, node.lon])
+    if (boundaryElement.type === 'relation') {
+      // For relations, get members and build coordinates
+      const members = boundaryElement.members || []
+      const ways = members
+        .filter((member: any) => member.type === 'way' && member.role === 'outer')
+        .map((member: any) => elements.find((el: any) => el.type === 'way' && el.id === member.ref))
+        .filter(Boolean)
+
+      if (ways.length === 0) {
+        return null
+      }
+
+      // Use the first outer way
+      const way = ways[0]
+      if (way.nodes && way.nodes.length > 0) {
+        for (const nodeId of way.nodes) {
+          const node = elements.find((el: any) => el.type === 'node' && el.id === nodeId)
+          if (node) {
+            coords.push([node.lat, node.lon])
+          }
+        }
+      }
+    } else if (boundaryElement.type === 'way') {
+      // For ways, directly use the nodes
+      if (boundaryElement.nodes && boundaryElement.nodes.length > 0) {
+        for (const nodeId of boundaryElement.nodes) {
+          const node = elements.find((el: any) => el.type === 'node' && el.id === nodeId)
+          if (node) {
+            coords.push([node.lat, node.lon])
+          }
+        }
       }
     }
 
-    // Close the polygon if not already closed
-    if (coords.length > 2 && (coords[0][0] !== coords[coords.length - 1][0] || coords[0][1] !== coords[coords.length - 1][1])) {
+    // Close the polygon if not already closed and we have enough points
+    if (
+      coords.length >= 3 &&
+      (coords[0][0] !== coords[coords.length - 1][0] ||
+        coords[0][1] !== coords[coords.length - 1][1])
+    ) {
       coords.push([coords[0][0], coords[0][1]])
     }
 
     return coords.length >= 3 ? coords : null
   } catch (error) {
-    console.error('Error extracting polygon from relation:', error)
+    console.error('Error extracting polygon coordinates:', error)
     return null
   }
 }
-
 /* -------------------- CHECK IF SHOP IS WITHIN BOUNDARY -------------------- */
 const isShopWithinBoundary = (shop: any): boolean => {
   if (!cityBoundaryPolygon.value || !shop.latitude || !shop.longitude) {
-    return false
+    // Fallback: check if shop city matches user city
+    return isShopInSameCity(shop)
   }
 
   const shopLat = Number(shop.latitude)
   const shopLng = Number(shop.longitude)
-  
+
   if (!isFinite(shopLat) || !isFinite(shopLng)) {
-    return false
+    return isShopInSameCity(shop)
   }
 
   // Use Leaflet's contains method to check if point is within polygon
   const shopPoint = L.latLng(shopLat, shopLng)
   return cityBoundaryPolygon.value.getBounds().contains(shopPoint)
+}
+
+/* -------------------- FALLBACK: CHECK IF SHOP IS IN SAME CITY BY NAME -------------------- */
+const isShopInSameCity = (shop: any): boolean => {
+  if (!userCity.value || !shop.city) return false
+
+  const normalizeName = (name: string) => name.toLowerCase().replace(/\s+/g, ' ').trim()
+
+  const userCityNormalized = normalizeName(userCity.value)
+  const shopCityNormalized = normalizeName(shop.city)
+
+  return (
+    userCityNormalized === shopCityNormalized ||
+    shopCityNormalized.includes(userCityNormalized) ||
+    userCityNormalized.includes(shopCityNormalized)
+  )
 }
 
 /* -------------------- DISTANCE CALCULATION -------------------- */
@@ -670,10 +705,10 @@ const doFetchShops = async () => {
       const lng = Number(s.longitude)
       const distanceKm =
         isFinite(lat) && isFinite(lng) ? getDistanceKm(userLat, userLng, lat, lng) : Infinity
-      
+
       // Check if shop is within city boundary
       const withinBoundary = isShopWithinBoundary(s)
-      
+
       return {
         ...s,
         distanceKm,
@@ -702,13 +737,17 @@ const fetchShops = () => {
 /* -------------------- APPLY SHOP FILTERS BASED ON DISPLAY MODE -------------------- */
 const applyShopFilters = () => {
   if (shopDisplayMode.value === 'within') {
-    // Show only shops within city boundary
-    filteredShops.value = shops.value.filter(shop => shop.withinBoundary)
+    // Show only shops within city boundary or same city
+    filteredShops.value = shops.value.filter(
+      (shop) => shop.withinBoundary || isShopInSameCity(shop),
+    )
   } else {
-    // Show only shops outside city boundary
-    filteredShops.value = shops.value.filter(shop => !shop.withinBoundary)
+    // Show only shops outside city boundary and different city
+    filteredShops.value = shops.value.filter(
+      (shop) => !shop.withinBoundary && !isShopInSameCity(shop),
+    )
   }
-  
+
   plotShops()
 }
 
@@ -716,11 +755,15 @@ const applyShopFilters = () => {
 const toggleDisplayMode = (mode: 'within' | 'outside') => {
   shopDisplayMode.value = mode
   applyShopFilters()
-  
+
   if (userCity.value) {
-    errorMsg.value = mode === 'within' 
-      ? `Showing shops within ${userCity.value}`
-      : `Showing shops outside ${userCity.value}`
+    errorMsg.value =
+      mode === 'within'
+        ? `Showing shops within ${userCity.value}`
+        : `Showing shops outside ${userCity.value}`
+  } else {
+    errorMsg.value =
+      mode === 'within' ? 'Showing shops in your area' : 'Showing shops outside your area'
   }
 }
 
@@ -780,9 +823,9 @@ const plotShops = () => {
       .join('')
 
     // Add boundary status to popup
-    const boundaryStatus = shop.withinBoundary 
-      ? '<span style="color: #10b981;">✓ Within City</span>' 
-      : '<span style="color: #ef4444;">✗ Outside City</span>'
+    const boundaryStatus = shop.withinBoundary
+    // ? '<span style="color: #10b981;">✓ Within City</span>'
+    // : '<span style="color: #ef4444;">✗ Outside City</span>'
 
     marker.bindPopup(`
       <div style="text-align:center; min-width: 220px;">
@@ -1410,45 +1453,134 @@ const updateShops = async () => {
 }
 
 /* -------------------- USER LOCATION TRACKING -------------------- */
-watch([latitude, longitude], async ([lat, lng]) => {
-  if (!map.value || lat == null || lng == null) return
-  const userLat = Number(lat)
-  const userLng = Number(lng)
-  if (!isFinite(userLat) || !isFinite(userLng)) return
+const hasValidLocation = ref(false)
 
-  const now = Date.now()
-  if (now - lastUpdateTs < 1000) {
+// Enhanced location watcher
+watch(
+  [latitude, longitude],
+  async ([lat, lng]) => {
+    if (!map.value || lat == null || lng == null) return
+
+    const userLat = Number(lat)
+    const userLng = Number(lng)
+
+    if (!isFinite(userLat) || !isFinite(userLng)) return
+
+    const now = Date.now()
+    if (now - lastUpdateTs < 1000) {
+      saveCachedLocation(userLat, userLng)
+      return
+    }
+    lastUpdateTs = now
+
+    // Update hasValidLocation
+    hasValidLocation.value = true
+
+    if (userMarker) {
+      userMarker.setLatLng([userLat, userLng])
+      userMarker.setPopupContent('You are here')
+    } else {
+      userMarker = L.marker([userLat, userLng], { icon: userIcon })
+        .addTo(map.value)
+        .bindPopup('You are here')
+        .openPopup()
+    }
+
     saveCachedLocation(userLat, userLng)
-    return
-  }
-  lastUpdateTs = now
 
-  if (userMarker) {
-    userMarker.setLatLng([userLat, userLng])
-    userMarker.setPopupContent('You are here')
-  } else {
-    userMarker = L.marker([userLat, userLng], { icon: userIcon })
-      .addTo(map.value)
-      .bindPopup('You are here')
-      .openPopup()
-  }
+    // Load city boundary when user location changes
+    await highlightUserCityBoundary(userLat, userLng)
 
-  saveCachedLocation(userLat, userLng)
-  
-  // Load city boundary when user location changes
-  await highlightUserCityBoundary(userLat, userLng)
-  
-  void updateShops()
-})
+    void updateShops()
+  },
+  { immediate: true },
+)
 
 /* -------------------- RECENTER -------------------- */
 const recenterToUser = async () => {
-  if (!map.value || !latitude.value || !longitude.value) return
+  if (!map.value) return
+
   locating.value = true
+  errorMsg.value = null
+
   try {
+    // Clear any existing routes
     clearAllRoutes()
-    await new Promise((r) => setTimeout(r, 100))
-    map.value.setView([latitude.value, longitude.value], 16, { animate: false })
+
+    // Try to get current position first
+    let targetLat: number
+    let targetLng: number
+
+    if (latitude.value && longitude.value) {
+      // Use the watched geolocation values if available
+      targetLat = Number(latitude.value)
+      targetLng = Number(longitude.value)
+    } else {
+      // Fallback: try to get fresh geolocation
+      try {
+        const position = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 0,
+        })
+        targetLat = position.coords.latitude
+        targetLng = position.coords.longitude
+
+        // Update the reactive values
+        if (typeof latitude.value !== 'undefined' && typeof longitude.value !== 'undefined') {
+          latitude.value = targetLat
+          longitude.value = targetLng
+        }
+      } catch (geolocationError) {
+        console.warn('Failed to get current position:', geolocationError)
+
+        // Fallback to last known location
+        if (lastKnown.value) {
+          targetLat = lastKnown.value[0]
+          targetLng = lastKnown.value[1]
+          errorMsg.value = 'Using last known location'
+        } else {
+          errorMsg.value = 'Unable to determine your location'
+          return
+        }
+      }
+    }
+
+    // Validate coordinates
+    if (!isFinite(targetLat!) || !isFinite(targetLng!)) {
+      errorMsg.value = 'Invalid location coordinates'
+      return
+    }
+
+    console.log('Recentering to:', targetLat, targetLng)
+
+    // Update user marker
+    if (userMarker) {
+      userMarker.setLatLng([targetLat, targetLng])
+      userMarker.setPopupContent('You are here')
+      userMarker.openPopup()
+    } else {
+      userMarker = L.marker([targetLat, targetLng], { icon: userIcon })
+        .addTo(map.value)
+        .bindPopup('You are here')
+        .openPopup()
+    }
+
+    // Center map on user location
+    map.value.setView([targetLat, targetLng], 16, {
+      animate: true,
+      duration: 0.5,
+    })
+
+    // Save to cache
+    saveCachedLocation(targetLat, targetLng)
+
+    // Refresh city boundary and shops
+    await highlightUserCityBoundary(targetLat, targetLng)
+    void updateShops()
+  } catch (error) {
+    console.error('Error recentering:', error)
+    errorMsg.value = 'Failed to recenter map: ' + (error as Error).message
   } finally {
     locating.value = false
   }
@@ -1479,7 +1611,7 @@ onMounted(async () => {
     }
 
     saveCachedLocation(quickLat, quickLng)
-    
+
     // Load city boundary and shops
     await highlightUserCityBoundary(quickLat, quickLng)
     void updateShops()
@@ -1525,7 +1657,7 @@ const toggleShopMenu = () => {
 /* -------------------- HANDLE SHOP CLICK -------------------- */
 const handleShopClick = async (shopId: string, index: number) => {
   console.log('Shop clicked:', shopId, 'isSearchMode:', isSearchMode.value)
-  
+
   if (isSearchMode.value) {
     await focusOnSearchResult(shopId, index)
   } else {
@@ -1546,8 +1678,8 @@ const handleShopClick = async (shopId: string, index: number) => {
           hide-details
           clearable
           density="comfortable"
-          placeholder="Search product or shop..."
-          append-inner-icon="mdi-earth"
+          placeholder="Search products, shops, or places..."
+          append-inner-icon="mdi-magnify"
           @keydown="onSearchKeydown"
           @click:clear="clearSearch"
           @click:append-inner="smartSearch"
@@ -1557,8 +1689,9 @@ const handleShopClick = async (shopId: string, index: number) => {
           @click="smartSearch"
           :loading="loading"
           :disabled="!search.trim()"
+          elevation="2"
         >
-          <v-icon size="22">mdi-magnify</v-icon>
+          <v-icon size="20">mdi-search-web</v-icon>
         </v-btn>
       </div>
     </v-sheet>
@@ -1578,49 +1711,13 @@ const handleShopClick = async (shopId: string, index: number) => {
         <span>Loading city boundary...</span>
       </div>
 
-      <div class="map-buttons" v-if="!showShopMenu">
-        <v-btn icon :loading="locating" @click="recenterToUser">
-          <v-icon>mdi-crosshairs-gps</v-icon>
-        </v-btn>
-        <v-btn icon @click="clearAllRoutes" title="Clear Routes">
-          <v-icon>mdi-close</v-icon>
-        </v-btn>
-        
-        <!-- Enhanced Display Mode Menu -->
-        <v-menu location="top" transition="scale-transition" color="#ffffff">
-          <template #activator="{ props }">
-            <v-btn icon v-bind="props" title="Display Options">
-              <v-icon>mdi-filter</v-icon>
-            </v-btn>
-          </template>
-          <v-list>
-            <v-list-item @click="toggleDisplayMode('within')">
-              <v-list-item-title>
-                <v-icon color="green" class="mr-2">mdi-checkbox-marked-circle</v-icon>
-                Display Within City
-              </v-list-item-title>
-            </v-list-item>
-            <v-list-item @click="toggleDisplayMode('outside')">
-              <v-list-item-title>
-                <v-icon color="red" class="mr-2">mdi-arrow-expand</v-icon>
-                Display Outside City
-              </v-list-item-title>
-            </v-list-item>
-            <v-divider></v-divider>
-            <v-list-item @click="clearCityBoundary" :disabled="!cityBoundaryPolygon">
-              <v-list-item-title>
-                <v-icon color="grey" class="mr-2">mdi-eye-off</v-icon>
-                Hide City Boundary
-              </v-list-item-title>
-            </v-list-item>
-          </v-list>
-        </v-menu>
-
+      <!-- Map Controls Container - Moved to bottom right -->
+      <div class="map-controls-container" v-if="!showShopMenu">
         <!-- Display Mode Chip -->
-        <v-chip 
-          v-if="userCity" 
-          :color="shopDisplayMode === 'within' ? 'green' : 'orange'" 
-          size="small" 
+        <v-chip
+          v-if="userCity"
+          :color="shopDisplayMode === 'within' ? 'green' : 'orange'"
+          size="small"
           class="mode-chip"
         >
           <v-icon small class="mr-1">
@@ -1629,12 +1726,63 @@ const handleShopClick = async (shopId: string, index: number) => {
           {{ shopDisplayMode === 'within' ? 'Within' : 'Outside' }} {{ userCity }}
         </v-chip>
 
-        <v-btn icon @click="toggleShopMenu">
-          <v-icon>mdi-menu</v-icon>
-        </v-btn>
+        <div class="map-controls-group">
+          <!-- Shop Menu Toggle -->
+          <v-btn icon @click="toggleShopMenu" class="control-btn" title="Show shops list">
+            <v-icon>mdi-store</v-icon>
+          </v-btn>
+
+          <!-- Display Mode Menu -->
+          <v-menu location="top" transition="scale-transition" color="#ffffff">
+            <template #activator="{ props }">
+              <v-btn icon v-bind="props" title="Display Options" class="control-btn">
+                <v-icon>mdi-filter</v-icon>
+              </v-btn>
+            </template>
+            <v-list>
+              <v-list-item @click="toggleDisplayMode('within')">
+                <v-list-item-title>
+                  <v-icon color="green" class="mr-2">mdi-checkbox-marked-circle</v-icon>
+                  Show Shops Within City
+                </v-list-item-title>
+                <v-list-item-subtitle
+                  >Display shops located in {{ userCity || 'your city' }}</v-list-item-subtitle
+                >
+              </v-list-item>
+              <v-list-item @click="toggleDisplayMode('outside')">
+                <v-list-item-title>
+                  <v-icon color="orange" class="mr-2">mdi-arrow-expand</v-icon>
+                  Show Shops Outside City
+                </v-list-item-title>
+                <v-list-item-subtitle
+                  >Display shops outside {{ userCity || 'your city' }}</v-list-item-subtitle
+                >
+              </v-list-item>
+              <v-divider></v-divider>
+              <v-list-item @click="clearCityBoundary" :disabled="!cityBoundaryPolygon">
+                <v-list-item-title>
+                  <v-icon color="grey" class="mr-2">mdi-eye-off</v-icon>
+                  Hide City Boundary
+                </v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
+
+          <!-- Recenter Button -->
+          <v-btn
+            icon
+            :loading="locating"
+            @click="recenterToUser"
+            :disabled="!hasValidLocation && !lastKnown"
+            :title="hasValidLocation ? 'Recenter to my location' : 'Location not available'"
+            class="control-btn"
+          >
+            <v-icon :color="hasValidLocation ? 'primary' : 'grey'">mdi-crosshairs-gps</v-icon>
+          </v-btn>
+        </div>
       </div>
 
-      <v-alert v-if="errorMsg" type="info" class="ma-4 route-info-alert">
+      <v-alert v-if="errorMsg" type="info" class="route-info-alert">
         {{ errorMsg }}
       </v-alert>
     </v-main>
@@ -1644,7 +1792,15 @@ const handleShopClick = async (shopId: string, index: number) => {
       <v-toolbar flat :color="shopDisplayMode === 'within' ? 'green' : 'orange'" dark>
         <v-toolbar-title>
           <div>
-            <div>{{ isSearchMode ? 'Search Results' : (shopDisplayMode === 'within' ? 'Shops Within City' : 'Shops Outside City') }}</div>
+            <div>
+              {{
+                isSearchMode
+                  ? 'Search Results'
+                  : shopDisplayMode === 'within'
+                    ? 'Shops Within City'
+                    : 'Shops Outside City'
+              }}
+            </div>
             <div style="font-size: 0.8rem; opacity: 0.8">
               {{ filteredShops.length }} {{ isSearchMode ? 'results' : 'shops' }} •
               {{ userCity || 'Unknown City' }}
@@ -1679,9 +1835,7 @@ const handleShopClick = async (shopId: string, index: number) => {
             <v-chip v-if="shop.withinBoundary" size="x-small" color="green" class="ml-2">
               Within
             </v-chip>
-            <v-chip v-else size="x-small" color="orange" class="ml-2">
-              Outside
-            </v-chip>
+            <v-chip v-else size="x-small" color="orange" class="ml-2"> Outside </v-chip>
           </v-list-item-title>
 
           <v-list-item-subtitle>
@@ -1704,10 +1858,18 @@ const handleShopClick = async (shopId: string, index: number) => {
       <div v-else class="pa-4 text-center">
         <v-icon size="48" color="grey-lighten-1">mdi-store-outline</v-icon>
         <div class="text-body-1 text-grey mt-2">
-          {{ shopDisplayMode === 'within' ? 'No shops within city boundary' : 'No shops outside city boundary' }}
+          {{
+            shopDisplayMode === 'within'
+              ? 'No shops within city boundary'
+              : 'No shops outside city boundary'
+          }}
         </div>
         <div class="text-caption text-grey">
-          {{ shopDisplayMode === 'within' ? 'Try switching to "Outside City" mode' : 'Try switching to "Within City" mode' }}
+          {{
+            shopDisplayMode === 'within'
+              ? 'Try switching to "Outside City" mode'
+              : 'Try switching to "Within City" mode'
+          }}
         </div>
       </div>
     </v-navigation-drawer>
@@ -1737,24 +1899,26 @@ const handleShopClick = async (shopId: string, index: number) => {
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(10px);
   border: none;
+  margin-bottom: 8px;
+  align-self: center;
 }
 
-/* Rest of the styles remain the same as in your original code */
+/* Improved layout styles */
 :deep(.v-application__wrap) {
   min-height: 100vh !important;
 }
 
 .hero {
-  background: #3f83c7;
+  background: linear-gradient(135deg, #3f83c7 0%, #1e40af 100%);
   border-radius: 0;
   padding-top: max(16px, env(safe-area-inset-top));
-  padding: clamp(20px, 8vw, 35px) clamp(12px, 4vw, 16px) clamp(8px, 3vw, 12px);
+  padding: clamp(12px, 4vw, 16px) clamp(12px, 4vw, 16px) clamp(8px, 3vw, 12px);
   margin: 0;
   width: 100%;
   position: sticky;
   top: 0;
   z-index: 1000;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
 }
 
 .hero-row {
@@ -1771,15 +1935,27 @@ const handleShopClick = async (shopId: string, index: number) => {
 }
 
 .search-field :deep(.v-field) {
-  background: #fff !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e2e8f0;
-  min-height: 48px;
+  background: #ffffff !important;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
+  border: 2px solid #e2e8f0 !important;
+  min-height: 52px;
+  transition: all 0.3s ease !important;
+}
+
+.search-field :deep(.v-field):hover {
+  border-color: #3b82f6 !important;
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.15) !important;
+}
+
+.search-field :deep(.v-field):focus-within {
+  border-color: #1d4ed8 !important;
+  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.2) !important;
 }
 
 .search-field :deep(input) {
   font-size: clamp(14px, 4vw, 16px);
   padding: 8px 4px;
+  font-weight: 500;
 }
 
 .search-field :deep(.v-field__append-inner) {
@@ -1787,14 +1963,32 @@ const handleShopClick = async (shopId: string, index: number) => {
   padding-bottom: 0;
 }
 
+.search-field :deep(.v-field__append-inner .v-icon) {
+  color: #6b7280;
+  transition: color 0.3s ease;
+}
+
+.search-field :deep(.v-field):focus-within .v-field__append-inner .v-icon {
+  color: #3b82f6;
+}
 .search-btn {
-  background: #1e40af !important;
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
   color: white !important;
-  min-width: 48px !important;
-  width: clamp(48px, 12vw, 56px) !important;
-  height: clamp(48px, 12vw, 56px) !important;
-  box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+  min-width: 52px !important;
+  width: clamp(52px, 12vw, 60px) !important;
+  height: clamp(52px, 12vw, 60px) !important;
+  box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
   border: none;
+  transition: all 0.3s ease !important;
+}
+
+.search-btn:hover:not(.v-btn--disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
+}
+
+.search-btn:active:not(.v-btn--disabled) {
+  transform: translateY(0);
 }
 
 .search-btn .v-icon {
@@ -1804,12 +1998,29 @@ const handleShopClick = async (shopId: string, index: number) => {
 #map {
   position: absolute;
   top: 0;
-  bottom: var(--bottom-nav-height, 70px);
   left: 0;
   right: 0;
+  bottom: var(--bottom-nav-height, 70px);
   width: 100%;
   height: calc(100vh - var(--bottom-nav-height, 70px));
   z-index: 1;
+}
+
+/* Ensure map controls don't cover Leaflet controls */
+:deep(.leaflet-top) {
+  top: calc(clamp(12px, 4vw, 16px) + clamp(52px, 12vw, 60px) + clamp(12px, 4vw, 16px)) !important;
+}
+
+:deep(.leaflet-bottom) {
+  bottom: calc(var(--bottom-nav-height, 70px) + 100px) !important;
+}
+
+:deep(.leaflet-left) {
+  left: 12px !important;
+}
+
+:deep(.leaflet-right) {
+  right: 12px !important;
 }
 
 :deep(.v-application__wrap) {
@@ -1824,25 +2035,51 @@ const handleShopClick = async (shopId: string, index: number) => {
   z-index: 1000;
 }
 
-.map-buttons {
+/* Improved Map Controls - Moved to bottom right */
+.map-controls-container {
   position: fixed;
   bottom: calc(var(--bottom-nav-height, 70px) + clamp(16px, 5vw, 24px));
   right: clamp(12px, 4vw, 20px);
   display: flex;
   flex-direction: column;
-  gap: clamp(6px, 2vw, 10px);
+  align-items: flex-end;
+  gap: 8px;
   z-index: 2000;
+  max-width: calc(100vw - 40px);
 }
 
-.map-buttons .v-btn {
-  background: white;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
-  width: clamp(44px, 11vw, 52px);
-  height: clamp(44px, 11vw, 52px);
-  border: 1px solid #e2e8f0;
+.map-controls-group {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(6px, 2vw, 10px);
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(10px);
+  border-radius: 20px;
+  padding: 10px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.9);
 }
 
-.map-buttons .v-btn .v-icon {
+.control-btn {
+  background: white !important;
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15) !important;
+  width: clamp(46px, 11vw, 54px) !important;
+  height: clamp(46px, 11vw, 54px) !important;
+  border: 1px solid #e2e8f0 !important;
+  transition: all 0.3s ease !important;
+}
+
+.control-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2) !important;
+  background: #f8fafc !important;
+}
+
+.control-btn:active {
+  transform: translateY(0);
+}
+
+.control-btn .v-icon {
   font-size: clamp(18px, 4.5vw, 20px);
 }
 
@@ -1851,46 +2088,68 @@ const handleShopClick = async (shopId: string, index: number) => {
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  background: rgba(255, 255, 255, 0.95);
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  background: rgba(255, 255, 255, 0.98);
+  padding: 24px;
+  border-radius: 16px;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.2);
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 16px;
   z-index: 3000;
-  backdrop-filter: blur(10px);
-  border: 1px solid #e2e8f0;
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
 }
 
 .route-loading span {
   font-weight: 600;
-  color: #374151;
+  color: #1f2937;
+  font-size: 16px;
 }
 
 .route-info-alert {
-  background-color: #dbeafe !important;
-  border-left: 4px solid #3b82f6;
+  background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%) !important;
+  border-left: 4px solid #3b82f6 !important;
+  margin: 12px !important;
+  position: relative;
+  z-index: 2000;
+  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.15) !important;
+  border-radius: 12px !important;
 }
 
-/* Responsive adjustments */
+/* Enhanced responsive adjustments */
 @media (max-width: 360px) {
   .hero {
-    padding: 12px 10px 6px;
+    padding: 10px 8px 6px;
   }
 
   .hero-row {
     gap: 6px;
   }
 
-  .map-buttons {
-    bottom: 70px;
+  .map-controls-container {
+    bottom: calc(70px + 12px);
     right: 8px;
   }
 
-  .map-buttons .v-btn {
-    width: 40px;
-    height: 40px;
+  .control-btn {
+    width: 42px !important;
+    height: 42px !important;
+  }
+
+  .map-controls-group {
+    padding: 8px;
+    border-radius: 16px;
+  }
+}
+
+@media (max-width: 480px) {
+  .map-controls-container {
+    bottom: calc(var(--bottom-nav-height, 70px) + clamp(12px, 3vw, 16px));
+    right: clamp(8px, 3vw, 12px);
+  }
+  
+  :deep(.leaflet-bottom) {
+    bottom: calc(var(--bottom-nav-height, 70px) + 80px) !important;
   }
 }
 
@@ -1904,9 +2163,58 @@ const handleShopClick = async (shopId: string, index: number) => {
     --bottom-nav-height: 80px;
   }
 
-  .map-buttons {
+  .map-controls-container {
+    bottom: calc(80px + 24px);
+    right: clamp(16px, 4vw, 24px);
+  }
+  
+  :deep(.leaflet-bottom) {
+    bottom: calc(var(--bottom-nav-height, 80px) + 120px) !important;
+  }
+}
+
+@media (min-width: 1024px) {
+  .map-controls-container {
     bottom: calc(80px + 24px);
     right: 24px;
   }
+}
+
+/* Safe area support for notched devices */
+@supports (padding: max(0px)) {
+  .hero {
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+  
+  .map-controls-container {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(var(--bottom-nav-height, 70px) + max(16px, env(safe-area-inset-bottom)));
+  }
+}
+
+/* Animation for better UX */
+.control-btn {
+  animation: fadeInUp 0.5s ease-out;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Loading state improvements */
+.search-btn:deep(.v-btn__loader) {
+  color: white !important;
+}
+
+.control-btn:deep(.v-btn__loader) {
+  color: #3b82f6 !important;
 }
 </style>
