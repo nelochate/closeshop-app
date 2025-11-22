@@ -214,15 +214,27 @@ const isWithinShopHours = (date: string, time: string) => {
   return true
 }
 
-// ✅ ENHANCED CHECKOUT: Handle cart cleanup
+// ✅ ENHANCED CHECKOUT: Handle cart cleanup with debugging
 const handleCheckout = async () => {
-  if (!buyer.value || !address.value) return alert('Missing buyer or address info')
-  if (!items.value.length) return alert('No items to checkout')
+  if (!buyer.value || !address.value) {
+    alert('Missing buyer or address info')
+    return
+  }
+  if (!items.value.length) {
+    alert('No items to checkout')
+    return
+  }
+
+  console.log('🛒 Starting checkout process...')
+  console.log('Items:', items.value)
+  console.log('Buyer:', buyer.value)
+  console.log('Address:', address.value)
 
   try {
     const txNumber = generateTransactionNumber()
     transactionNumber.value = txNumber
 
+    console.log('📝 Creating order...')
     // Insert order
     const { data: order, error: orderError } = await supabase
       .from('orders')
@@ -241,7 +253,12 @@ const handleCheckout = async () => {
       .select()
       .single()
 
-    if (orderError) throw orderError
+    if (orderError) {
+      console.error('❌ Order creation error:', orderError)
+      throw orderError
+    }
+
+    console.log('✅ Order created:', order)
 
     // Insert order items
     const orderItems = items.value.map((item) => ({
@@ -251,9 +268,14 @@ const handleCheckout = async () => {
       price: item.price,
     }))
 
+    console.log('📦 Inserting order items...')
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      console.error('❌ Order items error:', itemsError)
+      throw itemsError
+    }
 
+    console.log('💰 Creating payment record...')
     // Insert payment record
     const { error: paymentError } = await supabase.from('payments').insert({
       order_id: order.id,
@@ -262,21 +284,25 @@ const handleCheckout = async () => {
       method: paymentMethod.value,
     })
 
-    if (paymentError) throw paymentError
+    if (paymentError) {
+      console.error('❌ Payment creation error:', paymentError)
+      throw paymentError
+    }
 
     // ✅ NEW: Clean up cart items if coming from cart
     if (fromCart.value && cartItemIds.value.length > 0) {
+      console.log('🗑️ Cleaning cart items...')
       const { error: cartError } = await supabase
         .from('cart_items')
         .delete()
         .in('id', cartItemIds.value)
 
       if (cartError) {
-        console.error('Error cleaning cart:', cartError)
-        // Don't throw here - order was created successfully
+        console.error('⚠️ Cart cleanup error (non-critical):', cartError)
       }
     }
 
+    console.log('🎯 Navigating to success page...')
     // Navigate to success page
     router.push({
       name: 'checkout-success',
@@ -286,12 +312,12 @@ const handleCheckout = async () => {
         totalAmount: totalPrice.value,
       },
     })
+
   } catch (err) {
-    console.error('Checkout error:', err)
+    console.error('❌ Checkout error:', err)
     alert('Failed to checkout. Please try again.')
   }
 }
-
 // ❌ CANCEL ORDER (your existing code)
 const handleCancel = async () => {
   if (countdownInterval) clearInterval(countdownInterval)
