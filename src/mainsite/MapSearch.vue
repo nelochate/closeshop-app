@@ -251,22 +251,7 @@ const selectRoute = (index: number) => {
 
   if (!route || !map.value) return
 
-  currentRouteLayers.forEach((layer, i) => {
-    if (i === index) {
-      layer.setStyle({
-        weight: 8,
-        opacity: 1,
-        color: route.color,
-      })
-      layer.bringToFront()
-    } else {
-      layer.setStyle({
-        weight: 3,
-        opacity: 0.4,
-        color: route.color,
-      })
-    }
-  })
+  // ... existing route selection code ...
 
   const distanceKm = (route.distance / 1000).toFixed(1)
   const durationMin = Math.round(route.duration / 60)
@@ -277,7 +262,26 @@ const selectRoute = (index: number) => {
     cycling: '🚴',
   }
 
-  errorMsg.value = `Selected: ${typeIcons[route.type]} ${route.summary} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`
+  setErrorMessage(
+    `Selected: ${typeIcons[route.type]} ${route.summary} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`,
+  )
+}
+
+const toggleDisplayMode = (mode: 'within' | 'outside') => {
+  shopDisplayMode.value = mode
+  applyShopFilters()
+
+  if (userCity.value) {
+    setErrorMessage(
+      mode === 'within'
+        ? `Showing shops within ${userCity.value}`
+        : `Showing shops outside ${userCity.value}`,
+    )
+  } else {
+    setErrorMessage(
+      mode === 'within' ? 'Showing shops in your area' : 'Showing shops outside your area',
+    )
+  }
 }
 
 /* -------------------- CLEAR ALL ROUTES -------------------- */
@@ -751,21 +755,6 @@ const applyShopFilters = () => {
   plotShops()
 }
 
-/* -------------------- TOGGLE DISPLAY MODE -------------------- */
-const toggleDisplayMode = (mode: 'within' | 'outside') => {
-  shopDisplayMode.value = mode
-  applyShopFilters()
-
-  if (userCity.value) {
-    errorMsg.value =
-      mode === 'within'
-        ? `Showing shops within ${userCity.value}`
-        : `Showing shops outside ${userCity.value}`
-  } else {
-    errorMsg.value =
-      mode === 'within' ? 'Showing shops in your area' : 'Showing shops outside your area'
-  }
-}
 
 /* -------------------- HELPERS -------------------- */
 const getFullAddress = (shop: any) => {
@@ -864,6 +853,9 @@ const plotShops = () => {
 /* -------------------- FOCUS ON SHOP MARKER -------------------- */
 const focusOnShopMarker = async (shopId: string) => {
   console.log('Focusing on shop:', shopId)
+  
+  // Clear any previous messages immediately
+  setErrorMessage(null)
 
   let marker = shopMarkers.find((m: any) => m.shopId === shopId)
 
@@ -872,13 +864,13 @@ const focusOnShopMarker = async (shopId: string) => {
   }
 
   if (!marker || !map.value) {
-    console.error('Marker not found for shop:', shopId)
+    setErrorMessage('Shop location not found')
     return
   }
 
   const shop = marker.shopData
   if (!shop || !shop.latitude || !shop.longitude) {
-    console.error('Shop data incomplete:', shop)
+    setErrorMessage('Shop location data is incomplete')
     return
   }
 
@@ -887,7 +879,6 @@ const focusOnShopMarker = async (shopId: string) => {
 
   if (isFinite(userLat) && isFinite(userLng)) {
     routeLoading.value = true
-    errorMsg.value = null
 
     try {
       clearAllRoutes()
@@ -913,12 +904,13 @@ const focusOnShopMarker = async (shopId: string) => {
         drawRouteOptions(routes)
 
         if (routes[0].summary.includes('Fallback')) {
-          errorMsg.value = 'Using direct route (routing service unavailable)'
+          setErrorMessage('Using direct route (routing service unavailable)', 3000)
         } else {
-          errorMsg.value = `Found ${routes.length} route options. Click on any route to select it.`
+          setErrorMessage(`Found ${routes.length} route options. Click on any route to select it.`, 5000)
         }
       } else {
-        errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
+        setErrorMessage('Could not calculate routes to this shop. Please try again.', 3000)
+        // Fallback view
         map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
           animate: true,
           duration: 0.5,
@@ -928,7 +920,8 @@ const focusOnShopMarker = async (shopId: string) => {
       marker.openPopup()
     } catch (error) {
       console.error('Error focusing on shop:', error)
-      errorMsg.value = 'Error calculating routes: ' + (error as Error).message
+      setErrorMessage('Error calculating routes: ' + (error as Error).message, 3000)
+      // Fallback view
       map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
         animate: true,
         duration: 0.5,
@@ -938,6 +931,7 @@ const focusOnShopMarker = async (shopId: string) => {
       routeLoading.value = false
     }
   } else {
+    setErrorMessage('Your location is not available. Centering on shop only.', 3000)
     map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
       animate: true,
       duration: 0.5,
@@ -1631,6 +1625,20 @@ onUnmounted(() => {
     } catch {}
 })
 
+
+onUnmounted(() => {
+  stopWatching()
+  if (errorTimeout) {
+    clearTimeout(errorTimeout)
+    errorTimeout = null
+  }
+  if (latitude.value && longitude.value)
+    saveCachedLocation(Number(latitude.value), Number(longitude.value))
+  if (map.value)
+    try {
+      setTimeout(() => map.value?.remove(), 300)
+    } catch {}
+})
 /* -------------------- UI SHOP CLICK -------------------- */
 const openShop = async (shopId: string) => {
   const shop = shops.value.find((s) => s.id === shopId)
@@ -1662,6 +1670,32 @@ const handleShopClick = async (shopId: string, index: number) => {
     await focusOnSearchResult(shopId, index)
   } else {
     await focusOnShopMarker(shopId)
+  }
+}
+
+// Add a timeout reference for clearing messages
+let errorTimeout: number | null = null
+
+// Create a method to set error messages with auto-clear
+const setErrorMessage = (message: string | null, duration: number = 4000) => {
+  if (errorTimeout) {
+    clearTimeout(errorTimeout)
+    errorTimeout = null
+  }
+
+  errorMsg.value = null // Clear first
+
+  if (message) {
+    // Use nextTick to ensure the DOM updates properly
+    setTimeout(() => {
+      errorMsg.value = message
+
+      // Auto-clear after duration
+      errorTimeout = window.setTimeout(() => {
+        errorMsg.value = null
+        errorTimeout = null
+      }, duration)
+    }, 50)
   }
 }
 </script>
@@ -1781,9 +1815,19 @@ const handleShopClick = async (shopId: string, index: number) => {
           </v-btn>
         </div>
       </div>
-
-      <v-alert v-if="errorMsg" type="info" class="route-info-alert">
-        {{ errorMsg }}
+      <v-alert
+        v-if="errorMsg"
+        type="info"
+        class="route-info-alert"
+        @click="setErrorMessage(null)"
+        style="cursor: pointer"
+      >
+        <div class="d-flex justify-space-between align-center">
+          <span>{{ errorMsg }}</span>
+          <v-btn icon size="small" @click.stop="setErrorMessage(null)" class="ml-2">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </div>
       </v-alert>
     </v-main>
 
@@ -2114,6 +2158,10 @@ const handleShopClick = async (shopId: string, index: number) => {
   z-index: 2000;
   box-shadow: 0 4px 16px rgba(59, 130, 246, 0.15) !important;
   border-radius: 12px !important;
+  transition: all 0.3s ease !important;
+}
+.route-info-alert:hover {
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.25) !important;
 }
 
 /* Enhanced responsive adjustments */
@@ -2147,7 +2195,7 @@ const handleShopClick = async (shopId: string, index: number) => {
     bottom: calc(var(--bottom-nav-height, 70px) + clamp(12px, 3vw, 16px));
     right: clamp(8px, 3vw, 12px);
   }
-  
+
   :deep(.leaflet-bottom) {
     bottom: calc(var(--bottom-nav-height, 70px) + 80px) !important;
   }
@@ -2167,7 +2215,7 @@ const handleShopClick = async (shopId: string, index: number) => {
     bottom: calc(80px + 24px);
     right: clamp(16px, 4vw, 24px);
   }
-  
+
   :deep(.leaflet-bottom) {
     bottom: calc(var(--bottom-nav-height, 80px) + 120px) !important;
   }
@@ -2186,7 +2234,7 @@ const handleShopClick = async (shopId: string, index: number) => {
     padding-left: max(12px, env(safe-area-inset-left));
     padding-right: max(12px, env(safe-area-inset-right));
   }
-  
+
   .map-controls-container {
     right: max(12px, env(safe-area-inset-right));
     bottom: calc(var(--bottom-nav-height, 70px) + max(16px, env(safe-area-inset-bottom)));
