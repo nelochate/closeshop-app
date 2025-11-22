@@ -2,7 +2,9 @@
 import { ref, onMounted, computed } from 'vue'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
-
+// Add router import
+import { useRouter } from 'vue-router'
+const router = useRouter()
 const activeTab = ref('cart')
 const loading = ref(true)
 const cartItems = ref([]) // Replace cart store with local state
@@ -221,17 +223,7 @@ const deleteSelectedItems = async () => {
   }
 }
 
-// ✅ Checkout selected
-const checkoutSelected = () => {
-  const items = cartItems.value.filter((i) => selectedItems.value.includes(i.id))
-  if (!items.length) {
-    alert('Please select items to checkout')
-    return
-  }
-  const total = items.reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0)
-  alert(`Proceeding to checkout: ₱${total.toFixed(2)} for ${items.length} items`)
-  // TODO: navigate to checkout page
-}
+
 
 // Initialize
 onMounted(async () => {
@@ -239,6 +231,39 @@ onMounted(async () => {
   await fetchCart()
   loading.value = false
 })
+
+
+// ✅ Enhanced Checkout function
+const checkoutSelected = () => {
+  const selectedCartItems = cartItems.value.filter(i => selectedItems.value.includes(i.id))
+  
+  if (!selectedCartItems.length) {
+    alert('Please select items to checkout')
+    return
+  }
+
+  // Transform cart items to match purchase view format
+  const itemsForCheckout = selectedCartItems.map(item => ({
+    id: item.product_id,
+    product_id: item.product_id,
+    name: item.product?.prod_name || 'Unnamed Product',
+    price: item.product?.price || 0,
+    quantity: item.quantity,
+    image: (typeof item.product?.main_img_urls === 'string'
+      ? JSON.parse(item.product.main_img_urls)[0]
+      : item.product?.main_img_urls?.[0]) || '/placeholder.png',
+    cart_item_id: item.id // Keep reference to cart item for cleanup
+  }))
+
+  // Navigate to purchase view with selected items
+  router.push({
+    name: 'purchaseview',
+    state: {
+      items: itemsForCheckout,
+      fromCart: true // Flag to indicate coming from cart
+    }
+  })
+}
 </script>
 
 <template>
