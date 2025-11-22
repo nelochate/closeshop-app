@@ -3,12 +3,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
-//for routes
 const route = useRoute()
 const router = useRouter()
 const items = ref<any[]>([])
+const fromCart = ref(false) // Track if coming from cart
+const cartItemIds = ref<string[]>([]) // Store cart item IDs for cleanup
 
-// 🧾 STATE
+// 🧾 STATE (your existing state remains the same)
 const buyer = ref<any>(null)
 const address = ref<any>(null)
 const deliveryOption = ref('meetup')
@@ -19,41 +20,89 @@ const showDialog = ref(false)
 const countdown = ref(300)
 const currentOrderId = ref<string>('')
 const transactionNumber = ref('')
-const shopId = ref<string>('your_shop_id_here')
 
 // 🕒 Initialize with current LOCAL date and time
 const now = new Date()
-// Get local date parts to avoid timezone issues
 const year = now.getFullYear()
 const month = (now.getMonth() + 1).toString().padStart(2, '0')
 const day = now.getDate().toString().padStart(2, '0')
 const deliveryDate = ref<string>(`${year}-${month}-${day}`)
 
-// Get local time
 const hours = now.getHours().toString().padStart(2, '0')
-const currentMinutes = now.getMinutes().toString().padStart(2, '0') // ← Renamed to avoid conflict
+const currentMinutes = now.getMinutes().toString().padStart(2, '0')
 const deliveryTime = ref<string>(`${hours}:${currentMinutes}`)
 
-// Time picker defaults based on current local time
 const currentHour12 = now.getHours() % 12 || 12
 const selectedHour = ref(currentHour12.toString().padStart(2, '0'))
-const selectedMinute = ref(currentMinutes) // ← Using the renamed variable
+const selectedMinute = ref(currentMinutes)
 const selectedPeriod = ref<'AM' | 'PM'>(now.getHours() >= 12 ? 'PM' : 'AM')
 
-//load transaction number on mount
+// Load transaction number on mount
 onMounted(() => {
   transactionNumber.value = generateTransactionNumber()
+  loadItemsFromNavigation()
 })
 
-onMounted(() => {
-  // Check if the page was navigated with product info
+// ✅ NEW: Load items from navigation state or cart
+const loadItemsFromNavigation = async () => {
+  // Check if items were passed via navigation
   if (history.state?.items) {
     items.value = history.state.items
+    fromCart.value = history.state.fromCart || false
+
+    // Extract cart item IDs if coming from cart
+    if (fromCart.value) {
+      cartItemIds.value = items.value.map((item) => item.cart_item_id).filter(Boolean)
+    }
   } else {
-    // Fallback: fetch from cart if nothing passed
-    fetchCartItems()
+    // Fallback: fetch from cart
+    await fetchCartItems()
   }
-})
+}
+
+// ✅ NEW: Fetch cart items as fallback
+const fetchCartItems = async () => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    const { data, error } = await supabase
+      .from('cart_items')
+      .select(
+        `
+        *,
+        product:products (
+          *,
+          shop:shops (*)
+        )
+      `,
+      )
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    // Transform cart items to match expected format
+    items.value = (data || []).map((item) => ({
+      id: item.product_id,
+      product_id: item.product_id,
+      name: item.product?.prod_name || 'Unnamed Product',
+      price: item.product?.price || 0,
+      quantity: item.quantity,
+      image:
+        (typeof item.product?.main_img_urls === 'string'
+          ? JSON.parse(item.product.main_img_urls)[0]
+          : item.product?.main_img_urls?.[0]) || '/placeholder.png',
+      cart_item_id: item.id,
+    }))
+
+    fromCart.value = true
+    cartItemIds.value = items.value.map((item) => item.cart_item_id).filter(Boolean)
+  } catch (err) {
+    console.error('Error fetching cart items:', err)
+  }
+}
 
 const shopSchedule = ref({
   openDays: [1, 2, 3, 4, 5, 6],
@@ -68,7 +117,7 @@ const totalPrice = computed(() =>
   items.value.reduce((sum, item) => sum + item.price * (item.quantity || 1), 0),
 )
 
-// ⏱ COUNTDOWN LOGIC
+// ⏱ COUNTDOWN LOGIC (your existing code)
 let countdownInterval: number | null = null
 const formatTime = (seconds: number) => {
   const min = Math.floor(seconds / 60)
@@ -89,7 +138,7 @@ const decreaseQty = (item: any) => {
   if ((item.quantity || 1) > 1) item.quantity--
 }
 
-// 📦 FETCH USER + SHOP DATA
+// 📦 FETCH USER + SHOP DATA (your existing code)
 onMounted(async () => {
   try {
     const {
@@ -99,7 +148,6 @@ onMounted(async () => {
 
     // Fetch profile
     const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single()
-
     buyer.value = profile
 
     // Fetch all addresses of user
@@ -117,18 +165,15 @@ onMounted(async () => {
     // CASE 1: User only has ONE address → auto set as default
     if (allAddresses.length === 1) {
       const single = allAddresses[0]
-
       if (!single.is_default) {
         await supabase.from('addresses').update({ is_default: true }).eq('id', single.id)
       }
-
       address.value = { ...single, is_default: true }
       return
     }
 
     // CASE 2: User has multiple → pick the one set as default
     const defaultAddress = allAddresses.find((a) => a.is_default === true)
-
     if (defaultAddress) {
       address.value = defaultAddress
       return
@@ -150,7 +195,7 @@ const generateTransactionNumber = () => {
   return `TX-${timestamp}-${random}`.toUpperCase()
 }
 
-// 🕒 VALIDATION
+// 🕒 VALIDATION (your existing code)
 const isWithinShopHours = (date: string, time: string) => {
   if (!date || !time) return false
   const selected = new Date(`${date}T${time}`)
@@ -169,10 +214,11 @@ const isWithinShopHours = (date: string, time: string) => {
   return true
 }
 
-// 💳 CHECKOUT
-// Checkout
+// ✅ ENHANCED CHECKOUT: Handle cart cleanup
 const handleCheckout = async () => {
   if (!buyer.value || !address.value) return alert('Missing buyer or address info')
+  if (!items.value.length) return alert('No items to checkout')
+
   try {
     const txNumber = generateTransactionNumber()
     transactionNumber.value = txNumber
@@ -183,35 +229,62 @@ const handleCheckout = async () => {
       .insert({
         user_id: buyer.value.id,
         address_id: address.value.id,
-        total_amount: items.value.reduce((sum, i) => sum + i.price * i.quantity, 0),
+        total_amount: totalPrice.value,
         status: 'pending',
-        payment_method: 'cash',
+        payment_method: paymentMethod.value,
         transaction_number: txNumber,
+        delivery_option: deliveryOption.value,
+        delivery_date: deliveryDate.value,
+        delivery_time: deliveryTime.value,
+        note: note.value,
       })
       .select()
       .single()
+
     if (orderError) throw orderError
 
     // Insert order items
     const orderItems = items.value.map((item) => ({
       order_id: order.id,
-      product_id: item.id,
+      product_id: item.product_id,
       quantity: item.quantity,
       price: item.price,
     }))
+
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
     if (itemsError) throw itemsError
 
     // Insert payment record
-    await supabase.from('payments').insert({
+    const { error: paymentError } = await supabase.from('payments').insert({
       order_id: order.id,
       amount: order.total_amount,
       status: 'pending',
+      method: paymentMethod.value,
     })
 
+    if (paymentError) throw paymentError
+
+    // ✅ NEW: Clean up cart items if coming from cart
+    if (fromCart.value && cartItemIds.value.length > 0) {
+      const { error: cartError } = await supabase
+        .from('cart_items')
+        .delete()
+        .in('id', cartItemIds.value)
+
+      if (cartError) {
+        console.error('Error cleaning cart:', cartError)
+        // Don't throw here - order was created successfully
+      }
+    }
+
+    // Navigate to success page
     router.push({
       name: 'checkout-success',
       params: { orderId: order.id },
+      state: {
+        orderNumber: txNumber,
+        totalAmount: totalPrice.value,
+      },
     })
   } catch (err) {
     console.error('Checkout error:', err)
@@ -219,7 +292,7 @@ const handleCheckout = async () => {
   }
 }
 
-// ❌ CANCEL ORDER
+// ❌ CANCEL ORDER (your existing code)
 const handleCancel = async () => {
   if (countdownInterval) clearInterval(countdownInterval)
   await supabase
@@ -232,7 +305,7 @@ const handleCancel = async () => {
   alert('Order canceled successfully.')
 }
 
-// 🚚 DELIVERY OPTIONS
+// 🚚 DELIVERY OPTIONS (your existing code)
 const deliveryOptions = [
   { label: 'Meet Up', value: 'meetup' },
   { label: 'Pickup', value: 'pickup' },
@@ -246,7 +319,7 @@ const deliveryOptionsDisplay = computed(() =>
   ),
 )
 
-// 🕓 TIME PICKER (12-hour)
+// 🕓 TIME PICKER (12-hour) - your existing code
 const hours12 = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'))
 const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'))
 
@@ -269,7 +342,7 @@ const selectMinute = (minute: string) => {
 
 // Initialize time on component mount and watch for changes
 onMounted(() => {
-  updateTime() // Set initial time
+  updateTime()
 })
 
 watch(selectedPeriod, updateTime)
@@ -283,7 +356,7 @@ const confirmDateTime = () => {
   showDateTimePicker.value = false
 }
 
-// Format date for display (optional)
+// Format date for display
 const formattedDate = computed(() => {
   if (!deliveryDate.value) return 'Not set'
   const date = new Date(deliveryDate.value)
@@ -338,40 +411,43 @@ const formattedDate = computed(() => {
           </v-card-text>
         </v-card>
         <!-- Items -->
-        <v-card outlined class="mb-4 card-elevated">
+        <v-card variant="outlined" class="mb-4 card-elevated">
           <v-card-title class="card-title">Items to Purchase</v-card-title>
           <v-list class="item-list">
             <v-list-item v-for="item in items" :key="item.id" class="list-item">
-              <v-list-item-avatar class="item-avatar">
-                <v-img :src="item.image" alt="product" class="product-image" />
-              </v-list-item-avatar>
+              <!-- ✅ VUETIFY 3 COMPATIBLE -->
+              <template #prepend>
+                <v-avatar class="item-avatar">
+                  <v-img :src="item.image" alt="product" class="product-image" />
+                </v-avatar>
+              </template>
 
-              <v-list-item-content class="item-content">
-                <v-list-item-title class="item-name">{{ item.name }}</v-list-item-title>
-                <v-list-item-subtitle class="item-price">₱{{ item.price }}</v-list-item-subtitle>
-              </v-list-item-content>
+              <v-list-item-title class="item-name">{{ item.name }}</v-list-item-title>
+              <v-list-item-subtitle class="item-price">₱{{ item.price }}</v-list-item-subtitle>
 
-              <v-list-item-action class="item-actions">
-                <div class="quantity-controls">
-                  <v-btn
-                    size="x-small"
-                    color="error"
-                    variant="tonal"
-                    @click="decreaseQty(item)"
-                    class="qty-btn"
-                    >−</v-btn
-                  >
-                  <span class="quantity-display">{{ item.quantity }}</span>
-                  <v-btn
-                    size="x-small"
-                    color="primary"
-                    variant="tonal"
-                    @click="increaseQty(item)"
-                    class="qty-btn"
-                    >+</v-btn
-                  >
+              <template #append>
+                <div class="item-actions">
+                  <div class="quantity-controls">
+                    <v-btn
+                      size="x-small"
+                      color="error"
+                      variant="tonal"
+                      @click="decreaseQty(item)"
+                      class="qty-btn"
+                      >−</v-btn
+                    >
+                    <span class="quantity-display">{{ item.quantity }}</span>
+                    <v-btn
+                      size="x-small"
+                      color="primary"
+                      variant="tonal"
+                      @click="increaseQty(item)"
+                      class="qty-btn"
+                      >+</v-btn
+                    >
+                  </div>
                 </div>
-              </v-list-item-action>
+              </template>
             </v-list-item>
           </v-list>
           <v-divider></v-divider>

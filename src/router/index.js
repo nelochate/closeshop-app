@@ -157,7 +157,7 @@ const routes = [
   },
 
   {
-    path: '/purchaseview/:id',
+    path: '/purchaseview',
     name: 'purchaseview',
     component: () => import('@/mainsite/PurchaseView.vue'),
     props: true,
