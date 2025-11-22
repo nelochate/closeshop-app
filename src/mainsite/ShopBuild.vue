@@ -44,6 +44,9 @@ const address = {
   street: ref(''),
   postal: ref(''),
   house_no: ref(''),
+  city: ref(''),
+  province: ref(''),
+  region: ref('')
 }
 
 // -------------------- PSGC --------------------
@@ -63,7 +66,29 @@ const longitude = ref<number | null>(125.5406)
 const map = ref<L.Map | null>(null)
 let shopMarker: L.Marker | null = null
 
-//reverse geocode
+// -------------------- OPEN DAYS --------------------
+const openDays = ref<number[]>([1, 2, 3, 4, 5, 6]) // Default: Monday to Saturday
+const daysOfWeek = [
+  { id: 1, label: 'Monday' },
+  { id: 2, label: 'Tuesday' },
+  { id: 3, label: 'Wednesday' },
+  { id: 4, label: 'Thursday' },
+  { id: 5, label: 'Friday' },
+  { id: 6, label: 'Saturday' },
+  { id: 7, label: 'Sunday' }
+]
+
+const toggleDay = (dayId: number) => {
+  const index = openDays.value.indexOf(dayId)
+  if (index > -1) {
+    openDays.value.splice(index, 1)
+  } else {
+    openDays.value.push(dayId)
+  }
+  openDays.value.sort((a, b) => a - b)
+}
+
+// -------------------- REVERSE GEOCODE --------------------
 const reverseGeocode = async (lat: number, lng: number) => {
   try {
     const res = await fetch(
@@ -72,7 +97,7 @@ const reverseGeocode = async (lat: number, lng: number) => {
     const data = await res.json()
 
     if (data?.display_name) {
-      fullAddress.value = data.display_name // ✅ auto-fill address
+      fullAddress.value = data.display_name
       showSnackbar(`📍 ${data.display_name}`, 'success')
     } else {
       showSnackbar('Address not found for this location', 'error')
@@ -83,6 +108,7 @@ const reverseGeocode = async (lat: number, lng: number) => {
   }
 }
 
+// -------------------- MAP INITIALIZATION --------------------
 const initMap = (lat: number, lng: number) => {
   if (map.value) return
 
@@ -97,16 +123,14 @@ const initMap = (lat: number, lng: number) => {
     attribution: '© OpenStreetMap contributors',
   }).addTo(map.value)
 
-  // ✅ Create only ONE marker
   shopMarker = L.marker([lat, lng], { draggable: true }).addTo(map.value)
 
-  // 📍 Allow dragging to update coordinates and show address
   shopMarker.on('dragend', async (e) => {
     const pos = (e.target as L.Marker).getLatLng()
     latitude.value = pos.lat
     longitude.value = pos.lng
     await saveCoordinates(pos.lat, pos.lng)
-    await reverseGeocode(pos.lat, pos.lng) // ✅ update fullAddress when dragged
+    await reverseGeocode(pos.lat, pos.lng)
   })
 
   map.value.on('click', async (e: L.LeafletMouseEvent) => {
@@ -115,7 +139,7 @@ const initMap = (lat: number, lng: number) => {
     longitude.value = lng
     shopMarker?.setLatLng([lat, lng])
     await saveCoordinates(lat, lng)
-    await reverseGeocode(lat, lng) // ✅ update fullAddress when tapped
+    await reverseGeocode(lat, lng)
   })
 }
 
@@ -207,13 +231,12 @@ const saveCoordinates = async (lat: number, lng: number) => {
   try {
     if (!currentShopId.value) return
 
-    // Update coordinates + detected address
     const { error } = await supabase
       .from('shops')
       .update({
         latitude: lat,
         longitude: lng,
-        detected_address: fullAddress.value, // 🧠 add this line
+        detected_address: fullAddress.value,
       })
       .eq('id', currentShopId.value)
 
@@ -239,7 +262,6 @@ const getCoordinatesFromAddress = async (address: string) => {
   }
 }
 
-//for search
 // -------------------- SEARCH PLACE --------------------
 const searchQuery = ref('')
 const searchLoading = ref(false)
@@ -286,25 +308,25 @@ const fetchRegions = async () => {
   regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const fetchProvinces = async (regionCode) => {
+const fetchProvinces = async (regionCode: string) => {
   const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
   const data = await res.json()
   provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const fetchCities = async (provinceCode) => {
+const fetchCities = async (provinceCode: string) => {
   const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
   const data = await res.json()
   cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-const fetchBarangays = async (cityCode) => {
+const fetchBarangays = async (cityCode: string) => {
   const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
   const data = await res.json()
   barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
 }
 
-// Dropdown watchers
+// Update address fields when PSGC selections change
 watch(selectedRegion, (regionCode) => {
   selectedProvince.value = null
   selectedCity.value = null
@@ -312,7 +334,11 @@ watch(selectedRegion, (regionCode) => {
   provinces.value = []
   cities.value = []
   barangaysList.value = []
-  if (regionCode) fetchProvinces(regionCode)
+  if (regionCode) {
+    fetchProvinces(regionCode)
+    const regionObj = regions.value.find((r) => r.code === regionCode)
+    if (regionObj) address.region.value = regionObj.name
+  }
 })
 
 watch(selectedProvince, (provinceCode) => {
@@ -320,22 +346,32 @@ watch(selectedProvince, (provinceCode) => {
   selectedBarangay.value = null
   cities.value = []
   barangaysList.value = []
-  if (provinceCode) fetchCities(provinceCode)
+  if (provinceCode) {
+    fetchCities(provinceCode)
+    const provinceObj = provinces.value.find((p) => p.code === provinceCode)
+    if (provinceObj) address.province.value = provinceObj.name
+  }
 })
 
 watch(selectedCity, (cityCode) => {
   selectedBarangay.value = null
   barangaysList.value = []
-  if (cityCode) fetchBarangays(cityCode)
+  if (cityCode) {
+    fetchBarangays(cityCode)
+    const cityObj = cities.value.find((c) => c.code === cityCode)
+    if (cityObj) address.city.value = cityObj.name
+  }
 })
 
-watch(selectedBarangay, async (val) => {
-  if (!val || !selectedCity.value) return
+watch(selectedBarangay, async (barangayCode) => {
+  if (!barangayCode || !selectedCity.value) return
+
+  const barangayObj = barangaysList.value.find((b) => b.code === barangayCode)
+  if (barangayObj) address.barangay.value = barangayObj.name
 
   const regionObj = regions.value.find((r) => r.code === selectedRegion.value)
   const provinceObj = provinces.value.find((p) => p.code === selectedProvince.value)
   const cityObj = cities.value.find((c) => c.code === selectedCity.value)
-  const barangayObj = barangaysList.value.find((b) => b.code === val)
 
   if (barangayObj && cityObj && provinceObj && regionObj) {
     const full = `${barangayObj.name}, ${cityObj.name}, ${provinceObj.name}, ${regionObj.name}, Philippines`
@@ -351,7 +387,7 @@ watch(selectedBarangay, async (val) => {
   }
 })
 
-// for map zoomers
+// Update map when full address changes
 watch(fullAddress, async (newVal) => {
   if (!newVal || !map.value) return
 
@@ -359,12 +395,8 @@ watch(fullAddress, async (newVal) => {
   if (coords) {
     latitude.value = coords.lat
     longitude.value = coords.lon
-
-    // Move map and marker
     map.value.setView([coords.lat, coords.lon], 15)
     shopMarker?.setLatLng([coords.lat, coords.lon])
-
-    // Optionally, you can auto-save the coordinates
     await saveCoordinates(coords.lat, coords.lon)
   }
 })
@@ -380,14 +412,10 @@ const getLocation = () => {
       latitude.value = pos.coords.latitude
       longitude.value = pos.coords.longitude
 
-      // ✅ Move map and marker
       map.value?.setView([latitude.value, longitude.value], 17)
       shopMarker?.setLatLng([latitude.value, longitude.value])
 
-      // ✅ Reverse geocode to get readable address
       await reverseGeocode(latitude.value, longitude.value)
-
-      // ✅ Optionally save to Supabase
       await saveCoordinates(latitude.value, longitude.value)
     },
     (err) => {
@@ -414,6 +442,7 @@ const saveShop = async () => {
     } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
+    // Prepare shop data according to schema
     const shopData = {
       owner_id: user.id,
       business_name: shopName.value,
@@ -422,22 +451,23 @@ const saveShop = async () => {
       physical_store: physicalUrl.value,
       latitude: latitude.value,
       longitude: longitude.value,
-      open_time: openTime.value || null, // ✅ send null if empty
-      close_time: closeTime.value || null, // ✅ send null if empty
+      open_time: openTime.value || null,
+      close_time: closeTime.value || null,
       barangay: address.barangay.value,
       building: address.building.value,
       street: address.street.value,
       postal: address.postal.value,
       house_no: address.house_no.value,
-      city: 'Butuan City',
-      province: 'Agusan del Norte',
-      region: 'CARAGA',
+      city: address.city.value,
+      province: address.province.value,
+      region: address.region.value,
       delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
-      status: 'pending', // ✅ new field
+      status: 'pending',
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
+      open_days: openDays.value // Add open days according to schema
     }
 
     if (!currentShopId.value) {
@@ -480,9 +510,23 @@ onMounted(async () => {
     address.street.value = data.street
     address.postal.value = data.postal
     address.house_no.value = data.house_no
+    address.city.value = data.city
+    address.province.value = data.province
+    address.region.value = data.region
     latitude.value = data.latitude || 8.9489
     longitude.value = data.longitude || 125.5406
     fullAddress.value = data.detected_address || ''
+    deliveryOptions.value = data.delivery_options || []
+    meetUpDetails.value = data.meetup_details || ''
+    openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
+    validIdFrontUrl.value = data.valid_id_front
+    validIdBackUrl.value = data.valid_id_back
+
+    // Set PSGC selections if data exists
+    if (data.region) {
+      // You might need to map region names back to codes
+      // This would require additional logic to find matching codes
+    }
   }
 
   initMap(latitude.value!, longitude.value!)
@@ -498,13 +542,11 @@ onMounted(async () => {
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title><strong>Create Shop</strong></v-toolbar-title>
+      <v-toolbar-title><strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong></v-toolbar-title>
     </v-app-bar>
 
     <v-main class="pb-16">
-      <!-- =========================
-           Cover & Logo Section
-      ========================== -->
+      <!-- Cover & Logo Section -->
       <div class="cover-section">
         <v-img
           :src="physicalUrl || 'https://via.placeholder.com/1200x400?text=Store+Cover+Photo'"
@@ -512,52 +554,52 @@ onMounted(async () => {
           cover
         >
           <div class="cover-overlay"></div>
-
           <v-btn
             icon
             color="white"
             class="cover-upload"
-            @click="
-              () => {
-                pickerTarget = 'physical'
-                showPicker = true
-              }
-            "
+            @click="pickerTarget = 'physical'; showPicker = true"
           >
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
           <h2 class="text-center text-blue">Upload Physical Store Photo</h2>
         </v-img>
 
-        <!-- Floating logo - FIXED POSITIONING -->
+        <!-- Floating logo -->
         <div class="logo-wrapper">
           <v-avatar size="110" color="white" class="logo-avatar">
             <v-img v-if="avatarUrl" :src="avatarUrl" cover />
             <v-icon v-else size="70" color="grey">mdi-store</v-icon>
           </v-avatar>
-
           <v-btn
             icon
             class="logo-upload-btn"
-            @click="
-              () => {
-                pickerTarget = 'logo'
-                showPicker = true
-              }
-            "
+            @click="pickerTarget = 'logo'; showPicker = true"
           >
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
         </div>
       </div>
 
-      <!-- =========================
-           Form Section
-      ========================== -->
+      <!-- Form Section -->
       <div class="form-section pa-4">
         <h2 class="section-title">Business Information</h2>
-        <v-text-field v-model="shopName" label="Business Name" outlined />
+        <v-text-field v-model="shopName" label="Business Name" outlined required />
         <v-textarea v-model="description" label="About Us" outlined auto-grow />
+
+        <!-- Open Days Section -->
+        <h2 class="section-title">Open Days</h2>
+        <div class="open-days">
+          <v-chip
+            v-for="day in daysOfWeek"
+            :key="day.id"
+            :color="openDays.includes(day.id) ? 'primary' : 'grey'"
+            class="ma-1"
+            @click="toggleDay(day.id)"
+          >
+            {{ day.label }}
+          </v-chip>
+        </div>
 
         <h2 class="section-title">Operating Hours</h2>
         <v-row>
@@ -580,12 +622,14 @@ onMounted(async () => {
           outlined
         />
 
-        <h2 class="section-title">Address (Butuan City)</h2>
+        <h2 class="section-title">Address</h2>
         <v-radio-group v-model="addressOption" inline>
           <v-radio label="Enter address manually" value="manual" />
           <v-radio label="Set current location as shop address" value="map" />
         </v-radio-group>
+
         <div v-if="addressOption === 'manual'">
+          <!-- PSGC Address Fields -->
           <v-select
             v-model="selectedRegion"
             :items="regions"
@@ -625,6 +669,12 @@ onMounted(async () => {
             :disabled="!selectedCity"
           />
 
+          <!-- Additional Address Details -->
+          <v-text-field v-model="address.house_no.value" label="House No." outlined />
+          <v-text-field v-model="address.building.value" label="Building Name" outlined />
+          <v-text-field v-model="address.street.value" label="Street" outlined />
+          <v-text-field v-model="address.postal.value" label="Postal Code" outlined />
+
           <v-text-field
             v-if="fullAddress"
             v-model="fullAddress"
@@ -632,7 +682,6 @@ onMounted(async () => {
             readonly
             outlined
           />
-          <v-text-field label="Add more details (e.g., house no., street, building)" outlined />
 
           <h4 class="text-center mb-2">Please drag/tap your location in the map</h4>
 
@@ -640,7 +689,7 @@ onMounted(async () => {
             Toggle Map Fullscreen
           </v-btn>
 
-          <!-- Search Section with Results Dropdown -->
+          <!-- Search Section -->
           <div class="search-section">
             <v-text-field
               v-model="searchQuery"
@@ -663,7 +712,6 @@ onMounted(async () => {
               Search
             </v-btn>
 
-            <!-- Search Results Dropdown -->
             <v-card
               v-if="showSearchResults && searchResults.length > 0"
               class="search-results"
@@ -686,25 +734,17 @@ onMounted(async () => {
           </div>
         </div>
 
+        <!-- Map -->
         <div id="map" class="map">
           <v-btn icon @click="getLocation" class="locate-btn">
             <v-icon>mdi-crosshairs-gps</v-icon>
           </v-btn>
         </div>
 
-        <!-- <v-btn
-          color="secondary"
-          @click="() => saveCoordinates(latitude!, longitude!)"
-          class="save-location"
-        >
-          Save this location
-        </v-btn>-->
         <div v-if="addressOption === 'map'">
-          <!--dria tamn-->
           <v-btn block color="primary" @click="getLocation" class="mt-2">
             Set my location as shop address
           </v-btn>
-
           <v-text-field
             v-if="fullAddress"
             v-model="fullAddress"
@@ -714,47 +754,47 @@ onMounted(async () => {
           />
         </div>
 
-        <!--for the camera valid id-->
+        <!-- Valid ID Upload -->
         <div class="valid-id-upload mt-4">
           <v-btn
             color="primary"
-            @click="
-              () => {
-                pickerTarget = 'valid_id_front'
-                showPicker = true
-              }
-            "
+            @click="pickerTarget = 'valid_id_front'; showPicker = true"
             class="mr-2"
           >
             Upload Valid ID (Front)
           </v-btn>
           <v-btn
             color="primary"
-            @click="
-              () => {
-                pickerTarget = 'valid_id_back'
-                showPicker = true
-              }
-            "
+            @click="pickerTarget = 'valid_id_back'; showPicker = true"
           >
             Upload Valid ID (Back)
           </v-btn>
 
-          <div class="mt-2">
+          <div class="mt-2 d-flex">
             <v-img v-if="validIdFrontUrl" :src="validIdFrontUrl" max-height="150" class="mr-2" />
             <v-img v-if="validIdBackUrl" :src="validIdBackUrl" max-height="150" />
           </div>
         </div>
 
-        <v-btn block color="#3f83c7" :loading="saving" @click="saveShop" class="mt-4 text-white">
-          {{ saving ? 'Saving...' : 'Save Shop' }}
+        <!-- Save Button -->
+        <v-btn 
+          block 
+          color="#3f83c7" 
+          :loading="saving" 
+          @click="saveShop" 
+          class="mt-4 text-white"
+          :disabled="!shopName"
+        >
+          {{ saving ? 'Saving...' : (currentShopId ? 'Update Shop' : 'Save Shop') }}
         </v-btn>
       </div>
 
+      <!-- Snackbar -->
       <v-snackbar v-model="snackbar" :color="snackbarColor" timeout="3000">
         {{ snackbarMessage }}
       </v-snackbar>
 
+      <!-- Image Picker Dialog -->
       <v-dialog v-model="showPicker" max-width="290">
         <v-card>
           <v-card-title class="headline">Pick Image Source</v-card-title>
@@ -772,7 +812,8 @@ onMounted(async () => {
 .app-bar {
   padding-top: 22px;
 }
-/* ===== Cover Section ===== */
+
+/* Cover Section */
 .cover-section {
   position: relative;
   width: 100%;
@@ -805,7 +846,7 @@ onMounted(async () => {
   z-index: 20;
 }
 
-/* ===== Logo Wrapper ===== */
+/* Logo Wrapper */
 .logo-wrapper {
   position: absolute;
   bottom: -55px;
@@ -852,7 +893,7 @@ onMounted(async () => {
   color: white !important;
 }
 
-/* ===== Form Section ===== */
+/* Form Section */
 .form-section {
   margin-top: 70px;
   background: #fff;
@@ -868,7 +909,15 @@ onMounted(async () => {
   margin: 16px 0 8px;
 }
 
-/* ===== Search Section ===== */
+/* Open Days */
+.open-days {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+/* Search Section */
 .search-section {
   position: relative;
   margin-bottom: 16px;
@@ -903,10 +952,7 @@ onMounted(async () => {
   border-bottom: none;
 }
 
-/* ===== Map ===== */
-.map {
-  position: relative;
-}
+/* Map */
 .map {
   height: 400px;
   width: 100%;
@@ -926,32 +972,7 @@ onMounted(async () => {
   z-index: 1000;
 }
 
-.save-location {
-  position: absolute;
-  bottom: 15px;
-  left: 15px;
-  z-index: 1000;
-  background: rgba(63, 131, 199, 0.9);
-  color: white;
-}
-
-/* Typography */
-h2 {
-  font-size: 1.2rem;
-  margin-top: 24px;
-  color: #3f83c7;
-}
-
-h4 {
-  font-weight: 500;
-}
-
-/* Ensure proper stacking context */
-.v-main {
-  position: relative;
-}
-
-/* Mobile responsiveness */
+/* Responsive Design */
 @media (max-width: 768px) {
   .logo-avatar {
     width: 90px !important;
@@ -971,6 +992,10 @@ h4 {
 
   .form-section {
     margin-top: 60px;
+  }
+
+  .open-days {
+    justify-content: flex-start;
   }
 }
 
@@ -994,7 +1019,7 @@ h4 {
   }
 }
 
-/* Animation for better UX */
+/* Animations */
 .logo-avatar,
 .logo-upload-btn,
 .cover-upload {
