@@ -4,16 +4,16 @@ import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 
-// Router
+// ------------------ Router ------------------
 const router = useRouter()
 const route = useRoute()
 const goBack = () => router.back()
 
-// Mode check
+// ------------------ Mode check ------------------
+const productId = ref<string | null>(null)
 const isEditMode = ref(false)
-const productId = ref<number | null>(null)
 
-// Form state
+// ------------------ Form state ------------------
 const productName = ref('')
 const description = ref('')
 const price = ref<number | null>(null)
@@ -25,14 +25,14 @@ const hasVarieties = ref(false)
 const hasSamePrice = ref(false)
 const isSubmitting = ref(false)
 
-// Main images
+// ------------------ Main images ------------------
 const mainProductImages = ref<File[]>([])
 const mainImagePreviews = ref<string[]>([])
 const mainPreviewDialog = ref(false)
 const selectedMainImage = ref<string | null>(null)
 const showPhotoPicker = ref(false)
 
-// Varieties
+// ------------------ Varieties ------------------
 type Variety = {
   id: number
   name: string
@@ -42,42 +42,37 @@ type Variety = {
 }
 const varieties = ref<Variety[]>([])
 
-// Snackbar
+// ------------------ Snackbar ------------------
 const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref<'success' | 'error'>('success')
-
 const showSnackbar = (message: string, type: 'success' | 'error') => {
   snackbarMessage.value = message
   snackbarColor.value = type
   snackbar.value = true
 }
 
-// -------------------- Image helpers --------------------
+// ------------------ Image helpers ------------------
 const pickProductImage = async (source: 'camera' | 'gallery') => {
-  try {
-    const photo = await Camera.getPhoto({
-      quality: 90,
-      resultType: CameraResultType.Uri,
-      source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
-    })
+  const photo = await Camera.getPhoto({
+    quality: 90,
+    resultType: CameraResultType.Uri,
+    source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos
+  })
+  if (!photo?.webPath) return
 
-    if (!photo?.webPath) return
-    if (mainProductImages.value.length >= 5) {
-      alert('Max 5 images allowed')
-      return
-    }
-
-    const response = await fetch(photo.webPath)
-    const blob = await response.blob()
-    const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
-
-    mainProductImages.value.push(file)
-    mainImagePreviews.value.push(photo.webPath)
-    showPhotoPicker.value = false
-  } catch (err) {
-    console.error(err)
+  if (mainProductImages.value.length >= 5) {
+    alert('Max 5 images allowed')
+    return
   }
+
+  const response = await fetch(photo.webPath)
+  const blob = await response.blob()
+  const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+
+  mainProductImages.value.push(file)
+  mainImagePreviews.value.push(photo.webPath)
+  showPhotoPicker.value = false
 }
 
 const openMainPreview = (image: string) => {
@@ -93,51 +88,69 @@ const removeMainImage = (index: number) => {
   }
 }
 
-// -------------------- Upload images --------------------
+// ------------------ Variety Image Helpers ------------------
+const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') => {
+  const photo = await Camera.getPhoto({
+    quality: 90,
+    resultType: CameraResultType.Uri,
+    source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos
+  })
+  if (!photo?.webPath) return
+  if (variety.images.length >= 3) {
+    alert('Max 3 images per variety')
+    return
+  }
+
+  const response = await fetch(photo.webPath)
+  const blob = await response.blob()
+  const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+  variety.images.push(file)
+  variety.previews.push(photo.webPath)
+}
+
+const removeVarietyImage = (variety: Variety, index: number) => {
+  URL.revokeObjectURL(variety.previews[index])
+  variety.images.splice(index, 1)
+  variety.previews.splice(index, 1)
+}
+
+// ------------------ Upload images ------------------
 const uploadImages = async (files: File[], folder = 'products', shopId: string) => {
   const urls: string[] = []
   for (const file of files) {
     const filePath = `${shopId}/${folder}/${Date.now()}-${file.name}`
     const { error } = await supabase.storage.from('product_lists').upload(filePath, file)
-    if (error) {
-      console.error('Upload failed:', error.message)
-      continue
+    if (!error) {
+      const { data } = supabase.storage.from('product_lists').getPublicUrl(filePath)
+      urls.push(data.publicUrl)
     }
-    const { data } = supabase.storage.from('product_lists').getPublicUrl(filePath)
-    urls.push(data.publicUrl)
   }
   return urls
 }
 
-// -------------------- Remove old images --------------------
+// ------------------ Remove old images ------------------
 const removeOldImages = async (urls: string[]) => {
   if (!urls?.length) return
   const paths = urls
-    .map((url: string) => {
-      const parts = url.split('/product_lists/')
-      return parts[1] ? parts[1] : null
-    })
-    .filter((p: string | null) => p !== null) as string[]
-
+    .map(url => url.split('/product_lists/')[1])
+    .filter(Boolean) as string[]
   if (paths.length) {
     const { error } = await supabase.storage.from('product_lists').remove(paths)
-    if (error) console.warn('⚠️ Failed to remove old images:', error.message)
+    if (error) console.warn('Failed to remove old images:', error.message)
   }
 }
 
-// -------------------- Submit --------------------
+// ------------------ Submit form ------------------
 const submitForm = async () => {
-  if (isSubmitting.value) return // prevent double-clicks
+  if (isSubmitting.value) return
   isSubmitting.value = true
 
   try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
-    if (userError || !user) throw new Error('No user logged in')
+    // 1️⃣ Get current user
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
+    if (!user || userError) throw new Error('No user logged in')
 
-    // find shop id
+    // 2️⃣ Get shop id
     const { data: shop } = await supabase
       .from('shops')
       .select('id')
@@ -147,36 +160,46 @@ const submitForm = async () => {
 
     const shopId = shop.id
 
-    // upload new images
+    // 3️⃣ Upload main product images if new ones selected
     const newImageUrls = mainProductImages.value.length
       ? await uploadImages(mainProductImages.value, 'main', shopId)
       : []
+
     const finalImageUrls = newImageUrls.length ? newImageUrls : mainImagePreviews.value
 
-    // varieties
-    const varietyData = []
+    // 4️⃣ Prepare variety data
+    const varietyData: { name: string; price: number; images: string[] }[] = []
+
     for (const v of varieties.value) {
       let urls: string[] = []
-      if (Array.isArray(v.images) && v.images.length && v.images[0] instanceof File) {
+
+      if (Array.isArray(v.images) && v.images[0] instanceof File) {
         urls = await uploadImages(v.images as File[], 'varieties', shopId)
       } else if (Array.isArray(v.images)) {
         urls = v.images as string[]
       }
 
-      // ✅ If hasSamePrice, use main price
-      const varietyPrice = hasSamePrice.value ? price.value : v.price
+      const varietyPrice = hasSamePrice.value ? price.value! : v.price
 
-      varietyData.push({ name: v.name, price: varietyPrice, images: urls })
+      varietyData.push({
+        name: v.name,
+        price: varietyPrice,
+        images: urls
+      })
     }
 
+    // 5️⃣ Edit mode
     if (isEditMode.value && productId.value) {
-      const { data: oldProduct } = await supabase
+      // Fetch old product for image cleanup
+      const { data: oldProduct, error: fetchError } = await supabase
         .from('products')
         .select('main_img_urls, varieties')
         .eq('id', productId.value)
         .single()
+      if (fetchError) throw fetchError
 
-      const { error } = await supabase
+      // Update product
+      const { error: updateError } = await supabase
         .from('products')
         .update({
           prod_name: productName.value,
@@ -184,19 +207,21 @@ const submitForm = async () => {
           price: price.value,
           stock: stock.value,
           main_img_urls: finalImageUrls,
-          sizes: selectedSizes.value,
-          varieties: varietyData,
+          sizes: hasSizes.value ? selectedSizes.value : [],
+          varieties: hasVarieties.value ? varietyData : [],
         })
         .eq('id', productId.value)
+      if (updateError) throw updateError
 
-      if (error) throw error
-
+      // Remove old main images if replaced
       if (newImageUrls.length && oldProduct?.main_img_urls) {
         await removeOldImages(oldProduct.main_img_urls)
       }
+
+      // Remove old variety images
       if (oldProduct?.varieties) {
         for (const oldVariety of oldProduct.varieties) {
-          const newVariety = varietyData.find((v) => v.name === oldVariety.name)
+          const newVariety = varietyData.find(v => v.name === oldVariety.name)
           if (newVariety && newVariety.images.length && oldVariety.images) {
             await removeOldImages(oldVariety.images)
           }
@@ -205,111 +230,31 @@ const submitForm = async () => {
 
       showSnackbar('✅ Product updated successfully!', 'success')
     } else {
-      await supabase.from('products').insert([
-        {
-          shop_id: shopId,
-          prod_name: productName.value,
-          prod_description: description.value,
-          price: price.value,
-          stock: stock.value,
-          main_img_urls: finalImageUrls,
-          sizes: hasSizes.value ? selectedSizes.value : [],
-          varieties: hasVarieties.value ? varietyData : [],
-        },
-      ])
+      // 6️⃣ Insert new product
+      await supabase.from('products').insert([{
+        shop_id: shopId,
+        prod_name: productName.value,
+        prod_description: description.value,
+        price: price.value,
+        stock: stock.value,
+        main_img_urls: finalImageUrls,
+        sizes: hasSizes.value ? selectedSizes.value : [],
+        varieties: hasVarieties.value ? varietyData : [],
+      }])
+
       showSnackbar('✅ Product added successfully!', 'success')
       resetForm()
     }
   } catch (err: any) {
-    console.error('❌ Error saving product:', err.message)
-    showSnackbar('❌ Something went wrong. Please try again.', 'error')
+    console.error('❌ Error saving product:', err)
+    showSnackbar(`❌ ${err.message || 'Something went wrong'}`, 'error')
   } finally {
-    isSubmitting.value = false // ✅ always re-enable button
+    isSubmitting.value = false
   }
 }
 
-// -------------------- Prefill if editing --------------------
-onMounted(async () => {
-  if (productId.value) {
-    isEditMode.value = true
 
-    const { data, error } = await supabase
-      .from('products')
-      .select('*')
-      .eq('id', productId.value)
-      .single()
-
-    if (!error && data) {
-      productName.value = data.prod_name
-      description.value = data.prod_description
-      price.value = data.price
-      stock.value = data.stock
-      selectedSizes.value = data.sizes || []
-      mainImagePreviews.value = data.main_img_urls || []
-
-      // 🟢 Check for varieties
-      if (data.varieties && data.varieties.length > 0) {
-        hasVarieties.value = true
-
-        // 🟢 Auto-detect if all variety prices are the same as the main product
-        hasSamePrice.value = data.varieties.every((v: any) => v.price === data.price)
-
-        // 🟢 Map varieties back into editable form
-        varieties.value = data.varieties.map((v: any, idx: number) => ({
-          id: idx,
-          name: v.name,
-          price: v.price,
-          images: v.images || [],
-          previews: v.images || [],
-        }))
-      }
-    }
-  }
-})
-
-const addVariety = () => {
-  varieties.value.push({
-    id: Date.now(),
-    name: '',
-    price: 0,
-    images: [],
-    previews: [],
-  })
-}
-
-// -------------------- Variety image helpers --------------------
-const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') => {
-  try {
-    const photo = await Camera.getPhoto({
-      quality: 90,
-      resultType: CameraResultType.Uri,
-      source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
-    })
-
-    if (!photo?.webPath) return
-    if (variety.images.length >= 3) {
-      alert('Max 3 images per variety')
-      return
-    }
-
-    const response = await fetch(photo.webPath)
-    const blob = await response.blob()
-    const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
-
-    variety.images.push(file)
-    variety.previews.push(photo.webPath)
-  } catch (err) {
-    console.error('Error picking variety image:', err)
-  }
-}
-
-const removeVarietyImage = (variety: Variety, index: number) => {
-  URL.revokeObjectURL(variety.previews[index])
-  variety.images.splice(index, 1)
-  variety.previews.splice(index, 1)
-}
-
-// reset form
+// ------------------ Reset form ------------------
 const resetForm = () => {
   productName.value = ''
   description.value = ''
@@ -322,11 +267,52 @@ const resetForm = () => {
   mainProductImages.value = []
   mainImagePreviews.value = []
   varieties.value = []
-
-  // scroll to top after reset
   window.scrollTo({ top: 0, behavior: 'smooth' })
 }
+
+// ------------------ Prefill for edit ------------------
+onMounted(async () => {
+  const id = route.params.id as string
+  if (id) {
+    isEditMode.value = true
+    productId.value = id
+
+    const { data, error } = await supabase.from('products').select('*').eq('id', id).single()
+    if (!error && data) {
+      productName.value = data.prod_name
+      description.value = data.prod_description
+      price.value = data.price
+      stock.value = data.stock
+      selectedSizes.value = data.sizes || []
+      mainImagePreviews.value = data.main_img_urls || []
+
+      if (data.varieties && data.varieties.length > 0) {
+        hasVarieties.value = true
+        hasSamePrice.value = data.varieties.every((v: any) => v.price === data.price)
+        varieties.value = data.varieties.map((v: any, idx: number) => ({
+          id: idx,
+          name: v.name,
+          price: v.price,
+          images: v.images || [],
+          previews: v.images || []
+        }))
+      }
+    }
+  }
+})
+
+// ------------------ Add new variety ------------------
+const addVariety = () => {
+  varieties.value.push({
+    id: Date.now(),
+    name: '',
+    price: 0,
+    images: [],
+    previews: []
+  })
+}
 </script>
+
 <template>
   <v-app>
     <v-app-bar flat color="primary" dark>
