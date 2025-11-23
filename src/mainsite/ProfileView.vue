@@ -223,6 +223,7 @@ const goShopOrBuild = () => {
     router.push('/shop-build')
   }
 }
+
 // Load items for the selected section
 const loadSectionItems = async (sectionId) => {
   if (!user.value?.id) return
@@ -245,6 +246,7 @@ const loadSectionItems = async (sectionId) => {
           selected_size,
           selected_variety,
           products (
+            id,
             prod_name,
             main_img_urls
           )
@@ -283,11 +285,12 @@ const loadSectionItems = async (sectionId) => {
       console.error('Error loading section items:', error)
       sectionItems.value = []
     } else {
-      // Flatten order_items for display
+      // Flatten order_items for display - INCLUDING PRODUCT ID
       sectionItems.value = data.flatMap((order) =>
         order.order_items.map((item) => ({
           id: item.id,
           order_id: order.id,
+          product_id: item.product_id, // Add product_id here
           status: order.status,
           quantity: item.quantity,
           price: item.price,
@@ -303,6 +306,20 @@ const loadSectionItems = async (sectionId) => {
     sectionItems.value = []
   } finally {
     isLoadingSection.value = false
+  }
+}
+
+// View product function
+const viewProduct = (productId) => {
+  if (productId) {
+    router.push(`/viewproduct/${productId}`)
+  }
+}
+
+// View order details function (if you want to keep this too)
+const viewOrder = (orderId) => {
+  if (orderId) {
+    router.push(`/order/${orderId}`)
   }
 }
 </script>
@@ -386,19 +403,53 @@ const loadSectionItems = async (sectionId) => {
           <div v-else class="section-content">
             <v-row v-if="sectionItems.length > 0" dense>
               <v-col v-for="order in sectionItems" :key="order.id" cols="12" sm="6" md="4">
-                <v-card outlined>
-                  <v-img v-if="order.product_img" :src="order.product_img" height="150px" cover />
+                <v-card outlined class="order-card">
+                  <v-img 
+                    v-if="order.product_img" 
+                    :src="order.product_img" 
+                    height="150px" 
+                    cover 
+                    style="cursor: pointer;"
+                    @click="viewProduct(order.product_id)"
+                  />
                   <v-card-title>{{ order.product_name || 'Product' }}</v-card-title>
-                  <v-card-subtitle>Status: {{ order.status }}</v-card-subtitle>
+                  <v-card-subtitle>
+                    <v-chip small :color="
+                      order.status === 'completed' ? 'success' :
+                      order.status === 'cancelled' ? 'error' :
+                      order.status === 'pending' ? 'warning' :
+                      'primary'
+                    ">
+                      {{ order.status }}
+                    </v-chip>
+                  </v-card-subtitle>
                   <v-card-text>
-                    Quantity: {{ order.quantity }} <br />
-                    Price: ₱{{ order.price }} <br />
-                    <span v-if="order.selected_size">Size: {{ order.selected_size }}</span>
-                    <span v-if="order.selected_variety">Variety: {{ order.selected_variety }}</span>
+                    <div><strong>Quantity:</strong> {{ order.quantity }}</div>
+                    <div><strong>Price:</strong> ₱{{ order.price }}</div>
+                    <div v-if="order.selected_size"><strong>Size:</strong> {{ order.selected_size }}</div>
+                    <div v-if="order.selected_variety"><strong>Variety:</strong> {{ order.selected_variety }}</div>
                   </v-card-text>
                   <v-card-actions>
-                    <v-btn color="primary" text @click="router.push(`/order/${order.order_id}`)">
-                      View
+                    <!-- View Product Button -->
+                    <v-btn 
+                      color="primary" 
+                      variant="outlined" 
+                      size="small"
+                      @click="viewProduct(order.product_id)"
+                    >
+                      <v-icon left small>mdi-eye</v-icon>
+                      View Product
+                    </v-btn>
+                    
+                    <!-- View Order Button (optional) -->
+                    <v-btn 
+                      color="secondary" 
+                      variant="text" 
+                      size="small"
+                      @click="viewOrder(order.order_id)"
+                    >
+                      <v-icon left small>mdi-receipt</v-icon>
+                      Order Details
                     </v-btn>
                   </v-card-actions>
                 </v-card>
@@ -428,7 +479,6 @@ const loadSectionItems = async (sectionId) => {
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
-
 <style scoped>
 /* Global font style */
 :root {
@@ -779,4 +829,37 @@ const loadSectionItems = async (sectionId) => {
 .v-main {
   position: relative;
 }
+
+/* Additional styles for the order cards */
+.order-card {
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.order-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.v-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.v-card-actions .v-btn {
+  flex: 1;
+  min-width: 120px;
+}
+
+/* Responsive adjustments for buttons */
+@media (max-width: 600px) {
+  .v-card-actions {
+    flex-direction: column;
+  }
+  
+  .v-card-actions .v-btn {
+    width: 100%;
+  }
+}
+
 </style>
