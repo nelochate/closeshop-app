@@ -66,7 +66,11 @@ const routes = [
     component: ProductListing,
     meta: { requiresAuth: true },
   },
-  { path: '/additem/:id?', name: 'additem', component: AddItem, meta: { requiresAuth: true } },
+  {
+    path: '/additem/:id?',
+    name: 'AddItem',
+    component: () => import('@/mainsite/AddItem.vue'),
+  },
 
   // ✅ Allow unauthenticated access to update-password
   {
@@ -164,17 +168,17 @@ const routes = [
   },
   //for checkout
   {
-  path: '/checkout-success/:orderId',
-  name: 'checkout-success',
-  component: () => import('@/mainsite/CheckoutSuccess.vue'),
-  props: true,
-},
-{
-  path: '/rateview/:orderId',
-  name: 'rateview',
-  component: () => import('@/mainsite/RateView.vue'),
-  props: true,
-}
+    path: '/checkout-success/:orderId',
+    name: 'checkout-success',
+    component: () => import('@/mainsite/CheckoutSuccess.vue'),
+    props: true,
+  },
+  {
+    path: '/rateview/:orderId',
+    name: 'rateview',
+    component: () => import('@/mainsite/RateView.vue'),
+    props: true,
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
