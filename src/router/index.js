@@ -160,12 +160,11 @@ const routes = [
     component: () => import('@/mainsite/SearchView.vue'),
   },
 
-  {
-    path: '/purchaseview',
-    name: 'purchaseview',
-    component: () => import('@/mainsite/PurchaseView.vue'),
-    props: true,
-  },
+{
+  path: '/purchaseview/:id?', // Make id optional with ?
+  name: 'purchaseview',
+  component: () => import('@/mainsite/PurchaseView.vue'),
+},
   //for checkout
   {
     path: '/checkout-success/:orderId',
