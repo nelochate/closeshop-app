@@ -288,21 +288,33 @@ const buyNow = () => {
 
   const item = {
     id: product.value.id,
+    product_id: product.value.id,
     name: product.value.prod_name,
     price: product.value.price,
-    quantity: 1, // default
+    quantity: 1,
     size: selectedSize.value || null,
     variety: selectedVariety.value || null,
     image: mainImage(product.value.main_img_urls),
+    shop_id: product.value.shop?.id,
+    product: product.value
   }
 
+  console.log('🛒 Navigating to checkout with item:', item)
+
+  // ✅ Use query params instead of state for more reliability
   router.push({
-    name: 'purchaseview', // this matches your route
-    params: { id: product.value.id }, // must match /purchaseview/:id
-    state: { items: [item], shopId: product.value.shop.id },
+    name: 'purchaseview',
+    query: {
+      productId: product.value.id,
+      fromProduct: 'true'
+    },
+    state: { 
+      items: [item], 
+      shopId: product.value.shop.id,
+      fromCart: false 
+    }
   })
 }
-
 // Add to Cart Dialog
 const addToCartDialog = computed(() => {
   return {

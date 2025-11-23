@@ -234,6 +234,7 @@ onMounted(async () => {
 
 
 // ✅ Enhanced Checkout function
+// ✅ Enhanced Checkout function with shop_id
 const checkoutSelected = () => {
   const selectedCartItems = cartItems.value.filter(i => selectedItems.value.includes(i.id))
   
@@ -252,8 +253,13 @@ const checkoutSelected = () => {
     image: (typeof item.product?.main_img_urls === 'string'
       ? JSON.parse(item.product.main_img_urls)[0]
       : item.product?.main_img_urls?.[0]) || '/placeholder.png',
-    cart_item_id: item.id // Keep reference to cart item for cleanup
+    cart_item_id: item.id, // Keep reference to cart item for cleanup
+    shop_id: item.product?.shop?.id || item.product?.shop_id, // CRITICAL: Include shop_id
+    product: item.product // Include full product data for shop info
   }))
+
+  console.log('🛒 Items for checkout:', itemsForCheckout)
+  console.log('🏪 Shop IDs:', itemsForCheckout.map(item => item.shop_id))
 
   // Navigate to purchase view with selected items
   router.push({
