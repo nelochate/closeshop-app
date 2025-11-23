@@ -9,7 +9,8 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
 
 /* -------------------- MAPBOX CONFIG -------------------- */
-const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+const MAPBOX_ACCESS_TOKEN =
+  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 /* -------------------- ROUTE OPTIONS INTERFACE -------------------- */
 interface RouteOption {
@@ -61,7 +62,8 @@ const userIcon = L.icon({
 })
 
 const registeredShopIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
 })
@@ -106,19 +108,22 @@ const initializeMap = (): Promise<void> => {
         }).addTo(map.value)
 
         // Add zoom control
-        L.control.zoom({
-          position: 'topright'
-        }).addTo(map.value)
+        L.control
+          .zoom({
+            position: 'topright',
+          })
+          .addTo(map.value)
 
         // Load cached location
         loadCachedLocation()
         const placeholder = lastKnown.value ?? [8.95, 125.53]
 
         // Create user marker
-        userMarker = L.marker(placeholder, { 
+        userMarker = L.marker(placeholder, {
           icon: userIcon,
-          zIndexOffset: 1000 
-        }).addTo(map.value)
+          zIndexOffset: 1000,
+        })
+          .addTo(map.value)
           .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
 
         // Force map resize
@@ -128,7 +133,6 @@ const initializeMap = (): Promise<void> => {
           console.log('Map initialized successfully')
           resolve()
         }, 100)
-
       } catch (error) {
         console.error('Error initializing map:', error)
         resolve()
@@ -141,31 +145,31 @@ const initializeMap = (): Promise<void> => {
 const detectUserCity = async (lat: number, lng: number): Promise<string | null> => {
   try {
     console.log('Detecting city for:', lat, lng)
-    
+
     const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?types=place&access_token=${MAPBOX_ACCESS_TOKEN}`
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?types=place&access_token=${MAPBOX_ACCESS_TOKEN}`,
     )
-    
+
     if (!response.ok) {
       throw new Error(`Geocoding failed: ${response.status}`)
     }
-    
+
     const data = await response.json()
     console.log('Geocoding response:', data)
-    
+
     if (data.features && data.features.length > 0) {
       // Find city feature
-      const cityFeature = data.features.find((feature: any) => 
-        feature.place_type.includes('place') || 
-        feature.place_type.includes('locality')
+      const cityFeature = data.features.find(
+        (feature: any) =>
+          feature.place_type.includes('place') || feature.place_type.includes('locality'),
       )
-      
+
       if (cityFeature) {
         console.log('Detected city:', cityFeature.text)
         return cityFeature.text
       }
     }
-    
+
     console.warn('No city features found in response')
     return null
   } catch (error) {
@@ -177,32 +181,31 @@ const detectUserCity = async (lat: number, lng: number): Promise<string | null> 
 const fetchCityBoundary = async (cityName: string): Promise<any> => {
   try {
     console.log('Fetching boundary for:', cityName)
-    
+
     // Use OpenStreetMap Nominatim for boundary data
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&polygon_geojson=1&limit=1`
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&polygon_geojson=1&limit=1`,
     )
-    
+
     if (!response.ok) throw new Error('Boundary fetch failed')
-    
+
     const data = await response.json()
     console.log('Boundary data:', data)
-    
+
     if (data && data.length > 0 && data[0].geojson) {
       return {
         type: 'Feature',
         geometry: data[0].geojson,
         properties: {
           name: cityName,
-          display_name: data[0].display_name
-        }
+          display_name: data[0].display_name,
+        },
       }
     }
-    
+
     // Fallback: Create circular boundary
     console.log('Using circular boundary as fallback')
     return createCircularBoundary(latitude.value!, longitude.value!)
-    
   } catch (error) {
     console.warn('City boundary fetch failed:', error)
     return createCircularBoundary(latitude.value!, longitude.value!)
@@ -212,43 +215,42 @@ const fetchCityBoundary = async (cityName: string): Promise<any> => {
 const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) => {
   const points = 32
   const coordinates = []
-  
+
   for (let i = 0; i < points; i++) {
     const angle = (i * 360) / points
     const bearing = (angle * Math.PI) / 180
-    
+
     const latRad = (lat * Math.PI) / 180
     const lngRad = (lng * Math.PI) / 180
     const angularDistance = radiusKm / 6371
-    
+
     const newLat = Math.asin(
       Math.sin(latRad) * Math.cos(angularDistance) +
-      Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearing)
+        Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearing),
     )
-    
-    const newLng = lngRad + Math.atan2(
-      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latRad),
-      Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(newLat)
-    )
-    
-    coordinates.push([
-      (newLat * 180) / Math.PI,
-      (newLng * 180) / Math.PI
-    ])
+
+    const newLng =
+      lngRad +
+      Math.atan2(
+        Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latRad),
+        Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(newLat),
+      )
+
+    coordinates.push([(newLat * 180) / Math.PI, (newLng * 180) / Math.PI])
   }
-  
+
   coordinates.push(coordinates[0]) // Close polygon
-  
+
   return {
     type: 'Feature',
     geometry: {
       type: 'Polygon',
-      coordinates: [coordinates]
+      coordinates: [coordinates],
     },
     properties: {
       name: 'Approximate Area',
-      isFallback: true
-    }
+      isFallback: true,
+    },
   }
 }
 
@@ -261,31 +263,31 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
   try {
     boundaryLoading.value = true
     console.log('Starting boundary highlighting for:', lat, lng)
-    
+
     // Clear existing boundary
     clearCityBoundary()
-    
+
     // Detect city name
     const detectedCity = await detectUserCity(lat, lng)
     userCity.value = detectedCity
-    
+
     if (!detectedCity) {
       console.warn('Could not detect city name')
       setErrorMessage('Could not detect your city. Showing all shops.', 3000)
       boundaryLoading.value = false
       return
     }
-    
+
     // Fetch boundary data
     const boundaryData = await fetchCityBoundary(detectedCity)
-    
+
     if (!boundaryData) {
       console.warn('Could not fetch boundary data')
       setErrorMessage('Could not load city boundary. Showing all shops.', 3000)
       boundaryLoading.value = false
       return
     }
-    
+
     // Create and style the boundary layer
     cityBoundaryLayer.value = L.geoJSON(boundaryData, {
       style: {
@@ -295,11 +297,11 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
         weight: 3,
         opacity: 0.8,
         dashArray: '10, 10',
-        className: 'city-boundary'
+        className: 'city-boundary',
       },
       onEachFeature: (feature, layer) => {
         if (feature.properties) {
-          const popupContent = feature.properties.isFallback 
+          const popupContent = feature.properties.isFallback
             ? `<div style="text-align: center;">
                  <strong>${feature.properties.name}</strong><br>
                  <small>Approximate boundary (5km radius)</small>
@@ -308,10 +310,10 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
                  <strong>${feature.properties.name}</strong><br>
                  <small>${feature.properties.display_name || ''}</small>
                </div>`
-          
+
           layer.bindPopup(popupContent)
         }
-      }
+      },
     }).addTo(map.value)
 
     // Store the polygon for spatial queries
@@ -328,16 +330,15 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
         animate: true,
         duration: 1,
         maxZoom: 15,
-        padding: [20, 20]
+        padding: [20, 20],
       })
     } else {
       // Fallback: Center on user
       map.value.setView([lat, lng], 14, { animate: true, duration: 1 })
     }
-    
+
     setErrorMessage(`Showing shops in ${detectedCity}`, 3000)
     console.log('Boundary highlighted successfully')
-    
   } catch (error) {
     console.error('Error highlighting city boundary:', error)
     setErrorMessage('Error loading city boundary', 3000)
@@ -351,12 +352,12 @@ const clearCityBoundary = () => {
     map.value?.removeLayer(cityBoundaryLayer.value)
     cityBoundaryLayer.value = null
   }
-  
+
   if (cityBoundaryPolygon.value) {
     map.value?.removeLayer(cityBoundaryPolygon.value)
     cityBoundaryPolygon.value = null
   }
-  
+
   userCity.value = null
   setErrorMessage('City boundary cleared')
 }
@@ -479,7 +480,6 @@ const recenterToUser = async () => {
     // Save and refresh boundary
     saveCachedLocation(targetLat, targetLng)
     await highlightUserCityBoundary(targetLat, targetLng)
-    
   } catch (error) {
     console.error('Error recentering:', error)
     errorMsg.value = 'Failed to recenter map'
@@ -775,26 +775,29 @@ const doFetchShops = async () => {
       .from('shops')
       .select(
         `
-        id,
-        business_name,
-        latitude,
-        longitude,
-        logo_url,
-        physical_store,
-        detected_address,
-        house_no,
-        building,
-        street,
-        barangay,
-        city,
-        province,
-        postal,
-        status,
-        products:products(id, prod_name, price, main_img_urls)
-      `,
+    id,
+    business_name,
+    latitude,
+    longitude,
+    logo_url,
+    physical_store,
+    detected_address,
+    house_no,
+    building,
+    street,
+    barangay,
+    city,
+    province,
+    postal,
+    status,
+    manual_status,
+    open_time,
+    close_time,
+    open_days,
+    products:products(id, prod_name, price, main_img_urls)
+  `,
       )
       .eq('status', 'approved')
-
     if (error) throw error
     if (!data) {
       shops.value = []
@@ -902,19 +905,32 @@ const plotShops = () => {
       .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
       .join('')
 
+    // In the plotShops function, update the popup content:
+    const statusDisplay = getShopStatusDisplay(shop)
     marker.bindPopup(`
-      <div style="text-align:center; min-width: 220px;">
-        <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
-        <p><strong>${shop.business_name}</strong></p>
-        <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
-        <p style="margin:2px 0; font-size:14px;">${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}</p>
-        ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
-        <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
-          <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
-          <button id="route-${shop.id}" style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">Show Routes</button>
-        </div>
+  <div style="text-align:center; min-width: 240px;">
+    <div style="position: relative;">
+      <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
+      <div 
+        style="position: absolute; top: -5px; right: -5px; background: ${statusDisplay.color}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; cursor: help;"
+        title="${statusDisplay.tooltip}"
+      >
+        ${statusDisplay.text}
+        ${shop.manual_status !== 'auto' ? ' ⚡' : ''}
       </div>
-    `)
+    </div>
+    <p><strong>${shop.business_name}</strong></p>
+    <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
+    <p style="margin:2px 0; font-size:14px;">${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}</p>
+    ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
+    <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
+      <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
+      <button id="route-${shop.id}" style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;" ${!isShopCurrentlyOpen(shop) ? 'disabled' : ''}>Show Routes</button>
+    </div>
+    ${!isShopCurrentlyOpen(shop) ? '<p style="color: #ef4444; font-size: 12px; margin-top: 4px;">Shop is currently closed</p>' : ''}
+    ${shop.manual_status !== 'auto' ? '<p style="color: #f59e0b; font-size: 11px; margin-top: 2px;">⚡ Manual override</p>' : ''}
+  </div>
+`)
 
     marker.on('popupopen', () => {
       const viewBtn = document.getElementById(`view-${shop.id}`)
@@ -1024,6 +1040,7 @@ const focusOnShopMarker = async (shopId: string) => {
 }
 
 /* -------------------- HELPERS -------------------- */
+/* -------------------- SHOP STATUS HELPERS -------------------- */
 const getFullAddress = (shop: any) => {
   if (shop.detected_address) return shop.detected_address
   const parts = [
@@ -1040,18 +1057,66 @@ const getFullAddress = (shop: any) => {
   return 'Address not available'
 }
 
+const convertTimeToNumber = (timeStr: string): number => {
+  if (!timeStr) return 0
+  const [hours, minutes] = timeStr.split(':').map(Number)
+  return hours * 100 + minutes
+}
+
+const isShopCurrentlyOpen = (shop: any): boolean => {
+  // First check manual status - note: your schema uses manual_status, not is_open
+  if (shop.manual_status === 'closed') return false
+  if (shop.manual_status === 'open') return true
+
+  // If auto mode, check business hours
+  return isShopOpenByHours(shop)
+}
+
+const getShopStatusDisplay = (shop: any): { text: string; color: string; tooltip: string } => {
+  const isOpen = isShopCurrentlyOpen(shop)
+
+  if (shop.manual_status === 'open') {
+    return {
+      text: 'OPEN',
+      color: '#10b981',
+      tooltip: 'Manually set to OPEN by seller',
+    }
+  }
+  if (shop.manual_status === 'closed') {
+    return {
+      text: 'CLOSED',
+      color: '#ef4444',
+      tooltip: 'Manually set to CLOSED by seller',
+    }
+  }
+
+  if (isOpen) {
+    return {
+      text: 'OPEN',
+      color: '#10b981',
+      tooltip: 'Open based on business hours',
+    }
+  } else {
+    return {
+      text: 'CLOSED',
+      color: '#ef4444',
+      tooltip: 'Closed based on business hours',
+    }
+  }
+}
+
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
   console.log('Mounting map component...')
-  
+
   try {
     await initializeMap()
 
     if (Capacitor.getPlatform() !== 'web') await requestPermission()
 
-    const pos = await Geolocation.getCurrentPosition({ 
-      enableHighAccuracy: false, 
-      timeout: 10000 
+    const pos = await Geolocation.getCurrentPosition({
+      enableHighAccuracy: false,
+      timeout: 10000,
     })
     const quickLat = pos.coords.latitude
     const quickLng = pos.coords.longitude
@@ -1070,18 +1135,17 @@ onMounted(async () => {
       }
 
       await highlightUserCityBoundary(quickLat, quickLng)
-      
+
       if (!cityBoundaryLayer.value) {
         map.value.setView([quickLat, quickLng], 14, { animate: true })
       }
     }
 
     saveCachedLocation(quickLat, quickLng)
-    
+
     setTimeout(() => {
       doFetchShops()
     }, 1000)
-    
   } catch (err) {
     console.warn('Quick geolocation failed:', err)
     setErrorMessage('Location access failed. Using default location.', 3000)
@@ -1199,10 +1263,11 @@ const smartSearch = async () => {
 
   try {
     // Basic search implementation - you can expand this
-    const filtered = shops.value.filter(shop => 
-      shop.business_name.toLowerCase().includes(query) ||
-      shop.city?.toLowerCase().includes(query) ||
-      shop.products?.some((p: any) => p.prod_name.toLowerCase().includes(query))
+    const filtered = shops.value.filter(
+      (shop) =>
+        shop.business_name.toLowerCase().includes(query) ||
+        shop.city?.toLowerCase().includes(query) ||
+        shop.products?.some((p: any) => p.prod_name.toLowerCase().includes(query)),
     )
 
     if (filtered.length === 0) {
@@ -1261,6 +1326,34 @@ const openShop = async (shopId: string) => {
 
   router.push(`/shop/${shopId}`)
 }
+
+
+
+// Add these helper functions to your map component
+
+const isShopOpenByHours = (shop: any): boolean => {
+  const now = new Date()
+  const currentDay = now.getDay() // 0 = Sunday, 1 = Monday, etc.
+  const currentTime = now.getHours() * 100 + now.getMinutes()
+
+  // Check if shop is open today
+  if (shop.open_days && shop.open_days.length > 0) {
+    // Convert Sunday (0) to 7 for consistency with your schema (1-7 = Mon-Sun)
+    const adjustedDay = currentDay === 0 ? 7 : currentDay
+    if (!shop.open_days.includes(adjustedDay)) {
+      return false
+    }
+  }
+  // Check opening hours
+  if (shop.open_time && shop.close_time) {
+    const openTime = convertTimeToNumber(shop.open_time)
+    const closeTime = convertTimeToNumber(shop.close_time)
+
+    return currentTime >= openTime && currentTime <= closeTime
+  }
+
+  return true // If no hours specified, assume open
+}
 </script>
 
 <template>
@@ -1293,8 +1386,8 @@ const openShop = async (shopId: string) => {
       </div>
     </v-sheet>
 
-    <v-main style="position: relative; height: calc(100vh - 64px);">
-      <div id="map" style="height: 100%; width: 100%;"></div>
+    <v-main style="position: relative; height: calc(100vh - 64px)">
+      <div id="map" style="height: 100%; width: 100%"></div>
 
       <!-- Boundary Loading Overlay -->
       <div v-if="boundaryLoading" class="boundary-loading">
@@ -1378,7 +1471,7 @@ const openShop = async (shopId: string) => {
           </v-btn>
         </div>
       </div>
-      
+
       <v-alert
         v-if="errorMsg"
         type="info"
@@ -1417,13 +1510,34 @@ const openShop = async (shopId: string) => {
                     :src="shop.logo_url || shop.physical_store || 'https://placehold.co/80x80'"
                     alt="Shop logo"
                   />
+                  <v-badge
+                    dot
+                    :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
+                    location="top end"
+                    offset-x="-4"
+                    offset-y="-4"
+                  >
+                  </v-badge>
                 </v-avatar>
               </template>
-              <v-list-item-title>{{ shop.business_name }}</v-list-item-title>
+              <v-list-item-title>
+                {{ shop.business_name }}
+                <v-chip
+                  :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
+                  size="x-small"
+                  class="ml-2"
+                >
+                  {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
+                </v-chip>
+              </v-list-item-title>
               <v-list-item-subtitle>
                 {{ getFullAddress(shop) }}
-                <br>
-                {{ Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown' }}
+                <br />
+                {{
+                  Number(shop.distanceKm) !== Infinity
+                    ? shop.distanceKm.toFixed(2) + ' km away'
+                    : 'Distance unknown'
+                }}
               </v-list-item-subtitle>
             </v-list-item>
           </v-list>
@@ -1644,24 +1758,25 @@ const openShop = async (shopId: string) => {
 /* Responsive adjustments with safe area support */
 @media (max-width: 768px) {
   .hero {
-    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-left)) 12px max(12px, env(safe-area-inset-right));
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-left)) 12px
+      max(12px, env(safe-area-inset-right));
   }
-  
+
   .hero-row {
     gap: 8px;
     margin-top: env(safe-area-inset-top);
   }
-  
+
   .map-controls-container {
     bottom: max(80px, calc(80px + env(safe-area-inset-bottom)));
     right: max(12px, env(safe-area-inset-right));
   }
-  
+
   .control-btn {
     width: 44px !important;
     height: 44px !important;
   }
-  
+
   /* Adjust for notched devices */
   .route-info-alert {
     top: max(70px, calc(70px + env(safe-area-inset-top)));
@@ -1674,7 +1789,7 @@ const openShop = async (shopId: string) => {
   .hero {
     padding-top: max(20px, env(safe-area-inset-top));
   }
-  
+
   .hero-row {
     margin-top: max(8px, env(safe-area-inset-top));
   }
@@ -1685,16 +1800,16 @@ const openShop = async (shopId: string) => {
   .hero {
     padding-top: 16px;
   }
-  
+
   .hero-row {
     margin-top: 0;
   }
-  
+
   .map-controls-container {
     bottom: 100px;
     right: 20px;
   }
-  
+
   .route-info-alert {
     top: 80px;
   }
