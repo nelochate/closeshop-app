@@ -15,8 +15,9 @@ const error = ref<string | null>(null)
 const selectedImage = ref('')
 const quantity = ref(1)
 const addingToCart = ref(false)
+const activeTab = ref('details') // 'details', 'specifications', 'reviews'
 
-// Fetch product details with your schema
+// Fetch product details with enhanced data
 const fetchProduct = async () => {
   try {
     loading.value = true
@@ -24,7 +25,7 @@ const fetchProduct = async () => {
 
     console.log('🛍️ Fetching product:', productId)
 
-    // Using your actual table structure
+    // Enhanced query with more product details
     const { data: productData, error: productError } = await supabase
       .from('products')
       .select(`
@@ -43,7 +44,20 @@ const fetchProduct = async () => {
           street,
           barangay,
           city,
-          province
+          province,
+          contact_number,
+          email
+        ),
+        product_reviews (
+          id,
+          rating,
+          comment,
+          created_at,
+          user:profiles (
+            first_name,
+            last_name,
+            avatar_url
+          )
         )
       `)
       .eq('id', productId)
@@ -61,7 +75,7 @@ const fetchProduct = async () => {
     product.value = productData
     shop.value = productData.shop
 
-    // Set default selected image using your main_img_urls field
+    // Set default selected image
     const images = getProductImages(productData)
     selectedImage.value = images[0] || '/placeholder.png'
 
@@ -76,19 +90,16 @@ const fetchProduct = async () => {
   }
 }
 
-// Get product images from your main_img_urls field
+// Get product images
 const getProductImages = (productData: any): string[] => {
   if (!productData?.main_img_urls) return ['/placeholder.png']
   
   try {
-    // Handle different formats of main_img_urls
     if (typeof productData.main_img_urls === 'string') {
-      // Try to parse as JSON array
       try {
         const parsed = JSON.parse(productData.main_img_urls)
         return Array.isArray(parsed) ? parsed : [parsed]
       } catch {
-        // If it's a single URL string
         return [productData.main_img_urls]
       }
     }
@@ -103,14 +114,13 @@ const getProductImages = (productData: any): string[] => {
   }
 }
 
-// Get shop schedule from your shops table
-const shopSchedule = computed(() => {
+// Enhanced shop information
+const shopInfo = computed(() => {
   if (!shop.value) return null
   
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const openDays = shop.value.open_days?.map((dayIndex: number) => days[dayIndex]) || []
   
-  // Format address from your shops table columns
   const addressParts = [
     shop.value.street,
     shop.value.barangay,
@@ -126,11 +136,47 @@ const shopSchedule = computed(() => {
     closeTime: formatTime(shop.value.close_time) || '6:00 PM',
     meetupDetails: shop.value.meetup_details || 'Main Entrance',
     deliveryOptions: shop.value.delivery_options || ['meetup'],
-    fullAddress
+    fullAddress,
+    contact: shop.value.contact_number || 'Not provided',
+    email: shop.value.email || 'Not provided'
   }
 })
 
-// Format time from your time columns
+// Product specifications
+const productSpecs = computed(() => {
+  if (!product.value) return []
+  
+  const specs = []
+  if (product.value.category) specs.push({ label: 'Category', value: product.value.category })
+  if (product.value.weight) specs.push({ label: 'Weight', value: product.value.weight })
+  if (product.value.dimensions) specs.push({ label: 'Dimensions', value: product.value.dimensions })
+  if (product.value.material) specs.push({ label: 'Material', value: product.value.material })
+  if (product.value.brand) specs.push({ label: 'Brand', value: product.value.brand })
+  
+  return specs
+})
+
+// Review statistics
+const reviewStats = computed(() => {
+  if (!product.value?.product_reviews?.length) return null
+  
+  const reviews = product.value.product_reviews
+  const totalReviews = reviews.length
+  const averageRating = reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / totalReviews
+  const ratingCounts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+  
+  reviews.forEach((review: any) => {
+    ratingCounts[review.rating as keyof typeof ratingCounts]++
+  })
+  
+  return {
+    averageRating: averageRating.toFixed(1),
+    totalReviews,
+    ratingCounts
+  }
+})
+
+// Format time
 const formatTime = (timeString: string) => {
   if (!timeString) return null
   try {
@@ -144,7 +190,16 @@ const formatTime = (timeString: string) => {
   }
 }
 
-// Add to cart function using your cart_items table
+// Format date
+const formatDate = (dateString: string) => {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric'
+  })
+}
+
+// Add to cart function
 const addToCart = async () => {
   try {
     addingToCart.value = true
@@ -155,9 +210,7 @@ const addToCart = async () => {
       return
     }
 
-    console.log('🛒 Adding to cart for user:', user.id)
-
-    // Check if item already exists in cart using your cart_items table
+    // Check if item already exists in cart
     const { data: existingItem, error: checkError } = await supabase
       .from('cart_items')
       .select('id, quantity')
@@ -165,13 +218,13 @@ const addToCart = async () => {
       .eq('product_id', productId)
       .single()
 
-    if (checkError && checkError.code !== 'PGRST116') { // PGRST116 = no rows found
+    if (checkError && checkError.code !== 'PGRST116') {
       console.error('❌ Error checking cart:', checkError)
       throw checkError
     }
 
     if (existingItem) {
-      // Update quantity if item exists
+      // Update quantity
       const { error: updateError } = await supabase
         .from('cart_items')
         .update({ 
@@ -180,14 +233,9 @@ const addToCart = async () => {
         })
         .eq('id', existingItem.id)
 
-      if (updateError) {
-        console.error('❌ Error updating cart:', updateError)
-        throw updateError
-      }
-      
-      console.log('✅ Cart item quantity updated')
+      if (updateError) throw updateError
     } else {
-      // Add new item to cart using your cart_items schema
+      // Add new item
       const { error: insertError } = await supabase
         .from('cart_items')
         .insert({
@@ -197,15 +245,9 @@ const addToCart = async () => {
           created_at: new Date().toISOString()
         })
 
-      if (insertError) {
-        console.error('❌ Error adding to cart:', insertError)
-        throw insertError
-      }
-      
-      console.log('✅ New item added to cart')
+      if (insertError) throw insertError
     }
 
-    // Show success message
     alert(`Added ${quantity.value} ${product.value.prod_name} to cart!`)
     
   } catch (err: any) {
@@ -216,7 +258,7 @@ const addToCart = async () => {
   }
 }
 
-// Buy now function - navigates to your existing purchase view
+// Buy now function
 const buyNow = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser()
@@ -225,9 +267,6 @@ const buyNow = async () => {
       return
     }
 
-    console.log('🚀 Buying now, navigating to purchase view')
-
-    // Navigate to your existing purchase view with this product
     router.push({
       name: 'purchaseview',
       state: {
@@ -251,7 +290,7 @@ const buyNow = async () => {
   }
 }
 
-// Contact seller function - uses your conversations/messages schema
+// Contact seller function
 const contactSeller = async () => {
   try {
     if (!shop.value?.owner_id) {
@@ -265,9 +304,7 @@ const contactSeller = async () => {
       return
     }
 
-    console.log('💬 Contacting seller:', shop.value.owner_id)
-
-    // Find or create conversation (using your existing logic)
+    // Find or create conversation
     const { data: existingConversation, error: convError } = await supabase
       .from('conversations')
       .select('id')
@@ -286,11 +323,7 @@ const contactSeller = async () => {
         .select('id')
         .single()
 
-      if (createError) {
-        console.error('❌ Error creating conversation:', createError)
-        throw createError
-      }
-      
+      if (createError) throw createError
       conversationId = newConversation.id
     }
 
@@ -322,10 +355,7 @@ const goBack = () => router.back()
 
 const goToShop = () => {
   if (shop.value?.id) {
-    // You might want to create a ShopView component
-    console.log('Navigating to shop:', shop.value.id)
-    // router.push(`/shop/${shop.value.id}`)
-    alert('Shop view coming soon!')
+    router.push(`/shop/${shop.value.id}`)
   }
 }
 
@@ -338,7 +368,6 @@ const shareProduct = () => {
       url: window.location.href,
     })
   } else {
-    // Fallback: copy to clipboard
     navigator.clipboard.writeText(window.location.href)
     alert('Product link copied to clipboard!')
   }
@@ -371,7 +400,7 @@ onMounted(() => {
       <!-- Loading State -->
       <div v-if="loading" class="loading-container">
         <v-progress-circular indeterminate color="primary" size="64" />
-        <p class="text-h6 mt-4">Loading product...</p>
+        <p class="text-h6 mt-4">Loading product information...</p>
       </div>
 
       <!-- Error State -->
@@ -420,53 +449,149 @@ onMounted(() => {
             <div class="price-section">
               <h1 class="product-name">{{ product.prod_name }}</h1>
               <div class="price">₱{{ product.price?.toFixed(2) }}</div>
-              <div v-if="product.stock_quantity !== undefined" class="stock-info">
+              <div class="stock-info">
                 <v-chip size="small" :color="product.stock_quantity > 0 ? 'success' : 'error'">
-                  {{ product.stock_quantity > 0 ? `${product.stock_quantity} in stock` : 'Out of stock' }}
+                  {{ product.stock_quantity > 0 ? `${product.stock_quantity} units available` : 'Out of stock' }}
                 </v-chip>
+                <div class="product-sku" v-if="product.sku">
+                  SKU: {{ product.sku }}
+                </div>
               </div>
             </div>
 
-            <!-- Description -->
-            <div class="description-section">
-              <h3 class="section-title">Description</h3>
-              <p class="product-description">{{ product.description || 'No description available.' }}</p>
-            </div>
+            <!-- Tabs Navigation -->
+            <div class="tabs-section">
+              <v-tabs v-model="activeTab" color="primary">
+                <v-tab value="details">Details</v-tab>
+                <v-tab value="specifications">Specifications</v-tab>
+                <v-tab value="reviews">Reviews</v-tab>
+              </v-tabs>
 
-            <!-- Shop Info -->
-            <div class="shop-section" v-if="shop">
-              <h3 class="section-title">Sold by</h3>
-              <div class="shop-info" @click="goToShop">
-                <v-avatar size="48" class="shop-avatar">
-                  <v-img :src="shop.logo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(shop.business_name)}&background=random`" />
-                </v-avatar>
-                <div class="shop-details">
-                  <div class="shop-name">{{ shop.business_name }}</div>
-                  <div class="shop-address" v-if="shopSchedule?.fullAddress">
-                    {{ shopSchedule.fullAddress }}
+              <v-window v-model="activeTab">
+                <!-- Details Tab -->
+                <v-window-item value="details">
+                  <div class="tab-content">
+                    <div class="description-section">
+                      <h3 class="section-title">Product Description</h3>
+                      <p class="product-description">{{ product.description || 'No description available.' }}</p>
+                    </div>
+
+                    <!-- Shop Information -->
+                    <div class="shop-section" v-if="shop">
+                      <h3 class="section-title">Seller Information</h3>
+                      <div class="shop-info" @click="goToShop">
+                        <v-avatar size="48" class="shop-avatar">
+                          <v-img :src="shop.logo_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(shop.business_name)}&background=random`" />
+                        </v-avatar>
+                        <div class="shop-details">
+                          <div class="shop-name">{{ shop.business_name }}</div>
+                          <div class="shop-contact">
+                            <v-icon small>mdi-phone</v-icon>
+                            {{ shopInfo?.contact }}
+                          </div>
+                          <div class="shop-address" v-if="shopInfo?.fullAddress">
+                            <v-icon small>mdi-map-marker</v-icon>
+                            {{ shopInfo.fullAddress }}
+                          </div>
+                        </div>
+                        <v-icon>mdi-chevron-right</v-icon>
+                      </div>
+                    </div>
+
+                    <!-- Shop Schedule -->
+                    <div class="schedule-section" v-if="shopInfo">
+                      <h3 class="section-title">Business Hours & Delivery</h3>
+                      <div class="schedule-info">
+                        <div class="schedule-item">
+                          <v-icon small color="primary">mdi-clock-outline</v-icon>
+                          <div>
+                            <div class="schedule-time">{{ shopInfo.openTime }} - {{ shopInfo.closeTime }}</div>
+                            <div class="schedule-days">{{ shopInfo.openDays.join(', ') }}</div>
+                          </div>
+                        </div>
+                        <div class="schedule-item">
+                          <v-icon small color="primary">mdi-map-marker</v-icon>
+                          <span>Meetup: {{ shopInfo.meetupDetails }}</span>
+                        </div>
+                        <div class="schedule-item">
+                          <v-icon small color="primary">mdi-truck-delivery</v-icon>
+                          <span>Delivery Options: {{ Array.isArray(shopInfo.deliveryOptions) ? shopInfo.deliveryOptions.join(', ') : shopInfo.deliveryOptions }}</span>
+                        </div>
+                      </div>
+                    </div>
                   </div>
-                </div>
-                <v-icon>mdi-chevron-right</v-icon>
-              </div>
-            </div>
+                </v-window-item>
 
-            <!-- Shop Schedule -->
-            <div class="schedule-section" v-if="shopSchedule">
-              <h3 class="section-title">Shop Information</h3>
-              <div class="schedule-info">
-                <div class="schedule-item">
-                  <v-icon small>mdi-clock-outline</v-icon>
-                  <span>Open {{ shopSchedule.openTime }} - {{ shopSchedule.closeTime }}</span>
-                </div>
-                <div class="schedule-item">
-                  <v-icon small>mdi-calendar</v-icon>
-                  <span>Open: {{ shopSchedule.openDays.join(', ') }}</span>
-                </div>
-                <div class="schedule-item">
-                  <v-icon small>mdi-map-marker</v-icon>
-                  <span>Meetup: {{ shopSchedule.meetupDetails }}</span>
-                </div>
-              </div>
+                <!-- Specifications Tab -->
+                <v-window-item value="specifications">
+                  <div class="tab-content">
+                    <div class="specs-section">
+                      <h3 class="section-title">Product Specifications</h3>
+                      <div class="specs-list" v-if="productSpecs.length > 0">
+                        <div v-for="spec in productSpecs" :key="spec.label" class="spec-item">
+                          <span class="spec-label">{{ spec.label }}:</span>
+                          <span class="spec-value">{{ spec.value }}</span>
+                        </div>
+                      </div>
+                      <div v-else class="no-specs">
+                        <v-icon>mdi-information-outline</v-icon>
+                        <p>No specifications available for this product.</p>
+                      </div>
+                    </div>
+                  </div>
+                </v-window-item>
+
+                <!-- Reviews Tab -->
+                <v-window-item value="reviews">
+                  <div class="tab-content">
+                    <div class="reviews-section">
+                      <!-- Review Statistics -->
+                      <div v-if="reviewStats" class="review-stats">
+                        <div class="rating-overview">
+                          <div class="average-rating">
+                            <span class="rating-number">{{ reviewStats.averageRating }}</span>
+                            <div class="rating-stars">
+                              <v-icon v-for="n in 5" :key="n" small :color="n <= Math.round(parseFloat(reviewStats.averageRating)) ? 'amber' : 'grey'">
+                                mdi-star
+                              </v-icon>
+                            </div>
+                            <span class="total-reviews">{{ reviewStats.totalReviews }} reviews</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Reviews List -->
+                      <div class="reviews-list" v-if="product.product_reviews?.length > 0">
+                        <div v-for="review in product.product_reviews" :key="review.id" class="review-item">
+                          <div class="review-header">
+                            <v-avatar size="32" class="review-avatar">
+                              <v-img :src="review.user?.avatar_url || `https://ui-avatars.com/api/?name=${review.user?.first_name}+${review.user?.last_name}&background=random`" />
+                            </v-avatar>
+                            <div class="reviewer-info">
+                              <div class="reviewer-name">
+                                {{ review.user?.first_name }} {{ review.user?.last_name }}
+                              </div>
+                              <div class="review-date">{{ formatDate(review.created_at) }}</div>
+                            </div>
+                            <div class="review-rating">
+                              <v-icon v-for="n in 5" :key="n" x-small :color="n <= review.rating ? 'amber' : 'grey'">
+                                mdi-star
+                              </v-icon>
+                            </div>
+                          </div>
+                          <div class="review-comment" v-if="review.comment">
+                            {{ review.comment }}
+                          </div>
+                        </div>
+                      </div>
+                      <div v-else class="no-reviews">
+                        <v-icon>mdi-comment-outline</v-icon>
+                        <p>No reviews yet for this product.</p>
+                      </div>
+                    </div>
+                  </div>
+                </v-window-item>
+              </v-window>
             </div>
 
             <!-- Quantity Selector -->
@@ -508,7 +633,7 @@ onMounted(() => {
           @click="contactSeller"
         >
           <v-icon left>mdi-message</v-icon>
-          Chat
+          Chat Seller
         </v-btn>
         
         <v-btn
@@ -538,7 +663,6 @@ onMounted(() => {
   </v-app>
 </template>
 
-<!-- Keep the same styles as previous version -->
 <style scoped>
 .loading-container,
 .error-container {
@@ -614,7 +738,27 @@ onMounted(() => {
 }
 
 .stock-info {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-top: 8px;
+}
+
+.product-sku {
+  font-size: 0.85rem;
+  color: #666;
+  background: #f5f5f5;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+/* Tabs Section */
+.tabs-section {
+  margin-bottom: 24px;
+}
+
+.tab-content {
+  padding: 16px 0;
 }
 
 .section-title {
@@ -624,6 +768,7 @@ onMounted(() => {
   margin-bottom: 12px;
 }
 
+/* Description Section */
 .description-section {
   margin-bottom: 24px;
 }
@@ -666,9 +811,14 @@ onMounted(() => {
   margin-bottom: 4px;
 }
 
+.shop-contact,
 .shop-address {
   font-size: 0.85rem;
   color: #666;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
 }
 
 /* Schedule Section */
@@ -682,15 +832,147 @@ onMounted(() => {
 .schedule-info {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 16px;
 }
 
 .schedule-item {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: flex-start;
+  gap: 12px;
   color: #666;
   font-size: 0.9rem;
+}
+
+.schedule-time {
+  font-weight: 600;
+  color: #333;
+}
+
+.schedule-days {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+/* Specifications Section */
+.specs-section {
+  margin-bottom: 24px;
+}
+
+.specs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.spec-item {
+  display: flex;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.spec-label {
+  font-weight: 600;
+  color: #333;
+}
+
+.spec-value {
+  color: #666;
+}
+
+.no-specs,
+.no-reviews {
+  text-align: center;
+  padding: 40px 20px;
+  color: #666;
+}
+
+.no-specs .v-icon,
+.no-reviews .v-icon {
+  font-size: 48px;
+  margin-bottom: 16px;
+  opacity: 0.5;
+}
+
+/* Reviews Section */
+.reviews-section {
+  margin-bottom: 24px;
+}
+
+.review-stats {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 12px;
+}
+
+.rating-overview {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.average-rating {
+  text-align: center;
+}
+
+.rating-number {
+  font-size: 2rem;
+  font-weight: 700;
+  color: #333;
+  display: block;
+}
+
+.rating-stars {
+  margin: 4px 0;
+}
+
+.total-reviews {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.reviews-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-item {
+  padding: 16px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+}
+
+.review-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
+.reviewer-info {
+  flex: 1;
+}
+
+.reviewer-name {
+  font-weight: 600;
+  color: #333;
+}
+
+.review-date {
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.review-rating {
+  display: flex;
+  gap: 2px;
+}
+
+.review-comment {
+  color: #666;
+  line-height: 1.5;
 }
 
 /* Quantity Section */
@@ -755,6 +1037,17 @@ onMounted(() => {
   .thumbnail {
     width: 50px;
     height: 50px;
+  }
+  
+  .stock-info {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+  }
+  
+  .rating-overview {
+    flex-direction: column;
+    text-align: center;
   }
 }
 
