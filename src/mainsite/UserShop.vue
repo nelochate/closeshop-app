@@ -24,18 +24,18 @@ const transactionOptions = ['Orders', 'Completed', 'Cancelled']
 // Function to convert 24-hour time to 12-hour format
 const convertTo12Hour = (time24: string) => {
   if (!time24 || time24 === 'N/A') return 'N/A'
-  
+
   try {
     // Handle both "HH:MM" and "HH:MM:SS" formats
     const [hours, minutes] = time24.split(':')
     const hour = parseInt(hours)
     const minute = minutes || '00'
-    
+
     if (isNaN(hour)) return time24
-    
+
     const period = hour >= 12 ? 'PM' : 'AM'
     const hour12 = hour % 12 || 12 // Convert 0 to 12 for 12 AM
-    
+
     return `${hour12}:${minute} ${period}`
   } catch (error) {
     console.error('Error converting time:', error)
@@ -69,11 +69,11 @@ const fetchShopData = async () => {
     // assign values to display
     businessName.value = data?.business_name || 'No name'
     description.value = data?.description || 'No description provided'
-    
+
     // Convert times to 12-hour format
     timeOpen.value = convertTo12Hour(data?.open_time) || 'N/A'
     timeClose.value = convertTo12Hour(data?.close_time) || 'N/A'
-    
+
     businessAvatar.value = data?.logo_url || ''
     coverPhoto.value = data?.physical_store || ''
     manualStatus.value = data?.manual_status || 'auto'
@@ -142,7 +142,7 @@ const toggleShopStatus = async () => {
     alert(statusMessages[newStatus])
   } catch (err) {
     console.error('Error updating shop status:', err)
-    
+
     // More specific error messages
     if (err.message?.includes('permission denied')) {
       alert('Permission denied. Please make sure you are the owner of this shop.')
@@ -178,7 +178,7 @@ const debugShopAccess = async () => {
         p_owner_id: user.id,
         p_manual_status: 'auto'
       })
-      
+
       console.log('RPC test:', rpcTest)
       console.log('RPC error:', rpcError)
     }
@@ -195,22 +195,22 @@ onMounted(() => {
 
 // Helper to get current status display
 const getCurrentStatusDisplay = () => {
-  if (manualStatus.value === 'open') return { 
-    text: 'Manually Open', 
+  if (manualStatus.value === 'open') return {
+    text: 'Manually Open',
     color: 'green',
     icon: 'mdi-store-check',
     buttonText: 'Switch to Closed',
     buttonColor: 'red'
   }
-  if (manualStatus.value === 'closed') return { 
-    text: 'Manually Closed', 
+  if (manualStatus.value === 'closed') return {
+    text: 'Manually Closed',
     color: 'red',
-    icon: 'mdi-store-remove', 
+    icon: 'mdi-store-remove',
     buttonText: 'Switch to Auto Mode',
     buttonColor: 'blue'
   }
-  return { 
-    text: 'Auto (Based on Hours)', 
+  return {
+    text: 'Auto (Based on Hours)',
     color: 'blue',
     icon: 'mdi-clock',
     buttonText: 'Switch to Open',
@@ -223,12 +223,12 @@ const isShopCurrentlyOpen = () => {
   // This is a simplified version - you can expand this with your actual hours logic
   if (manualStatus.value === 'open') return true
   if (manualStatus.value === 'closed') return false
-  
+
   // Auto mode - you can add your business hours logic here
   const now = new Date()
   const currentHour = now.getHours()
   const currentMinute = now.getMinutes()
-  
+
   // Simple example: assume open during daytime if no specific hours
   return currentHour >= 8 && currentHour < 20
 }
@@ -275,7 +275,7 @@ const deleteShop = async () => {
     manualStatus.value = 'auto'
 
     alert('Shop deleted successfully')
-    
+
     // Redirect to home page
     router.push('/')
   } catch (err) {
@@ -288,7 +288,7 @@ const deleteShop = async () => {
 <template>
   <v-app>
     <!-- Top Bar -->
-    <v-app-bar flat color="primary" dark>
+    <v-app-bar class="top-bar" flat color="primary" dark>
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -376,12 +376,12 @@ const deleteShop = async () => {
                     : 'Status manually overridden'
                 }}
               </p>
-              
+
               <!-- Quick status summary -->
               <div class="mt-2">
-                <v-chip 
-                  v-if="manualStatus === 'auto'" 
-                  :color="isShopCurrentlyOpen() ? 'green' : 'red'" 
+                <v-chip
+                  v-if="manualStatus === 'auto'"
+                  :color="isShopCurrentlyOpen() ? 'green' : 'red'"
                   size="small"
                 >
                   <v-icon start small>
@@ -404,8 +404,8 @@ const deleteShop = async () => {
       <v-divider thickness="3">Transaction</v-divider>
 
       <v-container class="py-4">
-        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist"> 
-          My Product 
+        <v-btn color="primary" rounded="lg" class="mb-4" to="/productlist">
+          My Product
         </v-btn>
 
         <v-select
@@ -421,6 +421,9 @@ const deleteShop = async () => {
 </template>
 
 <style scoped>
+.top-bar {
+  padding-top: 20px;
+}
 .cover-photo {
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;

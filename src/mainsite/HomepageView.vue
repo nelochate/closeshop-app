@@ -436,7 +436,7 @@ const locationAccuracy = ref('none')
 const getLocationStatusColor = (accuracy) => {
   switch(accuracy) {
     case 'high': return 'success'
-    case 'medium': return 'warning' 
+    case 'medium': return 'warning'
     case 'cached': return 'info'
     default: return 'default'
   }
@@ -643,8 +643,6 @@ const getLocationStatusText = (accuracy) => {
   position: sticky;
   top: 0;
   z-index: 10;
-  border-bottom-left-radius: 10px;
-  border-bottom-right-radius: 10px;
 }
 
 .hero-row {
