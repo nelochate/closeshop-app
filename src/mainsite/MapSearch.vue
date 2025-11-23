@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, onUnmounted } from 'vue'
+import { ref, onMounted, watch, onUnmounted, nextTick } from 'vue'
 import L from 'leaflet'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@/composables/useGeolocation'
@@ -9,8 +9,7 @@ import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
 
 /* -------------------- MAPBOX CONFIG -------------------- */
-const MAPBOX_ACCESS_TOKEN =
-  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 /* -------------------- ROUTE OPTIONS INTERFACE -------------------- */
 interface RouteOption {
@@ -22,7 +21,481 @@ interface RouteOption {
   type: 'driving' | 'walking' | 'cycling'
 }
 
-/* -------------------- MULTIPLE ROUTING VIA MAPBOX WITH DIFFERENT PROFILES -------------------- */
+/* -------------------- STATE -------------------- */
+const activeTab = ref('map')
+const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
+const cityBoundaryPolygon = ref<L.Polygon | null>(null)
+const map = ref<L.Map | null>(null)
+const router = useRouter()
+const search = ref('')
+const shops = ref<any[]>([])
+const loading = ref(false)
+const errorMsg = ref<string | null>(null)
+const showShopMenu = ref(false)
+const shopDisplayMode = ref<'within' | 'outside'>('within')
+const userCity = ref<string | null>(null)
+const lastKnownKey = 'closeshop_last_location'
+const lastKnown = ref<[number, number] | null>(null)
+let lastUpdateTs = 0
+const productMatches = ref<any[]>([])
+const routeLoading = ref(false)
+const filteredShops = ref<any[]>([])
+const mapInitialized = ref(false)
+const isSearchMode = ref(false)
+const boundaryLoading = ref(false)
+const hasValidLocation = ref(false)
+
+/* -------------------- GEOLOCATION -------------------- */
+const { latitude, longitude, requestPermission, startWatching, stopWatching } = useGeolocation()
+let userMarker: L.Marker | null = null
+let shopMarkers: L.Marker[] = []
+const locating = ref(false)
+let fetchTimeout: number | null = null
+
+/* -------------------- ICONS -------------------- */
+const userIcon = L.icon({
+  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+})
+
+const registeredShopIcon = L.icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+})
+
+/* -------------------- MAP INITIALIZATION -------------------- */
+const initializeMap = (): Promise<void> => {
+  return new Promise((resolve) => {
+    if (map.value) {
+      try {
+        map.value.remove()
+      } catch (e) {
+        console.warn('Error removing existing map:', e)
+      }
+      map.value = null
+    }
+
+    nextTick(() => {
+      try {
+        const mapContainer = document.getElementById('map')
+        if (!mapContainer) {
+          console.error('Map container not found')
+          resolve()
+          return
+        }
+
+        // Clear container
+        mapContainer.innerHTML = ''
+
+        map.value = L.map('map', {
+          center: [8.95, 125.53], // Default center (Philippines)
+          zoom: 13,
+          zoomControl: false,
+          attributionControl: true,
+          fadeAnimation: true,
+          markerZoomAnimation: true,
+        })
+
+        // Add tile layer
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          attribution: '© OpenStreetMap contributors',
+          maxZoom: 19,
+        }).addTo(map.value)
+
+        // Add zoom control
+        L.control.zoom({
+          position: 'topright'
+        }).addTo(map.value)
+
+        // Load cached location
+        loadCachedLocation()
+        const placeholder = lastKnown.value ?? [8.95, 125.53]
+
+        // Create user marker
+        userMarker = L.marker(placeholder, { 
+          icon: userIcon,
+          zIndexOffset: 1000 
+        }).addTo(map.value)
+          .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
+
+        // Force map resize
+        setTimeout(() => {
+          map.value?.invalidateSize(true)
+          mapInitialized.value = true
+          console.log('Map initialized successfully')
+          resolve()
+        }, 100)
+
+      } catch (error) {
+        console.error('Error initializing map:', error)
+        resolve()
+      }
+    })
+  })
+}
+
+/* -------------------- CITY BOUNDARY DETECTION -------------------- */
+const detectUserCity = async (lat: number, lng: number): Promise<string | null> => {
+  try {
+    console.log('Detecting city for:', lat, lng)
+    
+    const response = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?types=place&access_token=${MAPBOX_ACCESS_TOKEN}`
+    )
+    
+    if (!response.ok) {
+      throw new Error(`Geocoding failed: ${response.status}`)
+    }
+    
+    const data = await response.json()
+    console.log('Geocoding response:', data)
+    
+    if (data.features && data.features.length > 0) {
+      // Find city feature
+      const cityFeature = data.features.find((feature: any) => 
+        feature.place_type.includes('place') || 
+        feature.place_type.includes('locality')
+      )
+      
+      if (cityFeature) {
+        console.log('Detected city:', cityFeature.text)
+        return cityFeature.text
+      }
+    }
+    
+    console.warn('No city features found in response')
+    return null
+  } catch (error) {
+    console.error('City detection failed:', error)
+    return null
+  }
+}
+
+const fetchCityBoundary = async (cityName: string): Promise<any> => {
+  try {
+    console.log('Fetching boundary for:', cityName)
+    
+    // Use OpenStreetMap Nominatim for boundary data
+    const response = await fetch(
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&polygon_geojson=1&limit=1`
+    )
+    
+    if (!response.ok) throw new Error('Boundary fetch failed')
+    
+    const data = await response.json()
+    console.log('Boundary data:', data)
+    
+    if (data && data.length > 0 && data[0].geojson) {
+      return {
+        type: 'Feature',
+        geometry: data[0].geojson,
+        properties: {
+          name: cityName,
+          display_name: data[0].display_name
+        }
+      }
+    }
+    
+    // Fallback: Create circular boundary
+    console.log('Using circular boundary as fallback')
+    return createCircularBoundary(latitude.value!, longitude.value!)
+    
+  } catch (error) {
+    console.warn('City boundary fetch failed:', error)
+    return createCircularBoundary(latitude.value!, longitude.value!)
+  }
+}
+
+const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) => {
+  const points = 32
+  const coordinates = []
+  
+  for (let i = 0; i < points; i++) {
+    const angle = (i * 360) / points
+    const bearing = (angle * Math.PI) / 180
+    
+    const latRad = (lat * Math.PI) / 180
+    const lngRad = (lng * Math.PI) / 180
+    const angularDistance = radiusKm / 6371
+    
+    const newLat = Math.asin(
+      Math.sin(latRad) * Math.cos(angularDistance) +
+      Math.cos(latRad) * Math.sin(angularDistance) * Math.cos(bearing)
+    )
+    
+    const newLng = lngRad + Math.atan2(
+      Math.sin(bearing) * Math.sin(angularDistance) * Math.cos(latRad),
+      Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(newLat)
+    )
+    
+    coordinates.push([
+      (newLat * 180) / Math.PI,
+      (newLng * 180) / Math.PI
+    ])
+  }
+  
+  coordinates.push(coordinates[0]) // Close polygon
+  
+  return {
+    type: 'Feature',
+    geometry: {
+      type: 'Polygon',
+      coordinates: [coordinates]
+    },
+    properties: {
+      name: 'Approximate Area',
+      isFallback: true
+    }
+  }
+}
+
+const highlightUserCityBoundary = async (lat: number, lng: number) => {
+  if (!map.value) {
+    console.error('Map not available for boundary highlighting')
+    return
+  }
+
+  try {
+    boundaryLoading.value = true
+    console.log('Starting boundary highlighting for:', lat, lng)
+    
+    // Clear existing boundary
+    clearCityBoundary()
+    
+    // Detect city name
+    const detectedCity = await detectUserCity(lat, lng)
+    userCity.value = detectedCity
+    
+    if (!detectedCity) {
+      console.warn('Could not detect city name')
+      setErrorMessage('Could not detect your city. Showing all shops.', 3000)
+      boundaryLoading.value = false
+      return
+    }
+    
+    // Fetch boundary data
+    const boundaryData = await fetchCityBoundary(detectedCity)
+    
+    if (!boundaryData) {
+      console.warn('Could not fetch boundary data')
+      setErrorMessage('Could not load city boundary. Showing all shops.', 3000)
+      boundaryLoading.value = false
+      return
+    }
+    
+    // Create and style the boundary layer
+    cityBoundaryLayer.value = L.geoJSON(boundaryData, {
+      style: {
+        fillColor: '#3b82f6',
+        fillOpacity: 0.1,
+        color: '#3b82f6',
+        weight: 3,
+        opacity: 0.8,
+        dashArray: '10, 10',
+        className: 'city-boundary'
+      },
+      onEachFeature: (feature, layer) => {
+        if (feature.properties) {
+          const popupContent = feature.properties.isFallback 
+            ? `<div style="text-align: center;">
+                 <strong>${feature.properties.name}</strong><br>
+                 <small>Approximate boundary (5km radius)</small>
+               </div>`
+            : `<div style="text-align: center;">
+                 <strong>${feature.properties.name}</strong><br>
+                 <small>${feature.properties.display_name || ''}</small>
+               </div>`
+          
+          layer.bindPopup(popupContent)
+        }
+      }
+    }).addTo(map.value)
+
+    // Store the polygon for spatial queries
+    const layers = cityBoundaryLayer.value.getLayers()
+    if (layers.length > 0 && layers[0] instanceof L.Polygon) {
+      cityBoundaryPolygon.value = layers[0] as L.Polygon
+    }
+
+    // Fit map to show boundary and user location
+    const bounds = cityBoundaryLayer.value.getBounds()
+    if (bounds.isValid()) {
+      bounds.extend([lat, lng]) // Include user location
+      map.value.fitBounds(bounds.pad(0.1), {
+        animate: true,
+        duration: 1,
+        maxZoom: 15,
+        padding: [20, 20]
+      })
+    } else {
+      // Fallback: Center on user
+      map.value.setView([lat, lng], 14, { animate: true, duration: 1 })
+    }
+    
+    setErrorMessage(`Showing shops in ${detectedCity}`, 3000)
+    console.log('Boundary highlighted successfully')
+    
+  } catch (error) {
+    console.error('Error highlighting city boundary:', error)
+    setErrorMessage('Error loading city boundary', 3000)
+  } finally {
+    boundaryLoading.value = false
+  }
+}
+
+const clearCityBoundary = () => {
+  if (cityBoundaryLayer.value) {
+    map.value?.removeLayer(cityBoundaryLayer.value)
+    cityBoundaryLayer.value = null
+  }
+  
+  if (cityBoundaryPolygon.value) {
+    map.value?.removeLayer(cityBoundaryPolygon.value)
+    cityBoundaryPolygon.value = null
+  }
+  
+  userCity.value = null
+  setErrorMessage('City boundary cleared')
+}
+
+/* -------------------- BOUNDARY CHECK -------------------- */
+const isShopWithinBoundary = (shop: any): boolean => {
+  if (!shop.latitude || !shop.longitude) {
+    return isShopInSameCity(shop)
+  }
+
+  const shopLat = Number(shop.latitude)
+  const shopLng = Number(shop.longitude)
+
+  if (!isFinite(shopLat) || !isFinite(shopLng)) {
+    return isShopInSameCity(shop)
+  }
+
+  // If we have a boundary polygon, use bounds check
+  if (cityBoundaryPolygon.value) {
+    const shopPoint = L.latLng(shopLat, shopLng)
+    const bounds = cityBoundaryPolygon.value.getBounds()
+    return bounds.contains(shopPoint)
+  }
+
+  // Fallback to city name matching
+  return isShopInSameCity(shop)
+}
+
+const isShopInSameCity = (shop: any): boolean => {
+  if (!userCity.value || !shop.city) return false
+
+  const normalizeName = (name: string) => {
+    if (!name) return ''
+    return name
+      .toLowerCase()
+      .replace(/city|municipality|municipal|town|province|^\s+|\s+$/g, '')
+      .trim()
+  }
+
+  const userCityNormalized = normalizeName(userCity.value)
+  const shopCityNormalized = normalizeName(shop.city)
+
+  if (!userCityNormalized || !shopCityNormalized) return false
+
+  return (
+    userCityNormalized === shopCityNormalized ||
+    shopCityNormalized.includes(userCityNormalized) ||
+    userCityNormalized.includes(shopCityNormalized)
+  )
+}
+
+/* -------------------- CACHE LOCATION -------------------- */
+function loadCachedLocation() {
+  try {
+    const v = localStorage.getItem(lastKnownKey)
+    if (v) {
+      const arr = JSON.parse(v)
+      if (Array.isArray(arr) && arr.length === 2) {
+        lastKnown.value = [Number(arr[0]), Number(arr[1])]
+      }
+    }
+  } catch (e) {
+    console.warn('Could not read cached location', e)
+  }
+}
+
+function saveCachedLocation(lat: number, lng: number) {
+  try {
+    localStorage.setItem(lastKnownKey, JSON.stringify([lat, lng]))
+  } catch (e) {
+    console.warn('Could not save cached location', e)
+  }
+}
+
+/* -------------------- RECENTER -------------------- */
+const recenterToUser = async () => {
+  if (!map.value) return
+
+  locating.value = true
+  errorMsg.value = null
+
+  try {
+    let targetLat: number, targetLng: number
+
+    if (latitude.value && longitude.value) {
+      targetLat = Number(latitude.value)
+      targetLng = Number(longitude.value)
+    } else {
+      try {
+        const position = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+        })
+        targetLat = position.coords.latitude
+        targetLng = position.coords.longitude
+      } catch (geolocationError) {
+        if (lastKnown.value) {
+          targetLat = lastKnown.value[0]
+          targetLng = lastKnown.value[1]
+          errorMsg.value = 'Using last known location'
+        } else {
+          errorMsg.value = 'Unable to determine your location'
+          return
+        }
+      }
+    }
+
+    // Update user marker
+    if (userMarker) {
+      userMarker.setLatLng([targetLat, targetLng])
+      userMarker.setPopupContent('You are here')
+    }
+
+    // Center map
+    map.value.setView([targetLat, targetLng], 16, {
+      animate: true,
+      duration: 0.5,
+    })
+
+    // Save and refresh boundary
+    saveCachedLocation(targetLat, targetLng)
+    await highlightUserCityBoundary(targetLat, targetLng)
+    
+  } catch (error) {
+    console.error('Error recentering:', error)
+    errorMsg.value = 'Failed to recenter map'
+  } finally {
+    locating.value = false
+  }
+}
+
+/* -------------------- ROUTE MANAGEMENT -------------------- */
+let currentRouteLayers: L.Polyline[] = []
+let currentRouteMarkers: L.Marker[] = []
+const selectedRouteIndex = ref<number | null>(null)
+const routeOptions = ref<RouteOption[]>([])
+const showRouteMenu = ref(false)
+
+/* -------------------- MULTIPLE ROUTING VIA MAPBOX -------------------- */
 const getRouteOptions = async (
   start: [number, number],
   end: [number, number],
@@ -137,13 +610,6 @@ const createStraightLineRoute = (
   }
 }
 
-/* -------------------- ROUTE MANAGEMENT -------------------- */
-let currentRouteLayers: L.Polyline[] = []
-let currentRouteMarkers: L.Marker[] = []
-const selectedRouteIndex = ref<number | null>(null)
-const routeOptions = ref<RouteOption[]>([])
-const showRouteMenu = ref(false)
-
 /* -------------------- DRAW MULTIPLE ROUTES -------------------- */
 const drawRouteOptions = (routes: RouteOption[]) => {
   if (!map.value || !routes.length) return
@@ -251,8 +717,6 @@ const selectRoute = (index: number) => {
 
   if (!route || !map.value) return
 
-  // ... existing route selection code ...
-
   const distanceKm = (route.distance / 1000).toFixed(1)
   const durationMin = Math.round(route.duration / 60)
 
@@ -265,23 +729,6 @@ const selectRoute = (index: number) => {
   setErrorMessage(
     `Selected: ${typeIcons[route.type]} ${route.summary} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`,
   )
-}
-
-const toggleDisplayMode = (mode: 'within' | 'outside') => {
-  shopDisplayMode.value = mode
-  applyShopFilters()
-
-  if (userCity.value) {
-    setErrorMessage(
-      mode === 'within'
-        ? `Showing shops within ${userCity.value}`
-        : `Showing shops outside ${userCity.value}`,
-    )
-  } else {
-    setErrorMessage(
-      mode === 'within' ? 'Showing shops in your area' : 'Showing shops outside your area',
-    )
-  }
 }
 
 /* -------------------- CLEAR ALL ROUTES -------------------- */
@@ -301,355 +748,6 @@ const clearAllRoutes = () => {
   routeOptions.value = []
   selectedRouteIndex.value = null
   showRouteMenu.value = false
-}
-
-/* -------------------- STATE -------------------- */
-const activeTab = ref('map')
-const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
-const cityBoundaryPolygon = ref<L.Polygon | null>(null)
-const map = ref<L.Map | null>(null)
-const router = useRouter()
-const search = ref('')
-const shops = ref<any[]>([])
-const loading = ref(false)
-const errorMsg = ref<string | null>(null)
-const showShopMenu = ref(false)
-const shopDisplayMode = ref<'within' | 'outside'>('within')
-const userCity = ref<string | null>(null)
-const lastKnownKey = 'closeshop_last_location'
-const lastKnown = ref<[number, number] | null>(null)
-let lastUpdateTs = 0
-const productMatches = ref<any[]>([])
-const routeLoading = ref(false)
-const filteredShops = ref<any[]>([])
-const mapInitialized = ref(false)
-const isSearchMode = ref(false)
-const boundaryLoading = ref(false)
-
-/* -------------------- CONFIG -------------------- */
-const fetchDebounceMs = 350
-
-/* -------------------- GEOLOCATION -------------------- */
-const { latitude, longitude, requestPermission, startWatching, stopWatching } = useGeolocation()
-let userMarker: L.Marker | null = null
-let shopMarkers: L.Marker[] = []
-const locating = ref(false)
-let fetchTimeout: number | null = null
-
-/* -------------------- ICONS -------------------- */
-const userIcon = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-})
-
-const registeredShopIcon = L.icon({
-  iconUrl:
-    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-})
-
-/* -------------------- CACHE LOCATION -------------------- */
-function loadCachedLocation() {
-  try {
-    const v = localStorage.getItem(lastKnownKey)
-    if (v) {
-      const arr = JSON.parse(v)
-      if (Array.isArray(arr) && arr.length === 2) {
-        lastKnown.value = [Number(arr[0]), Number(arr[1])]
-      }
-    }
-  } catch (e) {
-    console.warn('Could not read cached location', e)
-  }
-}
-
-function saveCachedLocation(lat: number, lng: number) {
-  try {
-    localStorage.setItem(lastKnownKey, JSON.stringify([lat, lng]))
-  } catch (e) {
-    console.warn('Could not save cached location', e)
-  }
-}
-
-/* -------------------- ENHANCED MAP INITIALIZATION -------------------- */
-const initializeMap = (): Promise<void> => {
-  return new Promise((resolve) => {
-    if (map.value) {
-      try {
-        map.value.remove()
-      } catch (e) {
-        console.warn('Error removing existing map:', e)
-      }
-      map.value = null
-    }
-
-    setTimeout(() => {
-      try {
-        const mapContainer = document.getElementById('map')
-        if (!mapContainer) {
-          console.error('Map container not found')
-          resolve()
-          return
-        }
-
-        map.value = L.map('map', {
-          center: [8.95, 125.53],
-          zoom: 13,
-          zoomAnimation: true, // Enable animations for smoother recentering
-          fadeAnimation: true,
-          markerZoomAnimation: true,
-        })
-
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors',
-        }).addTo(map.value)
-
-        loadCachedLocation()
-        const placeholder = lastKnown.value ?? [8.95, 125.53]
-
-        userMarker = L.marker(placeholder, { icon: userIcon })
-          .addTo(map.value)
-          .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
-          .openPopup()
-
-        // Add click handler for debug
-        map.value.on('click', (e) => {
-          console.log('Map clicked at:', e.latlng)
-        })
-
-        map.value.whenReady(() => {
-          console.log('Map is fully ready')
-          map.value?.invalidateSize(true)
-          mapInitialized.value = true
-          resolve()
-        })
-      } catch (error) {
-        console.error('Error initializing map:', error)
-        resolve()
-      }
-    }, 100)
-  })
-}
-
-/* -------------------- CITY BOUNDARY MANAGEMENT -------------------- */
-const clearCityBoundary = () => {
-  if (cityBoundaryPolygon.value && map.value) {
-    map.value.removeLayer(cityBoundaryPolygon.value)
-    cityBoundaryPolygon.value = null
-  }
-}
-
-/* -------------------- ENHANCED USER CITY BOUNDARY DETECTION -------------------- */
-const highlightUserCityBoundary = async (lat: number, lon: number) => {
-  if (!map.value) return
-
-  boundaryLoading.value = true
-  try {
-    // Clear previous boundary
-    clearCityBoundary()
-
-    // Get city name first using Nominatim
-    const osmUrl = `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lon}&addressdetails=1`
-    const osmRes = await fetch(osmUrl, {
-      headers: { 'User-Agent': 'CloseShop-App/1.0' },
-    })
-
-    if (!osmRes.ok) {
-      console.warn('Failed to fetch city name from Nominatim')
-      userCity.value = null
-      return
-    }
-
-    const osmData = await osmRes.json()
-    const address = osmData.address
-
-    // Try different address fields for city name
-    const cityName =
-      address.city || address.town || address.village || address.municipality || address.county
-
-    if (!cityName) {
-      console.warn('No city name found in address:', address)
-      userCity.value = null
-      return
-    }
-
-    userCity.value = cityName
-    console.log('Detected city:', cityName)
-
-    // Now fetch the boundary using Overpass API - simplified query
-    const overpassQuery = `
-      [out:json][timeout:30];
-      (
-        relation["boundary"="administrative"]["name"="${cityName}"];
-        way["boundary"="administrative"]["name"="${cityName}"];
-      );
-      out body;
-      >;
-      out skel qt;
-    `
-
-    const overpassUrl = `https://overpass-api.de/api/interpreter?data=${encodeURIComponent(overpassQuery)}`
-
-    const overpassRes = await fetch(overpassUrl, {
-      headers: { 'User-Agent': 'CloseShop-App/1.0' },
-    })
-
-    if (!overpassRes.ok) {
-      console.warn('Failed to fetch boundary from Overpass API')
-      return
-    }
-
-    const overpassData = await overpassRes.json()
-
-    if (!overpassData.elements || overpassData.elements.length === 0) {
-      console.warn('No boundary data found for city:', cityName)
-      return
-    }
-
-    // Extract polygon coordinates from the boundary data
-    const polygonCoords = extractPolygonCoordinates(overpassData.elements)
-
-    if (polygonCoords && polygonCoords.length > 0) {
-      // Create and style the boundary polygon
-      cityBoundaryPolygon.value = L.polygon(polygonCoords, {
-        color: '#3b82f6',
-        weight: 3,
-        opacity: 0.8,
-        fillColor: '#3b82f6',
-        fillOpacity: 0.1,
-        className: 'city-boundary',
-      }).addTo(map.value)
-
-      // Add popup with city info
-      cityBoundaryPolygon.value.bindPopup(`
-        <div style="text-align: center; min-width: 200px;">
-          <strong>${cityName}</strong><br>
-          <em>City Boundary</em><br>
-          <small>Shops within this area will be shown when "Within City" is selected</small>
-        </div>
-      `)
-
-      // Fit map to show both user location and boundary
-      const bounds = L.latLngBounds(polygonCoords)
-      bounds.extend([lat, lon])
-      map.value.fitBounds(bounds.pad(0.1), {
-        animate: true,
-        duration: 1,
-      })
-
-      errorMsg.value = `City boundary loaded: ${cityName}. Showing shops within city.`
-    } else {
-      console.warn('Could not extract polygon coordinates from boundary data')
-      errorMsg.value = `City detected: ${cityName}, but boundary data not available. Using city name for filtering.`
-    }
-  } catch (error) {
-    console.error('Failed to detect city boundary:', error)
-    userCity.value = null
-    errorMsg.value = 'Could not load city boundary. Using default filtering.'
-  } finally {
-    boundaryLoading.value = false
-  }
-}
-
-/* -------------------- SIMPLIFIED POLYGON EXTRACTION -------------------- */
-const extractPolygonCoordinates = (elements: any[]): [number, number][] | null => {
-  try {
-    // Find boundary relation or way
-    const boundaryElement = elements.find(
-      (element: any) => element.type === 'relation' || element.type === 'way',
-    )
-
-    if (!boundaryElement) {
-      return null
-    }
-
-    let coords: [number, number][] = []
-
-    if (boundaryElement.type === 'relation') {
-      // For relations, get members and build coordinates
-      const members = boundaryElement.members || []
-      const ways = members
-        .filter((member: any) => member.type === 'way' && member.role === 'outer')
-        .map((member: any) => elements.find((el: any) => el.type === 'way' && el.id === member.ref))
-        .filter(Boolean)
-
-      if (ways.length === 0) {
-        return null
-      }
-
-      // Use the first outer way
-      const way = ways[0]
-      if (way.nodes && way.nodes.length > 0) {
-        for (const nodeId of way.nodes) {
-          const node = elements.find((el: any) => el.type === 'node' && el.id === nodeId)
-          if (node) {
-            coords.push([node.lat, node.lon])
-          }
-        }
-      }
-    } else if (boundaryElement.type === 'way') {
-      // For ways, directly use the nodes
-      if (boundaryElement.nodes && boundaryElement.nodes.length > 0) {
-        for (const nodeId of boundaryElement.nodes) {
-          const node = elements.find((el: any) => el.type === 'node' && el.id === nodeId)
-          if (node) {
-            coords.push([node.lat, node.lon])
-          }
-        }
-      }
-    }
-
-    // Close the polygon if not already closed and we have enough points
-    if (
-      coords.length >= 3 &&
-      (coords[0][0] !== coords[coords.length - 1][0] ||
-        coords[0][1] !== coords[coords.length - 1][1])
-    ) {
-      coords.push([coords[0][0], coords[0][1]])
-    }
-
-    return coords.length >= 3 ? coords : null
-  } catch (error) {
-    console.error('Error extracting polygon coordinates:', error)
-    return null
-  }
-}
-/* -------------------- CHECK IF SHOP IS WITHIN BOUNDARY -------------------- */
-const isShopWithinBoundary = (shop: any): boolean => {
-  if (!cityBoundaryPolygon.value || !shop.latitude || !shop.longitude) {
-    // Fallback: check if shop city matches user city
-    return isShopInSameCity(shop)
-  }
-
-  const shopLat = Number(shop.latitude)
-  const shopLng = Number(shop.longitude)
-
-  if (!isFinite(shopLat) || !isFinite(shopLng)) {
-    return isShopInSameCity(shop)
-  }
-
-  // Use Leaflet's contains method to check if point is within polygon
-  const shopPoint = L.latLng(shopLat, shopLng)
-  return cityBoundaryPolygon.value.getBounds().contains(shopPoint)
-}
-
-/* -------------------- FALLBACK: CHECK IF SHOP IS IN SAME CITY BY NAME -------------------- */
-const isShopInSameCity = (shop: any): boolean => {
-  if (!userCity.value || !shop.city) return false
-
-  const normalizeName = (name: string) => name.toLowerCase().replace(/\s+/g, ' ').trim()
-
-  const userCityNormalized = normalizeName(userCity.value)
-  const shopCityNormalized = normalizeName(shop.city)
-
-  return (
-    userCityNormalized === shopCityNormalized ||
-    shopCityNormalized.includes(userCityNormalized) ||
-    userCityNormalized.includes(shopCityNormalized)
-  )
 }
 
 /* -------------------- DISTANCE CALCULATION -------------------- */
@@ -735,18 +833,16 @@ const fetchShops = () => {
   fetchTimeout = window.setTimeout(() => {
     void doFetchShops()
     fetchTimeout = null
-  }, fetchDebounceMs)
+  }, 350)
 }
 
-/* -------------------- APPLY SHOP FILTERS BASED ON DISPLAY MODE -------------------- */
+/* -------------------- APPLY SHOP FILTERS -------------------- */
 const applyShopFilters = () => {
   if (shopDisplayMode.value === 'within') {
-    // Show only shops within city boundary or same city
     filteredShops.value = shops.value.filter(
       (shop) => shop.withinBoundary || isShopInSameCity(shop),
     )
   } else {
-    // Show only shops outside city boundary and different city
     filteredShops.value = shops.value.filter(
       (shop) => !shop.withinBoundary && !isShopInSameCity(shop),
     )
@@ -755,22 +851,21 @@ const applyShopFilters = () => {
   plotShops()
 }
 
+const toggleDisplayMode = (mode: 'within' | 'outside') => {
+  shopDisplayMode.value = mode
+  applyShopFilters()
 
-/* -------------------- HELPERS -------------------- */
-const getFullAddress = (shop: any) => {
-  if (shop.detected_address) return shop.detected_address
-  const parts = [
-    shop.house_no,
-    shop.building,
-    shop.street,
-    shop.barangay,
-    shop.city,
-    shop.province,
-    shop.postal,
-  ].filter(Boolean)
-  if (parts.length) return parts.join(', ')
-  if (shop.physical_store) return shop.physical_store
-  return 'Address not available'
+  if (userCity.value) {
+    setErrorMessage(
+      mode === 'within'
+        ? `Showing shops within ${userCity.value}`
+        : `Showing shops outside ${userCity.value}`,
+    )
+  } else {
+    setErrorMessage(
+      mode === 'within' ? 'Showing shops in your area' : 'Showing shops outside your area',
+    )
+  }
 }
 
 /* -------------------- MARKER MANAGEMENT -------------------- */
@@ -784,15 +879,11 @@ const clearShopMarkers = () => {
 }
 
 const plotShops = () => {
-  if (!map.value || !map.value._loaded) return
+  if (!map.value) return
   clearShopMarkers()
 
   for (const shop of filteredShops.value) {
-    // Double-check status before plotting
-    if (shop.status !== 'approved') {
-      console.log(`Skipping non-approved shop: ${shop.business_name} (${shop.status})`)
-      continue
-    }
+    if (shop.status !== 'approved') continue
 
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
@@ -811,18 +902,12 @@ const plotShops = () => {
       .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
       .join('')
 
-    // Add boundary status to popup
-    const boundaryStatus = shop.withinBoundary
-    // ? '<span style="color: #10b981;">✓ Within City</span>'
-    // : '<span style="color: #ef4444;">✗ Outside City</span>'
-
     marker.bindPopup(`
       <div style="text-align:center; min-width: 220px;">
         <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
         <p><strong>${shop.business_name}</strong></p>
         <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
         <p style="margin:2px 0; font-size:14px;">${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}</p>
-        <p style="margin:2px 0; font-size:12px;">${boundaryStatus}</p>
         ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
         <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
           <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
@@ -853,12 +938,9 @@ const plotShops = () => {
 /* -------------------- FOCUS ON SHOP MARKER -------------------- */
 const focusOnShopMarker = async (shopId: string) => {
   console.log('Focusing on shop:', shopId)
-  
-  // Clear any previous messages immediately
   setErrorMessage(null)
 
   let marker = shopMarkers.find((m: any) => m.shopId === shopId)
-
   if (!marker) {
     marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
   }
@@ -906,11 +988,13 @@ const focusOnShopMarker = async (shopId: string) => {
         if (routes[0].summary.includes('Fallback')) {
           setErrorMessage('Using direct route (routing service unavailable)', 3000)
         } else {
-          setErrorMessage(`Found ${routes.length} route options. Click on any route to select it.`, 5000)
+          setErrorMessage(
+            `Found ${routes.length} route options. Click on any route to select it.`,
+            5000,
+          )
         }
       } else {
         setErrorMessage('Could not calculate routes to this shop. Please try again.', 3000)
-        // Fallback view
         map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
           animate: true,
           duration: 0.5,
@@ -921,7 +1005,6 @@ const focusOnShopMarker = async (shopId: string) => {
     } catch (error) {
       console.error('Error focusing on shop:', error)
       setErrorMessage('Error calculating routes: ' + (error as Error).message, 3000)
-      // Fallback view
       map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
         animate: true,
         duration: 0.5,
@@ -940,7 +1023,145 @@ const focusOnShopMarker = async (shopId: string) => {
   }
 }
 
-/* -------------------- ENHANCED SEARCH SYSTEM -------------------- */
+/* -------------------- HELPERS -------------------- */
+const getFullAddress = (shop: any) => {
+  if (shop.detected_address) return shop.detected_address
+  const parts = [
+    shop.house_no,
+    shop.building,
+    shop.street,
+    shop.barangay,
+    shop.city,
+    shop.province,
+    shop.postal,
+  ].filter(Boolean)
+  if (parts.length) return parts.join(', ')
+  if (shop.physical_store) return shop.physical_store
+  return 'Address not available'
+}
+
+/* -------------------- LIFECYCLE -------------------- */
+onMounted(async () => {
+  console.log('Mounting map component...')
+  
+  try {
+    await initializeMap()
+
+    if (Capacitor.getPlatform() !== 'web') await requestPermission()
+
+    const pos = await Geolocation.getCurrentPosition({ 
+      enableHighAccuracy: false, 
+      timeout: 10000 
+    })
+    const quickLat = pos.coords.latitude
+    const quickLng = pos.coords.longitude
+
+    console.log('Got location:', quickLat, quickLng)
+
+    if (map.value) {
+      if (!userMarker) {
+        userMarker = L.marker([quickLat, quickLng], { icon: userIcon })
+          .addTo(map.value)
+          .bindPopup('You are here')
+          .openPopup()
+      } else {
+        userMarker.setLatLng([quickLat, quickLng])
+        userMarker.setPopupContent('You are here')
+      }
+
+      await highlightUserCityBoundary(quickLat, quickLng)
+      
+      if (!cityBoundaryLayer.value) {
+        map.value.setView([quickLat, quickLng], 14, { animate: true })
+      }
+    }
+
+    saveCachedLocation(quickLat, quickLng)
+    
+    setTimeout(() => {
+      doFetchShops()
+    }, 1000)
+    
+  } catch (err) {
+    console.warn('Quick geolocation failed:', err)
+    setErrorMessage('Location access failed. Using default location.', 3000)
+    doFetchShops()
+  }
+})
+
+// Location watcher
+watch(
+  [latitude, longitude],
+  async ([lat, lng]) => {
+    if (!map.value || lat == null || lng == null) return
+
+    const userLat = Number(lat)
+    const userLng = Number(lng)
+
+    if (!isFinite(userLat) || !isFinite(userLng)) return
+
+    const now = Date.now()
+    if (now - lastUpdateTs < 1000) {
+      saveCachedLocation(userLat, userLng)
+      return
+    }
+    lastUpdateTs = now
+
+    hasValidLocation.value = true
+
+    if (userMarker) {
+      userMarker.setLatLng([userLat, userLng])
+      userMarker.setPopupContent('You are here')
+    } else {
+      userMarker = L.marker([userLat, userLng], { icon: userIcon })
+        .addTo(map.value)
+        .bindPopup('You are here')
+        .openPopup()
+    }
+
+    saveCachedLocation(userLat, userLng)
+    await highlightUserCityBoundary(userLat, userLng)
+    void doFetchShops()
+  },
+  { immediate: true },
+)
+
+onUnmounted(() => {
+  stopWatching()
+  if (map.value) {
+    try {
+      map.value.remove()
+    } catch (e) {
+      console.warn('Error removing map:', e)
+    }
+  }
+})
+
+/* -------------------- ERROR MESSAGE HANDLER -------------------- */
+let errorTimeout: number | null = null
+
+const setErrorMessage = (message: string | null, duration: number = 4000) => {
+  if (errorTimeout) {
+    clearTimeout(errorTimeout)
+    errorTimeout = null
+  }
+
+  errorMsg.value = null
+
+  if (message) {
+    setTimeout(() => {
+      errorMsg.value = message
+
+      if (duration > 0) {
+        errorTimeout = window.setTimeout(() => {
+          errorMsg.value = null
+        }, duration)
+      }
+    }, 50)
+  }
+}
+
+/* -------------------- BASIC SEARCH FUNCTIONALITY -------------------- */
 let searchResultMarkers: L.Marker[] = []
 
 const clearSearchMarkers = () => {
@@ -955,7 +1176,7 @@ const clearSearchMarkers = () => {
 const clearSearch = () => {
   search.value = ''
   isSearchMode.value = false
-  applyShopFilters() // Reset to current display mode
+  applyShopFilters()
   showShopMenu.value = false
   clearSearchMarkers()
 
@@ -974,672 +1195,59 @@ const smartSearch = async () => {
 
   loading.value = true
   errorMsg.value = null
-  productMatches.value = []
   isSearchMode.value = true
 
   try {
-    const userCityNorm = normalizeCity(userCity.value)
+    // Basic search implementation - you can expand this
+    const filtered = shops.value.filter(shop => 
+      shop.business_name.toLowerCase().includes(query) ||
+      shop.city?.toLowerCase().includes(query) ||
+      shop.products?.some((p: any) => p.prod_name.toLowerCase().includes(query))
+    )
 
-    const placeMatches = await searchPlacesAndShops(query, userCityNorm)
-    const productShopMatches = await searchProducts(query, userCityNorm)
-
-    const resultShops: any[] = []
-    const seenShopIds = new Set<string>()
-
-    placeMatches.forEach((shop) => {
-      if (!seenShopIds.has(shop.id)) {
-        resultShops.push(shop)
-        seenShopIds.add(shop.id)
-      }
-    })
-
-    productShopMatches.forEach((shop) => {
-      if (!seenShopIds.has(shop.id)) {
-        resultShops.push(shop)
-        seenShopIds.add(shop.id)
-      }
-    })
-
-    const userPos =
-      latitude.value && longitude.value
-        ? { lat: Number(latitude.value), lng: Number(longitude.value) }
-        : null
-
-    if (userPos && resultShops.length) {
-      resultShops.sort((a, b) => {
-        const dA = calculateShopDistance(a, userPos)
-        const dB = calculateShopDistance(b, userPos)
-        return dA - dB
-      })
-    }
-
-    if (resultShops.length === 0) {
+    if (filtered.length === 0) {
       errorMsg.value = `No results found for "${query}"`
       filteredShops.value = []
-      showShopMenu.value = true // Keep menu open to show no results
+      showShopMenu.value = true
       clearSearchMarkers()
     } else {
-      const placeCount = placeMatches.length
-      const productCount =
-        productShopMatches.length -
-        placeMatches.filter((p) => productShopMatches.some((ps) => ps.id === p.id)).length
-
-      errorMsg.value = `Found ${resultShops.length} results (${placeCount} places, ${productCount} products)`
-      filteredShops.value = resultShops
+      errorMsg.value = `Found ${filtered.length} results`
+      filteredShops.value = filtered
       showShopMenu.value = true
+      plotShops()
 
-      displaySearchResultsOnMap(resultShops)
-
-      if (resultShops.length === 1) {
-        await focusOnShopMarker(resultShops[0].id)
-      } else if (resultShops.length > 1) {
-        fitMapToSearchResults(resultShops)
+      if (filtered.length === 1) {
+        await focusOnShopMarker(filtered[0].id)
       }
     }
   } catch (error) {
     console.error('Search failed:', error)
     errorMsg.value = 'Search failed. Please try again.'
-    clearSearchMarkers()
   } finally {
     loading.value = false
   }
-}
-
-const searchPlacesAndShops = async (query: string, userCityNorm: string): Promise<any[]> => {
-  const results: any[] = []
-
-  const { data: shopData, error: shopError } = await supabase
-    .from('shops')
-    .select(
-      `
-      id,
-      business_name,
-      latitude,
-      longitude,
-      logo_url,
-      physical_store,
-      detected_address,
-      house_no,
-      building,
-      street,
-      barangay,
-      city,
-      province,
-      postal,
-      status,
-      products:products(id, prod_name, price, main_img_urls)
-    `,
-    )
-    .eq('status', 'approved')
-    .or(
-      `business_name.ilike.%${query}%,detected_address.ilike.%${query}%,city.ilike.%${query}%,barangay.ilike.%${query}%,street.ilike.%${query}%`,
-    )
-
-  if (!shopError && shopData) {
-    const filteredShops = userCityNorm
-      ? shopData.filter((shop) => {
-          const shopCityNorm = normalizeCity(shop.city)
-          return shopCityNorm.includes(userCityNorm) || userCityNorm.includes(shopCityNorm)
-        })
-      : shopData
-
-    const userPos =
-      latitude.value && longitude.value
-        ? { lat: Number(latitude.value), lng: Number(longitude.value) }
-        : null
-
-    results.push(
-      ...filteredShops.map((shop) => ({
-        ...shop,
-        distanceKm: userPos ? calculateShopDistance(shop, userPos) : Infinity,
-        matchType: 'place' as const,
-      })),
-    )
-  }
-
-  return results
-}
-
-const searchProducts = async (query: string, userCityNorm: string): Promise<any[]> => {
-  const results: any[] = []
-
-  const { data: productData, error: productError } = await supabase
-    .from('products')
-    .select(
-      `
-      id,
-      prod_name,
-      price,
-      main_img_urls,
-      shop_id,
-      shops!inner(
-        id,
-        business_name,
-        latitude,
-        longitude,
-        logo_url,
-        physical_store,
-        detected_address,
-        house_no,
-        building,
-        street,
-        barangay,
-        city,
-        province,
-        postal,
-        status,
-        products:products(id, prod_name, price, main_img_urls)
-      )
-    `,
-    )
-    .ilike('prod_name', `%${query}%`)
-    .eq('shops.status', 'approved')
-
-  if (!productError && productData) {
-    const filteredProducts = userCityNorm
-      ? productData.filter((product) => {
-          const shopCityNorm = normalizeCity(product.shops.city)
-          return shopCityNorm.includes(userCityNorm) || userCityNorm.includes(shopCityNorm)
-        })
-      : productData
-
-    const userPos =
-      latitude.value && longitude.value
-        ? { lat: Number(latitude.value), lng: Number(longitude.value) }
-        : null
-
-    results.push(
-      ...filteredProducts.map((product) => ({
-        ...product.shops,
-        distanceKm: userPos ? calculateShopDistance(product.shops, userPos) : Infinity,
-        matchType: 'product' as const,
-        matchedProduct: {
-          id: product.id,
-          name: product.prod_name,
-          price: product.price,
-          image: product.main_img_urls,
-        },
-      })),
-    )
-  }
-
-  return results
-}
-
-const calculateShopDistance = (shop: any, userPos: { lat: number; lng: number }): number => {
-  const lat = Number(shop.latitude)
-  const lng = Number(shop.longitude)
-  return isFinite(lat) && isFinite(lng)
-    ? getDistanceKm(userPos.lat, userPos.lng, lat, lng)
-    : Infinity
-}
-
-const displaySearchResultsOnMap = (results: any[]) => {
-  if (!map.value) return
-
-  clearSearchMarkers()
-  shopMarkers.forEach((marker) => {
-    if (map.value) map.value.removeLayer(marker)
-  })
-
-  results.forEach((shop, index) => {
-    const lat = Number(shop.latitude)
-    const lng = Number(shop.longitude)
-
-    if (!isFinite(lat) || !isFinite(lng)) return
-
-    const marker = L.marker([lat, lng], {
-      icon: createSearchResultIcon(shop, index + 1),
-      title: shop.business_name,
-      zIndexOffset: 1000,
-    }) as any
-
-    marker.shopId = shop.id
-    marker.shopData = shop
-    marker.addTo(map.value)
-
-    const productList = (shop.products || [])
-      .map((p: any) => {
-        const isMatchedProduct =
-          shop.matchType === 'product' && shop.matchedProduct && shop.matchedProduct.id === p.id
-        return `<li ${isMatchedProduct ? 'style="background-color: #f0f9ff; border-left: 3px solid #10b981; padding-left: 8px;"' : ''}>
-          ${p.prod_name} - ₱${p.price}
-          ${isMatchedProduct ? ' <span style="color: #10b981; font-weight: bold;">✓</span>' : ''}
-        </li>`
-      })
-      .join('')
-
-    marker.bindPopup(`
-      <div style="text-align:center; min-width: 240px;">
-        <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-          <div style="
-            background: ${shop.matchType === 'product' ? '#10b981' : '#3b82f6'};
-            color: white;
-            width: 24px;
-            height: 24px;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: bold;
-            font-size: 12px;
-          ">${index + 1}</div>
-          <strong style="flex: 1;">${shop.business_name}</strong>
-        </div>
-        <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
-        <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
-        <p style="margin:2px 0; font-size:14px;">
-          ${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}
-          ${shop.matchType === 'product' ? '<br><span style="color: #10b981; font-size: 12px;">✓ Sells matching product</span>' : ''}
-        </p>
-        ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;max-height: 120px; overflow-y: auto;">${productList}</ul>` : ''}
-        <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
-          <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
-          <button id="route-${shop.id}" style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">Show Routes</button>
-        </div>
-      </div>
-    `)
-
-    marker.on('popupopen', () => {
-      const viewBtn = document.getElementById(`view-${shop.id}`)
-      const routeBtn = document.getElementById(`route-${shop.id}`)
-
-      if (viewBtn) {
-        viewBtn.onclick = () => {
-          showShopMenu.value = false
-          router.push(`/shop/${shop.id}`)
-        }
-      }
-
-      if (routeBtn) {
-        routeBtn.onclick = async () => {
-          await focusOnShopMarker(shop.id)
-        }
-      }
-    })
-
-    marker.on('click', () => {
-      focusOnSearchResult(shop.id, index)
-    })
-
-    searchResultMarkers.push(marker)
-  })
-}
-
-const createSearchResultIcon = (shop: any, index: number) => {
-  const color = shop.matchType === 'product' ? '#10b981' : '#3b82f6'
-  const iconSize = 36
-
-  return L.divIcon({
-    html: `
-      <div style="
-        background: ${color};
-        color: white;
-        width: ${iconSize}px;
-        height: ${iconSize}px;
-        border-radius: 50%;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-weight: bold;
-        font-size: 14px;
-        border: 3px solid white;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.3);
-        cursor: pointer;
-      ">${index}</div>
-    `,
-    className: 'search-result-marker',
-    iconSize: [iconSize, iconSize],
-    iconAnchor: [iconSize / 2, iconSize / 2],
-  })
-}
-
-const fitMapToSearchResults = (results: any[]) => {
-  if (!map.value || results.length === 0) return
-
-  const bounds = L.latLngBounds([])
-  let validResults = 0
-
-  results.forEach((shop) => {
-    const lat = Number(shop.latitude)
-    const lng = Number(shop.longitude)
-    if (isFinite(lat) && isFinite(lng)) {
-      bounds.extend([lat, lng])
-      validResults++
-    }
-  })
-
-  if (latitude.value && longitude.value) {
-    bounds.extend([Number(latitude.value), Number(longitude.value)])
-  }
-
-  if (bounds.isValid() && validResults > 0) {
-    const padding = results.length > 3 ? 0.1 : 0.15
-    map.value.fitBounds(bounds.pad(padding), {
-      animate: true,
-      duration: 1,
-      padding: [20, 20],
-    })
-  }
-}
-
-/* -------------------- FOCUS ON SEARCH RESULT -------------------- */
-const focusOnSearchResult = async (shopId: string, index: number) => {
-  console.log('Focusing on search result:', shopId, 'index:', index)
-
-  const marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
-  if (!marker || !map.value) {
-    console.error('Search result marker not found for shop:', shopId)
-    return
-  }
-
-  // Highlight the selected search result
-  searchResultMarkers.forEach((m, i) => {
-    const isSelected = i === index
-    const icon = createSearchResultIcon(m.shopData, i + 1)
-    m.setIcon(icon)
-
-    if (isSelected) {
-      m.setZIndexOffset(2000)
-      m.openPopup()
-    } else {
-      m.setZIndexOffset(1000)
-    }
-  })
-
-  const shop = marker.shopData
-  if (!shop || !shop.latitude || !shop.longitude) {
-    console.error('Shop data incomplete:', shop)
-    return
-  }
-
-  const userLat = Number(latitude.value ?? lastKnown.value?.[0])
-  const userLng = Number(longitude.value ?? lastKnown.value?.[1])
-
-  // If we have user location, show route options
-  if (isFinite(userLat) && isFinite(userLng)) {
-    routeLoading.value = true
-    errorMsg.value = null
-
-    try {
-      clearAllRoutes()
-
-      const bounds = L.latLngBounds([
-        [userLat, userLng],
-        [Number(shop.latitude), Number(shop.longitude)],
-      ])
-
-      map.value.fitBounds(bounds.pad(0.2), {
-        animate: true,
-        duration: 0.5,
-        padding: [20, 20],
-      })
-
-      const routes = await getRouteOptions(
-        [userLat, userLng],
-        [Number(shop.latitude), Number(shop.longitude)],
-      )
-
-      if (routes.length > 0) {
-        routeOptions.value = routes
-        drawRouteOptions(routes)
-
-        if (routes[0].summary.includes('Fallback')) {
-          errorMsg.value = 'Using direct route (routing service unavailable)'
-        } else {
-          errorMsg.value = `Found ${routes.length} route options. Click on any route to select it.`
-        }
-      } else {
-        errorMsg.value = 'Could not calculate routes to this shop. Please try again.'
-        // Fallback: just center on the shop
-        map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
-          animate: true,
-          duration: 0.5,
-        })
-      }
-
-      // Open the marker popup
-      marker.openPopup()
-    } catch (error) {
-      console.error('Error focusing on search result:', error)
-      errorMsg.value = 'Error calculating routes: ' + (error as Error).message
-      // Fallback: just center on the shop
-      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
-        animate: true,
-        duration: 0.5,
-      })
-      marker.openPopup()
-    } finally {
-      routeLoading.value = false
-    }
-  } else {
-    // If no user location, just center on the shop
-    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
-      animate: true,
-      duration: 0.5,
-    })
-    marker.openPopup()
-  }
-}
-
-/* -------------------- SEARCH UTILITIES -------------------- */
-const normalizeCity = (name: string | null) =>
-  name
-    ? name
-        .toLowerCase()
-        .replace(/city|municipality|municipal|town|province/g, '')
-        .trim()
-    : ''
-
-const highlightMatch = (text: string, term: string) => {
-  if (!term) return text
-  const regex = new RegExp(`(${term.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&')})`, 'gi')
-  return text.replace(regex, '<span class="highlight">$1</span>')
 }
 
 const onSearchKeydown = (e: KeyboardEvent) => {
   if (e.key === 'Enter') smartSearch()
 }
 
-/* -------------------- UPDATE SHOPS -------------------- */
-const updateShops = async () => {
-  fetchShops()
-}
-
-/* -------------------- USER LOCATION TRACKING -------------------- */
-const hasValidLocation = ref(false)
-
-// Enhanced location watcher
-watch(
-  [latitude, longitude],
-  async ([lat, lng]) => {
-    if (!map.value || lat == null || lng == null) return
-
-    const userLat = Number(lat)
-    const userLng = Number(lng)
-
-    if (!isFinite(userLat) || !isFinite(userLng)) return
-
-    const now = Date.now()
-    if (now - lastUpdateTs < 1000) {
-      saveCachedLocation(userLat, userLng)
-      return
-    }
-    lastUpdateTs = now
-
-    // Update hasValidLocation
-    hasValidLocation.value = true
-
-    if (userMarker) {
-      userMarker.setLatLng([userLat, userLng])
-      userMarker.setPopupContent('You are here')
-    } else {
-      userMarker = L.marker([userLat, userLng], { icon: userIcon })
-        .addTo(map.value)
-        .bindPopup('You are here')
-        .openPopup()
-    }
-
-    saveCachedLocation(userLat, userLng)
-
-    // Load city boundary when user location changes
-    await highlightUserCityBoundary(userLat, userLng)
-
-    void updateShops()
-  },
-  { immediate: true },
-)
-
-/* -------------------- RECENTER -------------------- */
-const recenterToUser = async () => {
-  if (!map.value) return
-
-  locating.value = true
-  errorMsg.value = null
-
-  try {
-    // Clear any existing routes
-    clearAllRoutes()
-
-    // Try to get current position first
-    let targetLat: number
-    let targetLng: number
-
-    if (latitude.value && longitude.value) {
-      // Use the watched geolocation values if available
-      targetLat = Number(latitude.value)
-      targetLng = Number(longitude.value)
-    } else {
-      // Fallback: try to get fresh geolocation
-      try {
-        const position = await Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 10000,
-          maximumAge: 0,
-        })
-        targetLat = position.coords.latitude
-        targetLng = position.coords.longitude
-
-        // Update the reactive values
-        if (typeof latitude.value !== 'undefined' && typeof longitude.value !== 'undefined') {
-          latitude.value = targetLat
-          longitude.value = targetLng
-        }
-      } catch (geolocationError) {
-        console.warn('Failed to get current position:', geolocationError)
-
-        // Fallback to last known location
-        if (lastKnown.value) {
-          targetLat = lastKnown.value[0]
-          targetLng = lastKnown.value[1]
-          errorMsg.value = 'Using last known location'
-        } else {
-          errorMsg.value = 'Unable to determine your location'
-          return
-        }
-      }
-    }
-
-    // Validate coordinates
-    if (!isFinite(targetLat!) || !isFinite(targetLng!)) {
-      errorMsg.value = 'Invalid location coordinates'
-      return
-    }
-
-    console.log('Recentering to:', targetLat, targetLng)
-
-    // Update user marker
-    if (userMarker) {
-      userMarker.setLatLng([targetLat, targetLng])
-      userMarker.setPopupContent('You are here')
-      userMarker.openPopup()
-    } else {
-      userMarker = L.marker([targetLat, targetLng], { icon: userIcon })
-        .addTo(map.value)
-        .bindPopup('You are here')
-        .openPopup()
-    }
-
-    // Center map on user location
-    map.value.setView([targetLat, targetLng], 16, {
-      animate: true,
-      duration: 0.5,
-    })
-
-    // Save to cache
-    saveCachedLocation(targetLat, targetLng)
-
-    // Refresh city boundary and shops
-    await highlightUserCityBoundary(targetLat, targetLng)
-    void updateShops()
-  } catch (error) {
-    console.error('Error recentering:', error)
-    errorMsg.value = 'Failed to recenter map: ' + (error as Error).message
-  } finally {
-    locating.value = false
+const toggleShopMenu = () => {
+  showShopMenu.value = !showShopMenu.value
+  if (showShopMenu.value && !isSearchMode.value) {
+    applyShopFilters()
   }
 }
 
-/* -------------------- LIFECYCLE -------------------- */
-onMounted(async () => {
-  try {
-    await initializeMap()
-
-    if (Capacitor.getPlatform() !== 'web') await requestPermission()
-
-    const pos = await Geolocation.getCurrentPosition({ enableHighAccuracy: false, timeout: 5000 })
-    const quickLat = pos.coords.latitude
-    const quickLng = pos.coords.longitude
-
-    if (map.value) {
-      if (!userMarker) {
-        userMarker = L.marker([quickLat, quickLng], { icon: userIcon })
-          .addTo(map.value)
-          .bindPopup('You are here')
-          .openPopup()
-      } else {
-        userMarker.setLatLng([quickLat, quickLng])
-        userMarker.setPopupContent('You are here')
-      }
-      map.value.setView([quickLat, quickLng], 16, { animate: false })
-    }
-
-    saveCachedLocation(quickLat, quickLng)
-
-    // Load city boundary and shops
-    await highlightUserCityBoundary(quickLat, quickLng)
-    void updateShops()
-  } catch (err) {
-    console.warn('Quick geolocation failed:', err)
-    void fetchShops()
+const handleShopClick = async (shopId: string, index: number) => {
+  if (isSearchMode.value) {
+    // Focus on search result implementation
+    await focusOnShopMarker(shopId)
+  } else {
+    await focusOnShopMarker(shopId)
   }
-})
+}
 
-onUnmounted(() => {
-  stopWatching()
-  if (latitude.value && longitude.value)
-    saveCachedLocation(Number(latitude.value), Number(longitude.value))
-  if (map.value)
-    try {
-      setTimeout(() => map.value?.remove(), 300)
-    } catch {}
-})
-
-
-onUnmounted(() => {
-  stopWatching()
-  if (errorTimeout) {
-    clearTimeout(errorTimeout)
-    errorTimeout = null
-  }
-  if (latitude.value && longitude.value)
-    saveCachedLocation(Number(latitude.value), Number(longitude.value))
-  if (map.value)
-    try {
-      setTimeout(() => map.value?.remove(), 300)
-    } catch {}
-})
-/* -------------------- UI SHOP CLICK -------------------- */
 const openShop = async (shopId: string) => {
   const shop = shops.value.find((s) => s.id === shopId)
   if (!shop) return
@@ -1652,51 +1260,6 @@ const openShop = async (shopId: string) => {
   }
 
   router.push(`/shop/${shopId}`)
-}
-
-/* -------------------- TOGGLE SHOP MENU -------------------- */
-const toggleShopMenu = () => {
-  showShopMenu.value = !showShopMenu.value
-  if (showShopMenu.value && !isSearchMode.value) {
-    applyShopFilters() // Show shops based on current display mode
-  }
-}
-
-/* -------------------- HANDLE SHOP CLICK -------------------- */
-const handleShopClick = async (shopId: string, index: number) => {
-  console.log('Shop clicked:', shopId, 'isSearchMode:', isSearchMode.value)
-
-  if (isSearchMode.value) {
-    await focusOnSearchResult(shopId, index)
-  } else {
-    await focusOnShopMarker(shopId)
-  }
-}
-
-// Add a timeout reference for clearing messages
-let errorTimeout: number | null = null
-
-// Create a method to set error messages with auto-clear
-const setErrorMessage = (message: string | null, duration: number = 4000) => {
-  if (errorTimeout) {
-    clearTimeout(errorTimeout)
-    errorTimeout = null
-  }
-
-  errorMsg.value = null // Clear first
-
-  if (message) {
-    // Use nextTick to ensure the DOM updates properly
-    setTimeout(() => {
-      errorMsg.value = message
-
-      // Auto-clear after duration
-      errorTimeout = window.setTimeout(() => {
-        errorMsg.value = null
-        errorTimeout = null
-      }, duration)
-    }, 50)
-  }
 }
 </script>
 
@@ -1730,8 +1293,14 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
       </div>
     </v-sheet>
 
-    <v-main>
-      <div id="map"></div>
+    <v-main style="position: relative; height: calc(100vh - 64px);">
+      <div id="map" style="height: 100%; width: 100%;"></div>
+
+      <!-- Boundary Loading Overlay -->
+      <div v-if="boundaryLoading" class="boundary-loading">
+        <v-progress-circular indeterminate color="primary" size="24"></v-progress-circular>
+        <span>Detecting city boundary...</span>
+      </div>
 
       <!-- Route Loading Overlay -->
       <div v-if="routeLoading" class="route-loading">
@@ -1739,13 +1308,7 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
         <span>Calculating routes...</span>
       </div>
 
-      <!-- Boundary Loading Overlay -->
-      <div v-if="boundaryLoading" class="route-loading">
-        <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
-        <span>Loading city boundary...</span>
-      </div>
-
-      <!-- Map Controls Container - Moved to bottom right -->
+      <!-- Map Controls Container -->
       <div class="map-controls-container" v-if="!showShopMenu">
         <!-- Display Mode Chip -->
         <v-chip
@@ -1815,6 +1378,7 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
           </v-btn>
         </div>
       </div>
+      
       <v-alert
         v-if="errorMsg"
         type="info"
@@ -1831,99 +1395,47 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
       </v-alert>
     </v-main>
 
-    <!-- Shop Menu Drawer -->
     <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="380">
-      <v-toolbar flat :color="shopDisplayMode === 'within' ? 'green' : 'orange'" dark>
-        <v-toolbar-title>
-          <div>
-            <div>
-              {{
-                isSearchMode
-                  ? 'Search Results'
-                  : shopDisplayMode === 'within'
-                    ? 'Shops Within City'
-                    : 'Shops Outside City'
-              }}
-            </div>
-            <div style="font-size: 0.8rem; opacity: 0.8">
-              {{ filteredShops.length }} {{ isSearchMode ? 'results' : 'shops' }} •
-              {{ userCity || 'Unknown City' }}
-            </div>
-          </div>
-        </v-toolbar-title>
-        <v-btn icon @click="showShopMenu = false">
-          <v-icon>mdi-close</v-icon>
-        </v-btn>
-      </v-toolbar>
-      <v-divider></v-divider>
-
-      <v-list v-if="filteredShops.length > 0">
-        <v-list-item
-          v-for="(shop, index) in filteredShops"
-          :key="shop.id"
-          @click="handleShopClick(shop.id, index)"
-          class="search-result-item"
-          style="cursor: pointer"
-        >
-          <template #prepend>
-            <v-avatar size="44">
-              <v-img
-                :src="shop.logo_url || shop.physical_store || 'https://via.placeholder.com/80'"
-                :alt="shop.business_name"
-              />
-            </v-avatar>
-          </template>
-
-          <v-list-item-title>
-            {{ shop.business_name }}
-            <v-chip v-if="shop.withinBoundary" size="x-small" color="green" class="ml-2">
-              Within
-            </v-chip>
-            <v-chip v-else size="x-small" color="orange" class="ml-2"> Outside </v-chip>
-          </v-list-item-title>
-
-          <v-list-item-subtitle>
-            {{ getFullAddress(shop) }}
-          </v-list-item-subtitle>
-
-          <v-list-item-subtitle v-if="shop.distanceKm && isFinite(shop.distanceKm)">
-            <v-icon small>mdi-map-marker-distance</v-icon>
-            {{ shop.distanceKm.toFixed(2) }} km away
-          </v-list-item-subtitle>
-
-          <template #append>
-            <v-btn icon variant="text" size="small" @click.stop="openShop(shop.id)">
-              <v-icon>mdi-chevron-right</v-icon>
-            </v-btn>
-          </template>
-        </v-list-item>
-      </v-list>
-
-      <div v-else class="pa-4 text-center">
-        <v-icon size="48" color="grey-lighten-1">mdi-store-outline</v-icon>
-        <div class="text-body-1 text-grey mt-2">
-          {{
-            shopDisplayMode === 'within'
-              ? 'No shops within city boundary'
-              : 'No shops outside city boundary'
-          }}
-        </div>
-        <div class="text-caption text-grey">
-          {{
-            shopDisplayMode === 'within'
-              ? 'Try switching to "Outside City" mode'
-              : 'Try switching to "Within City" mode'
-          }}
-        </div>
-      </div>
+      <v-card>
+        <v-card-title class="d-flex align-center">
+          <span class="text-h6">Shops</span>
+          <v-spacer></v-spacer>
+          <v-btn icon @click="showShopMenu = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-card-text>
+          <v-list>
+            <v-list-item
+              v-for="(shop, index) in filteredShops"
+              :key="shop.id"
+              @click="handleShopClick(shop.id, index)"
+            >
+              <template #prepend>
+                <v-avatar size="48" rounded>
+                  <v-img
+                    :src="shop.logo_url || shop.physical_store || 'https://placehold.co/80x80'"
+                    alt="Shop logo"
+                  />
+                </v-avatar>
+              </template>
+              <v-list-item-title>{{ shop.business_name }}</v-list-item-title>
+              <v-list-item-subtitle>
+                {{ getFullAddress(shop) }}
+                <br>
+                {{ Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown' }}
+              </v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-card-text>
+      </v-card>
     </v-navigation-drawer>
 
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
-
 <style scoped>
-/* Add boundary-specific styles */
+/* Enhanced boundary styles */
 :deep(.city-boundary) {
   stroke-dasharray: 10, 10;
   animation: dash 30s linear infinite;
@@ -1935,42 +1447,85 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
   }
 }
 
+/* Boundary loading state */
+.boundary-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 16px 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 2500;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  color: #1f2937;
+}
+
 /* Enhanced mode chip styles */
 .mode-chip {
   font-weight: 600;
-  padding: clamp(4px, 1.5vw, 8px) clamp(8px, 2vw, 12px);
-  font-size: clamp(0.7rem, 3vw, 0.8rem);
+  padding: 8px 12px;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
   backdrop-filter: blur(10px);
   border: none;
   margin-bottom: 8px;
   align-self: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
 }
 
-/* Improved layout styles */
-:deep(.v-application__wrap) {
-  min-height: 100vh !important;
+.mode-chip:hover {
+  transform: scale(1.05);
 }
 
+/* Map container */
+#map {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1;
+}
+
+.v-main {
+  position: relative;
+  padding: 0 !important;
+}
+
+/* Hero section - FIXED FOR SAFE AREA */
 .hero {
   background: linear-gradient(135deg, #3f83c7 0%, #1e40af 100%);
   border-radius: 0;
+  /* Add safe area insets for phone status bar */
   padding-top: max(16px, env(safe-area-inset-top));
-  padding: clamp(12px, 4vw, 16px) clamp(12px, 4vw, 16px) clamp(8px, 3vw, 12px);
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
+  padding-bottom: 16px;
   margin: 0;
   width: 100%;
   position: sticky;
   top: 0;
   z-index: 1000;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  /* Ensure content doesn't go under the status bar */
+  min-height: calc(64px + env(safe-area-inset-top));
 }
 
 .hero-row {
   display: flex;
   align-items: center;
-  gap: clamp(8px, 3vw, 12px);
+  gap: 12px;
   max-width: 1200px;
   margin: 0 auto;
+  /* Add margin top to push content below status bar */
+  margin-top: env(safe-area-inset-top);
 }
 
 .search-field {
@@ -1996,31 +1551,12 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
   box-shadow: 0 8px 25px rgba(59, 130, 246, 0.2) !important;
 }
 
-.search-field :deep(input) {
-  font-size: clamp(14px, 4vw, 16px);
-  padding: 8px 4px;
-  font-weight: 500;
-}
-
-.search-field :deep(.v-field__append-inner) {
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.search-field :deep(.v-field__append-inner .v-icon) {
-  color: #6b7280;
-  transition: color 0.3s ease;
-}
-
-.search-field :deep(.v-field):focus-within .v-field__append-inner .v-icon {
-  color: #3b82f6;
-}
 .search-btn {
   background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
   color: white !important;
   min-width: 52px !important;
-  width: clamp(52px, 12vw, 60px) !important;
-  height: clamp(52px, 12vw, 60px) !important;
+  width: 60px !important;
+  height: 52px !important;
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
   border: none;
   transition: all 0.3s ease !important;
@@ -2031,59 +1567,11 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
 }
 
-.search-btn:active:not(.v-btn--disabled) {
-  transform: translateY(0);
-}
-
-.search-btn .v-icon {
-  font-size: clamp(18px, 5vw, 22px);
-}
-
-#map {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: var(--bottom-nav-height, 70px);
-  width: 100%;
-  height: calc(100vh - var(--bottom-nav-height, 70px));
-  z-index: 1;
-}
-
-/* Ensure map controls don't cover Leaflet controls */
-:deep(.leaflet-top) {
-  top: calc(clamp(12px, 4vw, 16px) + clamp(52px, 12vw, 60px) + clamp(12px, 4vw, 16px)) !important;
-}
-
-:deep(.leaflet-bottom) {
-  bottom: calc(var(--bottom-nav-height, 70px) + 100px) !important;
-}
-
-:deep(.leaflet-left) {
-  left: 12px !important;
-}
-
-:deep(.leaflet-right) {
-  right: 12px !important;
-}
-
-:deep(.v-application__wrap) {
-  min-height: 100vh !important;
-}
-
-:deep(.v-bottom-navigation) {
-  --bottom-nav-height: 70px;
-  height: var(--bottom-nav-height) !important;
-  padding-bottom: env(safe-area-inset-bottom);
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
-}
-
-/* Improved Map Controls - Moved to bottom right */
+/* Map Controls - Adjust for safe area */
 .map-controls-container {
-  position: fixed;
-  bottom: calc(var(--bottom-nav-height, 70px) + clamp(16px, 5vw, 24px));
-  right: clamp(12px, 4vw, 20px);
+  position: absolute;
+  bottom: max(100px, calc(100px + env(safe-area-inset-bottom)));
+  right: max(20px, env(safe-area-inset-right));
   display: flex;
   flex-direction: column;
   align-items: flex-end;
@@ -2095,7 +1583,7 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
 .map-controls-group {
   display: flex;
   flex-direction: column;
-  gap: clamp(6px, 2vw, 10px);
+  gap: 10px;
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(10px);
   border-radius: 20px;
@@ -2107,8 +1595,8 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
 .control-btn {
   background: white !important;
   box-shadow: 0 3px 12px rgba(0, 0, 0, 0.15) !important;
-  width: clamp(46px, 11vw, 54px) !important;
-  height: clamp(46px, 11vw, 54px) !important;
+  width: 48px !important;
+  height: 48px !important;
   border: 1px solid #e2e8f0 !important;
   transition: all 0.3s ease !important;
 }
@@ -2119,16 +1607,8 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
   background: #f8fafc !important;
 }
 
-.control-btn:active {
-  transform: translateY(0);
-}
-
-.control-btn .v-icon {
-  font-size: clamp(18px, 4.5vw, 20px);
-}
-
 .route-loading {
-  position: fixed;
+  position: absolute;
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
@@ -2141,128 +1621,82 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
   gap: 16px;
   z-index: 3000;
   backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-}
-
-.route-loading span {
-  font-weight: 600;
-  color: #1f2937;
-  font-size: 16px;
 }
 
 .route-info-alert {
-  background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%) !important;
-  border-left: 4px solid #3b82f6 !important;
-  margin: 12px !important;
-  position: relative;
+  position: absolute;
+  /* Adjust for safe area */
+  top: max(80px, calc(80px + env(safe-area-inset-top)));
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 2000;
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.15) !important;
-  border-radius: 12px !important;
-  transition: all 0.3s ease !important;
-}
-.route-info-alert:hover {
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.25) !important;
+  width: 90%;
+  max-width: 500px;
 }
 
-/* Enhanced responsive adjustments */
-@media (max-width: 360px) {
+/* Adjust main content area for safe area */
+.v-main {
+  position: relative;
+  height: calc(100vh - 64px - env(safe-area-inset-top)) !important;
+  padding: 0 !important;
+}
+
+/* Responsive adjustments with safe area support */
+@media (max-width: 768px) {
   .hero {
-    padding: 10px 8px 6px;
+    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-left)) 12px max(12px, env(safe-area-inset-right));
   }
-
+  
   .hero-row {
-    gap: 6px;
+    gap: 8px;
+    margin-top: env(safe-area-inset-top);
   }
-
+  
   .map-controls-container {
-    bottom: calc(70px + 12px);
-    right: 8px;
-  }
-
-  .control-btn {
-    width: 42px !important;
-    height: 42px !important;
-  }
-
-  .map-controls-group {
-    padding: 8px;
-    border-radius: 16px;
-  }
-}
-
-@media (max-width: 480px) {
-  .map-controls-container {
-    bottom: calc(var(--bottom-nav-height, 70px) + clamp(12px, 3vw, 16px));
-    right: clamp(8px, 3vw, 12px);
-  }
-
-  :deep(.leaflet-bottom) {
-    bottom: calc(var(--bottom-nav-height, 70px) + 80px) !important;
-  }
-}
-
-@media (min-width: 768px) {
-  #map {
-    bottom: var(--bottom-nav-height, 80px);
-    height: calc(100vh - var(--bottom-nav-height, 80px));
-  }
-
-  :deep(.v-bottom-navigation) {
-    --bottom-nav-height: 80px;
-  }
-
-  .map-controls-container {
-    bottom: calc(80px + 24px);
-    right: clamp(16px, 4vw, 24px);
-  }
-
-  :deep(.leaflet-bottom) {
-    bottom: calc(var(--bottom-nav-height, 80px) + 120px) !important;
-  }
-}
-
-@media (min-width: 1024px) {
-  .map-controls-container {
-    bottom: calc(80px + 24px);
-    right: 24px;
-  }
-}
-
-/* Safe area support for notched devices */
-@supports (padding: max(0px)) {
-  .hero {
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
-  }
-
-  .map-controls-container {
+    bottom: max(80px, calc(80px + env(safe-area-inset-bottom)));
     right: max(12px, env(safe-area-inset-right));
-    bottom: calc(var(--bottom-nav-height, 70px) + max(16px, env(safe-area-inset-bottom)));
+  }
+  
+  .control-btn {
+    width: 44px !important;
+    height: 44px !important;
+  }
+  
+  /* Adjust for notched devices */
+  .route-info-alert {
+    top: max(70px, calc(70px + env(safe-area-inset-top)));
+    width: 95%;
   }
 }
 
-/* Animation for better UX */
-.control-btn {
-  animation: fadeInUp 0.5s ease-out;
-}
-
-@keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
+/* Additional safe area support for very tall screens */
+@media (min-height: 800px) {
+  .hero {
+    padding-top: max(20px, env(safe-area-inset-top));
   }
-  to {
-    opacity: 1;
-    transform: translateY(0);
+  
+  .hero-row {
+    margin-top: max(8px, env(safe-area-inset-top));
   }
 }
 
-/* Loading state improvements */
-.search-btn:deep(.v-btn__loader) {
-  color: white !important;
-}
-
-.control-btn:deep(.v-btn__loader) {
-  color: #3b82f6 !important;
+/* Support for devices without safe-area-inset */
+@supports not (padding: max(0px)) {
+  .hero {
+    padding-top: 16px;
+  }
+  
+  .hero-row {
+    margin-top: 0;
+  }
+  
+  .map-controls-container {
+    bottom: 100px;
+    right: 20px;
+  }
+  
+  .route-info-alert {
+    top: 80px;
+  }
 }
 </style>
