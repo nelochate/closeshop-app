@@ -1366,7 +1366,7 @@ const isShopOpenByHours = (shop: any): boolean => {
           hide-details
           clearable
           density="comfortable"
-          placeholder="Search products, shops, or places..."
+          placeholder="Looking for something?"
           append-inner-icon="mdi-magnify"
           @keydown="onSearchKeydown"
           @click:clear="clearSearch"
@@ -1666,10 +1666,9 @@ const isShopOpenByHours = (shop: any): boolean => {
 .search-btn {
   background: #1d4ed8 !important;
   color: white !important;
-  min-width: 60px !important; /* Changed to match height */
+  min-width: 60px !important;
   width: 60px !important;
-  height: 40px !important;
-  border-radius: 80% !important; /* This makes it circular */
+  height: 60px !important;
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
   border: none;
   transition: all 0.3s ease !important;
