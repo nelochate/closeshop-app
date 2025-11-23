@@ -1327,8 +1327,6 @@ const openShop = async (shopId: string) => {
   router.push(`/shop/${shopId}`)
 }
 
-
-
 // Add these helper functions to your map component
 
 const isShopOpenByHours = (shop: any): boolean => {
@@ -1479,8 +1477,8 @@ const isShopOpenByHours = (shop: any): boolean => {
         @click="setErrorMessage(null)"
         style="cursor: pointer"
       >
-        <div class="d-flex justify-space-between align-center">
-          <span>{{ errorMsg }}</span>
+        <div class="d-flex justify-center align-center">
+          <span class="alert-text">{{ errorMsg }}</span>
           <v-btn icon size="small" @click.stop="setErrorMessage(null)" class="ml-2">
             <v-icon>mdi-close</v-icon>
           </v-btn>
@@ -1666,11 +1664,12 @@ const isShopOpenByHours = (shop: any): boolean => {
 }
 
 .search-btn {
-  background: linear-gradient(135deg, #10b981 0%, #059669 100%) !important;
+  background: #1d4ed8 !important;
   color: white !important;
-  min-width: 52px !important;
+  min-width: 60px !important; /* Changed to match height */
   width: 60px !important;
-  height: 52px !important;
+  height: 40px !important;
+  border-radius: 80% !important; /* This makes it circular */
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
   border: none;
   transition: all 0.3s ease !important;
@@ -1679,8 +1678,8 @@ const isShopOpenByHours = (shop: any): boolean => {
 .search-btn:hover:not(.v-btn--disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
+  border-radius: 50% !important; /* Ensure it stays circular on hover */
 }
-
 /* Map Controls - Adjust for safe area */
 .map-controls-container {
   position: absolute;
@@ -1704,6 +1703,7 @@ const isShopOpenByHours = (shop: any): boolean => {
   padding: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.9);
+  margin-bottom: 25px;
 }
 
 .control-btn {
@@ -1739,15 +1739,28 @@ const isShopOpenByHours = (shop: any): boolean => {
 
 .route-info-alert {
   position: absolute;
-  /* Adjust for safe area */
-  top: max(80px, calc(80px + env(safe-area-inset-top)));
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
   width: 90%;
   max-width: 500px;
+  margin: 0;
+  padding: 8px 16px;
 }
 
+/* Center the content vertically and horizontally */
+.route-info-alert .d-flex {
+  min-height: 32px; /* Ensure consistent height */
+}
+.alert-text {
+  flex: 1;
+  text-align: center;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
 /* Adjust main content area for safe area */
 .v-main {
   position: relative;
@@ -1777,10 +1790,22 @@ const isShopOpenByHours = (shop: any): boolean => {
     height: 44px !important;
   }
 
-  /* Adjust for notched devices */
   .route-info-alert {
-    top: max(70px, calc(70px + env(safe-area-inset-top)));
+    top: 50px;
     width: 95%;
+    padding: 6px 12px;
+  }
+
+  /* Make the alert content more compact */
+  .route-info-alert .v-alert__content {
+    padding: 0 !important;
+  }
+
+  .route-info-alert .d-flex {
+    min-height: 58px;
+  }
+   .alert-text {
+    font-size: 20px; /* Slightly smaller text on mobile */
   }
 }
 
