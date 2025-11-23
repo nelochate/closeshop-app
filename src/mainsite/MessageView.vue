@@ -12,6 +12,9 @@ const goBack = () => router.back()
 const conversations = ref<any[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
+const showDeleteDialog = ref(false)
+const conversationToDelete = ref<any>(null)
+const deleting = ref(false)
 
 // Fetch conversations with proper user matching
 const fetchConversations = async () => {
@@ -190,6 +193,55 @@ const fetchConversations = async () => {
   }
 }
 
+// ✅ DELETE CONVERSATION FUNCTION
+const deleteConversation = async (conversationId: string) => {
+  try {
+    deleting.value = true
+    console.log('🗑️ Deleting conversation:', conversationId)
+
+    // Delete the conversation (this will automatically delete all messages due to CASCADE)
+    const { error: deleteError } = await supabase
+      .from('conversations')
+      .delete()
+      .eq('id', conversationId)
+
+    if (deleteError) {
+      console.error('❌ Error deleting conversation:', deleteError)
+      throw deleteError
+    }
+
+    console.log('✅ Conversation deleted successfully')
+    
+    // Remove from local state
+    conversations.value = conversations.value.filter(conv => conv.id !== conversationId)
+    
+    // Close dialog
+    showDeleteDialog.value = false
+    conversationToDelete.value = null
+
+  } catch (err) {
+    console.error('❌ Error in deleteConversation:', err)
+    error.value = 'Failed to delete conversation'
+  } finally {
+    deleting.value = false
+  }
+}
+
+// ✅ Confirm delete dialog
+const confirmDelete = (conversation: any, event?: Event) => {
+  if (event) {
+    event.stopPropagation() // Prevent opening the chat
+  }
+  conversationToDelete.value = conversation
+  showDeleteDialog.value = true
+}
+
+// ✅ Cancel delete
+const cancelDelete = () => {
+  showDeleteDialog.value = false
+  conversationToDelete.value = null
+}
+
 // Alternative method using RPC if you want to create a database function
 const fetchConversationsWithRPC = async () => {
   try {
@@ -253,6 +305,18 @@ const subscribeToMessages = () => {
       },
       (payload) => {
         console.log('🔔 New conversation created:', payload)
+        fetchConversations() // Refresh conversations
+      }
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'conversations'
+      },
+      (payload) => {
+        console.log('🔔 Conversation deleted:', payload)
         fetchConversations() // Refresh conversations
       }
     )
@@ -400,20 +464,64 @@ setInterval(fetchConversations, 30000)
                 >
                   {{ conversation.time }}
                 </div>
-                <v-icon 
-                  v-if="conversation.unread" 
-                  color="primary" 
-                  size="16"
-                  class="mt-1"
-                >
-                  mdi-circle-medium
-                </v-icon>
+                <div class="action-buttons">
+                  <v-icon 
+                    v-if="conversation.unread" 
+                    color="primary" 
+                    size="16"
+                    class="mt-1 mr-1"
+                  >
+                    mdi-circle-medium
+                  </v-icon>
+                  <v-btn
+                    icon
+                    size="x-small"
+                    variant="text"
+                    color="error"
+                    @click.stop="confirmDelete(conversation)"
+                    class="delete-btn"
+                  >
+                    <v-icon size="18">mdi-delete-outline</v-icon>
+                  </v-btn>
+                </div>
               </div>
             </template>
           </v-list-item>
         </v-list>
       </div>
     </v-main>
+
+    <!-- Delete Confirmation Dialog -->
+    <v-dialog v-model="showDeleteDialog" max-width="400" persistent>
+      <v-card>
+        <v-card-title class="text-h6">
+          Delete Conversation?
+        </v-card-title>
+        <v-card-text>
+          Are you sure you want to delete this conversation with 
+          <strong>{{ conversationToDelete?.otherUserName }}</strong>? 
+          This action cannot be undone and will delete all messages in this conversation.
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn 
+            text 
+            @click="cancelDelete"
+            :disabled="deleting"
+          >
+            Cancel
+          </v-btn>
+          <v-btn 
+            color="error" 
+            variant="flat" 
+            @click="deleteConversation(conversationToDelete?.id)"
+            :loading="deleting"
+          >
+            Delete
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
 
     <!-- Reusable BottomNav -->
     <BottomNav v-model="activeTab" />
@@ -459,6 +567,7 @@ setInterval(fetchConversations, 30000)
   padding: 16px;
   transition: background-color 0.2s ease;
   cursor: pointer;
+  position: relative;
 }
 
 .conversation-item:hover {
@@ -535,7 +644,23 @@ setInterval(fetchConversations, 30000)
   flex-direction: column;
   align-items: flex-end;
   gap: 4px;
-  min-width: 60px;
+  min-width: 80px;
+}
+
+.action-buttons {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.delete-btn {
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.delete-btn:hover {
+  opacity: 1;
+  background-color: rgba(244, 67, 54, 0.1);
 }
 
 .message-time {
@@ -572,6 +697,10 @@ setInterval(fetchConversations, 30000)
   
   .unread-message {
     font-size: 0.8rem;
+  }
+  
+  .conversation-meta {
+    min-width: 70px;
   }
 }
 
