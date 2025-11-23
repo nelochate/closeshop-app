@@ -22,7 +22,7 @@ const formatMessageTime = (timestamp: string) => {
   const now = new Date()
   const messageTime = new Date(timestamp)
   const diffInMinutes = Math.floor((now.getTime() - messageTime.getTime()) / (1000 * 60))
-  
+
   if (diffInMinutes < 1) return 'now'
   if (diffInMinutes < 60) return `${diffInMinutes}m`
   if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h`
@@ -32,9 +32,8 @@ const formatMessageTime = (timestamp: string) => {
 // Update times every minute
 const startTimeUpdates = () => {
   timeUpdateInterval = setInterval(() => {
-    // This will trigger reactivity and update all timestamps
     messages.value = [...messages.value]
-  }, 60000) // Update every minute
+  }, 60000)
 }
 
 const scrollToBottom = async () => {
@@ -46,22 +45,18 @@ const scrollToBottom = async () => {
 // ✅ Fetch other user's profile and shop info
 const fetchOtherUserInfo = async () => {
   try {
-    // Get profile
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', otherUserId)
       .single()
-
     otherUserProfile.value = profile
 
-    // Get shop info if they are a seller
     const { data: shop } = await supabase
       .from('shops')
       .select('*')
       .eq('owner_id', otherUserId)
       .maybeSingle()
-
     shopInfo.value = shop
   } catch (error) {
     console.error('Error fetching user info:', error)
@@ -73,14 +68,13 @@ const getOrCreateConversation = async () => {
   const { data: auth } = await supabase.auth.getUser()
   if (!auth.user) return
   userId.value = auth.user.id
-  console.log('🟦 Logged in userId:', userId.value)
-  console.log('🟩 Chatting with userId:', otherUserId)
 
-  // find existing conversation
   const { data: existing, error } = await supabase
     .from('conversations')
     .select('id')
-    .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+    .or(
+      `and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`,
+    )
     .maybeSingle()
 
   if (error) console.error('Conversation fetch error:', error)
@@ -98,84 +92,127 @@ const getOrCreateConversation = async () => {
   }
 }
 
-// ✅ Load messages with product info - FIXED QUERY
+// ✅ Extract product name from order message
+const extractProductNameFromOrder = (content: string): string | null => {
+  // Match patterns like "Burger 1 (x2)" or "Product Name (x1)"
+  const match = content.match(/(.+?)\s*\(\s*x\d+\s*\)/)
+  return match ? match[1].trim() : null
+}
+
+// ✅ Find product by name
+const findProductByName = async (productName: string): Promise<any> => {
+  try {
+    const { data: product, error } = await supabase
+      .from('products')
+      .select(`
+        id,
+        prod_name,
+        price,
+        main_img_urls,
+        shop_id,
+        description
+      `)
+      .ilike('prod_name', `%${productName}%`)
+      .single()
+
+    if (error || !product) return null
+
+    // Fetch shop info if product exists
+    if (product?.shop_id) {
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('id, business_name, logo_url')
+        .eq('id', product.shop_id)
+        .single()
+      return { ...product, shop }
+    }
+
+    return product
+  } catch (error) {
+    console.error('Error finding product:', error)
+    return null
+  }
+}
+
+// ✅ Load messages with enhanced order notifications
 const loadMessages = async () => {
   if (!conversationId.value) return
-  
-  console.log('📨 Loading messages for conversation:', conversationId.value)
-  
+
   try {
-    // First, get basic messages
     const { data, error } = await supabase
       .from('messages')
       .select('*')
       .eq('conversation_id', conversationId.value)
       .order('created_at', { ascending: true })
-    
+
     if (error) {
       console.error('❌ Error loading messages:', error)
       return
     }
 
     if (!data) {
-      console.log('📭 No messages found')
       messages.value = []
       return
     }
 
-    console.log('📩 Raw messages loaded:', data)
-
-    // Then, fetch product info for messages that have product_id
-    const messagesWithProducts = await Promise.all(
+    // Enhanced message processing with order product detection
+    const enhancedMessages = await Promise.all(
       data.map(async (msg) => {
-        if (!msg.product_id) {
-          return { ...msg, product: null }
-        }
+        // For product share messages
+        if (msg.product_id) {
+          try {
+            const { data: product, error: productError } = await supabase
+              .from('products')
+              .select(`
+                id,
+                prod_name,
+                price,
+                main_img_urls,
+                shop_id,
+                description
+              `)
+              .eq('id', msg.product_id)
+              .single()
 
-        try {
-          const { data: product, error: productError } = await supabase
-            .from('products')
-            .select(`
-              id,
-              prod_name,
-              price,
-              main_img_urls,
-              shop_id
-            `)
-            .eq('id', msg.product_id)
-            .single()
+            if (productError) return { ...msg, product: null }
 
-          if (productError) {
-            console.error('❌ Error fetching product:', productError)
+            let shopInfo = null
+            if (product?.shop_id) {
+              const { data: shop } = await supabase
+                .from('shops')
+                .select('id, business_name, logo_url')
+                .eq('id', product.shop_id)
+                .single()
+              shopInfo = shop
+            }
+
+            return {
+              ...msg,
+              product: product ? { ...product, shop: shopInfo } : null,
+            }
+          } catch (err) {
             return { ...msg, product: null }
           }
-
-          // If product has shop_id, fetch shop info
-          let shopInfo = null
-          if (product?.shop_id) {
-            const { data: shop } = await supabase
-              .from('shops')
-              .select('id, business_name')
-              .eq('id', product.shop_id)
-              .single()
-            shopInfo = shop
-          }
-
-          return {
-            ...msg,
-            product: product ? { ...product, shop: shopInfo } : null
-          }
-        } catch (err) {
-          console.error('❌ Error processing product for message:', err)
-          return { ...msg, product: null }
         }
-      })
+
+        // For order notification messages - find the product
+        if (isOrderNotification(msg.content)) {
+          const productName = extractProductNameFromOrder(msg.content)
+          if (productName) {
+            const product = await findProductByName(productName)
+            return {
+              ...msg,
+              orderProduct: product, // Add the found product to order messages
+            }
+          }
+        }
+
+        return { ...msg, orderProduct: null }
+      }),
     )
 
-    messages.value = messagesWithProducts
-    console.log('✅ Final messages with products:', messages.value)
+    messages.value = enhancedMessages
     scrollToBottom()
-    
   } catch (err) {
     console.error('❌ Unexpected error in loadMessages:', err)
   }
@@ -189,17 +226,16 @@ const subscribeMessages = async () => {
     .channel(`chat-${conversationId.value}`)
     .on(
       'postgres_changes',
-      { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'messages', 
-        filter: `conversation_id=eq.${conversationId.value}` 
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId.value}`,
       },
       async (payload) => {
-        console.log('🔔 New message received:', payload.new)
-        
-        // Fetch product info for new message if it has a product_id
-        let productInfo = null
+        let newMessageWithData = { ...payload.new }
+
+        // For product share messages
         if (payload.new.product_id) {
           try {
             const { data: product } = await supabase
@@ -209,57 +245,51 @@ const subscribeMessages = async () => {
                 prod_name,
                 price,
                 main_img_urls,
-                shop_id
+                shop_id,
+                description
               `)
               .eq('id', payload.new.product_id)
               .single()
 
-            // Fetch shop info if product exists
             if (product?.shop_id) {
               const { data: shop } = await supabase
                 .from('shops')
-                .select('id, business_name')
+                .select('id, business_name, logo_url')
                 .eq('id', product.shop_id)
                 .single()
-              productInfo = { ...product, shop }
+              newMessageWithData.product = { ...product, shop }
             } else {
-              productInfo = product
+              newMessageWithData.product = product
             }
           } catch (error) {
             console.error('❌ Error fetching product for new message:', error)
           }
         }
 
-        const newMessageWithProduct = {
-          ...payload.new,
-          product: productInfo
+        // For order notification messages
+        if (isOrderNotification(payload.new.content)) {
+          const productName = extractProductNameFromOrder(payload.new.content)
+          if (productName) {
+            const product = await findProductByName(productName)
+            newMessageWithData.orderProduct = product
+          }
         }
 
-        messages.value.push(newMessageWithProduct)
+        messages.value.push(newMessageWithData)
         scrollToBottom()
-        
-        // Mark as read if it's for current user
+
         if (payload.new.receiver_id === userId.value) {
           await markMessageAsRead(payload.new.id)
         }
-      }
+      },
     )
-    .subscribe((status) => {
-      console.log('📡 Subscription status:', status)
-    })
+    .subscribe()
 }
 
 // ✅ Mark single message as read
 const markMessageAsRead = async (messageId: string) => {
   try {
-    const { error } = await supabase
-      .from('messages')
-      .update({ is_read: true })
-      .eq('id', messageId)
-
-    if (error) {
-      console.error('❌ Mark as read error:', error)
-    }
+    await supabase.from('messages').update({ is_read: true }).eq('id', messageId)
   } catch (err) {
     console.error('❌ Error marking message as read:', err)
   }
@@ -275,20 +305,12 @@ const sendMessage = async () => {
     receiver_id: otherUserId,
     content: newMessage.value,
     is_read: false,
-    product_id: null
+    product_id: null,
   }
 
   try {
-    const { data, error } = await supabase
-      .from('messages')
-      .insert([msg])
-      .select('*')
-      .single()
-
-    if (error) {
-      console.error('❌ Send message error:', error)
-    } else {
-      console.log('✅ Message sent:', data)
+    const { data, error } = await supabase.from('messages').insert([msg]).select('*').single()
+    if (!error) {
       messages.value.push(data)
       scrollToBottom()
     }
@@ -309,52 +331,13 @@ const sendProductMessage = async (product: any) => {
     receiver_id: otherUserId,
     content: `Check out this product: ${product.prod_name}`,
     is_read: false,
-    product_id: product.id
+    product_id: product.id,
   }
 
   try {
-    const { data, error } = await supabase
-      .from('messages')
-      .insert([msg])
-      .select('*')
-      .single()
-
-    if (error) {
-      console.error('❌ Send product message error:', error)
-    } else {
-      // Fetch product info for the new message
-      let productInfo = null
-      if (product.id) {
-        const { data: productData } = await supabase
-          .from('products')
-          .select(`
-            id,
-            prod_name,
-            price,
-            main_img_urls,
-            shop_id
-          `)
-          .eq('id', product.id)
-          .single()
-
-        if (productData?.shop_id) {
-          const { data: shop } = await supabase
-            .from('shops')
-            .select('id, business_name')
-            .eq('id', productData.shop_id)
-            .single()
-          productInfo = { ...productData, shop }
-        } else {
-          productInfo = productData
-        }
-      }
-
-      const messageWithProduct = {
-        ...data,
-        product: productInfo
-      }
-
-      messages.value.push(messageWithProduct)
+    const { data, error } = await supabase.from('messages').insert([msg]).select('*').single()
+    if (!error) {
+      messages.value.push({ ...data, product })
       scrollToBottom()
     }
   } catch (err) {
@@ -362,15 +345,14 @@ const sendProductMessage = async (product: any) => {
   }
 }
 
-// ✅ View product details
+// ✅ View product details - CORRECTED to use your route
 const viewProduct = (productId: string) => {
-  router.push(`/product/${productId}`)
+  router.push(`/viewproduct/${productId}`)
 }
 
 // ✅ Get product image
 const getProductImage = (product: any) => {
   if (!product?.main_img_urls) return '/placeholder.png'
-  
   try {
     if (typeof product.main_img_urls === 'string') {
       const parsed = JSON.parse(product.main_img_urls)
@@ -385,11 +367,14 @@ const getProductImage = (product: any) => {
   }
 }
 
+// ✅ Check if message is an order notification
+const isOrderNotification = (content: string) => {
+  return content.includes('New Order Received!') || content.includes('Transaction #:')
+}
+
 // ✅ Get user display name
 const userDisplayName = computed(() => {
-  if (shopInfo.value?.business_name) {
-    return shopInfo.value.business_name
-  }
+  if (shopInfo.value?.business_name) return shopInfo.value.business_name
   if (otherUserProfile.value?.first_name) {
     return `${otherUserProfile.value.first_name} ${otherUserProfile.value.last_name || ''}`.trim()
   }
@@ -398,56 +383,31 @@ const userDisplayName = computed(() => {
 
 // ✅ Get user avatar
 const userAvatar = computed(() => {
-  if (shopInfo.value?.logo_url) {
-    return shopInfo.value.logo_url
-  }
-  if (otherUserProfile.value?.avatar_url) {
-    return otherUserProfile.value.avatar_url
-  }
+  if (shopInfo.value?.logo_url) return shopInfo.value.logo_url
+  if (otherUserProfile.value?.avatar_url) return otherUserProfile.value.avatar_url
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(userDisplayName.value)}&background=random`
 })
 
 const goBack = () => router.back()
 
 onMounted(async () => {
-  console.log('🚀 ChatView mounted')
   loading.value = true
-  
   try {
     await fetchOtherUserInfo()
-    console.log('✅ User info fetched')
-    
     await getOrCreateConversation()
-    console.log('✅ Conversation ready:', conversationId.value)
-    
     await loadMessages()
-    console.log('✅ Messages loaded')
-
-    // Only subscribe once conversationId is confirmed
-    if (conversationId.value) {
-      await subscribeMessages()
-      console.log('✅ Real-time subscription started')
-    }
-
+    if (conversationId.value) await subscribeMessages()
     startTimeUpdates()
-    console.log('✅ Time updates started')
-    
   } catch (err) {
     console.error('❌ Error during initialization:', err)
   } finally {
     loading.value = false
-    console.log('✅ ChatView initialization complete')
   }
 })
 
 onUnmounted(() => {
-  console.log('🧹 Cleaning up chat subscriptions')
-  if (subscription) {
-    supabase.removeChannel(subscription)
-  }
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-  }
+  if (subscription) supabase.removeChannel(subscription)
+  if (timeUpdateInterval) clearInterval(timeUpdateInterval)
 })
 </script>
 
@@ -457,13 +417,13 @@ onUnmounted(() => {
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      
+
       <v-avatar size="32" class="mr-3">
         <v-img :src="userAvatar" :alt="userDisplayName" />
       </v-avatar>
-      
+
       <v-toolbar-title>{{ userDisplayName }}</v-toolbar-title>
-      
+
       <v-spacer />
     </v-app-bar>
 
@@ -485,14 +445,42 @@ onUnmounted(() => {
             :key="msg.id"
             :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
           >
-            <!-- Product Message -->
-            <div v-if="msg.product_id && msg.product" class="product-message">
-              <div class="product-card" @click="viewProduct(msg.product.id)">
+            <!-- Order Notification Message with View Product Button -->
+            <div v-if="isOrderNotification(msg.content)" class="order-notification">
+              <div class="notification-header">
+                <v-icon color="green" small>mdi-cart</v-icon>
+                <span class="notification-title">New Order Received!</span>
+              </div>
+              <div class="notification-content">
+                {{ msg.content }}
+              </div>
+              
+              <!-- View Product Button for Order Notification -->
+              <div class="order-action-buttons" v-if="msg.orderProduct">
+                <v-btn
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                  @click="viewProduct(msg.orderProduct.id)"
+                  class="view-product-btn"
+                >
+                  <v-icon left small>mdi-eye</v-icon>
+                  View Product
+                </v-btn>
+              </div>
+              
+              <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
+            </div>
+
+            <!-- Product Share Message -->
+            <div v-else-if="msg.product_id && msg.product" class="product-message">
+              <div class="product-card">
                 <v-img
                   :src="getProductImage(msg.product)"
                   :alt="msg.product.prod_name"
                   class="product-image"
                   cover
+                  @click="viewProduct(msg.product.id)"
                 />
                 <div class="product-info">
                   <div class="product-name">{{ msg.product.prod_name }}</div>
@@ -501,11 +489,25 @@ onUnmounted(() => {
                     {{ msg.product.shop.business_name }}
                   </div>
                 </div>
-                <v-icon class="view-icon">mdi-open-in-new</v-icon>
               </div>
-              <div class="message-content" v-if="msg.content && msg.content !== `Check out this product: ${msg.product.prod_name}`">
+
+              <div class="action-buttons">
+                <v-btn
+                  color="primary"
+                  variant="outlined"
+                  size="small"
+                  @click="viewProduct(msg.product.id)"
+                  class="view-btn"
+                >
+                  <v-icon left small>mdi-eye</v-icon>
+                  View Product
+                </v-btn>
+              </div>
+
+              <div class="message-content" v-if="msg.content && !msg.content.startsWith('Check out this product:')">
                 {{ msg.content }}
               </div>
+
               <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
             </div>
 
@@ -529,19 +531,13 @@ onUnmounted(() => {
         @keyup.enter="sendMessage"
         :disabled="loading"
       />
-      <v-btn 
-        icon 
-        color="primary" 
-        @click="sendMessage"
-        :disabled="!newMessage.trim() || loading"
-      >
+      <v-btn icon color="primary" @click="sendMessage" :disabled="!newMessage.trim() || loading">
         <v-icon>mdi-send</v-icon>
       </v-btn>
     </v-footer>
   </v-app>
 </template>
 
-<!-- Keep your existing styles the same -->
 <style scoped>
 .chat-container {
   display: flex;
@@ -553,7 +549,8 @@ onUnmounted(() => {
   background: #f9fafb;
 }
 
-.loading-state, .empty-state {
+.loading-state,
+.empty-state {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -600,7 +597,7 @@ onUnmounted(() => {
 
 /* Product Message */
 .product-message {
-  max-width: 300px;
+  max-width: 320px;
   background: white;
   border-radius: 12px;
   border: 1px solid #e5e7eb;
@@ -616,47 +613,46 @@ onUnmounted(() => {
 
 .product-card {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   padding: 12px;
-  cursor: pointer;
-  transition: background-color 0.2s;
   gap: 12px;
 }
 
-.product-card:hover {
-  background-color: rgba(0, 0, 0, 0.02);
-}
-
-.message-row.me .product-card:hover {
-  background-color: rgba(255, 255, 255, 0.1);
-}
-
 .product-image {
-  width: 60px;
-  height: 60px;
+  width: 80px;
+  height: 80px;
   border-radius: 8px;
   flex-shrink: 0;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.product-image:hover {
+  transform: scale(1.05);
 }
 
 .product-info {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .product-name {
   font-weight: 600;
   font-size: 0.9rem;
-  margin-bottom: 4px;
-  white-space: nowrap;
+  line-height: 1.3;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .product-price {
   font-weight: 700;
   color: #007aff;
   font-size: 0.85rem;
-  margin-bottom: 2px;
 }
 
 .message-row.me .product-price {
@@ -675,13 +671,31 @@ onUnmounted(() => {
   color: rgba(255, 255, 255, 0.7);
 }
 
-.view-icon {
-  color: #666;
-  opacity: 0.7;
+/* Action buttons for product messages */
+.action-buttons {
+  display: flex;
+  padding: 8px 12px;
+  gap: 8px;
+  border-top: 1px solid #f0f0f0;
+  background: #fafafa;
 }
 
-.message-row.me .view-icon {
-  color: rgba(255, 255, 255, 0.7);
+.message-row.me .action-buttons {
+  background: rgba(255, 255, 255, 0.1);
+  border-top: 1px solid rgba(255, 255, 255, 0.2);
+}
+
+.view-btn {
+  flex: 1;
+  font-size: 0.75rem;
+  height: 32px !important;
+  min-width: 0 !important;
+}
+
+.message-row.me .view-btn {
+  background-color: rgba(255, 255, 255, 0.2) !important;
+  color: white !important;
+  border-color: rgba(255, 255, 255, 0.3) !important;
 }
 
 .message-content {
@@ -702,10 +716,54 @@ onUnmounted(() => {
   opacity: 0.6;
   margin-top: 4px;
   text-align: right;
+  padding: 0 12px 8px;
 }
 
 .message-row.other .time {
   text-align: left;
+}
+
+/* Order Notification Styles */
+.order-notification {
+  max-width: 320px;
+  background: #e8f5e8;
+  border: 1px solid #c8e6c9;
+  border-radius: 12px;
+  padding: 12px;
+  margin: 4px 0;
+}
+
+.notification-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.notification-title {
+  font-weight: 600;
+  color: #2e7d32;
+  font-size: 0.9rem;
+}
+
+.notification-content {
+  font-size: 0.85rem;
+  color: #555;
+  line-height: 1.4;
+  margin-bottom: 12px;
+}
+
+/* Order Action Buttons */
+.order-action-buttons {
+  display: flex;
+  padding: 8px 0;
+  border-top: 1px solid #c8e6c9;
+}
+
+.view-product-btn {
+  flex: 1;
+  font-size: 0.75rem;
+  height: 32px !important;
 }
 
 /* Responsive Design */
@@ -714,28 +772,34 @@ onUnmounted(() => {
     padding: 12px;
     gap: 12px;
   }
-  
+
   .bubble {
     max-width: 85%;
     padding: 10px 14px;
   }
-  
+
   .product-message {
     max-width: 280px;
   }
-  
+
   .product-card {
     padding: 10px;
     gap: 10px;
   }
-  
+
   .product-image {
-    width: 50px;
-    height: 50px;
+    width: 70px;
+    height: 70px;
   }
-  
+
   .product-name {
     font-size: 0.85rem;
+  }
+
+  .view-btn,
+  .view-product-btn {
+    font-size: 0.7rem;
+    height: 28px !important;
   }
 }
 
@@ -755,5 +819,21 @@ onUnmounted(() => {
 
 .chat-container::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
+}
+
+/* Animation for new messages */
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.message-row {
+  animation: slideIn 0.3s ease;
 }
 </style>

@@ -173,6 +173,13 @@ const routes = [
   name: 'rateview',
   component: () => import('@/mainsite/RateView.vue'),
   props: true,
+},
+// In your router file
+{
+  path: '/viewproduct/:id',
+  name: 'viewproduct',
+  component: () => import('@/mainsite/ViewProducts.vue'),
+  meta: { requiresAuth: false }
 }
 ]
 
