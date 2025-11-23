@@ -181,7 +181,7 @@ onMounted(fetchProducts)
 
 <template>
   <v-app>
-    <v-app-bar flat color="primary" dark>
+    <v-app-bar class="top-bar" flat color="primary" dark>
       <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title class="text-h6">Product List</v-toolbar-title>
     </v-app-bar>
@@ -259,3 +259,9 @@ onMounted(fetchProducts)
     </v-main>
   </v-app>
 </template>
+
+<style scoped>
+.top-bar {
+  padding-top: 20px;
+}
+</style>

@@ -315,7 +315,7 @@ const addVariety = () => {
 
 <template>
   <v-app>
-    <v-app-bar flat color="primary" dark>
+    <v-app-bar class="top-bar" flat color="primary" dark>
       <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title class="text-h6">{{
         isEditMode ? 'Edit Product' : 'Add Product'
@@ -521,6 +521,9 @@ const addVariety = () => {
 </template>
 
 <style scoped>
+.top-bar {
+  padding-top: 20px;
+}
 .font-medium {
   font-weight: 500;
 }

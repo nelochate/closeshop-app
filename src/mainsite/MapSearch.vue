@@ -911,7 +911,7 @@ const plotShops = () => {
   <div style="text-align:center; min-width: 240px;">
     <div style="position: relative;">
       <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
-      <div 
+      <div
         style="position: absolute; top: -5px; right: -5px; background: ${statusDisplay.color}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; cursor: help;"
         title="${statusDisplay.tooltip}"
       >
@@ -1367,7 +1367,7 @@ const isShopOpenByHours = (shop: any): boolean => {
           clearable
           density="comfortable"
           placeholder="Looking for something?"
-          append-inner-icon="mdi-magnify"
+          append-inner-icon="mdi-clouds"
           @keydown="onSearchKeydown"
           @click:clear="clearSearch"
           @click:append-inner="smartSearch"
@@ -1379,7 +1379,7 @@ const isShopOpenByHours = (shop: any): boolean => {
           :disabled="!search.trim()"
           elevation="2"
         >
-          <v-icon size="20">mdi-search-web</v-icon>
+          <v-icon size="20">mdi-magnify</v-icon>
         </v-btn>
       </div>
     </v-sheet>
@@ -1613,19 +1613,15 @@ const isShopOpenByHours = (shop: any): boolean => {
 
 /* Hero section - FIXED FOR SAFE AREA */
 .hero {
-  background: linear-gradient(135deg, #3f83c7 0%, #1e40af 100%);
+  background: #3f83c7;
   border-radius: 0;
-  /* Add safe area insets for phone status bar */
-  padding-top: max(16px, env(safe-area-inset-top));
-  padding-left: max(16px, env(safe-area-inset-left));
-  padding-right: max(16px, env(safe-area-inset-right));
-  padding-bottom: 16px;
+  padding-top: env(safe-area-inset-top);
+  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
   margin: 0;
   width: 100%;
   position: sticky;
   top: 0;
-  z-index: 1000;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 10;
   /* Ensure content doesn't go under the status bar */
   min-height: calc(64px + env(safe-area-inset-top));
 }
@@ -1633,34 +1629,20 @@ const isShopOpenByHours = (shop: any): boolean => {
 .hero-row {
   display: flex;
   align-items: center;
-  gap: 12px;
-  max-width: 1200px;
-  margin: 0 auto;
-  /* Add margin top to push content below status bar */
-  margin-top: env(safe-area-inset-top);
+  gap: 10px;
 }
 
 .search-field {
   flex: 1;
-  min-width: 0;
 }
 
 .search-field :deep(.v-field) {
-  background: #ffffff !important;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.1) !important;
-  border: 2px solid #e2e8f0 !important;
-  min-height: 52px;
-  transition: all 0.3s ease !important;
+  background: #fff !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
-.search-field :deep(.v-field):hover {
-  border-color: #3b82f6 !important;
-  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.15) !important;
-}
-
-.search-field :deep(.v-field):focus-within {
-  border-color: #1d4ed8 !important;
-  box-shadow: 0 8px 25px rgba(59, 130, 246, 0.2) !important;
+.search-field :deep(input) {
+  font-size: 14px;
 }
 
 .search-btn {
@@ -1672,6 +1654,7 @@ const isShopOpenByHours = (shop: any): boolean => {
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
   border: none;
   transition: all 0.3s ease !important;
+  border-radius: 50% !important; /* Make it circular */
 }
 
 .search-btn:hover:not(.v-btn--disabled) {
