@@ -10,13 +10,11 @@ import ProfileView from '@/mainsite/ProfileView.vue'
 import NotificationView from '@/mainsite/NotificationView.vue'
 import ConfirmEmail from '@/common/ConfirmEmail.vue'
 import AdminDashboard from '@/mainsite/AdminDashboard.vue'
-import ShopBuild from '@/mainsite/ShopBuild.vue'
 import ForgotPasswordView from '@/mainsite/ForgotPasswordView.vue'
 import UpdatePasswordView from '@/mainsite/UpdatePasswordView.vue'
 import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
-import AddItem from '@/mainsite/AddItem.vue'
 import ChatView from '@/mainsite/ChatView.vue'
 
 // ✅ Define routes
@@ -58,7 +56,11 @@ const routes = [
     component: AdminDashboard,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
-  { path: '/shop-build', name: 'shop-build', component: ShopBuild, meta: { requiresAuth: true } },
+   {
+    path: '/shop-build/:id?',
+    name: 'shop-build',
+    component: () => import('@/mainsite/ShopBuild.vue'),
+  },
   { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },
   {
     path: '/productlist',
