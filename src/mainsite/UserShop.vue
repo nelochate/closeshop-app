@@ -2,11 +2,13 @@
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import ShopBuild from './ShopBuild.vue'
 
 const router = useRouter()
 const goBack = () => router.back()
 
 // state
+const shopId = ref<string | null>(null)
 const businessAvatar = ref('')
 const coverPhoto = ref('')
 const businessName = ref('')
@@ -53,11 +55,11 @@ const fetchShopData = async () => {
 
     if (userError || !user) throw new Error('User not logged in')
 
-    // Add manual_status to the select query
+    // Add 'id' to the select query
     const { data, error } = await supabase
       .from('shops')
       .select(
-        'business_name, description, logo_url, physical_store, open_time, close_time, barangay, building, street, house_no, postal, manual_status, open_days',
+        'id, business_name, description, logo_url, physical_store, open_time, close_time, barangay, building, street, house_no, postal, manual_status, open_days'
       )
       .eq('owner_id', user.id)
       .maybeSingle()
@@ -66,6 +68,9 @@ const fetchShopData = async () => {
 
     console.log('Shop info:', data)
 
+    // STORE THE SHOP ID
+    shopId.value = data?.id || null
+    
     // assign values to display
     businessName.value = data?.business_name || 'No name'
     description.value = data?.description || 'No description provided'
@@ -187,12 +192,6 @@ const debugShopAccess = async () => {
   }
 }
 
-// Call this in onMounted to check permissions
-onMounted(() => {
-  fetchShopData()
-  // debugShopAccess() // Uncomment to debug
-})
-
 // Helper to get current status display
 const getCurrentStatusDisplay = () => {
   if (manualStatus.value === 'open') return {
@@ -233,7 +232,7 @@ const isShopCurrentlyOpen = () => {
   return currentHour >= 8 && currentHour < 20
 }
 
-// Enhanced delete shop function with confirmation
+// UPDATE the deleteShop function to use shopId
 const deleteShop = async () => {
   if (!confirm('Are you sure you want to delete your shop? This action cannot be undone.')) {
     return
@@ -264,7 +263,8 @@ const deleteShop = async () => {
       }
     }
 
-    // Reset all state
+    // Reset all state including shopId
+    shopId.value = null
     businessAvatar.value = ''
     coverPhoto.value = ''
     businessName.value = ''
@@ -282,6 +282,23 @@ const deleteShop = async () => {
     console.error('Delete shop error:', err)
     alert('Failed to delete shop: ' + err.message)
   }
+}
+onMounted(() => {
+  fetchShopData()
+})
+
+// UPDATE editShop function to use the stored shopId
+const editShop = () => {
+  if (!shopId.value) {
+    alert('Shop ID not found. Please try again.')
+    return
+  }
+  
+  // Navigate to shop-build page with shop ID as a route param
+  router.push({ 
+    name: 'shop-build', 
+    params: { id: shopId.value } 
+  })
 }
 </script>
 
@@ -303,7 +320,7 @@ const deleteShop = async () => {
         </template>
 
         <v-list>
-          <v-list-item to="/edit-shop">
+          <v-list-item @click="editShop">
             <v-list-item-title>
               <v-icon start small>mdi-pencil</v-icon>
               Edit Shop

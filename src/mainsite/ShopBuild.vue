@@ -13,6 +13,13 @@ const route = useRoute()
 const goBack = () => router.back()
 const shopId = ref<string | null>((route.params.id as string) || null)
 
+watch(() => route.params.id, (newId) => {
+  shopId.value = (newId as string) || null
+  if (shopId.value) {
+    loadShopData()
+  }
+})
+
 // -------------------- STATES --------------------
 const currentShopId = ref<string | null>(null)
 const uploading = ref(false)
@@ -21,6 +28,37 @@ const saving = ref(false)
 const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref<'success' | 'error'>('success')
+const loadingShopData = ref(false)
+
+// -------------------- FORM STEPS --------------------
+const currentStep = ref(1)
+const totalSteps = 6
+const steps = [
+  { number: 1, title: 'Business Info', icon: 'mdi-store' },
+  { number: 2, title: 'Open Days', icon: 'mdi-calendar' },
+  { number: 3, title: 'Operating Hours', icon: 'mdi-clock' },
+  { number: 4, title: 'Delivery Options', icon: 'mdi-truck' },
+  { number: 5, title: 'Location', icon: 'mdi-map-marker' },
+  { number: 6, title: 'Valid ID', icon: 'mdi-card-account-details' }
+]
+
+const nextStep = () => {
+  if (currentStep.value < totalSteps) {
+    currentStep.value++
+    // Initialize map when moving to step 5
+    if (currentStep.value === 5) {
+      nextTick(() => {
+        initMap(latitude.value!, longitude.value!)
+      })
+    }
+  }
+}
+
+const prevStep = () => {
+  if (currentStep.value > 1) {
+    currentStep.value--
+  }
+}
 
 // -------------------- SHOP INFO --------------------
 const shopName = ref('')
@@ -60,22 +98,29 @@ const selectedProvince = ref<any>(null)
 const selectedCity = ref<any>(null)
 const selectedBarangay = ref<any>(null)
 
+// Track loading states
+const loadingRegions = ref(false)
+const loadingProvinces = ref(false)
+const loadingCities = ref(false)
+const loadingBarangays = ref(false)
+
 // -------------------- MAP --------------------
 const latitude = ref<number | null>(8.9489)
 const longitude = ref<number | null>(125.5406)
 const map = ref<L.Map | null>(null)
 let shopMarker: L.Marker | null = null
+const mapInitialized = ref(false)
 
 // -------------------- OPEN DAYS --------------------
 const openDays = ref<number[]>([1, 2, 3, 4, 5, 6]) // Default: Monday to Saturday
 const daysOfWeek = [
-  { id: 1, label: 'Monday' },
-  { id: 2, label: 'Tuesday' },
-  { id: 3, label: 'Wednesday' },
-  { id: 4, label: 'Thursday' },
-  { id: 5, label: 'Friday' },
-  { id: 6, label: 'Saturday' },
-  { id: 7, label: 'Sunday' }
+  { id: 1, label: 'Mon' },
+  { id: 2, label: 'Tue' },
+  { id: 3, label: 'Wed' },
+  { id: 4, label: 'Thu' },
+  { id: 5, label: 'Fri' },
+  { id: 6, label: 'Sat' },
+  { id: 7, label: 'Sun' }
 ]
 
 const toggleDay = (dayId: number) => {
@@ -86,6 +131,23 @@ const toggleDay = (dayId: number) => {
     openDays.value.push(dayId)
   }
   openDays.value.sort((a, b) => a - b)
+}
+
+// -------------------- PSGC MAPPING FUNCTIONS --------------------
+const findRegionCodeByName = (name: string) => {
+  return regions.value.find(region => region.name.includes(name))?.code || null
+}
+
+const findProvinceCodeByName = (name: string) => {
+  return provinces.value.find(province => province.name === name)?.code || null
+}
+
+const findCityCodeByName = (name: string) => {
+  return cities.value.find(city => city.name === name)?.code || null
+}
+
+const findBarangayCodeByName = (name: string) => {
+  return barangaysList.value.find(barangay => barangay.name === name)?.code || null
 }
 
 // -------------------- REVERSE GEOCODE --------------------
@@ -110,37 +172,55 @@ const reverseGeocode = async (lat: number, lng: number) => {
 
 // -------------------- MAP INITIALIZATION --------------------
 const initMap = (lat: number, lng: number) => {
-  if (map.value) return
+  // Check if map container exists
+  const mapContainer = document.getElementById('map')
+  if (!mapContainer) {
+    console.error('Map container not found')
+    return
+  }
 
-  map.value = L.map('map', {
-    center: [lat, lng],
-    zoom: 15,
-    fullscreenControl: true,
-    fullscreenControlOptions: { position: 'topleft' },
-  })
-
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-  }).addTo(map.value)
-
-  shopMarker = L.marker([lat, lng], { draggable: true }).addTo(map.value)
-
-  shopMarker.on('dragend', async (e) => {
-    const pos = (e.target as L.Marker).getLatLng()
-    latitude.value = pos.lat
-    longitude.value = pos.lng
-    await saveCoordinates(pos.lat, pos.lng)
-    await reverseGeocode(pos.lat, pos.lng)
-  })
-
-  map.value.on('click', async (e: L.LeafletMouseEvent) => {
-    const { lat, lng } = e.latlng
-    latitude.value = lat
-    longitude.value = lng
+  // Check if map is already initialized
+  if (map.value) {
+    map.value.setView([lat, lng], 15)
     shopMarker?.setLatLng([lat, lng])
-    await saveCoordinates(lat, lng)
-    await reverseGeocode(lat, lng)
-  })
+    return
+  }
+
+  try {
+    map.value = L.map('map', {
+      center: [lat, lng],
+      zoom: 15,
+      fullscreenControl: true,
+      fullscreenControlOptions: { position: 'topleft' },
+    })
+
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors',
+    }).addTo(map.value)
+
+    shopMarker = L.marker([lat, lng], { draggable: true }).addTo(map.value)
+
+    shopMarker.on('dragend', async (e) => {
+      const pos = (e.target as L.Marker).getLatLng()
+      latitude.value = pos.lat
+      longitude.value = pos.lng
+      await saveCoordinates(pos.lat, pos.lng)
+      await reverseGeocode(pos.lat, pos.lng)
+    })
+
+    map.value.on('click', async (e: L.LeafletMouseEvent) => {
+      const { lat, lng } = e.latlng
+      latitude.value = lat
+      longitude.value = lng
+      shopMarker?.setLatLng([lat, lng])
+      await saveCoordinates(lat, lng)
+      await reverseGeocode(lat, lng)
+    })
+
+    mapInitialized.value = true
+  } catch (error) {
+    console.error('Error initializing map:', error)
+  }
 }
 
 const toggleFullscreen = () => map.value?.toggleFullscreen()
@@ -303,27 +383,183 @@ const clearSearch = () => {
 
 // -------------------- PSGC API --------------------
 const fetchRegions = async () => {
-  const res = await fetch('https://psgc.cloud/api/regions')
-  const data = await res.json()
-  regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  loadingRegions.value = true
+  try {
+    const res = await fetch('https://psgc.cloud/api/regions')
+    const data = await res.json()
+    regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
+
+    // Pre-select Region XIII (Caraga)
+    const caragaRegion = data.find((r: any) => r.name.includes('Caraga'))
+    if (caragaRegion) {
+      selectedRegion.value = caragaRegion.code
+      address.region.value = caragaRegion.name
+      console.log('Selected region:', caragaRegion.name)
+    }
+  } catch (error) {
+    console.error('Failed to fetch regions:', error)
+  } finally {
+    loadingRegions.value = false
+  }
 }
 
 const fetchProvinces = async (regionCode: string) => {
-  const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
-  const data = await res.json()
-  provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  if (!regionCode) return
+
+  loadingProvinces.value = true
+  try {
+    const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
+    const data = await res.json()
+    provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
+
+    // Pre-select Agusan del Norte if available
+    const agusanDelNorte = data.find((p: any) => p.name === 'Agusan del Norte')
+    if (agusanDelNorte) {
+      selectedProvince.value = agusanDelNorte.code
+      address.province.value = agusanDelNorte.name
+      console.log('Selected province:', agusanDelNorte.name)
+    }
+  } catch (error) {
+    console.error('Failed to fetch provinces:', error)
+  } finally {
+    loadingProvinces.value = false
+  }
 }
 
 const fetchCities = async (provinceCode: string) => {
-  const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
-  const data = await res.json()
-  cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  if (!provinceCode) return
+
+  loadingCities.value = true
+  try {
+    const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
+    const data = await res.json()
+    cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
+
+    // Pre-select City of Butuan if available
+    const butuanCity = data.find((c: any) => c.name === 'City of Butuan')
+    if (butuanCity) {
+      selectedCity.value = butuanCity.code
+      address.city.value = butuanCity.name
+      console.log('Selected city:', butuanCity.name)
+    }
+  } catch (error) {
+    console.error('Failed to fetch cities:', error)
+  } finally {
+    loadingCities.value = false
+  }
 }
 
 const fetchBarangays = async (cityCode: string) => {
-  const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
-  const data = await res.json()
-  barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  if (!cityCode) return
+
+  loadingBarangays.value = true
+  try {
+    const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
+    const data = await res.json()
+    barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Failed to fetch barangays:', error)
+  } finally {
+    loadingBarangays.value = false
+  }
+}
+
+// Load shop data for editing
+const loadShopData = async () => {
+  if (!shopId.value) return
+
+  loadingShopData.value = true
+  try {
+    const { data, error } = await supabase.from('shops').select('*').eq('id', shopId.value).single()
+    if (error || !data) {
+      console.error('Error loading shop data:', error)
+      return
+    }
+
+    // Fill basic shop data
+    currentShopId.value = data.id
+    avatarUrl.value = data.logo_url
+    physicalUrl.value = data.physical_store
+    shopName.value = data.business_name
+    description.value = data.description
+    openTime.value = data.open_time
+    closeTime.value = data.close_time
+    address.barangay.value = data.barangay
+    address.building.value = data.building
+    address.street.value = data.street
+    address.postal.value = data.postal
+    address.house_no.value = data.house_no
+    address.city.value = data.city
+    address.province.value = data.province
+    address.region.value = data.region
+    latitude.value = data.latitude || 8.9489
+    longitude.value = data.longitude || 125.5406
+    fullAddress.value = data.detected_address || ''
+    deliveryOptions.value = data.delivery_options || []
+    meetUpDetails.value = data.meetup_details || ''
+    openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
+    validIdFrontUrl.value = data.valid_id_front
+    validIdBackUrl.value = data.valid_id_back
+
+    console.log('Loaded shop data:', {
+      region: data.region,
+      province: data.province,
+      city: data.city,
+      barangay: data.barangay
+    })
+
+    // Map PSGC values after a short delay to ensure regions are loaded
+    setTimeout(async () => {
+      if (data.region) {
+        const regionCode = findRegionCodeByName(data.region)
+        if (regionCode) {
+          selectedRegion.value = regionCode
+          console.log('Mapped region:', data.region, '->', regionCode)
+
+          // Wait for provinces to load
+          await fetchProvinces(regionCode)
+          await nextTick()
+
+          if (data.province) {
+            const provinceCode = findProvinceCodeByName(data.province)
+            if (provinceCode) {
+              selectedProvince.value = provinceCode
+              console.log('Mapped province:', data.province, '->', provinceCode)
+
+              // Wait for cities to load
+              await fetchCities(provinceCode)
+              await nextTick()
+
+              if (data.city) {
+                const cityCode = findCityCodeByName(data.city)
+                if (cityCode) {
+                  selectedCity.value = cityCode
+                  console.log('Mapped city:', data.city, '->', cityCode)
+
+                  // Wait for barangays to load
+                  await fetchBarangays(cityCode)
+                  await nextTick()
+
+                  if (data.barangay) {
+                    const barangayCode = findBarangayCodeByName(data.barangay)
+                    if (barangayCode) {
+                      selectedBarangay.value = barangayCode
+                      console.log('Mapped barangay:', data.barangay, '->', barangayCode)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }, 1000)
+
+  } catch (err) {
+    console.error('Error loading shop:', err)
+  } finally {
+    loadingShopData.value = false
+  }
 }
 
 // Update address fields when PSGC selections change
@@ -381,21 +617,24 @@ watch(selectedBarangay, async (barangayCode) => {
     if (coords) {
       latitude.value = coords.lat
       longitude.value = coords.lon
-      map.value?.setView([coords.lat, coords.lon], 15)
-      shopMarker?.setLatLng([coords.lat, coords.lon])
+      // Only update map if it's initialized and we're on the location step
+      if (mapInitialized.value && currentStep.value === 5) {
+        map.value?.setView([coords.lat, coords.lon], 15)
+        shopMarker?.setLatLng([coords.lat, coords.lon])
+      }
     }
   }
 })
 
 // Update map when full address changes
 watch(fullAddress, async (newVal) => {
-  if (!newVal || !map.value) return
+  if (!newVal || !mapInitialized.value || currentStep.value !== 5) return
 
   const coords = await getCoordinatesFromAddress(newVal)
   if (coords) {
     latitude.value = coords.lat
     longitude.value = coords.lon
-    map.value.setView([coords.lat, coords.lon], 15)
+    map.value?.setView([coords.lat, coords.lon], 15)
     shopMarker?.setLatLng([coords.lat, coords.lon])
     await saveCoordinates(coords.lat, coords.lon)
   }
@@ -412,8 +651,11 @@ const getLocation = () => {
       latitude.value = pos.coords.latitude
       longitude.value = pos.coords.longitude
 
-      map.value?.setView([latitude.value, longitude.value], 17)
-      shopMarker?.setLatLng([latitude.value, longitude.value])
+      // Only update map if it's initialized and we're on the location step
+      if (mapInitialized.value && currentStep.value === 5) {
+        map.value?.setView([latitude.value, longitude.value], 17)
+        shopMarker?.setLatLng([latitude.value, longitude.value])
+      }
 
       await reverseGeocode(latitude.value, longitude.value)
       await saveCoordinates(latitude.value, longitude.value)
@@ -480,6 +722,8 @@ const saveShop = async () => {
       const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
       if (error) throw error
       showSnackbar('Shop updated successfully!', 'success')
+      // Redirect back to user shop after update
+      router.push('/usershop')
     }
   } catch (err) {
     console.error(err)
@@ -494,44 +738,21 @@ onMounted(async () => {
   await fetchRegions()
   await nextTick()
 
+  // Load shop data if editing
   if (shopId.value) {
-    const { data, error } = await supabase.from('shops').select('*').eq('id', shopId.value).single()
-    if (error || !data) return
-
-    currentShopId.value = data.id
-    avatarUrl.value = data.logo_url
-    physicalUrl.value = data.physical_store
-    shopName.value = data.business_name
-    description.value = data.description
-    openTime.value = data.open_time
-    closeTime.value = data.close_time
-    address.barangay.value = data.barangay
-    address.building.value = data.building
-    address.street.value = data.street
-    address.postal.value = data.postal
-    address.house_no.value = data.house_no
-    address.city.value = data.city
-    address.province.value = data.province
-    address.region.value = data.region
-    latitude.value = data.latitude || 8.9489
-    longitude.value = data.longitude || 125.5406
-    fullAddress.value = data.detected_address || ''
-    deliveryOptions.value = data.delivery_options || []
-    meetUpDetails.value = data.meetup_details || ''
-    openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
-    validIdFrontUrl.value = data.valid_id_front
-    validIdBackUrl.value = data.valid_id_back
-
-    // Set PSGC selections if data exists
-    if (data.region) {
-      // You might need to map region names back to codes
-      // This would require additional logic to find matching codes
-    }
+    await loadShopData()
   }
 
-  initMap(latitude.value!, longitude.value!)
-  map.value?.setView([latitude.value!, longitude.value!], 15)
-  shopMarker?.setLatLng([latitude.value!, longitude.value!])
+  // Don't initialize map here - wait until step 5 is active
+})
+
+// Add a watcher to debug the selection process
+watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city]) => {
+  console.log('Current selections:', {
+    region: region ? regions.value.find(r => r.code === region)?.name : 'None',
+    province: province ? provinces.value.find(p => p.code === province)?.name : 'None',
+    city: city ? cities.value.find(c => c.code === city)?.name : 'None'
+  })
 })
 </script>
 
@@ -546,20 +767,33 @@ onMounted(async () => {
     </v-app-bar>
 
     <v-main class="pb-16">
+      <!-- Progress Steps -->
+      <v-card class="steps-card" flat>
+        <v-card-text class="steps-container">
+          <div class="steps">
+            <div v-for="step in steps" :key="step.number" class="step" :class="{
+                'active': currentStep === step.number,
+                'completed': currentStep > step.number
+              }">
+              <div class="step-icon">
+                <v-icon size="20">{{ step.icon }}</v-icon>
+              </div>
+              <span class="step-title">{{ step.title }}</span>
+            </div>
+          </div>
+          <div class="step-progress">
+            <v-progress-linear :model-value="(currentStep / totalSteps) * 100" color="#3f83c7" height="6"
+              rounded></v-progress-linear>
+          </div>
+        </v-card-text>
+      </v-card>
+
       <!-- Cover & Logo Section -->
       <div class="cover-section">
-        <v-img
-          :src="physicalUrl || 'https://via.placeholder.com/1200x400?text=Store+Cover+Photo'"
-          class="cover-photo"
-          cover
-        >
+        <v-img :src="physicalUrl || 'https://via.placeholder.com/1200x400?text=Store+Cover+Photo'" class="cover-photo"
+          cover>
           <div class="cover-overlay"></div>
-          <v-btn
-            icon
-            color="white"
-            class="cover-upload"
-            @click="pickerTarget = 'physical'; showPicker = true"
-          >
+          <v-btn icon color="white" class="cover-upload" @click="pickerTarget = 'physical'; showPicker = true">
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
           <h2 class="text-center text-blue">Upload Physical Store Photo</h2>
@@ -571,222 +805,391 @@ onMounted(async () => {
             <v-img v-if="avatarUrl" :src="avatarUrl" cover />
             <v-icon v-else size="70" color="grey">mdi-store</v-icon>
           </v-avatar>
-          <v-btn
-            icon
-            class="logo-upload-btn"
-            @click="pickerTarget = 'logo'; showPicker = true"
-          >
+          <v-btn icon class="logo-upload-btn" @click="pickerTarget = 'logo'; showPicker = true">
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
         </div>
       </div>
 
+      <!-- Loading State -->
+      <v-overlay :model-value="loadingShopData" class="align-center justify-center" persistent>
+        <v-progress-circular color="primary" indeterminate size="64"></v-progress-circular>
+        <div class="text-center mt-4">
+          <div class="text-h6">Loading Shop Data...</div>
+          <div class="text-body-2">Please wait while we load your shop information</div>
+        </div>
+      </v-overlay>
+
       <!-- Form Section -->
-      <div class="form-section pa-4">
-        <h2 class="section-title">Business Information</h2>
-        <v-text-field v-model="shopName" label="Business Name" outlined required />
-        <v-textarea v-model="description" label="About Us" outlined auto-grow />
-
-        <!-- Open Days Section -->
-        <h2 class="section-title">Open Days</h2>
-        <div class="open-days">
-          <v-chip
-            v-for="day in daysOfWeek"
-            :key="day.id"
-            :color="openDays.includes(day.id) ? 'primary' : 'grey'"
-            class="ma-1"
-            @click="toggleDay(day.id)"
-          >
-            {{ day.label }}
-          </v-chip>
-        </div>
-
-        <h2 class="section-title">Operating Hours</h2>
-        <v-row>
-          <v-col cols="6">
-            <v-text-field v-model="openTime" type="time" label="Opening Time" outlined />
-          </v-col>
-          <v-col cols="6">
-            <v-text-field v-model="closeTime" type="time" label="Closing Time" outlined />
-          </v-col>
-        </v-row>
-
-        <h2 class="section-title">Delivery Options</h2>
-        <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
-        <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
-        <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
-        <v-text-field
-          v-if="deliveryOptions.includes('meetup')"
-          v-model="meetUpDetails"
-          label="Meet-up details"
-          outlined
-        />
-
-        <h2 class="section-title">Address</h2>
-        <v-radio-group v-model="addressOption" inline>
-          <v-radio label="Enter address manually" value="manual" />
-          <v-radio label="Set current location as shop address" value="map" />
-        </v-radio-group>
-
-        <div v-if="addressOption === 'manual'">
-          <!-- PSGC Address Fields -->
-          <v-select
-            v-model="selectedRegion"
-            :items="regions"
-            item-title="name"
-            item-value="code"
-            label="Region"
-            outlined
-          />
-
-          <v-select
-            v-model="selectedProvince"
-            :items="provinces"
-            item-title="name"
-            item-value="code"
-            label="Province"
-            outlined
-            :disabled="!selectedRegion"
-          />
-
-          <v-select
-            v-model="selectedCity"
-            :items="cities"
-            item-title="name"
-            item-value="code"
-            label="City / Municipality"
-            outlined
-            :disabled="!selectedProvince"
-          />
-
-          <v-select
-            v-model="selectedBarangay"
-            :items="barangaysList"
-            item-title="name"
-            item-value="code"
-            label="Barangay"
-            outlined
-            :disabled="!selectedCity"
-          />
-
-          <!-- Additional Address Details -->
-          <v-text-field v-model="address.house_no.value" label="House No." outlined />
-          <v-text-field v-model="address.building.value" label="Building Name" outlined />
-          <v-text-field v-model="address.street.value" label="Street" outlined />
-          <v-text-field v-model="address.postal.value" label="Postal Code" outlined />
-
-          <v-text-field
-            v-if="fullAddress"
-            v-model="fullAddress"
-            label="Full Address"
-            readonly
-            outlined
-          />
-
-          <h4 class="text-center mb-2">Please drag/tap your location in the map</h4>
-
-          <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">
-            Toggle Map Fullscreen
-          </v-btn>
-
-          <!-- Search Section -->
-          <div class="search-section">
-            <v-text-field
-              v-model="searchQuery"
-              label="Search place"
-              outlined
-              append-inner-icon="mdi-magnify"
-              @keyup.enter="searchPlace"
-              @click:clear="clearSearch"
-              clearable
-            />
-
-            <v-btn
-              color="primary"
-              @click="searchPlace"
-              class="mb-3 search-btn"
-              :loading="searchLoading"
-              :disabled="!searchQuery.trim()"
-            >
-              <v-icon left>mdi-magnify</v-icon>
-              Search
+      <div class="form-section pa-4" v-if="!loadingShopData">
+        <!-- Step 1: Business Information -->
+        <v-card v-if="currentStep === 1" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-store</v-icon>
+            Business Information
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <v-text-field v-model="shopName" label="Business Name *" outlined required class="mb-3"
+              :rules="[v => !!v || 'Business name is required']" />
+            <v-textarea v-model="description" label="About Us" outlined auto-grow rows="3"
+              hint="Tell customers about your business" />
+          </v-card-text>
+          <v-card-actions class="step-actions">
+            <v-btn color="primary" @click="nextStep" :disabled="!shopName" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
             </v-btn>
+          </v-card-actions>
+        </v-card>
 
-            <v-card
-              v-if="showSearchResults && searchResults.length > 0"
-              class="search-results"
-              elevation="4"
-            >
-              <v-list density="compact">
-                <v-list-subheader>Search Results</v-list-subheader>
-                <v-list-item
-                  v-for="(result, index) in searchResults"
-                  :key="index"
-                  @click="selectSearchResult(result)"
-                  class="search-result-item"
-                >
-                  <v-list-item-title class="text-body-2">
-                    {{ result.display_name }}
-                  </v-list-item-title>
-                </v-list-item>
-              </v-list>
-            </v-card>
+        <!-- Step 2: Open Days -->
+        <v-card v-if="currentStep === 2" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-calendar</v-icon>
+            Open Days
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <div class="open-days">
+              <v-chip v-for="day in daysOfWeek" :key="day.id"
+                :color="openDays.includes(day.id) ? 'primary' : 'grey-lighten-2'"
+                :variant="openDays.includes(day.id) ? 'flat' : 'outlined'" class="ma-1 day-chip"
+                @click="toggleDay(day.id)">
+                {{ day.label }}
+              </v-chip>
+            </div>
+          </v-card-text>
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="primary" @click="nextStep" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+
+        <!-- Step 3: Operating Hours -->
+        <v-card v-if="currentStep === 3" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-clock</v-icon>
+            Operating Hours
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <v-row>
+              <v-col cols="6">
+                <v-text-field v-model="openTime" type="time" label="Opening Time" outlined />
+              </v-col>
+              <v-col cols="6">
+                <v-text-field v-model="closeTime" type="time" label="Closing Time" outlined />
+              </v-col>
+            </v-row>
+          </v-card-text>
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="primary" @click="nextStep" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+
+        <!-- Step 4: Delivery Options -->
+        <v-card v-if="currentStep === 4" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-truck</v-icon>
+            Delivery Options
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
+            <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
+            <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
+            <v-text-field v-if="deliveryOptions.includes('meetup')" v-model="meetUpDetails" label="Meet-up details"
+              outlined class="mt-2" />
+          </v-card-text>
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="primary" @click="nextStep" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+
+        <!-- Step 5: Location -->
+        <v-card v-if="currentStep === 5" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-map-marker</v-icon>
+            Location
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+          <v-card-text>
+            <v-radio-group v-model="addressOption" inline class="mb-4">
+              <v-radio label="Enter address manually" value="manual" />
+              <v-radio label="Set current location as shop address" value="map" />
+            </v-radio-group>
+
+            <div v-if="addressOption === 'manual'">
+              <!-- PSGC Address Fields -->
+              <v-row>
+                <v-col cols="12">
+                  <v-select v-model="selectedRegion" :items="regions" item-title="name" item-value="code"
+                    label="Region *" outlined :loading="loadingRegions" />
+                </v-col>
+                <v-col cols="12">
+                  <v-select v-model="selectedProvince" :items="provinces" item-title="name" item-value="code"
+                    label="Province *" outlined :disabled="!selectedRegion" :loading="loadingProvinces" />
+                </v-col>
+                <v-col cols="12">
+                  <v-select v-model="selectedCity" :items="cities" item-title="name" item-value="code"
+                    label="City / Municipality *" outlined :disabled="!selectedProvince" :loading="loadingCities" />
+                </v-col>
+                <v-col cols="12">
+                  <v-select v-model="selectedBarangay" :items="barangaysList" item-title="name" item-value="code"
+                    label="Barangay *" outlined :disabled="!selectedCity" :loading="loadingBarangays" />
+                </v-col>
+              </v-row>
+
+              <!-- Additional Address Details -->
+              <v-row>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model="address.house_no.value" label="House No." outlined />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model="address.building.value" label="Building Name" outlined />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model="address.street.value" label="Street" outlined />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-text-field v-model="address.postal.value" label="Postal Code" outlined />
+                </v-col>
+              </v-row>
+
+              <v-text-field v-if="fullAddress" v-model="fullAddress" label="Full Address" readonly outlined
+                class="mt-2" />
+
+              <h4 class="text-center mb-2 mt-4">Please drag/tap your location in the map</h4>
+
+              <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">
+                Toggle Map Fullscreen
+              </v-btn>
+
+              <!-- Search Section -->
+              <div class="search-section">
+                <v-text-field v-model="searchQuery" label="Search place" outlined append-inner-icon="mdi-magnify"
+                  @keyup.enter="searchPlace" @click:clear="clearSearch" clearable class="mb-2" />
+
+                <v-btn color="primary" @click="searchPlace" class="mb-3 search-btn" :loading="searchLoading"
+                  :disabled="!searchQuery.trim()" block>
+                  <v-icon left>mdi-magnify</v-icon>
+                  Search
+                </v-btn>
+
+                <v-card v-if="showSearchResults && searchResults.length > 0" class="search-results" elevation="4">
+                  <v-list density="compact">
+                    <v-list-subheader>Search Results</v-list-subheader>
+                    <v-list-item v-for="(result, index) in searchResults" :key="index"
+                      @click="selectSearchResult(result)" class="search-result-item">
+                      <v-list-item-title class="text-body-2">
+                        {{ result.display_name }}
+                      </v-list-item-title>
+                    </v-list-item>
+                  </v-list>
+                </v-card>
+              </div>
+            </div>
+          </v-card-text>
+
+          <!-- Map -->
+          <div id="map" class="map">
+            <v-btn icon @click="getLocation" class="locate-btn">
+              <v-icon>mdi-crosshairs-gps</v-icon>
+            </v-btn>
           </div>
-        </div>
 
-        <!-- Map -->
-        <div id="map" class="map">
-          <v-btn icon @click="getLocation" class="locate-btn">
-            <v-icon>mdi-crosshairs-gps</v-icon>
-          </v-btn>
-        </div>
-
-        <div v-if="addressOption === 'map'">
-          <v-btn block color="primary" @click="getLocation" class="mt-2">
-            Set my location as shop address
-          </v-btn>
-          <v-text-field
-            v-if="fullAddress"
-            v-model="fullAddress"
-            label="Detected Address"
-            outlined
-            readonly
-          />
-        </div>
-
-        <!-- Valid ID Upload -->
-        <div class="valid-id-upload mt-4">
-          <v-btn
-            color="primary"
-            @click="pickerTarget = 'valid_id_front'; showPicker = true"
-            class="mr-2"
-          >
-            Upload Valid ID (Front)
-          </v-btn>
-          <v-btn
-            color="primary"
-            @click="pickerTarget = 'valid_id_back'; showPicker = true"
-          >
-            Upload Valid ID (Back)
-          </v-btn>
-
-          <div class="mt-2 d-flex">
-            <v-img v-if="validIdFrontUrl" :src="validIdFrontUrl" max-height="150" class="mr-2" />
-            <v-img v-if="validIdBackUrl" :src="validIdBackUrl" max-height="150" />
+          <div v-if="addressOption === 'map'" class="pa-4">
+            <v-btn block color="primary" @click="getLocation" class="mt-2 mb-4">
+              Set my location as shop address
+            </v-btn>
+            <v-text-field v-if="fullAddress" v-model="fullAddress" label="Detected Address" outlined readonly />
           </div>
-        </div>
 
-        <!-- Save Button -->
-        <v-btn 
-          block 
-          color="#3f83c7" 
-          :loading="saving" 
-          @click="saveShop" 
-          class="mt-4 text-white"
-          :disabled="!shopName"
-        >
-          {{ saving ? 'Saving...' : (currentShopId ? 'Update Shop' : 'Save Shop') }}
-        </v-btn>
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="primary" @click="nextStep" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+
+        <!-- Step 6: Valid ID Upload -->
+        <v-card v-if="currentStep === 6" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-card-account-details</v-icon>
+            Valid ID Upload
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+
+          <v-card-text>
+            <!-- Upload Instructions -->
+            <v-alert type="info" variant="tonal" class="mb-4">
+              <template #title>
+                <strong>Upload Requirements</strong>
+              </template>
+              <div class="text-caption">
+                • Upload clear images of both front and back of your valid ID<br>
+                • Ensure all details are readable<br>
+                • Accepted formats: JPG, PNG<br>
+                • Maximum file size: 5MB
+              </div>
+            </v-alert>
+
+            <!-- ID Upload Cards -->
+            <v-row class="mb-4">
+              <!-- Front ID Card -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="id-upload-card" :class="{ 'has-image': validIdFrontUrl }">
+                  <v-card-title class="text-subtitle-1 d-flex align-center">
+                    <v-icon color="primary" class="mr-2">mdi-card-bulleted-outline</v-icon>
+                    Valid ID Front
+                    <v-chip v-if="validIdFrontUrl" color="success" size="x-small" class="ml-2">
+                      Uploaded
+                    </v-chip>
+                  </v-card-title>
+
+                  <v-card-text class="text-center pa-4">
+                    <!-- Image Preview -->
+                    <div class="image-preview-container mb-4">
+                      <v-img v-if="validIdFrontUrl" :src="validIdFrontUrl" :max-height="200"
+                        class="id-preview-image mx-auto" cover style="border-radius: 8px;">
+                        <template #placeholder>
+                          <v-skeleton-loader type="image" />
+                        </template>
+                      </v-img>
+
+                      <!-- Placeholder when no image -->
+                      <div v-else class="placeholder-container">
+                        <v-icon size="64" color="grey-lighten-1" class="mb-2">mdi-account-card-details</v-icon>
+                        <div class="text-caption text-grey">No ID front uploaded</div>
+                      </div>
+                    </div>
+
+                    <!-- Upload Button -->
+                    <v-btn color="primary" variant="outlined"
+                      @click="pickerTarget = 'valid_id_front'; showPicker = true" block class="upload-btn">
+                      <v-icon left>{{ validIdFrontUrl ? 'mdi-reload' : 'mdi-upload' }}</v-icon>
+                      {{ validIdFrontUrl ? 'Replace Front ID' : 'Upload Front ID' }}
+                    </v-btn>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+
+              <!-- Back ID Card -->
+              <v-col cols="12" md="6">
+                <v-card variant="outlined" class="id-upload-card" :class="{ 'has-image': validIdBackUrl }">
+                  <v-card-title class="text-subtitle-1 d-flex align-center">
+                    <v-icon color="primary" class="mr-2">mdi-card-bulleted</v-icon>
+                    Valid ID Back
+                    <v-chip v-if="validIdBackUrl" color="success" size="x-small" class="ml-2">
+                      Uploaded
+                    </v-chip>
+                  </v-card-title>
+
+                  <v-card-text class="text-center pa-4">
+                    <!-- Image Preview -->
+                    <div class="image-preview-container mb-4">
+                      <v-img v-if="validIdBackUrl" :src="validIdBackUrl" :max-height="200"
+                        class="id-preview-image mx-auto" cover style="border-radius: 8px;">
+                        <template #placeholder>
+                          <v-skeleton-loader type="image" />
+                        </template>
+                      </v-img>
+
+                      <!-- Placeholder when no image -->
+                      <div v-else class="placeholder-container">
+                        <v-icon size="64" color="grey-lighten-1" class="mb-2">mdi-account-card-details-outline</v-icon>
+                        <div class="text-caption text-grey">No ID back uploaded</div>
+                      </div>
+                    </div>
+
+                    <!-- Upload Button -->
+                    <v-btn color="primary" variant="outlined" @click="pickerTarget = 'valid_id_back'; showPicker = true"
+                      block class="upload-btn">
+                      <v-icon left>{{ validIdBackUrl ? 'mdi-reload' : 'mdi-upload' }}</v-icon>
+                      {{ validIdBackUrl ? 'Replace Back ID' : 'Upload Back ID' }}
+                    </v-btn>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+
+            <!-- Upload Status -->
+            <v-alert v-if="uploading" type="info" variant="tonal" class="mb-2">
+              <div class="d-flex align-center">
+                <v-progress-circular indeterminate size="20" width="2" class="mr-3" />
+                Uploading ID image...
+              </div>
+            </v-alert>
+
+            <!-- Validation Status -->
+            <div v-if="validIdFrontUrl && validIdBackUrl" class="text-center">
+              <v-chip color="success" variant="flat" class="mb-2">
+                <v-icon start>mdi-check-circle</v-icon>
+                Both ID images uploaded successfully
+              </v-chip>
+              <div class="text-caption text-medium-emphasis">
+                Ready to save your shop information
+              </div>
+            </div>
+
+            <div v-else-if="validIdFrontUrl || validIdBackUrl" class="text-center">
+              <v-chip color="warning" variant="flat" class="mb-2">
+                <v-icon start>mdi-alert-circle</v-icon>
+                Please upload both front and back of your ID
+              </v-chip>
+            </div>
+          </v-card-text>
+
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="#3f83c7" :loading="saving" @click="saveShop" class="text-white save-btn"
+              :disabled="!shopName" size="large">
+              <v-icon left>{{ saving ? 'mdi-loading' : 'mdi-content-save' }}</v-icon>
+              {{ saving ? 'Saving...' : (currentShopId ? 'Update Shop' : 'Save Shop') }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
       </div>
 
       <!-- Snackbar -->
@@ -795,12 +1198,21 @@ onMounted(async () => {
       </v-snackbar>
 
       <!-- Image Picker Dialog -->
-      <v-dialog v-model="showPicker" max-width="290">
+      <v-dialog v-model="showPicker" max-width="400">
         <v-card>
           <v-card-title class="headline">Pick Image Source</v-card-title>
-          <v-card-actions>
-            <v-btn color="primary" @click="pickImage('camera')">Use Camera</v-btn>
-            <v-btn color="primary" @click="pickImage('gallery')">Use Gallery</v-btn>
+          <v-card-text class="text-center">
+            Choose how you want to upload the image
+          </v-card-text>
+          <v-card-actions class="justify-center pb-4">
+            <v-btn color="primary" @click="pickImage('camera')" class="mr-2">
+              <v-icon left>mdi-camera</v-icon>
+              Use Camera
+            </v-btn>
+            <v-btn color="primary" @click="pickImage('gallery')">
+              <v-icon left>mdi-image</v-icon>
+              Use Gallery
+            </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -813,7 +1225,81 @@ onMounted(async () => {
   padding-top: 22px;
 }
 
-/* Cover Section */
+.pb-16 {
+  padding-top: 75px !important;
+}
+.steps-card {
+  border-radius: 0;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  margin-bottom: 8px;
+}
+
+.steps-container {
+  padding: 16px;
+}
+
+.steps {
+  display: flex;
+  justify-content: space-between;
+  position: relative;
+  margin-bottom: 16px;
+}
+
+.step {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: relative;
+  z-index: 2;
+  flex: 1;
+}
+
+.step-icon {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #e0e0e0;
+  color: #757575;
+  margin-bottom: 8px;
+  transition: all 0.3s ease;
+}
+
+.step.active .step-icon {
+  background-color: #3f83c7;
+  color: white;
+  transform: scale(1.1);
+  box-shadow: 0 4px 8px rgba(63, 131, 199, 0.3);
+}
+
+.step.completed .step-icon {
+  background-color: #4caf50;
+  color: white;
+}
+
+.step-title {
+  font-size: 0.75rem;
+  font-weight: 500;
+  text-align: center;
+  color: #757575;
+  transition: all 0.3s ease;
+}
+
+.step.active .step-title {
+  color: #3f83c7;
+  font-weight: 600;
+}
+
+.step.completed .step-title {
+  color: #4caf50;
+}
+
+.step-progress {
+  margin-top: 8px;
+}
+
 .cover-section {
   position: relative;
   width: 100%;
@@ -846,7 +1332,6 @@ onMounted(async () => {
   z-index: 20;
 }
 
-/* Logo Wrapper */
 .logo-wrapper {
   position: absolute;
   bottom: -55px;
@@ -893,7 +1378,6 @@ onMounted(async () => {
   color: white !important;
 }
 
-/* Form Section */
 .form-section {
   margin-top: 70px;
   background: #fff;
@@ -903,13 +1387,33 @@ onMounted(async () => {
   padding-top: 20px;
 }
 
+.step-card {
+  border-radius: 12px;
+  overflow: hidden;
+  transition: all 0.3s ease;
+}
+
 .section-title {
   color: #3f83c7;
   font-weight: 600;
-  margin: 16px 0 8px;
+  margin: 0;
+  font-size: 1.1rem;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #e0e0e0;
 }
 
-/* Open Days */
+.step-actions {
+  display: flex;
+  justify-content: space-between;
+  padding: 16px;
+  border-top: 1px solid #e0e0e0;
+  background-color: #fafafa;
+}
+
+.prev-btn, .next-btn {
+  min-width: 120px;
+}
+
 .open-days {
   display: flex;
   flex-wrap: wrap;
@@ -917,7 +1421,16 @@ onMounted(async () => {
   margin-bottom: 16px;
 }
 
-/* Search Section */
+.day-chip {
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.day-chip:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
 .search-section {
   position: relative;
   margin-bottom: 16px;
@@ -952,7 +1465,6 @@ onMounted(async () => {
   border-bottom: none;
 }
 
-/* Map */
 .map {
   height: 400px;
   width: 100%;
@@ -972,8 +1484,38 @@ onMounted(async () => {
   z-index: 1000;
 }
 
-/* Responsive Design */
+.placeholder-image {
+  width: 150px;
+  height: 100px;
+  border: 2px dashed #ccc;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #999;
+  border-radius: 8px;
+}
+
+.save-btn {
+  font-weight: bold;
+  font-size: 1rem;
+  height: 48px;
+  background-color: #3f83c7;
+}
+
 @media (max-width: 768px) {
+  .steps {
+    flex-wrap: wrap;
+  }
+
+  .step {
+    flex: 0 0 33.333%;
+    margin-bottom: 16px;
+  }
+
+  .step-title {
+    font-size: 0.7rem;
+  }
+
   .logo-avatar {
     width: 90px !important;
     height: 90px !important;
@@ -997,9 +1539,26 @@ onMounted(async () => {
   .open-days {
     justify-content: flex-start;
   }
+
+  .section-title {
+    font-size: 1rem;
+  }
+
+  .step-actions {
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .prev-btn, .next-btn, .save-btn {
+    width: 100%;
+  }
 }
 
 @media (max-width: 480px) {
+  .step {
+    flex: 0 0 50%;
+  }
+
   .logo-avatar {
     width: 80px !important;
     height: 80px !important;
@@ -1017,9 +1576,16 @@ onMounted(async () => {
   .search-results {
     max-height: 150px;
   }
+
+  .cover-section {
+    height: 180px;
+  }
+
+  .cover-photo {
+    height: 180px;
+  }
 }
 
-/* Animations */
 .logo-avatar,
 .logo-upload-btn,
 .cover-upload {
@@ -1029,5 +1595,20 @@ onMounted(async () => {
 .logo-avatar:hover {
   transform: scale(1.05);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.4);
+}
+
+.step-card {
+  animation: fadeIn 0.5s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 </style>
