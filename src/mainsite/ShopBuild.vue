@@ -684,6 +684,21 @@ const saveShop = async () => {
     } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
+    // For existing shops, fetch current status first
+    let currentStatus = 'pending' // Default for new shops
+    
+    if (currentShopId.value) {
+      const { data: existingShop } = await supabase
+        .from('shops')
+        .select('status')
+        .eq('id', currentShopId.value)
+        .single()
+      
+      if (existingShop) {
+        currentStatus = existingShop.status
+      }
+    }
+
     // Prepare shop data according to schema
     const shopData = {
       owner_id: user.id,
@@ -706,19 +721,23 @@ const saveShop = async () => {
       delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
-      status: 'pending',
+      status: currentStatus, // Use existing status for updates, 'pending' for new shops
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
-      open_days: openDays.value // Add open days according to schema
+      open_days: openDays.value,
+      updated_at: new Date().toISOString() // Add updated timestamp
     }
 
     if (!currentShopId.value) {
+      // New shop - set to pending
+      shopData.status = 'pending'
       const { data, error } = await supabase.from('shops').insert(shopData).select().single()
       if (error) throw error
       currentShopId.value = data.id
-      showSnackbar('Shop created successfully!', 'success')
+      showSnackbar('Shop created successfully! Waiting for admin approval.', 'success')
       router.push(`/shop/${data.id}`)
     } else {
+      // Existing shop - preserve status and update
       const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
       if (error) throw error
       showSnackbar('Shop updated successfully!', 'success')
