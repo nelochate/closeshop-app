@@ -15,9 +15,9 @@ const error = ref<string | null>(null)
 const selectedImage = ref('')
 const quantity = ref(1)
 const addingToCart = ref(false)
-const activeTab = ref('details') // 'details', 'specifications', 'reviews'
+const activeTab = ref('details') // 'details', 'specifications'
 
-// Fetch product details with enhanced data
+// Fetch product details - CORRECTED QUERY
 const fetchProduct = async () => {
   try {
     loading.value = true
@@ -25,7 +25,7 @@ const fetchProduct = async () => {
 
     console.log('🛍️ Fetching product:', productId)
 
-    // Enhanced query with more product details
+    // CORRECTED QUERY - using only existing columns from your shops table
     const { data: productData, error: productError } = await supabase
       .from('products')
       .select(`
@@ -45,19 +45,15 @@ const fetchProduct = async () => {
           barangay,
           city,
           province,
-          contact_number,
-          email
-        ),
-        product_reviews (
-          id,
-          rating,
-          comment,
-          created_at,
-          user:profiles (
-            first_name,
-            last_name,
-            avatar_url
-          )
+          postal,
+          building,
+          house_no,
+          region,
+          latitude,
+          longitude,
+          physical_store,
+          detected_address,
+          status
         )
       `)
       .eq('id', productId)
@@ -90,11 +86,12 @@ const fetchProduct = async () => {
   }
 }
 
-// Get product images
+// Get product images - UPDATED FOR JSONB FIELD
 const getProductImages = (productData: any): string[] => {
   if (!productData?.main_img_urls) return ['/placeholder.png']
   
   try {
+    // Since main_img_urls is JSONB, it might already be parsed
     if (typeof productData.main_img_urls === 'string') {
       try {
         const parsed = JSON.parse(productData.main_img_urls)
@@ -108,27 +105,36 @@ const getProductImages = (productData: any): string[] => {
       return productData.main_img_urls
     }
     
+    // Handle JSONB object case
+    if (typeof productData.main_img_urls === 'object') {
+      return Object.values(productData.main_img_urls)
+    }
+    
     return ['/placeholder.png']
   } catch {
     return ['/placeholder.png']
   }
 }
 
-// Enhanced shop information
+// Enhanced shop information - UPDATED TO USE ACTUAL COLUMNS
 const shopInfo = computed(() => {
   if (!shop.value) return null
   
   const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
   const openDays = shop.value.open_days?.map((dayIndex: number) => days[dayIndex]) || []
   
+  // Build address from available columns
   const addressParts = [
+    shop.value.house_no,
+    shop.value.building,
     shop.value.street,
     shop.value.barangay,
     shop.value.city,
-    shop.value.province
+    shop.value.province,
+    shop.value.postal
   ].filter(Boolean)
   
-  const fullAddress = addressParts.join(', ') || 'Address not specified'
+  const fullAddress = addressParts.join(', ') || shop.value.detected_address || 'Address not specified'
 
   return {
     openDays,
@@ -137,43 +143,66 @@ const shopInfo = computed(() => {
     meetupDetails: shop.value.meetup_details || 'Main Entrance',
     deliveryOptions: shop.value.delivery_options || ['meetup'],
     fullAddress,
-    contact: shop.value.contact_number || 'Not provided',
-    email: shop.value.email || 'Not provided'
+    // REMOVED contact since contact_number doesn't exist
+    email: shop.value.email || 'Not provided',
+    hasPhysicalStore: shop.value.physical_store === 'yes'
   }
 })
 
-// Product specifications
+// Product specifications - UPDATED FOR YOUR SCHEMA
 const productSpecs = computed(() => {
   if (!product.value) return []
   
   const specs = []
-  if (product.value.category) specs.push({ label: 'Category', value: product.value.category })
-  if (product.value.weight) specs.push({ label: 'Weight', value: product.value.weight })
-  if (product.value.dimensions) specs.push({ label: 'Dimensions', value: product.value.dimensions })
-  if (product.value.material) specs.push({ label: 'Material', value: product.value.material })
-  if (product.value.brand) specs.push({ label: 'Brand', value: product.value.brand })
+  
+  // Check for varieties
+  if (product.value.varieties) {
+    try {
+      const varieties = typeof product.value.varieties === 'string' 
+        ? JSON.parse(product.value.varieties) 
+        : product.value.varieties
+      if (Array.isArray(varieties) && varieties.length > 0) {
+        specs.push({ label: 'Varieties', value: varieties.join(', ') })
+      }
+    } catch (e) {
+      console.log('Error parsing varieties:', e)
+    }
+  }
+  
+  // Check for sizes
+  if (product.value.sizes) {
+    try {
+      const sizes = typeof product.value.sizes === 'string' 
+        ? JSON.parse(product.value.sizes) 
+        : product.value.sizes
+      if (Array.isArray(sizes) && sizes.length > 0) {
+        specs.push({ label: 'Sizes', value: sizes.join(', ') })
+      }
+    } catch (e) {
+      console.log('Error parsing sizes:', e)
+    }
+  }
+  
+  // Check stock (using 'stock' field from your schema, not 'stock_quantity')
+  if (product.value.stock !== undefined) {
+    specs.push({ label: 'Stock', value: `${product.value.stock} units` })
+  }
+  
+  // Check sold count
+  if (product.value.sold) {
+    specs.push({ label: 'Sold', value: product.value.sold.toString() })
+  }
+
+  // Check if has varieties or sizes
+  if (product.value.has_varieties) {
+    specs.push({ label: 'Has Varieties', value: 'Yes' })
+  }
+  
+  if (product.value.has_sizes) {
+    specs.push({ label: 'Has Sizes', value: 'Yes' })
+  }
   
   return specs
-})
-
-// Review statistics
-const reviewStats = computed(() => {
-  if (!product.value?.product_reviews?.length) return null
-  
-  const reviews = product.value.product_reviews
-  const totalReviews = reviews.length
-  const averageRating = reviews.reduce((sum: number, review: any) => sum + review.rating, 0) / totalReviews
-  const ratingCounts = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
-  
-  reviews.forEach((review: any) => {
-    ratingCounts[review.rating as keyof typeof ratingCounts]++
-  })
-  
-  return {
-    averageRating: averageRating.toFixed(1),
-    totalReviews,
-    ratingCounts
-  }
 })
 
 // Format time
@@ -188,15 +217,6 @@ const formatTime = (timeString: string) => {
   } catch {
     return timeString
   }
-}
-
-// Format date
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric'
-  })
 }
 
 // Add to cart function
@@ -364,7 +384,7 @@ const shareProduct = () => {
   if (navigator.share) {
     navigator.share({
       title: product.value.prod_name,
-      text: product.value.description,
+      text: product.value.prod_description || product.value.description,
       url: window.location.href,
     })
   } else {
@@ -450,11 +470,11 @@ onMounted(() => {
               <h1 class="product-name">{{ product.prod_name }}</h1>
               <div class="price">₱{{ product.price?.toFixed(2) }}</div>
               <div class="stock-info">
-                <v-chip size="small" :color="product.stock_quantity > 0 ? 'success' : 'error'">
-                  {{ product.stock_quantity > 0 ? `${product.stock_quantity} units available` : 'Out of stock' }}
+                <v-chip size="small" :color="product.stock > 0 ? 'success' : 'error'">
+                  {{ product.stock > 0 ? `${product.stock} units available` : 'Out of stock' }}
                 </v-chip>
-                <div class="product-sku" v-if="product.sku">
-                  SKU: {{ product.sku }}
+                <div class="product-sold" v-if="product.sold">
+                  {{ product.sold }} sold
                 </div>
               </div>
             </div>
@@ -464,7 +484,6 @@ onMounted(() => {
               <v-tabs v-model="activeTab" color="primary">
                 <v-tab value="details">Details</v-tab>
                 <v-tab value="specifications">Specifications</v-tab>
-                <v-tab value="reviews">Reviews</v-tab>
               </v-tabs>
 
               <v-window v-model="activeTab">
@@ -473,7 +492,7 @@ onMounted(() => {
                   <div class="tab-content">
                     <div class="description-section">
                       <h3 class="section-title">Product Description</h3>
-                      <p class="product-description">{{ product.description || 'No description available.' }}</p>
+                      <p class="product-description">{{ product.prod_description || product.description || 'No description available.' }}</p>
                     </div>
 
                     <!-- Shop Information -->
@@ -485,13 +504,19 @@ onMounted(() => {
                         </v-avatar>
                         <div class="shop-details">
                           <div class="shop-name">{{ shop.business_name }}</div>
-                          <div class="shop-contact">
-                            <v-icon small>mdi-phone</v-icon>
-                            {{ shopInfo?.contact }}
+                          <!-- REMOVED contact number since it doesn't exist -->
+                          <div class="shop-email" v-if="shopInfo?.email && shopInfo.email !== 'Not provided'">
+                            <v-icon small>mdi-email</v-icon>
+                            {{ shopInfo.email }}
                           </div>
                           <div class="shop-address" v-if="shopInfo?.fullAddress">
                             <v-icon small>mdi-map-marker</v-icon>
                             {{ shopInfo.fullAddress }}
+                          </div>
+                          <div class="shop-status" v-if="shop.status">
+                            <v-chip size="x-small" :color="shop.status === 'approved' ? 'success' : 'warning'">
+                              {{ shop.status }}
+                            </v-chip>
                           </div>
                         </div>
                         <v-icon>mdi-chevron-right</v-icon>
@@ -517,6 +542,10 @@ onMounted(() => {
                           <v-icon small color="primary">mdi-truck-delivery</v-icon>
                           <span>Delivery Options: {{ Array.isArray(shopInfo.deliveryOptions) ? shopInfo.deliveryOptions.join(', ') : shopInfo.deliveryOptions }}</span>
                         </div>
+                        <div class="schedule-item" v-if="shopInfo.hasPhysicalStore">
+                          <v-icon small color="primary">mdi-store</v-icon>
+                          <span>Physical Store Available</span>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -536,57 +565,6 @@ onMounted(() => {
                       <div v-else class="no-specs">
                         <v-icon>mdi-information-outline</v-icon>
                         <p>No specifications available for this product.</p>
-                      </div>
-                    </div>
-                  </div>
-                </v-window-item>
-
-                <!-- Reviews Tab -->
-                <v-window-item value="reviews">
-                  <div class="tab-content">
-                    <div class="reviews-section">
-                      <!-- Review Statistics -->
-                      <div v-if="reviewStats" class="review-stats">
-                        <div class="rating-overview">
-                          <div class="average-rating">
-                            <span class="rating-number">{{ reviewStats.averageRating }}</span>
-                            <div class="rating-stars">
-                              <v-icon v-for="n in 5" :key="n" small :color="n <= Math.round(parseFloat(reviewStats.averageRating)) ? 'amber' : 'grey'">
-                                mdi-star
-                              </v-icon>
-                            </div>
-                            <span class="total-reviews">{{ reviewStats.totalReviews }} reviews</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      <!-- Reviews List -->
-                      <div class="reviews-list" v-if="product.product_reviews?.length > 0">
-                        <div v-for="review in product.product_reviews" :key="review.id" class="review-item">
-                          <div class="review-header">
-                            <v-avatar size="32" class="review-avatar">
-                              <v-img :src="review.user?.avatar_url || `https://ui-avatars.com/api/?name=${review.user?.first_name}+${review.user?.last_name}&background=random`" />
-                            </v-avatar>
-                            <div class="reviewer-info">
-                              <div class="reviewer-name">
-                                {{ review.user?.first_name }} {{ review.user?.last_name }}
-                              </div>
-                              <div class="review-date">{{ formatDate(review.created_at) }}</div>
-                            </div>
-                            <div class="review-rating">
-                              <v-icon v-for="n in 5" :key="n" x-small :color="n <= review.rating ? 'amber' : 'grey'">
-                                mdi-star
-                              </v-icon>
-                            </div>
-                          </div>
-                          <div class="review-comment" v-if="review.comment">
-                            {{ review.comment }}
-                          </div>
-                        </div>
-                      </div>
-                      <div v-else class="no-reviews">
-                        <v-icon>mdi-comment-outline</v-icon>
-                        <p>No reviews yet for this product.</p>
                       </div>
                     </div>
                   </div>
@@ -613,6 +591,7 @@ onMounted(() => {
                   variant="outlined"
                   color="primary"
                   @click="increaseQuantity"
+                  :disabled="product.stock !== undefined && quantity >= product.stock"
                 >
                   <v-icon>mdi-plus</v-icon>
                 </v-btn>
@@ -642,7 +621,7 @@ onMounted(() => {
           class="action-btn"
           @click="addToCart"
           :loading="addingToCart"
-          :disabled="product?.stock_quantity === 0"
+          :disabled="!product || product.stock === 0"
         >
           <v-icon left>mdi-cart</v-icon>
           Add to Cart
@@ -653,7 +632,7 @@ onMounted(() => {
           variant="flat"
           class="buy-btn"
           @click="buyNow"
-          :disabled="product?.stock_quantity === 0"
+          :disabled="!product || product.stock === 0"
         >
           <v-icon left>mdi-shopping</v-icon>
           Buy Now
@@ -1068,5 +1047,47 @@ onMounted(() => {
 
 .thumbnail-container::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
+}
+
+.loading-container,
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  text-align: center;
+}
+
+.product-content {
+  padding-bottom: 80px;
+}
+
+.shop-email {
+  font-size: 0.85rem;
+  color: #666;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+
+.shop-status {
+  margin-top: 4px;
+}
+
+/* Rest of your CSS remains unchanged */
+.loading-container,
+.error-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  text-align: center;
+}
+
+.product-content {
+  padding-bottom: 80px;
 }
 </style>

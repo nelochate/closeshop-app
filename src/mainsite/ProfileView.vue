@@ -30,20 +30,20 @@ const navItems = ref([
     color: '#354d7c',
     count: 0,
   },
-  {
-    id: 'to-pay',
-    title: 'To Pay',
-    icon: 'mdi-credit-card-outline',
-    color: '#354d7c',
-    count: 0,
-  },
-
+  
   {
     id: 'to-receive',
-    title: 'To Receive',
+    title: 'To Receive & Pay',
     icon: 'mdi-package-down',
     color: '#354d7c',
     count: 0
+  },
+    {
+    id: 'reviews',
+    title: 'To Review',
+    icon: 'mdi-star-outline',
+    color: '#354d7c',
+    count: 0,
   },
   {
     id: 'completed',
@@ -60,13 +60,7 @@ const navItems = ref([
     count: 0,
   },
 
-  {
-    id: 'reviews',
-    title: 'To Review',
-    icon: 'mdi-star-outline',
-    color: '#354d7c',
-    count: 0,
-  },
+
 ])
 
 const selectedSection = ref('my-purchases')
