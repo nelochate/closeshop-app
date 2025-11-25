@@ -56,7 +56,7 @@ const routes = [
     component: AdminDashboard,
     meta: { requiresAuth: true, requiresAdmin: true },
   },
-   {
+  {
     path: '/shop-build/:id?',
     name: 'shop-build',
     component: () => import('@/mainsite/ShopBuild.vue'),
@@ -162,11 +162,11 @@ const routes = [
     component: () => import('@/mainsite/SearchView.vue'),
   },
 
-{
-  path: '/purchaseview/:id?', // Make id optional with ?
-  name: 'purchaseview',
-  component: () => import('@/mainsite/PurchaseView.vue'),
-},
+  {
+    path: '/purchaseview/:id?', // Make id optional with ?
+    name: 'purchaseview',
+    component: () => import('@/mainsite/PurchaseView.vue'),
+  },
   //for checkout
   {
     path: '/checkout-success/:orderId',
@@ -179,6 +179,12 @@ const routes = [
     name: 'rateview',
     component: () => import('@/mainsite/RateView.vue'),
     props: true,
+  },
+  {
+    path: '/viewproduct/:id', // Add :id parameter
+    name: 'viewproduct',
+    component: () => import('@/mainsite/ViewProducts.vue'),
+    props: true, // This will pass the id as a prop to your component
   },
 ]
 
