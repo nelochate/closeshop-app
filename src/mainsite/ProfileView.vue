@@ -59,7 +59,13 @@ const navItems = ref([
     color: '#354d7c',
     count: 0,
   },
-
+  {
+    id: 'Failed',
+    title: 'Failed transactions (unpaid or rejected)',
+    icon: 'mdi-close-circle-outline',
+    color: '#354d7c',
+    count: 0,
+  },
 
 ])
 
@@ -313,7 +319,7 @@ const viewProduct = (productId) => {
 // View order details function (if you want to keep this too)
 const viewOrder = (orderId) => {
   if (orderId) {
-    router.push(`/order/${orderId}`)
+    router.push(`/orderdetails/${orderId}`)
   }
 }
 </script>
