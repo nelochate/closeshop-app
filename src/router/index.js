@@ -186,6 +186,12 @@ const routes = [
     component: () => import('@/mainsite/ViewProducts.vue'),
     props: true, // This will pass the id as a prop to your component
   },
+  {
+  path: '/orderdetails/:id',
+  name: 'orderdetails',
+  component: () => import('@/mainsite/OrderDetails.vue'),
+  props: true,
+}
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
