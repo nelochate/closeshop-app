@@ -636,12 +636,12 @@ const goShopOrBuild = () => {
   height: 38px !important;
   margin-left: -14px;
   max-width: 200px;
-  margin-top: 15px !important;
+  margin-top: 12px !important;
 }
 
 /* Settings Button - Top Right */
 .settings-btn {
-  margin-top: 25px;
+  margin-top: 23px;
   position: absolute;
   top: 20px;
   right: 16px;
@@ -670,7 +670,7 @@ const goShopOrBuild = () => {
   align-items: center;
   gap: 20px;
   flex-wrap: nowrap;
-  margin-top: 15px;
+  margin-top: 10px;
 }
 
 .avatar-container {
