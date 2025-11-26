@@ -407,8 +407,6 @@ const formattedDate = computed(() => {
     day: 'numeric',
   })
 })
-
-// ✅ CHECKOUT PROCESS
 const handleCheckout = async () => {
   // Validation
   if (!buyer.value) {
@@ -428,11 +426,19 @@ const handleCheckout = async () => {
 
   console.log('🛒 Starting checkout process...')
   console.log('Items:', items.value)
-  console.log('Buyer:', buyer.value)
-  console.log('Address:', address.value)
 
   try {
-    // Create order
+    // Since each user has only 1 shop, get the shop_id from the first item
+    const shopId = items.value[0]?.shop_id
+    
+    if (!shopId) {
+      alert('Shop information not found for items')
+      return
+    }
+
+    console.log('🏪 Creating order for shop:', shopId)
+
+    // Create single order with shop_id
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
@@ -446,13 +452,14 @@ const handleCheckout = async () => {
         delivery_date: deliveryDate.value,
         delivery_time: deliveryTime.value,
         note: note.value,
+        shop_id: shopId, // ✅ SET THE SHOP ID
       })
       .select()
       .single()
 
     if (orderError) throw orderError
 
-    console.log('✅ Order created:', order)
+    console.log('✅ Order created with shop_id:', shopId)
 
     // Create order items
     const orderItems = items.value.map((item) => ({
@@ -460,10 +467,11 @@ const handleCheckout = async () => {
       product_id: item.product_id,
       quantity: item.quantity,
       price: item.price,
+      selected_size: item.size,
+      selected_variety: item.variety,
     }))
 
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-
     if (itemsError) throw itemsError
 
     console.log('✅ Order items created')
@@ -480,9 +488,9 @@ const handleCheckout = async () => {
 
     console.log('✅ Payment record created')
 
-    // Send message to seller - FIXED VERSION
-    //await sendOrderMessageToSeller(order.id)
-    await sendOrderMessagesToSellers(order.id)
+    // Send message to seller
+    await sendOrderMessageToSeller(order.id, shopId, items.value)
+
     // Clean up cart if coming from cart
     if (fromCart.value && cartItemIds.value.length > 0) {
       const { error: cartError } = await supabase
@@ -506,13 +514,12 @@ const handleCheckout = async () => {
         totalAmount: totalPrice.value,
       },
     })
+
   } catch (err) {
     console.error('❌ Checkout error:', err)
     alert('Failed to complete checkout. Please try again.')
   }
 }
-
-// 💬 SEND ORDER MESSAGE TO SELLER - FIXED VERSION (uses owner_id instead of user_id)
 // 💬 SEND ORDER MESSAGES TO ALL SELLERS (for cart checkout)
 const sendOrderMessagesToSellers = async (orderId: string) => {
   try {

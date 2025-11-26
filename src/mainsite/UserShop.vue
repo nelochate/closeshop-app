@@ -35,7 +35,7 @@ const rejectDialog = ref(false)
 const rejectReason = ref('')
 const processingOrder = ref(false)
 
-// Add this missing function - place it after your state declarations
+// Helper functions
 const getProductImage = (product: any) => {
   if (!product?.main_img_urls) return '/placeholder.png'
   try {
@@ -51,10 +51,24 @@ const getProductImage = (product: any) => {
     return '/placeholder.png'
   }
 }
-// Fetch shop data
+
+const buildAddress = (shopData: any) => {
+  const addressParts = [
+    shopData.house_no,
+    shopData.building,
+    shopData.street,
+    shopData.barangay,
+    shopData.city,
+    shopData.province,
+    shopData.postal,
+  ].filter((part) => part && part.trim() !== '')
+
+  return addressParts.join(', ') || shopData.detected_address || ''
+}
+
+// Main data fetching functions
 const fetchShopData = async () => {
   try {
-    console.log('🛍️ Fetching shop data...')
     const {
       data: { user },
     } = await supabase.auth.getUser()
@@ -64,7 +78,6 @@ const fetchShopData = async () => {
       return
     }
 
-    // Get shop data
     const { data: shopData, error: shopError } = await supabase
       .from('shops')
       .select('*')
@@ -74,28 +87,27 @@ const fetchShopData = async () => {
     if (shopError) {
       console.error('❌ Error fetching shop:', shopError)
       if (shopError.code === 'PGRST116') {
-        console.log('No shop found for user')
         shopId.value = null
       }
       return
     }
 
-    console.log('✅ Shop data:', shopData)
+    // Map database columns to component state
     shopId.value = shopData.id
-    businessAvatar.value = shopData.avatar_url || ''
-    coverPhoto.value = shopData.cover_photo || ''
+    businessAvatar.value = shopData.logo_url || ''
+    coverPhoto.value = ''
     businessName.value = shopData.business_name || 'My Business'
     description.value = shopData.description || ''
-    timeOpen.value = shopData.time_open || 'N/A'
-    timeClose.value = shopData.time_close || 'N/A'
+    timeOpen.value = shopData.open_time || 'N/A'
+    timeClose.value = shopData.close_time || 'N/A'
     manualStatus.value = shopData.manual_status || 'auto'
-    address.value = shopData.address || 'No address set'
+    address.value = buildAddress(shopData) || 'No address set'
   } catch (err) {
     console.error('❌ Error in fetchShopData:', err)
     shopId.value = null
   }
 }
-// Replace your current fetchShopOrders with this corrected version
+
 const fetchShopOrders = async () => {
   if (!shopId.value) {
     console.log('❌ No shop ID available')
@@ -106,54 +118,32 @@ const fetchShopOrders = async () => {
     ordersLoading.value = true
     console.log('📦 Fetching orders for shop:', shopId.value)
 
-    // Step 1: Get all products for this shop
-    const { data: products, error: productsError } = await supabase
-      .from('products')
-      .select('id, prod_name, main_img_urls')
-      .eq('shop_id', shopId.value)
-
-    if (productsError) {
-      console.error('❌ Error fetching products:', productsError)
-      throw productsError
-    }
-
-    console.log('✅ Products found:', products?.length || 0)
-
-    if (!products || products.length === 0) {
-      orders.value = []
-      return
-    }
-
-    const productIds = products.map((p) => p.id)
-    console.log('📋 Product IDs:', productIds)
-
-    // Step 2: Get order items for these products
-    const { data: orderItems, error: itemsError } = await supabase
-      .from('order_items')
-      .select('*')
-      .in('product_id', productIds)
-      .order('created_at', { ascending: false })
-
-    if (itemsError) {
-      console.error('❌ Error fetching order items:', itemsError)
-      throw itemsError
-    }
-
-    console.log('✅ Order items found:', orderItems?.length || 0)
-
-    if (!orderItems || orderItems.length === 0) {
-      orders.value = []
-      return
-    }
-
-    // Step 3: Get the actual orders for these order items
-    const orderIds = orderItems.map((item) => item.order_id)
-    console.log('📋 Order IDs:', orderIds)
-
+    // SIMPLIFIED APPROACH: Query orders directly by shop_id with all related data
     const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
-      .select('*')
-      .in('id', orderIds)
+      .select(
+        `
+        *,
+        order_items (
+          *,
+          products (
+            id,
+            prod_name,
+            main_img_urls,
+            shop_id
+          )
+        ),
+        profiles:user_id (
+          id,
+          first_name,
+          last_name,
+          phone
+        ),
+        addresses (*)
+      `,
+      )
+      .eq('shop_id', shopId.value)
+      .order('created_at', { ascending: false })
 
     if (ordersError) {
       console.error('❌ Error fetching orders:', ordersError)
@@ -161,71 +151,69 @@ const fetchShopOrders = async () => {
     }
 
     console.log('✅ Orders found:', ordersData?.length || 0)
-    console.log('📋 Orders data:', ordersData) // Add this to debug
 
-    // Step 4: Get buyer information for these orders
-    const buyerIds = [...new Set(ordersData?.map((order) => order.user_id).filter(Boolean) || [])]
-    console.log('📋 Buyer IDs:', buyerIds)
-
-    let buyers = []
-    if (buyerIds.length > 0) {
-      const { data: buyersData, error: buyersError } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, phone')
-        .in('id', buyerIds)
-
-      if (buyersError) {
-        console.error('❌ Error fetching buyers:', buyersError)
-      } else {
-        buyers = buyersData || []
-        console.log('✅ Buyers data:', buyers) // Add this to debug
-      }
+    if (!ordersData || ordersData.length === 0) {
+      console.log('📭 No orders found for this shop')
+      orders.value = []
+      return
     }
 
-    console.log('✅ Buyers found:', buyers.length)
+    console.log('📋 Raw orders data:', ordersData)
 
-    // Step 5: Combine all the data - FIXED: Check if data exists
-    orders.value = orderItems.map((item) => {
-      const order = ordersData?.find((o) => o.id === item.order_id)
-      const product = products?.find((p) => p.id === item.product_id)
-      const buyer = buyers?.find((b) => b.id === order?.user_id)
+    // Transform the data - flatten order items
+    orders.value = ordersData.flatMap(
+      (order) =>
+        order.order_items?.map((item) => ({
+          id: item.id, // order_item id
+          order_id: order.id,
+          product_id: item.product_id,
+          product_name: item.products?.prod_name || 'Unknown Product',
+          product_img: getProductImage(item.products),
+          quantity: item.quantity || 1,
+          price: item.price || 0,
+          selected_size: item.selected_size || null,
+          selected_variety: item.selected_variety || null,
+          status: order.status || 'pending',
+          created_at: order.created_at,
+          updated_at: order.updated_at,
+          note: order.note || null,
+          total_amount: order.total_amount || 0,
+          delivery_option: order.delivery_option || null,
+          delivery_date: order.delivery_date || null,
+          delivery_time: order.delivery_time || null,
+          payment_method: order.payment_method || null,
+          transaction_number: order.transaction_number || null,
+          buyer: order.profiles
+            ? {
+                first_name: order.profiles.first_name,
+                last_name: order.profiles.last_name,
+                phone: order.profiles.phone,
+              }
+            : null,
+          address: order.addresses
+            ? {
+                street: order.addresses.street,
+                city: order.addresses.city_name || order.addresses.city,
+                province: order.addresses.province,
+                phone: order.addresses.phone,
+              }
+            : null,
+        })) || [],
+    )
 
-      // Debug each item
-      console.log('🔍 Processing order item:', {
-        itemId: item.id,
-        orderId: item.order_id,
-        productId: item.product_id,
-        foundOrder: !!order,
-        foundProduct: !!product,
-        foundBuyer: !!buyer,
-        orderStatus: order?.status,
-      })
-
-      return {
-        id: item.id,
-        order_id: order?.id,
-        product_id: item.product_id,
-        product_name: product?.prod_name || 'Unknown Product',
-        product_img: getProductImage(product),
-        quantity: item.quantity || 1,
-        price: item.price || 0,
-        selected_size: item.selected_size || null,
-        selected_variety: item.selected_variety || null,
-        status: order?.status || 'pending',
-        created_at: order?.created_at || item.created_at,
-        updated_at: order?.updated_at,
-        note: order?.note || null,
-        buyer: buyer
-          ? {
-              first_name: buyer.first_name,
-              last_name: buyer.last_name,
-              phone: buyer.phone,
-            }
-          : null,
-      }
+    console.log('✅ Final transformed orders:', orders.value.length)
+    console.log('📊 Orders by status:', {
+      pending: orders.value.filter((o) => o.status === 'pending').length,
+      paid: orders.value.filter((o) => o.status === 'paid').length,
+      shipped: orders.value.filter((o) => o.status === 'shipped').length,
+      delivered: orders.value.filter((o) => o.status === 'delivered').length,
+      cancelled: orders.value.filter((o) => o.status === 'cancelled').length,
     })
 
-    console.log('✅ Final transformed orders:', orders.value)
+    // Debug: Show sample order if available
+    if (orders.value.length > 0) {
+      console.log('🔍 Sample order:', orders.value[0])
+    }
   } catch (err) {
     console.error('❌ Error in fetchShopOrders:', err)
     orders.value = []
@@ -233,132 +221,62 @@ const fetchShopOrders = async () => {
     ordersLoading.value = false
   }
 }
-const debugOrders = async () => {
+
+const debugOrdersData = async () => {
   if (!shopId.value) {
     console.log('❌ No shop ID for debug')
     return
   }
 
   try {
-    console.log('🐛 DEBUG: Checking database state...')
+    console.log('🐛 DEBUG: Checking orders data...')
 
-    // Check products
-    const { data: products, error: productsError } = await supabase
-      .from('products')
-      .select('id, prod_name, main_img_urls')
+    // Check orders directly
+    const { data: directOrders, error: directError } = await supabase
+      .from('orders')
+      .select('id, status, total_amount, shop_id, created_at')
       .eq('shop_id', shopId.value)
+      .limit(5)
 
-    console.log('🐛 DEBUG - Products:', products)
-    if (productsError) console.error('🐛 DEBUG - Products error:', productsError)
+    console.log('📦 Direct orders with shop_id:', directOrders)
+    if (directError) console.error('❌ Direct orders error:', directError)
 
-    // Check order_items for our products
-    if (products && products.length > 0) {
-      const productIds = products.map(p => p.id)
-      const { data: relatedOrderItems, error: relatedError } = await supabase
+    // Check if there are any order_items
+    if (directOrders && directOrders.length > 0) {
+      const orderIds = directOrders.map((o) => o.id)
+      const { data: orderItems, error: itemsError } = await supabase
         .from('order_items')
-        .select(`
-          *,
-          orders (
-            id,
-            status,
-            user_id,
-            created_at
-          )
-        `)
-        .in('product_id', productIds)
+        .select('id, order_id, product_id, quantity, price')
+        .in('order_id', orderIds)
         .limit(10)
 
-      console.log('🐛 DEBUG - Related order items with orders:', relatedOrderItems)
-      if (relatedError) console.error('🐛 DEBUG - Related order items error:', relatedError)
+      console.log('🛒 Order items for these orders:', orderItems)
+      if (itemsError) console.error('❌ Order items error:', itemsError)
     }
 
-  } catch (err) {
-    console.error('🐛 DEBUG - Error:', err)
-  }
-}
-// Update test function to use correct column names
-const testDatabaseConnection = async () => {
-  try {
-    console.log('🧪 Testing database connection...')
-
-    // Test 1: Check if we have any orders at all
-    const { data: testOrders, error: testError } = await supabase
-      .from('orders')
-      .select('*')
+    // Check products for this shop
+    const { data: shopProducts, error: productsError } = await supabase
+      .from('products')
+      .select('id, prod_name')
+      .eq('shop_id', shopId.value)
       .limit(5)
 
-    console.log('🧪 Test orders:', testOrders)
-    if (testError) console.error('🧪 Test orders error:', testError)
-
-    // Test 2: Check if we have any order_items
-    const { data: testItems, error: testItemsError } = await supabase
-      .from('order_items')
-      .select('*')
-      .limit(5)
-
-    console.log('🧪 Test order items:', testItems)
-    if (testItemsError) console.error('🧪 Test order items error:', testItemsError)
-
-    // Test 3: Check if any order_items belong to our products - FIXED COLUMN NAME
-    if (shopId.value) {
-      const { data: shopProducts, error: shopProductsError } = await supabase
-        .from('products')
-        .select('id, prod_name') // Changed from product_name to prod_name
-        .eq('shop_id', shopId.value)
-
-      console.log('🧪 Shop products:', shopProducts)
-      if (shopProductsError) console.error('🧪 Shop products error:', shopProductsError)
-
-      if (shopProducts && shopProducts.length > 0) {
-        const productIds = shopProducts.map((p) => p.id)
-        const { data: relatedOrderItems, error: relatedError } = await supabase
-          .from('order_items')
-          .select('*')
-          .in('product_id', productIds)
-          .limit(5)
-
-        console.log('🧪 Related order items:', relatedOrderItems)
-        if (relatedError) console.error('🧪 Related order items error:', relatedError)
-      }
-    }
+    console.log('📊 Shop products:', shopProducts)
+    if (productsError) console.error('❌ Products error:', productsError)
   } catch (err) {
-    console.error('🧪 Test error:', err)
+    console.error('🐛 DEBUG Error:', err)
   }
 }
 
-// Call this in your onMounted to test
+// Update your onMounted to include debug
 onMounted(async () => {
   await fetchShopData()
   if (shopId.value) {
-    await testDatabaseConnection() // Add this for testing
-    await debugOrders()
+    await debugOrdersData() // Add this temporarily
     await fetchShopOrders()
   }
 })
-// Add this computed property to help with debugging
-const debugInfo = computed(() => {
-  return {
-    shopId: shopId.value,
-    totalOrders: orders.value.length,
-    ordersByStatus: {
-      pending: orders.value.filter((o) => o.status === 'pending').length,
-      paid: orders.value.filter((o) => o.status === 'paid').length,
-      shipped: orders.value.filter((o) => o.status === 'shipped').length,
-      delivered: orders.value.filter((o) => o.status === 'delivered').length,
-      cancelled: orders.value.filter((o) => o.status === 'cancelled').length,
-    },
-    sampleOrder: orders.value[0] || null,
-  }
-})
-// Call this in onMounted to debug
-onMounted(async () => {
-  await fetchShopData()
-  if (shopId.value) {
-    await debugOrders() // Add this for debugging
-    await fetchShopOrders()
-  }
-})
-// Order Statistics - Update to match new structure
+// Computed properties
 const orderStats = computed(() => {
   const pending = orders.value.filter((o) => o.status === 'pending').length
   const processing = orders.value.filter((o) => ['paid', 'shipped'].includes(o.status)).length
@@ -368,7 +286,6 @@ const orderStats = computed(() => {
   return { pending, processing, completed, cancelled }
 })
 
-// Filter orders based on selected filter
 const filteredOrders = computed(() => {
   if (!orders.value || orders.value.length === 0) {
     return []
@@ -392,7 +309,6 @@ const filteredOrders = computed(() => {
       filtered = orders.value
   }
 
-  console.log(`🔍 Filtered ${filtered.length} orders for status: ${transactionFilter.value}`)
   return filtered
 })
 
@@ -402,8 +318,6 @@ const acceptOrder = async (order: any) => {
 
   try {
     processingOrder.value = true
-    console.log('✅ Accepting order:', order.order_id)
-
     const { error } = await supabase
       .from('orders')
       .update({
@@ -414,10 +328,8 @@ const acceptOrder = async (order: any) => {
 
     if (error) throw error
 
-    // Refresh orders to show updated status
     await fetchShopOrders()
-
-    alert('Order accepted successfully! The order is now marked as paid and ready for processing.')
+    alert('Order accepted successfully!')
   } catch (err) {
     console.error('❌ Error accepting order:', err)
     alert('Failed to accept order. Please try again.')
@@ -436,8 +348,6 @@ const rejectOrder = async (order: any) => {
 
   try {
     processingOrder.value = true
-    console.log('❌ Rejecting order:', order.order_id)
-
     const { error } = await supabase
       .from('orders')
       .update({
@@ -452,8 +362,7 @@ const rejectOrder = async (order: any) => {
     await fetchShopOrders()
     rejectDialog.value = false
     rejectReason.value = ''
-
-    alert('Order rejected successfully! The buyer has been notified.')
+    alert('Order rejected successfully!')
   } catch (err) {
     console.error('❌ Error rejecting order:', err)
     alert('Failed to reject order. Please try again.')
@@ -467,7 +376,6 @@ const markAsShipped = async (order: any) => {
 
   try {
     processingOrder.value = true
-
     const { error } = await supabase
       .from('orders')
       .update({
@@ -479,7 +387,7 @@ const markAsShipped = async (order: any) => {
     if (error) throw error
 
     await fetchShopOrders()
-    alert('Order marked as shipped! The buyer has been notified.')
+    alert('Order marked as shipped!')
   } catch (err) {
     console.error('Error marking as shipped:', err)
     alert('Failed to mark as shipped. Please try again.')
@@ -493,7 +401,6 @@ const markAsDelivered = async (order: any) => {
 
   try {
     processingOrder.value = true
-
     const { error } = await supabase
       .from('orders')
       .update({
@@ -505,7 +412,7 @@ const markAsDelivered = async (order: any) => {
     if (error) throw error
 
     await fetchShopOrders()
-    alert('Order marked as delivered! Transaction completed successfully.')
+    alert('Order marked as delivered!')
   } catch (err) {
     console.error('Error marking as delivered:', err)
     alert('Failed to mark as delivered. Please try again.')
@@ -673,17 +580,14 @@ const isShopCurrentlyOpen = () => {
   const currentHour = now.getHours()
   const currentMinute = now.getMinutes()
 
-  // Parse open time
   const openTime = timeOpen.value
   if (openTime && openTime !== 'N/A') {
     const [openHour, openMinute] = openTime.split(':').map(Number)
 
-    // Parse close time
     const closeTime = timeClose.value
     if (closeTime && closeTime !== 'N/A') {
       const [closeHour, closeMinute] = closeTime.split(':').map(Number)
 
-      // Check if current time is within business hours
       const currentTotalMinutes = currentHour * 60 + currentMinute
       const openTotalMinutes = openHour * 60 + openMinute
       const closeTotalMinutes = closeHour * 60 + closeMinute
@@ -692,20 +596,25 @@ const isShopCurrentlyOpen = () => {
     }
   }
 
-  // Default to 8 AM - 8 PM if no hours set
   return currentHour >= 8 && currentHour < 20
 }
 
 // Refresh data
 const refreshData = async () => {
-  console.log('🔄 Refreshing data...')
   await fetchShopData()
   if (shopId.value) {
     await fetchShopOrders()
   }
 }
-</script>
 
+// Initialize
+onMounted(async () => {
+  await fetchShopData()
+  if (shopId.value) {
+    await fetchShopOrders()
+  }
+})
+</script>
 <template>
   <v-app>
     <!-- Update your top bar to include refresh -->
@@ -737,10 +646,15 @@ const refreshData = async () => {
         <v-btn small @click="fetchShopData" class="ml-2"> Check Again </v-btn>
       </v-alert>
 
-      <!-- Cover + Logo -->
+      <!-- In your template, update the cover section -->
       <v-container class="pa-0">
-        <v-img v-if="coverPhoto" :src="coverPhoto" height="180" cover class="cover-photo" />
-        <div v-else class="cover-placeholder"></div>
+        <div v-if="coverPhoto" class="cover-photo-container">
+          <v-img :src="coverPhoto" height="180" cover class="cover-photo" />
+        </div>
+        <div v-else class="cover-placeholder">
+          <v-icon size="48" color="grey-lighten-1">mdi-store-front</v-icon>
+          <div class="text-caption text-grey-lighten-1 mt-2">No cover photo</div>
+        </div>
 
         <!-- Avatar overlapping cover -->
         <div class="avatar-wrapper">
@@ -924,6 +838,15 @@ const refreshData = async () => {
                     </div>
                     <div v-if="order.selected_variety">
                       <strong>Variety:</strong> {{ order.selected_variety }}
+                    </div>
+                    <!-- Add these new fields -->
+                    <div>
+                      <strong>Transaction #:</strong> {{ order.transaction_number || 'N/A' }}
+                    </div>
+                    <div><strong>Delivery:</strong> {{ order.delivery_option || 'N/A' }}</div>
+                    <div v-if="order.delivery_date">
+                      <strong>Schedule:</strong> {{ formatDate(order.delivery_date) }}
+                      {{ order.delivery_time }}
                     </div>
                   </div>
 
@@ -1209,5 +1132,15 @@ const refreshData = async () => {
   .order-details {
     font-size: 0.8rem;
   }
+}
+.cover-placeholder {
+  height: 180px;
+  background: linear-gradient(135deg, #e5e7eb, #d1d5db);
+  border-bottom-left-radius: 12px;
+  border-bottom-right-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
 }
 </style>
