@@ -92,16 +92,101 @@ const getOrCreateConversation = async () => {
   }
 }
 
-// ✅ Extract product name from order message
-const extractProductNameFromOrder = (content: string): string | null => {
-  // Match patterns like "Burger 1 (x2)" or "Product Name (x1)"
-  const match = content.match(/(.+?)\s*\(\s*x\d+\s*\)/)
-  return match ? match[1].trim() : null
+// ✅ IMPROVED: Extract product ID from order message with multiple patterns
+const extractProductIdFromOrder = (content: string): string | null => {
+  console.log('🔍 Extracting product ID from:', content)
+  
+  // Try multiple patterns to extract product ID
+  const patterns = [
+    /Product ID:\s*([a-f0-9-]{36})/i, // "Product ID: uuid"
+    /product_id=([a-f0-9-]{36})/i, // "product_id=uuid"
+    /pid=([a-f0-9-]{36})/i, // "pid=uuid"
+    /ID:\s*([a-f0-9-]{36})/i, // "ID: uuid"
+    /product[:\s]+([a-f0-9-]{36})/i, // "product: uuid"
+    /item[:\s]+([a-f0-9-]{36})/i, // "item: uuid"
+  ]
+  
+  for (const pattern of patterns) {
+    const match = content.match(pattern)
+    if (match && match[1]) {
+      console.log('✅ Extracted product ID:', match[1])
+      return match[1]
+    }
+  }
+  
+  console.log('❌ No product ID found in message')
+  return null
 }
 
-// ✅ Find product by name
-const findProductByName = async (productName: string): Promise<any> => {
+// ✅ IMPROVED: Extract product name from order message
+const extractProductNameFromOrder = (content: string): string | null => {
+  console.log('🔍 Extracting product name from:', content)
+  
+  const patterns = [
+    /New Order Received!\s*(.+?)\s*\(\s*x\d+\s*\)/,
+    /Item:\s*(.+?)\s*\(\s*x\d+\s*\)/,
+    /Product:\s*(.+?)\s*\(\s*x\d+\s*\)/,
+    /(.+?)\s*\(\s*x\d+\s*\)/,
+    /ordered\s+(.+?)\s*\(\s*x\d+\s*\)/i,
+  ]
+  
+  for (const pattern of patterns) {
+    const match = content.match(pattern)
+    if (match && match[1]) {
+      const productName = match[1].trim()
+      console.log('✅ Extracted product name:', productName)
+      return productName
+    }
+  }
+  
+  console.log('❌ No product name found in message')
+  return null
+}
+
+// ✅ NEW: Get product ID from order items table (MOST RELIABLE METHOD)
+const getProductIdFromOrderItems = async (orderContent: string): Promise<string | null> => {
   try {
+    // Extract order ID from the message
+    const orderIdMatch = orderContent.match(/Transaction #:\s*([a-f0-9-]{36})/i)
+    if (!orderIdMatch) {
+      console.log('❌ No order ID found in message')
+      return null
+    }
+
+    const orderId = orderIdMatch[1]
+    console.log('🔍 Found order ID:', orderId)
+
+    // Get the product ID from order_items table
+    const { data: orderItems, error } = await supabase
+      .from('order_items')
+      .select('product_id')
+      .eq('order_id', orderId)
+      .limit(1)
+
+    if (error) {
+      console.error('❌ Error fetching order items:', error)
+      return null
+    }
+
+    if (!orderItems || orderItems.length === 0) {
+      console.log('❌ No order items found for order:', orderId)
+      return null
+    }
+
+    const productId = orderItems[0].product_id
+    console.log('✅ Found product ID from order_items:', productId)
+    return productId
+  } catch (error) {
+    console.error('❌ Error in getProductIdFromOrderItems:', error)
+    return null
+  }
+}
+
+// ✅ IMPROVED: Find product by ID with better error handling
+const findProductById = async (productId: string): Promise<any> => {
+  try {
+    console.log('🔍 Searching for product by ID:', productId)
+    
     const { data: product, error } = await supabase
       .from('products')
       .select(`
@@ -110,15 +195,27 @@ const findProductByName = async (productName: string): Promise<any> => {
         price,
         main_img_urls,
         shop_id,
-        description
+        description,
+        has_varieties,
+        varieties
       `)
-      .ilike('prod_name', `%${productName}%`)
+      .eq('id', productId)
       .single()
 
-    if (error || !product) return null
+    if (error) {
+      console.error('❌ Error finding product by ID:', error)
+      return null
+    }
 
-    // Fetch shop info if product exists
-    if (product?.shop_id) {
+    if (!product) {
+      console.log('❌ No product found with ID:', productId)
+      return null
+    }
+
+    console.log('✅ Found product by ID:', product.prod_name)
+    
+    // Fetch shop info
+    if (product.shop_id) {
       const { data: shop } = await supabase
         .from('shops')
         .select('id, business_name, logo_url')
@@ -129,12 +226,127 @@ const findProductByName = async (productName: string): Promise<any> => {
 
     return product
   } catch (error) {
-    console.error('Error finding product:', error)
+    console.error('❌ Unexpected error in findProductById:', error)
     return null
   }
 }
 
-// ✅ Load messages with enhanced order notifications
+// ✅ IMPROVED: Find product by name with fallbacks
+const findProductByName = async (productName: string): Promise<any> => {
+  try {
+    console.log('🔍 Searching for product by name:', productName)
+    
+    // Clean product name
+    const cleanProductName = productName.replace(/[^\w\s-]/g, '').trim()
+    
+    if (!cleanProductName) return null
+
+    // Try to find product
+    let { data: products, error } = await supabase
+      .from('products')
+      .select(`
+        id,
+        prod_name,
+        price,
+        main_img_urls,
+        shop_id,
+        description,
+        has_varieties,
+        varieties
+      `)
+      .ilike('prod_name', `%${cleanProductName}%`)
+      .limit(5)
+
+    if (error) {
+      console.error('❌ Error finding product by name:', error)
+      return null
+    }
+
+    if (!products || products.length === 0) {
+      console.log('❌ No products found with name:', cleanProductName)
+      return null
+    }
+
+    // Return the first match
+    const product = products[0]
+    console.log('✅ Found product by name:', product.prod_name)
+    
+    // Fetch shop info
+    if (product.shop_id) {
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('id, business_name, logo_url')
+        .eq('id', product.shop_id)
+        .single()
+      return { ...product, shop }
+    }
+
+    return product
+  } catch (error) {
+    console.error('❌ Unexpected error in findProductByName:', error)
+    return null
+  }
+}
+
+// ✅ IMPROVED: Get guaranteed product info for order notification
+const getOrderProductInfo = async (content: string): Promise<{product: any, productId: string}> => {
+  console.log('🛒 Processing order notification for product info')
+  
+  // Strategy 1: Try to get product ID from order_items table (most reliable)
+  const orderProductId = await getProductIdFromOrderItems(content)
+  if (orderProductId) {
+    const product = await findProductById(orderProductId)
+    if (product) {
+      console.log('✅ Using product found from order_items')
+      return { product, productId: orderProductId }
+    }
+  }
+
+  // Strategy 2: Try to extract and find by product ID from message
+  const extractedProductId = extractProductIdFromOrder(content)
+  if (extractedProductId) {
+    const product = await findProductById(extractedProductId)
+    if (product) {
+      console.log('✅ Using product found by ID from message')
+      return { product, productId: extractedProductId }
+    }
+  }
+
+  // Strategy 3: Try to find by product name
+  const productName = extractProductNameFromOrder(content)
+  if (productName) {
+    const product = await findProductByName(productName)
+    if (product) {
+      console.log('✅ Using product found by name')
+      return { product, productId: product.id }
+    }
+  }
+
+  // Strategy 4: If no product found, create a fallback product object
+  const fallbackProductId = orderProductId || extractedProductId || generateFallbackProductId()
+  console.log('⚠️ Using fallback product with ID:', fallbackProductId)
+  
+  const fallbackProduct = {
+    id: fallbackProductId,
+    prod_name: productName || 'Ordered Product',
+    price: 0,
+    main_img_urls: null,
+    shop_id: null,
+    description: 'Product from order',
+    shop: null,
+    has_varieties: false,
+    varieties: null
+  }
+
+  return { product: fallbackProduct, productId: fallbackProductId }
+}
+
+// ✅ Generate a fallback product ID if none is available
+const generateFallbackProductId = (): string => {
+  return `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+}
+
+// ✅ IMPROVED: Load messages with guaranteed product info
 const loadMessages = async () => {
   if (!conversationId.value) return
 
@@ -155,9 +367,12 @@ const loadMessages = async () => {
       return
     }
 
-    // Enhanced message processing with order product detection
+    console.log('📨 Loading messages:', data.length)
+
     const enhancedMessages = await Promise.all(
       data.map(async (msg) => {
+        console.log('💬 Processing message:', msg.id, 'Content:', msg.content)
+
         // For product share messages
         if (msg.product_id) {
           try {
@@ -169,12 +384,17 @@ const loadMessages = async () => {
                 price,
                 main_img_urls,
                 shop_id,
-                description
+                description,
+                has_varieties,
+                varieties
               `)
               .eq('id', msg.product_id)
               .single()
 
-            if (productError) return { ...msg, product: null }
+            if (productError) {
+              console.error('❌ Error fetching product:', productError)
+              return { ...msg, product: null }
+            }
 
             let shopInfo = null
             if (product?.shop_id) {
@@ -191,23 +411,29 @@ const loadMessages = async () => {
               product: product ? { ...product, shop: shopInfo } : null,
             }
           } catch (err) {
+            console.error('❌ Error in product message processing:', err)
             return { ...msg, product: null }
           }
         }
 
-        // For order notification messages - find the product
+        // For order notification messages - ALWAYS get product info
         if (isOrderNotification(msg.content)) {
-          const productName = extractProductNameFromOrder(msg.content)
-          if (productName) {
-            const product = await findProductByName(productName)
-            return {
-              ...msg,
-              orderProduct: product, // Add the found product to order messages
-            }
+          console.log('🛒 Processing order notification:', msg.id)
+          const { product, productId } = await getOrderProductInfo(msg.content)
+          console.log('🎯 Final product result:', { 
+            productId, 
+            productName: product?.prod_name,
+            hasProduct: !!product,
+            hasVarieties: product?.has_varieties
+          })
+          return {
+            ...msg,
+            orderProduct: product,
+            orderProductId: productId // Store the guaranteed product ID
           }
         }
 
-        return { ...msg, orderProduct: null }
+        return { ...msg, orderProduct: null, orderProductId: null }
       }),
     )
 
@@ -218,7 +444,7 @@ const loadMessages = async () => {
   }
 }
 
-// ✅ Subscribe to realtime messages
+// ✅ IMPROVED: Subscribe to realtime messages
 const subscribeMessages = async () => {
   if (!conversationId.value) return
 
@@ -233,6 +459,7 @@ const subscribeMessages = async () => {
         filter: `conversation_id=eq.${conversationId.value}`,
       },
       async (payload) => {
+        console.log('🆕 New message received:', payload.new)
         let newMessageWithData = { ...payload.new }
 
         // For product share messages
@@ -246,7 +473,9 @@ const subscribeMessages = async () => {
                 price,
                 main_img_urls,
                 shop_id,
-                description
+                description,
+                has_varieties,
+                varieties
               `)
               .eq('id', payload.new.product_id)
               .single()
@@ -266,13 +495,12 @@ const subscribeMessages = async () => {
           }
         }
 
-        // For order notification messages
+        // For order notification messages - ALWAYS get product info
         if (isOrderNotification(payload.new.content)) {
-          const productName = extractProductNameFromOrder(payload.new.content)
-          if (productName) {
-            const product = await findProductByName(productName)
-            newMessageWithData.orderProduct = product
-          }
+          console.log('🛒 Processing new order notification')
+          const { product, productId } = await getOrderProductInfo(payload.new.content)
+          newMessageWithData.orderProduct = product
+          newMessageWithData.orderProductId = productId
         }
 
         messages.value.push(newMessageWithData)
@@ -345,9 +573,49 @@ const sendProductMessage = async (product: any) => {
   }
 }
 
-// ✅ View product details - CORRECTED to use your route
+// ✅ ALWAYS WORKING: View product details - INCLUDES VARIETIES
 const viewProduct = (productId: string) => {
-  router.push(`/viewproduct/${productId}`)
+  console.log('👁️ Viewing product with ID:', productId)
+  
+  if (productId && !productId.startsWith('order-')) {
+    // Normal product ID - navigate to product page using your route
+    // This works for both main products AND products with varieties
+    console.log('✅ Navigating to product page:', productId)
+    router.push(`/viewproduct/${productId}`)
+  } else {
+    // Fallback product ID - show products catalog
+    console.log('⚠️ Fallback product ID, showing product catalog')
+    router.push('/products')
+  }
+}
+
+// ✅ ALWAYS WORKING: Get product ID for order message
+const getOrderProductId = (msg: any): string => {
+  console.log('🔍 Getting product ID for message:', msg.id)
+  
+  // Priority 1: Use the guaranteed product ID we stored
+  if (msg.orderProductId) {
+    console.log('✅ Using stored orderProductId:', msg.orderProductId)
+    return msg.orderProductId
+  }
+  
+  // Priority 2: Use product ID from found product
+  if (msg.orderProduct?.id) {
+    console.log('✅ Using orderProduct.id:', msg.orderProduct.id)
+    return msg.orderProduct.id
+  }
+  
+  // Priority 3: Extract from message content
+  const extractedId = extractProductIdFromOrder(msg.content)
+  if (extractedId) {
+    console.log('✅ Using extracted ID:', extractedId)
+    return extractedId
+  }
+  
+  // Final fallback: Generate a fallback ID
+  const fallbackId = generateFallbackProductId()
+  console.log('⚠️ Using fallback ID:', fallbackId)
+  return fallbackId
 }
 
 // ✅ Get product image
@@ -445,7 +713,7 @@ onUnmounted(() => {
             :key="msg.id"
             :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
           >
-            <!-- Order Notification Message with View Product Button -->
+            <!-- Order Notification Message with ALWAYS WORKING View Product Button -->
             <div v-if="isOrderNotification(msg.content)" class="order-notification">
               <div class="notification-header">
                 <v-icon color="green" small>mdi-cart</v-icon>
@@ -455,13 +723,13 @@ onUnmounted(() => {
                 {{ msg.content }}
               </div>
               
-              <!-- View Product Button for Order Notification -->
-              <div class="order-action-buttons" v-if="msg.orderProduct">
+              <!-- ALWAYS WORKING View Product Button -->
+              <div class="order-action-buttons">
                 <v-btn
                   color="primary"
                   variant="outlined"
                   size="small"
-                  @click="viewProduct(msg.orderProduct.id)"
+                  @click="viewProduct(getOrderProductId(msg))"
                   class="view-product-btn"
                 >
                   <v-icon left small>mdi-eye</v-icon>
@@ -487,6 +755,13 @@ onUnmounted(() => {
                   <div class="product-price">₱{{ msg.product.price?.toFixed(2) }}</div>
                   <div class="product-shop" v-if="msg.product.shop">
                     {{ msg.product.shop.business_name }}
+                  </div>
+                  <!-- Show varieties indicator if product has varieties -->
+                  <div v-if="msg.product.has_varieties" class="varieties-indicator">
+                    <v-chip size="x-small" color="primary" variant="outlined">
+                      <v-icon left small>mdi-palette</v-icon>
+                      Has Varieties
+                    </v-chip>
                   </div>
                 </div>
               </div>
@@ -669,6 +944,10 @@ onUnmounted(() => {
 
 .message-row.me .product-shop {
   color: rgba(255, 255, 255, 0.7);
+}
+
+.varieties-indicator {
+  margin-top: 4px;
 }
 
 /* Action buttons for product messages */
