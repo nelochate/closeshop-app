@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue' // ✅ Added onUnmounted import
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
@@ -14,6 +14,10 @@ const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
 const errorMsg = ref('')
+
+// notification state
+const unreadNotifications = ref(0)
+const notificationSubscription = ref(null)
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
 
@@ -31,7 +35,6 @@ function updateSearch() {
 }
 
 /* 🧭 Location Permission */
-/* 🧭 Smart Location Permission with Fallbacks */
 async function requestLocationPermission() {
   try {
     console.log('📍 Requesting location permission...')
@@ -303,6 +306,7 @@ async function fetchShops() {
     nearby.value = []
   }
 }
+
 /* 🛍️ Fetch Products from Approved Shops */
 async function fetchProducts() {
   try {
@@ -352,7 +356,75 @@ function extractImage(main_img_urls) {
   return PLACEHOLDER_IMG
 }
 
-/* 🚀 Main Lifecycle */
+/* 🔔 Notification System */
+async function setupNotificationListener() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
+
+  // Fetch initial unread count
+  await fetchUnreadNotificationCount()
+
+  // Subscribe to real-time notifications
+  notificationSubscription.value = supabase
+    .channel('user-notifications')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      },
+      (payload) => {
+        console.log('New notification received:', payload)
+        unreadNotifications.value++
+
+        // Show native notification if enabled
+        if (Notification.permission === 'granted') {
+          new Notification('CloseShop', {
+            body: payload.new.message,
+            icon: '/icon.png',
+          })
+        }
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      },
+      (payload) => {
+        // If notification is marked as read, decrease count
+        if (payload.new.is_read && !payload.old.is_read) {
+          unreadNotifications.value = Math.max(0, unreadNotifications.value - 1)
+        }
+      },
+    )
+    .subscribe()
+}
+
+async function fetchUnreadNotificationCount() {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('is_read', false)
+
+  if (!error && count !== null) {
+    unreadNotifications.value = count
+  }
+}
+
 /* 🚀 Main Lifecycle */
 onMounted(async () => {
   try {
@@ -379,11 +451,11 @@ onMounted(async () => {
       await setupPushNotifications()
 
       // Wait a bit for location if possible, but don't block
-      await Promise.race([
-        locationPromise,
-        new Promise((resolve) => setTimeout(resolve, 2000)), // Max 2 second wait
-      ])
+      await Promise.race([locationPromise, new Promise((resolve) => setTimeout(resolve, 2000))])
     }
+
+    // Setup notification listener
+    await setupNotificationListener()
 
     // Load shops and products in parallel
     await Promise.all([fetchShops(), fetchProducts()])
@@ -392,6 +464,13 @@ onMounted(async () => {
     errorMsg.value = 'Failed to load app data'
   } finally {
     loading.value = false
+  }
+})
+
+// Cleanup subscription - ✅ FIXED: Now properly imported
+onUnmounted(() => {
+  if (notificationSubscription.value) {
+    notificationSubscription.value.unsubscribe()
   }
 })
 
@@ -415,20 +494,6 @@ function markSurveyAnswered() {
   localStorage.setItem('surveyAnswered', 'true')
   showSurvey.value = false
 }
-
-onMounted(() => {
-  const saved = localStorage.getItem('surveyAnswered')
-  if (saved === 'true') hasAnsweredSurvey.value = true
-
-  // 💬 Show the hint 3 seconds after loading (only if not answered)
-  if (!hasAnsweredSurvey.value) {
-    setTimeout(() => {
-      showSurveyHint.value = true
-      // Hide automatically after 8 seconds
-      setTimeout(() => (showSurveyHint.value = false), 8000)
-    }, 3000)
-  }
-})
 
 // Add these helper functions
 const locationAccuracy = ref('none')
@@ -480,11 +545,26 @@ const getLocationStatusText = (accuracy) => {
             @focus="goToSearch"
             @input="updateSearch"
           />
-          <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
-            <v-icon size="22">mdi-bell-outline</v-icon>
-          </v-btn>
+
+          <!-- Notification Button with Badge -->
+          <div class="notification-wrapper">
+            <v-btn class="notif-btn" icon aria-label="Notifications" @click="goNotifications">
+              <v-icon size="22">mdi-bell-outline</v-icon>
+            </v-btn>
+
+            <!-- Badge -->
+            <div 
+              v-if="unreadNotifications > 0" 
+              class="notification-badge"
+              :class="{ 'badge-large': unreadNotifications > 9 }"
+            >
+              {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}
+            </div>
+          </div>
         </div>
       </v-sheet>
+      
+      <!-- ... rest of your template remains the same ... -->
       <v-container class="py-4" style="max-width: 720px">
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
@@ -574,17 +654,15 @@ const getLocationStatusText = (accuracy) => {
         </v-alert>
       </v-container>
     </v-main>
-    <!-- 💬 Floating Survey Button -->
-    <!-- 💬 Floating Survey Button with Hint -->
+    
+    <!-- ... survey and bottom nav remain the same ... -->
     <div v-if="!hasAnsweredSurvey" class="floating-survey-wrapper">
-      <!-- Tooltip Cloud -->
       <transition name="fade">
         <div v-if="showSurveyHint" class="survey-hint">
           💭 Please answer this survey once done exploring the app!
         </div>
       </transition>
 
-      <!-- Button -->
       <v-btn
         class="floating-survey-btn"
         icon
@@ -597,7 +675,6 @@ const getLocationStatusText = (accuracy) => {
       </v-btn>
     </div>
 
-    <!-- 🧾 Survey Modal Fullscreen - FIXED -->
     <v-dialog
       v-model="showSurvey"
       fullscreen
@@ -606,7 +683,6 @@ const getLocationStatusText = (accuracy) => {
       transition="dialog-bottom-transition"
     >
       <v-card class="survey-fullscreen-card">
-        <!-- Header -->
         <v-toolbar style="background: #3f83c7; color: white" class="survey-toolbar">
           <v-toolbar-title class="text-h6">Customer Feedback Survey</v-toolbar-title>
           <v-btn icon variant="text" color="white" @click="showSurvey = false">
@@ -614,7 +690,6 @@ const getLocationStatusText = (accuracy) => {
           </v-btn>
         </v-toolbar>
 
-        <!-- Iframe Container -->
         <div class="iframe-container">
           <iframe
             src="https://docs.google.com/forms/d/e/1FAIpQLScgP_QJBFQNeH42g5DKTkDusG-9EMru1XZUJwfVB02hzDS1Xg/viewform?embedded=true"
@@ -632,6 +707,7 @@ const getLocationStatusText = (accuracy) => {
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
+
 <style scoped>
 .page {
   background: #f5f7fa;
@@ -668,6 +744,11 @@ const getLocationStatusText = (accuracy) => {
   font-size: 14px;
 }
 
+.notification-wrapper {
+  position: relative;
+  display: inline-block;
+}
+
 .notif-btn {
   width: 44px;
   height: 44px;
@@ -675,10 +756,53 @@ const getLocationStatusText = (accuracy) => {
   border-radius: 9999px;
   background: #fff !important;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  position: relative;
 }
 
 .notif-btn :deep(.v-icon) {
   color: #111827;
+}
+
+.notification-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: #ff4444;
+  color: white;
+  border-radius: 10px;
+  min-width: 18px;
+  height: 18px;
+  font-size: 10px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  animation: pulse 2s infinite;
+}
+
+.badge-large {
+  min-width: 22px;
+  height: 22px;
+  font-size: 9px;
+  top: -6px;
+  right: -6px;
+}
+
+@keyframes pulse {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
 }
 
 .section-header {
@@ -707,8 +831,8 @@ const getLocationStatusText = (accuracy) => {
   overflow-x: auto;
   padding: 10px 2px 2px;
   scroll-snap-type: x mandatory;
-  -ms-overflow-style: none; /* IE and Edge */
-  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 
 .scroll-row::-webkit-scrollbar {
@@ -767,8 +891,6 @@ const getLocationStatusText = (accuracy) => {
   text-overflow: ellipsis;
   flex: 1;
 }
-
-/* REMOVED: .item-meta and .item-sub (unused) */
 
 .empty-card {
   width: 240px;
@@ -856,7 +978,6 @@ const getLocationStatusText = (accuracy) => {
   color: #6b7280;
 }
 
-/* Floating Survey */
 .floating-survey-wrapper {
   position: fixed;
   bottom: 96px;
@@ -885,7 +1006,6 @@ const getLocationStatusText = (accuracy) => {
   box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
 }
 
-/* Survey Hint */
 .survey-hint {
   background: white;
   color: #333;
@@ -911,7 +1031,6 @@ const getLocationStatusText = (accuracy) => {
   filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
 }
 
-/* Survey Fullscreen */
 .survey-fullscreen-card {
   display: flex;
   flex-direction: column;
@@ -940,7 +1059,6 @@ const getLocationStatusText = (accuracy) => {
   flex: 1;
 }
 
-/* Animations */
 .fade-enter-active,
 .fade-leave-active {
   transition: opacity 0.4s;
@@ -962,7 +1080,6 @@ const getLocationStatusText = (accuracy) => {
   }
 }
 
-/* Responsive Design */
 @media (max-width: 480px) {
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -991,6 +1108,4 @@ const getLocationStatusText = (accuracy) => {
     font-size: 16px;
   }
 }
-
-/* REMOVED: Conflicting iframe height rule and duplicate dialog styles */
 </style>
