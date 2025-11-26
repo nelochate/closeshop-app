@@ -28,23 +28,34 @@ const transactionFilter = ref('all')
 const transactionOptions = [
   { title: 'All Orders', value: 'all' },
   { title: 'Pending Payment', value: 'pending' },
-  { title: 'Paid', value: 'paid' },
+  { title: 'Approved', value: 'paid' },
   { title: 'Delivered', value: 'delivered' },
   { title: 'Cancelled', value: 'cancelled' }
 ]
 
 // COMPUTED: Filtered orders based on selected filter
+// FIXED: Filtered orders based on selected filter (matching your current options)
 const filteredOrders = computed(() => {
   if (transactionFilter.value === 'all') {
     return orders.value
   }
+
   return orders.value.filter(order => {
-    if (transactionFilter.value === 'paid') {
-      return order.payment_status === 'paid'
-    } else if (transactionFilter.value === 'delivered') {
-      return order.delivery_status === 'delivered'
-    } else {
-      return order.status === transactionFilter.value
+    switch (transactionFilter.value) {
+      case 'pending':
+        return order.payment_status === 'pending'
+
+      case 'paid': // This matches your "Approved" in UI but 'paid' in value
+        return order.payment_status === 'paid'
+
+      case 'delivered':
+        return order.delivery_status === 'delivered'
+
+      case 'cancelled':
+        return order.status === 'cancelled' || order.payment_status === 'cancelled'
+
+      default:
+        return true
     }
   })
 })
