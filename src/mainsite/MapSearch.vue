@@ -45,6 +45,7 @@ const mapInitialized = ref(false)
 const isSearchMode = ref(false)
 const boundaryLoading = ref(false)
 const hasValidLocation = ref(false)
+const selectedShopId = ref<string | null>(null)
 
 /* -------------------- GEOLOCATION -------------------- */
 const { latitude, longitude, requestPermission, startWatching, stopWatching } = useGeolocation()
@@ -66,6 +67,13 @@ const registeredShopIcon = L.icon({
     'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
   iconSize: [25, 41],
   iconAnchor: [12, 41],
+})
+
+const highlightedShopIcon = L.icon({
+  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-gold.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
+  iconSize: [30, 46],
+  iconAnchor: [15, 46],
 })
 
 /* -------------------- MAP INITIALIZATION -------------------- */
@@ -905,7 +913,6 @@ const plotShops = () => {
       .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
       .join('')
 
-    // In the plotShops function, update the popup content:
     const statusDisplay = getShopStatusDisplay(shop)
     marker.bindPopup(`
   <div style="text-align:center; min-width: 240px;">
@@ -972,6 +979,20 @@ const focusOnShopMarker = async (shopId: string) => {
     return
   }
 
+  // Highlight the marker with a bounce animation
+  if (marker) {
+    marker.setZIndexOffset(1000)
+    
+    // Add bounce animation
+    marker.setIcon(highlightedShopIcon)
+
+    // Revert to normal icon after 3 seconds
+    setTimeout(() => {
+      marker.setIcon(registeredShopIcon)
+      marker.setZIndexOffset(0)
+    }, 3000)
+  }
+
   const userLat = Number(latitude.value ?? lastKnown.value?.[0])
   const userLng = Number(longitude.value ?? lastKnown.value?.[1])
 
@@ -981,61 +1002,32 @@ const focusOnShopMarker = async (shopId: string) => {
     try {
       clearAllRoutes()
 
-      const bounds = L.latLngBounds([
-        [userLat, userLng],
-        [Number(shop.latitude), Number(shop.longitude)],
-      ])
-
-      map.value.fitBounds(bounds.pad(0.2), {
-        animate: true,
-        duration: 0.5,
-        padding: [20, 20],
-      })
-
-      const routes = await getRouteOptions(
-        [userLat, userLng],
-        [Number(shop.latitude), Number(shop.longitude)],
-      )
-
-      if (routes.length > 0) {
-        routeOptions.value = routes
-        drawRouteOptions(routes)
-
-        if (routes[0].summary.includes('Fallback')) {
-          setErrorMessage('Using direct route (routing service unavailable)', 3000)
-        } else {
-          setErrorMessage(
-            `Found ${routes.length} route options. Click on any route to select it.`,
-            5000,
-          )
-        }
-      } else {
-        setErrorMessage('Could not calculate routes to this shop. Please try again.', 3000)
-        map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
-          animate: true,
-          duration: 0.5,
-        })
-      }
-
-      marker.openPopup()
-    } catch (error) {
-      console.error('Error focusing on shop:', error)
-      setErrorMessage('Error calculating routes: ' + (error as Error).message, 3000)
+      // Center map on the shop with smooth animation
       map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
         animate: true,
-        duration: 0.5,
+        duration: 1,
       })
+
+      // Open popup
       marker.openPopup()
+
+      // Show success message
+      setErrorMessage(`Focused on ${shop.business_name}`, 3000)
+
+    } catch (error) {
+      console.error('Error focusing on shop:', error)
+      setErrorMessage('Error focusing on shop', 3000)
     } finally {
       routeLoading.value = false
     }
   } else {
-    setErrorMessage('Your location is not available. Centering on shop only.', 3000)
+    // Just center on shop if user location not available
     map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
       animate: true,
-      duration: 0.5,
+      duration: 1,
     })
     marker.openPopup()
+    setErrorMessage(`Focused on ${shop.business_name}`, 3000)
   }
 }
 
@@ -1102,6 +1094,235 @@ const getShopStatusDisplay = (shop: any): { text: string; color: string; tooltip
       color: '#ef4444',
       tooltip: 'Closed based on business hours',
     }
+  }
+}
+
+const isShopOpenByHours = (shop: any): boolean => {
+  const now = new Date()
+  const currentDay = now.getDay() // 0 = Sunday, 1 = Monday, etc.
+  const currentTime = now.getHours() * 100 + now.getMinutes()
+
+  // Check if shop is open today
+  if (shop.open_days && shop.open_days.length > 0) {
+    // Convert Sunday (0) to 7 for consistency with your schema (1-7 = Mon-Sun)
+    const adjustedDay = currentDay === 0 ? 7 : currentDay
+    if (!shop.open_days.includes(adjustedDay)) {
+      return false
+    }
+  }
+  // Check opening hours
+  if (shop.open_time && shop.close_time) {
+    const openTime = convertTimeToNumber(shop.open_time)
+    const closeTime = convertTimeToNumber(shop.close_time)
+
+    return currentTime >= openTime && currentTime <= closeTime
+  }
+
+  return true // If no hours specified, assume open
+}
+
+/* -------------------- SEARCH FUNCTIONALITY -------------------- */
+let searchResultMarkers: L.Marker[] = []
+
+const clearSearchMarkers = () => {
+  searchResultMarkers.forEach((marker) => {
+    if (map.value && map.value.hasLayer(marker)) {
+      map.value.removeLayer(marker)
+    }
+  })
+  searchResultMarkers = []
+}
+
+// Enhanced search function
+const smartSearch = async () => {
+  const query = search.value.trim().toLowerCase()
+  if (!query || !map.value) return
+
+  loading.value = true
+  errorMsg.value = null
+  isSearchMode.value = true
+
+  try {
+    // Enhanced search that matches shop name, location, AND products
+    const searchResults = shops.value.filter(shop => {
+      const searchTerms = [
+        shop.business_name?.toLowerCase(),
+        shop.city?.toLowerCase(),
+        shop.barangay?.toLowerCase(),
+        shop.street?.toLowerCase(),
+        shop.province?.toLowerCase(),
+        ...(shop.products || []).map((p: any) => p.prod_name?.toLowerCase())
+      ].filter(Boolean)
+
+      // Check if any search term matches the query
+      return searchTerms.some(term => term && term.includes(query))
+    })
+
+    // Sort by relevance and distance
+    const sortedResults = searchResults.sort((a, b) => {
+      // Priority 1: Exact matches in business name
+      const aNameMatch = a.business_name?.toLowerCase().includes(query)
+      const bNameMatch = b.business_name?.toLowerCase().includes(query)
+      
+      if (aNameMatch && !bNameMatch) return -1
+      if (!aNameMatch && bNameMatch) return 1
+
+      // Priority 2: Number of matching products
+      const aProductMatches = getMatchingProducts(a).length
+      const bProductMatches = getMatchingProducts(b).length
+      
+      if (aProductMatches !== bProductMatches) {
+        return bProductMatches - aProductMatches
+      }
+
+      // Priority 3: Distance
+      return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
+    })
+
+    if (sortedResults.length === 0) {
+      errorMsg.value = `No shops or products found for "${query}"`
+      filteredShops.value = []
+      showShopMenu.value = true
+      clearSearchMarkers()
+    } else {
+      const matchTypes = {
+        shops: sortedResults.filter(shop => 
+          shop.business_name?.toLowerCase().includes(query) ||
+          shop.city?.toLowerCase().includes(query)
+        ).length,
+        products: sortedResults.filter(shop => 
+          getMatchingProducts(shop).length > 0
+        ).length
+      }
+
+      errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products)`
+      filteredShops.value = sortedResults
+      showShopMenu.value = true
+      plotShops()
+
+      // Auto-focus on first result if only one
+      if (sortedResults.length === 1) {
+        await focusOnShopMarker(sortedResults[0].id)
+      }
+    }
+  } catch (error) {
+    console.error('Search failed:', error)
+    errorMsg.value = 'Search failed. Please try again.'
+  } finally {
+    loading.value = false
+  }
+}
+
+// Enhanced clear search
+const clearSearch = () => {
+  search.value = ''
+  isSearchMode.value = false
+  applyShopFilters()
+  showShopMenu.value = false
+  clearSearchMarkers()
+
+  shopMarkers.forEach((marker) => {
+    if (map.value) map.value.addLayer(marker)
+  })
+
+  if (latitude.value && longitude.value) {
+    map.value?.setView([Number(latitude.value), Number(longitude.value)], 13, { animate: true })
+  }
+}
+
+// Get products that match search query
+const getMatchingProducts = (shop: any): any[] => {
+  const query = search.value.trim().toLowerCase()
+  if (!query || !shop.products) return []
+  
+  return shop.products.filter((product: any) => 
+    product.prod_name?.toLowerCase().includes(query)
+  )
+}
+
+// Check if shop has search matches
+const hasSearchMatch = (shop: any): boolean => {
+  if (!isSearchMode.value || !search.value) return false
+  
+  const query = search.value.toLowerCase()
+  return (
+    shop.business_name?.toLowerCase().includes(query) ||
+    shop.city?.toLowerCase().includes(query) ||
+    shop.barangay?.toLowerCase().includes(query) ||
+    getMatchingProducts(shop).length > 0
+  )
+}
+
+const onSearchKeydown = (e: KeyboardEvent) => {
+  if (e.key === 'Enter') smartSearch()
+}
+
+const toggleShopMenu = () => {
+  showShopMenu.value = !showShopMenu.value
+  if (showShopMenu.value && !isSearchMode.value) {
+    applyShopFilters()
+  }
+}
+
+/* -------------------- ENHANCED SHOP SELECTION -------------------- */
+
+// Enhanced shop click handler
+const handleShopClick = async (shopId: string, index: number) => {
+  selectedShopId.value = shopId
+  await focusOnShopFromList(shopId)
+}
+
+// Focus on shop and close drawer
+const focusOnShopFromList = async (shopId: string) => {
+  console.log('Focusing on shop from list:', shopId)
+  
+  // Close the drawer first
+  showShopMenu.value = false
+  
+  // Small delay to allow drawer animation to complete
+  await new Promise(resolve => setTimeout(resolve, 300))
+  
+  // Then focus on the shop marker
+  await focusOnShopMarker(shopId)
+  
+  // Clear selection after a delay
+  setTimeout(() => {
+    selectedShopId.value = null
+  }, 2000)
+}
+
+// Open shop details page
+const openShopDetails = async (shopId: string) => {
+  const shop = shops.value.find((s) => s.id === shopId)
+  if (!shop) return
+
+  showShopMenu.value = false
+  await new Promise(resolve => setTimeout(resolve, 300))
+  
+  router.push(`/shop/${shopId}`)
+}
+
+/* -------------------- ERROR MESSAGE HANDLER -------------------- */
+let errorTimeout: number | null = null
+
+const setErrorMessage = (message: string | null, duration: number = 4000) => {
+  if (errorTimeout) {
+    clearTimeout(errorTimeout)
+    errorTimeout = null
+  }
+
+  errorMsg.value = null
+
+  if (message) {
+    setTimeout(() => {
+      errorMsg.value = message
+
+      if (duration > 0) {
+        errorTimeout = window.setTimeout(() => {
+          errorMsg.value = null
+        }, duration)
+      }
+    }, 50)
   }
 }
 
@@ -1200,158 +1421,6 @@ onUnmounted(() => {
     }
   }
 })
-
-/* -------------------- ERROR MESSAGE HANDLER -------------------- */
-let errorTimeout: number | null = null
-
-const setErrorMessage = (message: string | null, duration: number = 4000) => {
-  if (errorTimeout) {
-    clearTimeout(errorTimeout)
-    errorTimeout = null
-  }
-
-  errorMsg.value = null
-
-  if (message) {
-    setTimeout(() => {
-      errorMsg.value = message
-
-      if (duration > 0) {
-        errorTimeout = window.setTimeout(() => {
-          errorMsg.value = null
-        }, duration)
-      }
-    }, 50)
-  }
-}
-
-/* -------------------- BASIC SEARCH FUNCTIONALITY -------------------- */
-let searchResultMarkers: L.Marker[] = []
-
-const clearSearchMarkers = () => {
-  searchResultMarkers.forEach((marker) => {
-    if (map.value && map.value.hasLayer(marker)) {
-      map.value.removeLayer(marker)
-    }
-  })
-  searchResultMarkers = []
-}
-
-const clearSearch = () => {
-  search.value = ''
-  isSearchMode.value = false
-  applyShopFilters()
-  showShopMenu.value = false
-  clearSearchMarkers()
-
-  shopMarkers.forEach((marker) => {
-    if (map.value) map.value.addLayer(marker)
-  })
-
-  if (latitude.value && longitude.value) {
-    map.value?.setView([Number(latitude.value), Number(longitude.value)], 13, { animate: true })
-  }
-}
-
-const smartSearch = async () => {
-  const query = search.value.trim().toLowerCase()
-  if (!query || !map.value) return
-
-  loading.value = true
-  errorMsg.value = null
-  isSearchMode.value = true
-
-  try {
-    // Basic search implementation - you can expand this
-    const filtered = shops.value.filter(
-      (shop) =>
-        shop.business_name.toLowerCase().includes(query) ||
-        shop.city?.toLowerCase().includes(query) ||
-        shop.products?.some((p: any) => p.prod_name.toLowerCase().includes(query)),
-    )
-
-    if (filtered.length === 0) {
-      errorMsg.value = `No results found for "${query}"`
-      filteredShops.value = []
-      showShopMenu.value = true
-      clearSearchMarkers()
-    } else {
-      errorMsg.value = `Found ${filtered.length} results`
-      filteredShops.value = filtered
-      showShopMenu.value = true
-      plotShops()
-
-      if (filtered.length === 1) {
-        await focusOnShopMarker(filtered[0].id)
-      }
-    }
-  } catch (error) {
-    console.error('Search failed:', error)
-    errorMsg.value = 'Search failed. Please try again.'
-  } finally {
-    loading.value = false
-  }
-}
-
-const onSearchKeydown = (e: KeyboardEvent) => {
-  if (e.key === 'Enter') smartSearch()
-}
-
-const toggleShopMenu = () => {
-  showShopMenu.value = !showShopMenu.value
-  if (showShopMenu.value && !isSearchMode.value) {
-    applyShopFilters()
-  }
-}
-
-const handleShopClick = async (shopId: string, index: number) => {
-  if (isSearchMode.value) {
-    // Focus on search result implementation
-    await focusOnShopMarker(shopId)
-  } else {
-    await focusOnShopMarker(shopId)
-  }
-}
-
-const openShop = async (shopId: string) => {
-  const shop = shops.value.find((s) => s.id === shopId)
-  if (!shop) return
-
-  showShopMenu.value = false
-  await focusOnShopMarker(shopId)
-
-  if (map.value) {
-    map.value.invalidateSize()
-  }
-
-  router.push(`/shop/${shopId}`)
-}
-
-// Add these helper functions to your map component
-
-const isShopOpenByHours = (shop: any): boolean => {
-  const now = new Date()
-  const currentDay = now.getDay() // 0 = Sunday, 1 = Monday, etc.
-  const currentTime = now.getHours() * 100 + now.getMinutes()
-
-  // Check if shop is open today
-  if (shop.open_days && shop.open_days.length > 0) {
-    // Convert Sunday (0) to 7 for consistency with your schema (1-7 = Mon-Sun)
-    const adjustedDay = currentDay === 0 ? 7 : currentDay
-    if (!shop.open_days.includes(adjustedDay)) {
-      return false
-    }
-  }
-  // Check opening hours
-  if (shop.open_time && shop.close_time) {
-    const openTime = convertTimeToNumber(shop.open_time)
-    const closeTime = convertTimeToNumber(shop.close_time)
-
-    return currentTime >= openTime && currentTime <= closeTime
-  }
-
-  return true // If no hours specified, assume open
-}
 </script>
 
 <template>
@@ -1367,7 +1436,7 @@ const isShopOpenByHours = (shop: any): boolean => {
           clearable
           density="comfortable"
           placeholder="Looking for something?"
-          append-inner-icon="mdi-clouds"
+          append-inner-icon="mdi-magnify"
           @keydown="onSearchKeydown"
           @click:clear="clearSearch"
           @click:append-inner="smartSearch"
@@ -1486,66 +1555,228 @@ const isShopOpenByHours = (shop: any): boolean => {
       </v-alert>
     </v-main>
 
-    <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="380">
-      <v-card>
-        <v-card-title class="d-flex align-center">
-          <span class="text-h6">Shops</span>
+    <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="400">
+      <v-card class="h-100 d-flex flex-column">
+        <!-- Header -->
+        <v-card-title class="d-flex align-center bg-blue-lighten-5">
+          <v-icon color="primary" class="mr-2">mdi-store</v-icon>
+          <span class="text-h6 font-weight-bold">
+            {{ isSearchMode ? 'Search Results' : 'Shops & Products' }}
+          </span>
           <v-spacer></v-spacer>
-          <v-btn icon @click="showShopMenu = false">
+          <v-btn icon @click="showShopMenu = false" variant="text" size="small">
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-card-title>
-        <v-card-text>
-          <v-list>
+
+        <!-- Search Stats -->
+        <v-card-subtitle v-if="isSearchMode && search" class="pt-3 pb-2">
+          <div class="d-flex align-center justify-space-between">
+            <span class="text-caption text-medium-emphasis">
+              Found {{ filteredShops.length }} results for "{{ search }}"
+            </span>
+            <v-btn size="x-small" variant="text" @click="clearSearch" class="text-caption">
+              Clear
+            </v-btn>
+          </div>
+        </v-card-subtitle>
+
+        <!-- Display Mode Toggle -->
+        <v-card-text v-if="!isSearchMode && userCity" class="pt-2 pb-3">
+          <v-btn-group variant="outlined" class="w-100">
+            <v-btn
+              :color="shopDisplayMode === 'within' ? 'primary' : undefined"
+              @click="toggleDisplayMode('within')"
+              size="small"
+              class="flex-grow-1"
+            >
+              <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
+              Within {{ userCity }}
+            </v-btn>
+            <v-btn
+              :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
+              @click="toggleDisplayMode('outside')"
+              size="small"
+              class="flex-grow-1"
+            >
+              <v-icon start size="small">mdi-arrow-expand</v-icon>
+              Outside {{ userCity }}
+            </v-btn>
+          </v-btn-group>
+        </v-card-text>
+
+        <!-- Loading State -->
+        <v-card-text v-if="loading" class="text-center py-8">
+          <v-progress-circular indeterminate color="primary"></v-progress-circular>
+          <div class="text-caption text-medium-emphasis mt-2">Loading shops...</div>
+        </v-card-text>
+
+        <!-- Empty State -->
+        <v-card-text v-else-if="filteredShops.length === 0" class="text-center py-8">
+          <v-icon size="64" color="grey-lighten-1">mdi-store-off-outline</v-icon>
+          <div class="text-h6 text-grey mt-2">No shops found</div>
+          <div class="text-caption text-medium-emphasis mt-1">
+            {{ isSearchMode ? 'Try a different search term' : 'No shops in this area' }}
+          </div>
+        </v-card-text>
+
+        <!-- Shop List -->
+        <v-card-text v-else class="pa-0 flex-grow-1" style="overflow-y: auto">
+          <v-list density="comfortable" class="pa-0">
             <v-list-item
               v-for="(shop, index) in filteredShops"
               :key="shop.id"
               @click="handleShopClick(shop.id, index)"
+              class="mb-2 shop-list-item"
+              :class="{ 
+                'bg-blue-lighten-5': isSearchMode && hasSearchMatch(shop),
+                'selected-shop': selectedShopId === shop.id
+              }"
             >
               <template #prepend>
-                <v-avatar size="48" rounded>
-                  <v-img
-                    :src="shop.logo_url || shop.physical_store || 'https://placehold.co/80x80'"
-                    alt="Shop logo"
-                  />
-                  <v-badge
-                    dot
-                    :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
-                    location="top end"
-                    offset-x="-4"
-                    offset-y="-4"
+                <div class="position-relative">
+                  <v-avatar size="56" rounded class="elevation-1">
+                    <v-img
+                      :src="
+                        shop.logo_url ||
+                        shop.physical_store ||
+                        'https://placehold.co/80x80?text=Shop'
+                      "
+                      :alt="shop.business_name"
+                      cover
+                    />
+                  </v-avatar>
+                  <!-- Status Badge -->
+                  <div
+                    class="status-badge"
+                    :class="isShopCurrentlyOpen(shop) ? 'bg-green' : 'bg-red'"
                   >
-                  </v-badge>
-                </v-avatar>
+                    <v-icon size="12" color="white">
+                      {{ isShopCurrentlyOpen(shop) ? 'mdi-check' : 'mdi-close' }}
+                    </v-icon>
+                  </div>
+                </div>
               </template>
-              <v-list-item-title>
-                {{ shop.business_name }}
+
+              <v-list-item-title class="d-flex align-center mb-1">
+                <span class="font-weight-medium text-body-1">{{ shop.business_name }}</span>
                 <v-chip
                   :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
                   size="x-small"
                   class="ml-2"
+                  density="compact"
                 >
                   {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
                 </v-chip>
+                <v-spacer></v-spacer>
+                <v-icon
+                  v-if="isSearchMode && hasSearchMatch(shop)"
+                  size="16"
+                  color="primary"
+                  title="Search match"
+                >
+                  mdi-magnify
+                </v-icon>
               </v-list-item-title>
-              <v-list-item-subtitle>
-                {{ getFullAddress(shop) }}
-                <br />
-                {{
-                  Number(shop.distanceKm) !== Infinity
-                    ? shop.distanceKm.toFixed(2) + ' km away'
-                    : 'Distance unknown'
-                }}
+
+              <v-list-item-subtitle class="text-caption">
+                <!-- Address -->
+                <div class="d-flex align-center mb-1">
+                  <v-icon size="14" class="mr-1">mdi-map-marker</v-icon>
+                  <span>{{ getFullAddress(shop) }}</span>
+                </div>
+
+                <!-- Distance -->
+                <div class="d-flex align-center mb-1">
+                  <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
+                  <span>
+                    {{
+                      Number(shop.distanceKm) !== Infinity
+                        ? shop.distanceKm.toFixed(1) + ' km away'
+                        : 'Distance unknown'
+                    }}
+                  </span>
+                </div>
+
+                <!-- Matching Products (if in search mode) -->
+                <div
+                  v-if="isSearchMode && getMatchingProducts(shop).length > 0"
+                  class="matching-products mt-1"
+                >
+                  <v-chip
+                    v-for="product in getMatchingProducts(shop).slice(0, 2)"
+                    :key="product.id"
+                    size="x-small"
+                    variant="outlined"
+                    color="primary"
+                    class="mr-1 mb-1"
+                    density="compact"
+                  >
+                    <v-icon start size="12">mdi-package-variant</v-icon>
+                    {{ product.prod_name }}
+                  </v-chip>
+                  <span
+                    v-if="getMatchingProducts(shop).length > 2"
+                    class="text-caption text-medium-emphasis"
+                  >
+                    +{{ getMatchingProducts(shop).length - 2 }} more
+                  </span>
+                </div>
+
+                <!-- Shop Hours -->
+                <div v-if="shop.open_time && shop.close_time" class="d-flex align-center mt-1">
+                  <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+                  <span class="text-caption"> {{ shop.open_time }} - {{ shop.close_time }} </span>
+                </div>
               </v-list-item-subtitle>
+
+              <template #append>
+                <div class="d-flex flex-column align-center gap-1">
+                  <v-btn
+                    icon
+                    variant="text"
+                    size="small"
+                    @click.stop="openShopDetails(shop.id)"
+                    title="View shop details"
+                    color="primary"
+                  >
+                    <v-icon>mdi-information</v-icon>
+                  </v-btn>
+                  <v-btn
+                    icon
+                    variant="text"
+                    size="small"
+                    @click.stop="focusOnShopFromList(shop.id)"
+                    title="Show on map"
+                    color="green"
+                  >
+                    <v-icon>mdi-map-marker</v-icon>
+                  </v-btn>
+                </div>
+              </template>
             </v-list-item>
           </v-list>
         </v-card-text>
+
+        <!-- Footer Actions -->
+        <v-card-actions v-if="filteredShops.length > 0" class="bg-grey-lighten-4">
+          <v-btn
+            variant="text"
+            block
+            @click="recenterToUser"
+            :loading="locating"
+            prepend-icon="mdi-crosshairs-gps"
+          >
+            Recenter Map
+          </v-btn>
+        </v-card-actions>
       </v-card>
     </v-navigation-drawer>
 
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
+
 <style scoped>
 /* Enhanced boundary styles */
 :deep(.city-boundary) {
@@ -1654,14 +1885,15 @@ const isShopOpenByHours = (shop: any): boolean => {
   box-shadow: 0 4px 14px rgba(16, 185, 129, 0.4) !important;
   border: none;
   transition: all 0.3s ease !important;
-  border-radius: 50% !important; /* Make it circular */
+  border-radius: 50% !important;
 }
 
 .search-btn:hover:not(.v-btn--disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
-  border-radius: 50% !important; /* Ensure it stays circular on hover */
+  border-radius: 50% !important;
 }
+
 /* Map Controls - Adjust for safe area */
 .map-controls-container {
   position: absolute;
@@ -1733,7 +1965,7 @@ const isShopOpenByHours = (shop: any): boolean => {
 
 /* Center the content vertically and horizontally */
 .route-info-alert .d-flex {
-  min-height: 32px; /* Ensure consistent height */
+  min-height: 32px;
 }
 .alert-text {
   flex: 1;
@@ -1743,6 +1975,7 @@ const isShopOpenByHours = (shop: any): boolean => {
   align-items: center;
   justify-content: center;
 }
+
 /* Adjust main content area for safe area */
 .v-main {
   position: relative;
@@ -1750,7 +1983,95 @@ const isShopOpenByHours = (shop: any): boolean => {
   padding: 0 !important;
 }
 
-/* Responsive adjustments with safe area support */
+/* Status badge */
+.status-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+/* Matching products section */
+.matching-products {
+  border-left: 3px solid #3b82f6;
+  padding-left: 8px;
+  background-color: #f8fafc;
+  border-radius: 4px;
+  padding: 4px 8px;
+}
+
+/* Enhanced list item hover effects */
+.shop-list-item {
+  transition: all 0.3s ease;
+  border-radius: 8px;
+  margin: 4px 8px;
+  border: 2px solid transparent;
+  cursor: pointer;
+}
+
+.shop-list-item:hover {
+  background-color: #f1f5f9;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  border-color: #e2e8f0;
+}
+
+/* Selected shop style */
+.selected-shop {
+  background-color: #dbeafe !important;
+  border-color: #3b82f6 !important;
+  transform: scale(1.02);
+  box-shadow: 0 6px 20px rgba(59, 130, 246, 0.3) !important;
+}
+
+/* Custom scrollbar for the list */
+.v-card-text::-webkit-scrollbar {
+  width: 6px;
+}
+
+.v-card-text::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.v-card-text::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.v-card-text::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Button animations */
+.v-btn {
+  transition: all 0.3s ease !important;
+}
+
+.v-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Animation for search matches */
+.bg-blue-lighten-5 {
+  transition: all 0.3s ease;
+  animation: highlight-pulse 2s ease-in-out;
+}
+
+@keyframes highlight-pulse {
+  0% { background-color: #f1f5f9; }
+  50% { background-color: #dbeafe; }
+  100% { background-color: #f1f5f9; }
+}
+
+/* Responsive adjustments */
 @media (max-width: 768px) {
   .hero {
     padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-left)) 12px
@@ -1778,7 +2099,6 @@ const isShopOpenByHours = (shop: any): boolean => {
     padding: 6px 12px;
   }
 
-  /* Make the alert content more compact */
   .route-info-alert .v-alert__content {
     padding: 0 !important;
   }
@@ -1786,8 +2106,17 @@ const isShopOpenByHours = (shop: any): boolean => {
   .route-info-alert .d-flex {
     min-height: 58px;
   }
-   .alert-text {
-    font-size: 20px; /* Slightly smaller text on mobile */
+  .alert-text {
+    font-size: 14px;
+  }
+
+  .v-navigation-drawer {
+    width: 100vw !important;
+    max-width: 400px;
+  }
+  
+  .shop-list-item {
+    margin: 2px 4px;
   }
 }
 
