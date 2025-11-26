@@ -434,20 +434,28 @@ onMounted(() => {
 const locationAccuracy = ref('none')
 
 const getLocationStatusColor = (accuracy) => {
-  switch(accuracy) {
-    case 'high': return 'success'
-    case 'medium': return 'warning'
-    case 'cached': return 'info'
-    default: return 'default'
+  switch (accuracy) {
+    case 'high':
+      return 'success'
+    case 'medium':
+      return 'warning'
+    case 'cached':
+      return 'info'
+    default:
+      return 'default'
   }
 }
 
 const getLocationStatusText = (accuracy) => {
-  switch(accuracy) {
-    case 'high': return 'Accurate'
-    case 'medium': return 'Approximate'
-    case 'cached': return 'Last Known'
-    default: return 'No Location'
+  switch (accuracy) {
+    case 'high':
+      return 'Accurate'
+    case 'medium':
+      return 'Approximate'
+    case 'cached':
+      return 'Last Known'
+    default:
+      return 'No Location'
   }
 }
 </script>
@@ -589,7 +597,7 @@ const getLocationStatusText = (accuracy) => {
       </v-btn>
     </div>
 
-    <!-- 🧾 Survey Modal Fullscreen -->
+    <!-- 🧾 Survey Modal Fullscreen - FIXED -->
     <v-dialog
       v-model="showSurvey"
       fullscreen
@@ -599,28 +607,25 @@ const getLocationStatusText = (accuracy) => {
     >
       <v-card class="survey-fullscreen-card">
         <!-- Header -->
-        <v-card-title
-          class="d-flex justify-space-between align-center px-4 py-3"
-          style="background: #3f83c7; color: white"
-        >
-          <span class="text-h6">Customer Feedback Survey</span>
+        <v-toolbar style="background: #3f83c7; color: white" class="survey-toolbar">
+          <v-toolbar-title class="text-h6">Customer Feedback Survey</v-toolbar-title>
           <v-btn icon variant="text" color="white" @click="showSurvey = false">
             <v-icon>mdi-close</v-icon>
           </v-btn>
-        </v-card-title>
+        </v-toolbar>
 
         <!-- Iframe Container -->
-        <v-card-text class="p-0" style="flex: 1; display: flex; overflow: hidden">
+        <div class="iframe-container">
           <iframe
             src="https://docs.google.com/forms/d/e/1FAIpQLScgP_QJBFQNeH42g5DKTkDusG-9EMru1XZUJwfVB02hzDS1Xg/viewform?embedded=true"
-            style="border: 0; width: 100%; height: 100%"
+            class="survey-iframe"
             frameborder="0"
             marginheight="0"
             marginwidth="0"
           >
             Loading…
           </iframe>
-        </v-card-text>
+        </div>
       </v-card>
     </v-dialog>
 
@@ -636,7 +641,6 @@ const getLocationStatusText = (accuracy) => {
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding-top: env(safe-area-inset-top);
   padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
   margin: 0;
   width: 100%;
@@ -703,6 +707,8 @@ const getLocationStatusText = (accuracy) => {
   overflow-x: auto;
   padding: 10px 2px 2px;
   scroll-snap-type: x mandatory;
+  -ms-overflow-style: none; /* IE and Edge */
+  scrollbar-width: none; /* Firefox */
 }
 
 .scroll-row::-webkit-scrollbar {
@@ -720,7 +726,8 @@ const getLocationStatusText = (accuracy) => {
   scroll-snap-align: start;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end; /* push footer to bottom */
+  justify-content: flex-end;
+  cursor: pointer;
 }
 
 .item-img {
@@ -761,19 +768,7 @@ const getLocationStatusText = (accuracy) => {
   flex: 1;
 }
 
-.item-meta {
-  position: absolute;
-  left: 36px;
-  right: 8px;
-  bottom: 6px;
-  color: #fff;
-}
-
-.item-sub {
-  font-size: 10px;
-  opacity: 0.9;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
-}
+/* REMOVED: .item-meta and .item-sub (unused) */
 
 .empty-card {
   width: 240px;
@@ -861,15 +856,117 @@ const getLocationStatusText = (accuracy) => {
   color: #6b7280;
 }
 
-/* ✅ Keep products 2-column layout for small devices (e.g. 350x800) */
+/* Floating Survey */
+.floating-survey-wrapper {
+  position: fixed;
+  bottom: 96px;
+  right: 20px;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.floating-survey-btn {
+  position: relative;
+  border-radius: 50%;
+  background-color: #3f83c7 !important;
+  color: white !important;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+}
+
+.floating-survey-btn:hover {
+  transform: scale(1.05);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+}
+
+/* Survey Hint */
+.survey-hint {
+  background: white;
+  color: #333;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 12px;
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  max-width: 220px;
+  text-align: center;
+  animation: floatUp 0.4s ease-out;
+  position: relative;
+}
+
+.survey-hint::after {
+  content: '';
+  position: absolute;
+  bottom: -6px;
+  right: 26px;
+  border-width: 6px 6px 0 6px;
+  border-style: solid;
+  border-color: white transparent transparent transparent;
+  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
+}
+
+/* Survey Fullscreen */
+.survey-fullscreen-card {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  max-height: 100vh;
+  background: white;
+}
+
+.survey-toolbar {
+  flex: 0 0 auto;
+  padding-top: env(safe-area-inset-top);
+}
+
+.iframe-container {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+.survey-iframe {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  flex: 1;
+}
+
+/* Animations */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.4s;
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+@keyframes floatUp {
+  from {
+    transform: translateY(10px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Responsive Design */
 @media (max-width: 480px) {
   .product-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: repeat(2, 1fr);
     gap: 10px;
-  }
-
-  .product-card {
-    height: auto;
   }
 
   .product-img {
@@ -888,116 +985,12 @@ const getLocationStatusText = (accuracy) => {
     font-size: 11px;
   }
 }
-/* 💬floating survey*/
-.floating-survey-btn {
-  position: fixed;
-  bottom: 96px; /* just above BottomNav */
-  right: 20px;
-  z-index: 200;
-  border-radius: 50%;
-  background-color: #3f83c7 !important;
-  color: white !important;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
-}
 
-.floating-survey-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
-}
 @media (max-width: 600px) {
-  .v-dialog > .v-overlay__content {
-    width: 95% !important;
-    max-width: 95% !important;
-  }
-
-  iframe {
-    height: 400px !important;
-  }
-}
-
-.floating-survey-wrapper {
-  position: fixed;
-  bottom: 96px;
-  right: 20px;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-direction: column;
-  gap: 6px;
-}
-
-/* 💬 Tooltip cloud */
-.survey-hint {
-  background: white;
-  color: #333;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 12px;
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  max-width: 220px;
-  text-align: center;
-  animation: floatUp 0.4s ease-out;
-  position: relative;
-}
-
-/* little pointer triangle */
-.survey-hint::after {
-  content: '';
-  position: absolute;
-  bottom: -6px;
-  right: 26px;
-  border-width: 6px 6px 0 6px;
-  border-style: solid;
-  border-color: white transparent transparent transparent;
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
-}
-
-/* fade animation for transition */
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.4s;
-}
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-/* subtle floating motion */
-@keyframes floatUp {
-  from {
-    transform: translateY(10px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
-/* Make the fullscreen card stretch to full height */
-.survey-fullscreen-card {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-}
-
-/* Optional: smooth fade/slide animation */
-.v-dialog__content {
-  background: rgba(0, 0, 0, 0.4); /* dim background */
-}
-
-/* Mobile adjustments */
-@media (max-width: 600px) {
-  .survey-fullscreen-card v-card-title {
+  .survey-toolbar .v-toolbar-title {
     font-size: 16px;
-    padding: 12px;
   }
 }
 
-
+/* REMOVED: Conflicting iframe height rule and duplicate dialog styles */
 </style>
