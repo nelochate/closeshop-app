@@ -21,7 +21,7 @@ const hasShop = ref(false)
 const sectionItems = ref([]) // Holds items for the selected section
 const isLoadingSection = ref(false)
 
-// Shopee-style navigation items
+// Shopee-style navigation items - UPDATED with correct status mapping
 const navItems = ref([
   {
     id: 'my-purchases',
@@ -30,7 +30,6 @@ const navItems = ref([
     color: '#354d7c',
     count: 0,
   },
-  
   {
     id: 'to-receive',
     title: 'To Receive & Pay',
@@ -38,7 +37,7 @@ const navItems = ref([
     color: '#354d7c',
     count: 0
   },
-    {
+  {
     id: 'reviews',
     title: 'To Review',
     icon: 'mdi-star-outline',
@@ -60,13 +59,12 @@ const navItems = ref([
     count: 0,
   },
   {
-    id: 'Failed',
-    title: 'Failed transactions (unpaid or rejected)',
-    icon: 'mdi-close-circle-outline',
+    id: 'failed',
+    title: 'Failed Transactions',
+    icon: 'mdi-alert-circle-outline',
     color: '#354d7c',
     count: 0,
   },
-
 ])
 
 const selectedSection = ref('my-purchases')
@@ -113,14 +111,14 @@ const checkUserShop = async () => {
   }
 }
 
-// Load order counts for each section
+// FIXED: Load order counts for each section with correct status mapping
 const loadOrderCounts = async () => {
   if (!user.value?.id) return
 
   try {
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('status, id')
+      .select('status, payment_status, delivery_status, id')
       .eq('user_id', user.value.id)
 
     if (error) {
@@ -128,31 +126,55 @@ const loadOrderCounts = async () => {
       return
     }
 
+    console.log('📊 All orders for counts:', orders)
+
     navItems.value = navItems.value.map((item) => {
       let count = 0
       switch (item.id) {
-        case 'to-pay':
-          count = orders.filter((o) => o.status === 'pending').length
-          break
-        case 'to-ship':
-          count = orders.filter((o) => o.status === 'paid').length
+        case 'my-purchases':
+          count = orders.length
           break
         case 'to-receive':
-          count = orders.filter((o) => o.status === 'shipped').length
-          break
-        case 'completed':
-          count = orders.filter((o) => o.status === 'delivered').length
-          break
-        case 'cancelled':
-          count = orders.filter((o) => o.status === 'cancelled').length
+          // Orders that are paid but not delivered yet
+          count = orders.filter((o) =>
+            o.payment_status === 'paid' &&
+            o.delivery_status !== 'delivered' &&
+            o.status !== 'cancelled'
+          ).length
           break
         case 'reviews':
-          // Count orders that are delivered but not reviewed yet
-          count = orders.filter((o) => o.status === 'delivered').length // can refine later
+          // Orders that are delivered but not reviewed (you might need a reviews table to check this)
+          count = orders.filter((o) =>
+            o.delivery_status === 'delivered' &&
+            o.status !== 'cancelled'
+          ).length
+          break
+        case 'completed':
+          // Orders that are both paid and delivered
+          count = orders.filter((o) =>
+            o.payment_status === 'paid' &&
+            o.delivery_status === 'delivered'
+          ).length
+          break
+        case 'cancelled':
+          // Orders that are cancelled
+          count = orders.filter((o) =>
+            o.status === 'cancelled' ||
+            o.payment_status === 'cancelled'
+          ).length
+          break
+        case 'failed':
+          // Failed transactions (unpaid, rejected, or failed payments)
+          count = orders.filter((o) =>
+            o.payment_status === 'failed' ||
+            o.status === 'failed' ||
+            (o.payment_status === 'pending' && o.status !== 'cancelled')
+          ).length
           break
         default:
-          count = orders.length
+          count = 0
       }
+      console.log(`🔢 ${item.title} count:`, count)
       return { ...item, count }
     })
   } catch (err) {
@@ -166,11 +188,158 @@ const handleNavClick = async (itemId) => {
   await loadSectionItems(itemId)
 }
 
+// FIXED: Load items for the selected section with correct filtering
+const loadSectionItems = async (sectionId) => {
+  if (!user.value?.id) return
+  isLoadingSection.value = true
+
+  try {
+    let query = supabase
+      .from('orders')
+      .select(
+        `
+        id,
+        status,
+        payment_status,
+        delivery_status,
+        total_amount,
+        created_at,
+        transaction_number,
+        order_items (
+          id,
+          product_id,
+          quantity,
+          price,
+          selected_size,
+          selected_variety,
+          products (
+            id,
+            prod_name,
+            main_img_urls
+          )
+        )
+      `,
+      )
+      .eq('user_id', user.value.id)
+
+    // Apply filters based on section
+    switch (sectionId) {
+      case 'to-receive':
+        query = query
+          .eq('payment_status', 'paid')
+          .neq('delivery_status', 'delivered')
+          .neq('status', 'cancelled')
+        break
+      case 'reviews':
+        query = query
+          .eq('delivery_status', 'delivered')
+          .neq('status', 'cancelled')
+        break
+      case 'completed':
+        query = query
+          .eq('payment_status', 'paid')
+          .eq('delivery_status', 'delivered')
+        break
+      case 'cancelled':
+        query = query.or('status.eq.cancelled,payment_status.eq.cancelled')
+        break
+      case 'failed':
+        query = query.or('payment_status.eq.failed,status.eq.failed')
+        break
+      case 'my-purchases':
+      default:
+        // Show all orders for my purchases
+        break
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false })
+
+    if (error) {
+      console.error('Error loading section items:', error)
+      sectionItems.value = []
+    } else {
+      console.log(`📦 ${sectionId} items:`, data)
+
+      // Enhanced order data structure
+      sectionItems.value = data.map((order) => ({
+        id: order.id,
+        transaction_number: order.transaction_number,
+        status: order.status,
+        payment_status: order.payment_status,
+        delivery_status: order.delivery_status,
+        total_amount: order.total_amount,
+        created_at: order.created_at,
+        items: order.order_items.map((item) => ({
+          id: item.id,
+          product_id: item.product_id,
+          quantity: item.quantity,
+          price: item.price,
+          product_name: item.products?.prod_name,
+          product_img: Array.isArray(item.products?.main_img_urls)
+            ? item.products.main_img_urls[0]
+            : item.products?.main_img_urls || null,
+          selected_size: item.selected_size,
+          selected_variety: item.selected_variety,
+        }))
+      }))
+    }
+  } catch (err) {
+    console.error('Error fetching section items:', err)
+    sectionItems.value = []
+  } finally {
+    isLoadingSection.value = false
+  }
+}
+
+// Helper function to get status color
+const getStatusColor = (order) => {
+  if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
+  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'success'
+  if (order.payment_status === 'paid') return 'primary'
+  if (order.payment_status === 'pending') return 'warning'
+  if (order.payment_status === 'failed') return 'error'
+  return 'grey'
+}
+
+// Helper function to get status text
+const getStatusText = (order) => {
+  if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
+  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'Completed'
+  if (order.payment_status === 'paid') return 'Appproved - To Receive'
+  if (order.payment_status === 'pending') return 'Pending Payment Method'
+  if (order.payment_status === 'failed') return 'Failed'
+  return 'Processing'
+}
+
+// Format date
+const formatDate = (dateString) => {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
+// View product function
+const viewProduct = (productId) => {
+  if (productId) {
+    router.push(`/viewproduct/${productId}`)
+  }
+}
+
+// View order details function
+const viewOrder = (orderId) => {
+  if (orderId) {
+    router.push(`/orderdetails/${orderId}`)
+  }
+}
+
 // Run when component mounts
 onMounted(async () => {
   await loadUser()
   await checkUserShop()
   await loadOrderCounts()
+  await loadSectionItems(selectedSection.value)
 })
 
 // Watch for user changes → re-check shop ownership
@@ -180,6 +349,7 @@ watch(
     if (newId) {
       await checkUserShop()
       await loadOrderCounts()
+      await loadSectionItems(selectedSection.value)
     }
   },
 )
@@ -223,121 +393,22 @@ const goShopOrBuild = () => {
     router.push('/shop-build')
   }
 }
-
-// Load items for the selected section
-const loadSectionItems = async (sectionId) => {
-  if (!user.value?.id) return
-  isLoadingSection.value = true
-
-  try {
-    let query = supabase
-      .from('orders')
-      .select(
-        `
-        id,
-        status,
-        total_amount,
-        created_at,
-        order_items (
-          id,
-          product_id,
-          quantity,
-          price,
-          selected_size,
-          selected_variety,
-          products (
-            id,
-            prod_name,
-            main_img_urls
-          )
-        )
-      `,
-      )
-      .eq('user_id', user.value.id)
-
-    switch (sectionId) {
-      case 'to-pay':
-        query = query.eq('status', 'pending')
-        break
-      case 'to-ship':
-        query = query.eq('status', 'paid')
-        break
-      case 'to-receive':
-        query = query.eq('status', 'shipped')
-        break
-      case 'completed':
-        query = query.eq('status', 'delivered')
-        break
-      case 'cancelled':
-        query = query.eq('status', 'cancelled')
-        break
-      case 'reviews':
-        query = query.eq('status', 'delivered')
-        break
-      case 'my-purchases':
-      default:
-        break
-    }
-
-    const { data, error } = await query.order('created_at', { ascending: false })
-
-    if (error) {
-      console.error('Error loading section items:', error)
-      sectionItems.value = []
-    } else {
-      // Flatten order_items for display - INCLUDING PRODUCT ID
-      sectionItems.value = data.flatMap((order) =>
-        order.order_items.map((item) => ({
-          id: item.id,
-          order_id: order.id,
-          product_id: item.product_id, // Add product_id here
-          status: order.status,
-          quantity: item.quantity,
-          price: item.price,
-          product_name: item.products?.prod_name,
-          product_img: item.products?.main_img_urls?.[0] || null,
-          selected_size: item.selected_size,
-          selected_variety: item.selected_variety,
-        })),
-      )
-    }
-  } catch (err) {
-    console.error('Error fetching section items:', err)
-    sectionItems.value = []
-  } finally {
-    isLoadingSection.value = false
-  }
-}
-
-// View product function
-const viewProduct = (productId) => {
-  if (productId) {
-    router.push(`/viewproduct/${productId}`)
-  }
-}
-
-// View order details function (if you want to keep this too)
-const viewOrder = (orderId) => {
-  if (orderId) {
-    router.push(`/orderdetails/${orderId}`)
-  }
-}
 </script>
 
 <template>
   <v-app>
     <!-- Main Profile Content -->
-    <v-main>
+    <v-main class="profile-main">
       <!-- Shop Button - Top Left -->
       <div class="shop-btn-container">
-        <v-btn @click="goShopOrBuild" class="shop-btn" size="large">
+        <v-btn @click="goShopOrBuild" class="shop-btn" size="large" elevation="2">
           <v-icon start size="25">mdi-storefront-outline</v-icon>
-          {{ hasShop ? 'View Shop' : 'Create Shop' }}
+          {{ hasShop ? 'My Shop' : 'Create Shop' }}
         </v-btn>
       </div>
 
       <!-- Settings Icon - Top Right -->
-      <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
+      <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')" elevation="1">
         <v-icon size="29">mdi-cog-outline</v-icon>
       </v-btn>
 
@@ -345,9 +416,9 @@ const viewOrder = (orderId) => {
       <div class="profile-header">
         <div class="profile-inline">
           <div class="avatar-container">
-            <v-avatar size="80" color="grey-lighten-3">
+            <v-avatar size="80" color="grey-lighten-3" class="avatar-glow">
               <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-              <v-icon v-else size="40">mdi-account</v-icon>
+              <v-icon v-else size="40" color="white">mdi-account</v-icon>
             </v-avatar>
             <v-btn
               class="edit-btn"
@@ -370,7 +441,7 @@ const viewOrder = (orderId) => {
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
-      <!-- Shopee-style Icon Navigation -->
+      <!-- Enhanced Shopee-style Icon Navigation -->
       <div class="shopee-nav-section">
         <div class="nav-grid">
           <div
@@ -381,9 +452,11 @@ const viewOrder = (orderId) => {
             @click="handleNavClick(item.id)"
           >
             <div class="nav-icon-container">
-              <v-icon :color="selectedSection === item.id ? item.color : '#757575'" size="28">
-                {{ item.icon }}
-              </v-icon>
+              <div class="nav-icon-wrapper" :class="{ active: selectedSection === item.id }">
+                <v-icon :color="selectedSection === item.id ? 'white' : item.color" size="24">
+                  {{ item.icon }}
+                </v-icon>
+              </div>
               <div v-if="item.count > 0" class="badge">
                 {{ item.count > 99 ? '99+' : item.count }}
               </div>
@@ -393,80 +466,131 @@ const viewOrder = (orderId) => {
         </div>
       </div>
 
-      <!-- Content Section -->
+      <!-- Enhanced Content Section -->
       <div class="content-section">
         <v-expand-transition>
-          <div v-if="isLoadingSection" class="section-content">
-            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+          <div v-if="isLoadingSection" class="section-loading">
+            <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
+            <p class="loading-text">Loading your orders...</p>
           </div>
 
           <div v-else class="section-content">
-            <v-row v-if="sectionItems.length > 0" dense>
-              <v-col v-for="order in sectionItems" :key="order.id" cols="12" sm="6" md="4">
-                <v-card outlined class="order-card">
-                  <v-img 
-                    v-if="order.product_img" 
-                    :src="order.product_img" 
-                    height="150px" 
-                    cover 
-                    style="cursor: pointer;"
-                    @click="viewProduct(order.product_id)"
-                  />
-                  <v-card-title>{{ order.product_name || 'Product' }}</v-card-title>
-                  <v-card-subtitle>
-                    <v-chip small :color="
-                      order.status === 'completed' ? 'success' :
-                      order.status === 'cancelled' ? 'error' :
-                      order.status === 'pending' ? 'warning' :
-                      'primary'
-                    ">
-                      {{ order.status }}
-                    </v-chip>
-                  </v-card-subtitle>
-                  <v-card-text>
-                    <div><strong>Quantity:</strong> {{ order.quantity }}</div>
-                    <div><strong>Price:</strong> ₱{{ order.price }}</div>
-                    <div v-if="order.selected_size"><strong>Size:</strong> {{ order.selected_size }}</div>
-                    <div v-if="order.selected_variety"><strong>Variety:</strong> {{ order.selected_variety }}</div>
-                  </v-card-text>
-                  <v-card-actions>
-                    <!-- View Product Button -->
-                    <v-btn 
-                      color="primary" 
-                      variant="outlined" 
+            <!-- Enhanced Order Cards -->
+            <div v-if="sectionItems.length > 0" class="orders-container">
+              <v-card
+                v-for="order in sectionItems"
+                :key="order.id"
+                class="order-card elevation-2"
+                rounded="lg"
+              >
+                <v-card-title class="order-header">
+                  <div class="order-info">
+                    <div class="order-number">Order #{{ order.transaction_number }}</div>
+                    <div class="order-date">{{ formatDate(order.created_at) }}</div>
+                  </div>
+                  <v-chip :color="getStatusColor(order)" variant="flat" size="small">
+                    {{ getStatusText(order) }}
+                  </v-chip>
+                </v-card-title>
+
+                <v-divider></v-divider>
+
+                <!-- Order Items -->
+                <div class="order-items">
+                  <div
+                    v-for="item in order.items"
+                    :key="item.id"
+                    class="order-item"
+                  >
+                    <v-img
+                      :src="item.product_img || '/placeholder-product.png'"
+                      height="80"
+                      width="80"
+                      cover
+                      class="product-image"
+                      @click="viewProduct(item.product_id)"
+                    />
+                    <div class="item-details">
+                      <h4 class="product-name" @click="viewProduct(item.product_id)">
+                        {{ item.product_name || 'Product' }}
+                      </h4>
+                      <div class="item-specs">
+                        <span class="quantity">Qty: {{ item.quantity }}</span>
+                        <span class="price">₱{{ item.price?.toLocaleString() }}</span>
+                      </div>
+                      <div v-if="item.selected_size || item.selected_variety" class="variants">
+                        <v-chip v-if="item.selected_size" size="x-small" class="mr-1">
+                          {{ item.selected_size }}
+                        </v-chip>
+                        <v-chip v-if="item.selected_variety" size="x-small">
+                          {{ item.selected_variety }}
+                        </v-chip>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <v-divider></v-divider>
+
+                <v-card-actions class="order-actions">
+                  <div class="order-total">
+                    <strong>Total: ₱{{ order.total_amount?.toLocaleString() }}</strong>
+                  </div>
+                  <div class="action-buttons">
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
                       size="small"
-                      @click="viewProduct(order.product_id)"
-                    >
-                      <v-icon left small>mdi-eye</v-icon>
-                      View Product
-                    </v-btn>
-                    
-                    <!-- View Order Button (optional) -->
-                    <v-btn 
-                      color="secondary" 
-                      variant="text" 
-                      size="small"
-                      @click="viewOrder(order.order_id)"
+                      @click="viewOrder(order.id)"
                     >
                       <v-icon left small>mdi-receipt</v-icon>
-                      Order Details
+                      Details
                     </v-btn>
-                  </v-card-actions>
-                </v-card>
-              </v-col>
-            </v-row>
+                    <v-btn
+                      v-if="order.payment_status === 'paid' && order.delivery_status !== 'delivered'"
+                      color="success"
+                      variant="flat"
+                      size="small"
+                    >
+                      <v-icon left small>mdi-truck</v-icon>
+                      Track
+                    </v-btn>
+                    <v-btn
+                      v-if="order.delivery_status === 'delivered'"
+                      color="secondary"
+                      variant="flat"
+                      size="small"
+                    >
+                      <v-icon left small>mdi-star</v-icon>
+                      Review
+                    </v-btn>
+                  </div>
+                </v-card-actions>
+              </v-card>
+            </div>
 
+            <!-- Enhanced Empty State -->
             <div v-else class="empty-state">
-              <v-icon size="64" color="grey-lighten-1">mdi-cart-off</v-icon>
-              <p class="empty-text">No items in this section</p>
+              <div class="empty-icon">
+                <v-icon size="80" color="grey-lighten-2">mdi-cart-off</v-icon>
+              </div>
+              <h3 class="empty-title">No orders found</h3>
+              <p class="empty-text">
+                {{
+                  selectedSection === 'my-purchases'
+                    ? "You haven't made any purchases yet."
+                    : `No ${selectedSection.replace('-', ' ')} orders.`
+                }}
+              </p>
 
-              <!-- Show Start Shopping button only for My Purchases -->
               <v-btn
                 v-if="selectedSection === 'my-purchases'"
                 color="primary"
-                class="mt-4"
+                class="empty-action-btn"
                 @click="router.push('/')"
+                size="large"
               >
+                <v-icon left>mdi-shopping</v-icon>
                 Start Shopping
               </v-btn>
             </div>
@@ -479,10 +603,15 @@ const viewOrder = (orderId) => {
     <BottomNav v-model="activeTab" />
   </v-app>
 </template>
+
 <style scoped>
 /* Global font style */
 :root {
   font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
+}
+
+.profile-main {
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
 }
 
 /* Shop Button Container - Top Left */
@@ -498,36 +627,33 @@ const viewOrder = (orderId) => {
   text-transform: none;
   border-top-right-radius: 20px;
   border-bottom-right-radius: 20px;
-  box-shadow: 0 4px 12px rgba(23, 101, 179, 0.3);
   transition: all 0.3s ease;
   background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
   color: #464749 !important;
   font-weight: 600;
   font-size: 0.95rem;
-  border: 2px solid #5e6e7e;
   padding: 8px 20px;
-  height: 35px !important;
+  height: 38px !important;
   margin-left: -14px;
   max-width: 200px;
+  margin-top: 15px !important;
 }
 
 /* Settings Button - Top Right */
 .settings-btn {
-  padding-top: 25px;
+  margin-top: 25px;
   position: absolute;
   top: 20px;
   right: 16px;
   z-index: 1200;
   color: #ffffff;
-  border-radius: 50%;
-  width: 48px;
-  height: 48px;
+  width: 40px;
+  height: 40px;
 }
 
 /* Profile Header */
 .profile-header {
-  padding-top: 80px !important;
-  padding-bottom: 30px !important;
+  padding: 100px 24px 30px !important;
   display: flex;
   align-items: flex-start;
   gap: 20px;
@@ -536,13 +662,25 @@ const viewOrder = (orderId) => {
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   color: #fff;
   margin-top: 0px !important;
-  border-bottom-left-radius: 20px;
+  border-bottom-left-radius: 24px;
+}
+
+.profile-inline{
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  flex-wrap: nowrap;
+  margin-top: 15px;
 }
 
 .avatar-container {
   position: relative;
   display: inline-block;
   flex-shrink: 0;
+}
+
+.avatar-glow {
+  box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
 }
 
 .edit-btn {
@@ -553,10 +691,14 @@ const viewOrder = (orderId) => {
   border: 2px solid white;
   border-radius: 50%;
   transition: all 0.25s ease-in-out;
-  width: 25px !important;
-  height: 25px !important;
-  background-color: #5ca3eb;
+  width: 28px !important;
+  height: 28px !important;
+  background: linear-gradient(135deg, #5ca3eb, #354d7c);
   color: white;
+}
+
+.edit-btn:hover {
+  transform: translate(30%, 30%) scale(1.1);
 }
 
 .edit-icon {
@@ -566,46 +708,52 @@ const viewOrder = (orderId) => {
 .profile-inline {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 20px;
   flex-wrap: nowrap;
 }
 
 .info-block {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
   flex: 1 1 auto;
 }
 
 .name-row {
   margin: 0;
-  font-size: 1.6rem;
-  font-weight: 200;
+  font-size: 1.8rem;
+  font-weight: 600;
   letter-spacing: 0.3px;
   color: #fff;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  text-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
 }
 
 .email-row {
   margin: 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
   color: #e0e7ef;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Shopee-style Navigation */
+/* Enhanced Shopee-style Navigation */
 .shopee-nav-section {
-  padding: 16px;
+  padding: 24px 16px;
   background: white;
+  border-radius: 16px;
+  margin: -20px 16px 0;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  position: relative;
+  z-index: 10;
 }
 
 .nav-grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(3, 1fr);
   gap: 16px;
 }
 
@@ -613,20 +761,24 @@ const viewOrder = (orderId) => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
-  padding: 12px 8px;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 16px 8px;
+  border-radius: 12px;
   cursor: pointer;
   transition: all 0.3s ease;
   position: relative;
+  background: #f8fafc;
 }
 
 .nav-item:hover {
-  background-color: #f8f9fa;
+  background-color: #e3f2fd;
+  transform: translateY(-2px);
 }
 
 .nav-item.active {
-  background-color: #fff2f0;
+  background: linear-gradient(135deg, #354d7c, #5276b0);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(53, 77, 124, 0.3);
 }
 
 .nav-icon-container {
@@ -634,83 +786,257 @@ const viewOrder = (orderId) => {
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.nav-icon-wrapper {
   width: 48px;
   height: 48px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #e3f2fd;
+  transition: all 0.3s ease;
+}
+
+.nav-item.active .nav-icon-wrapper {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
-  background: #354d7c !important;
+  top: -8px;
+  right: -8px;
+  background: linear-gradient(135deg, #ff4757, #ff3742) !important;
   color: white;
   border-radius: 10px;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 600;
-  min-width: 18px;
+  padding: 4px 8px;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 20px;
   text-align: center;
   line-height: 1;
+  border: 2px solid white;
 }
 
 .nav-title {
-  font-size: 0.75rem;
-  font-weight: 500;
+  font-size: 0.8rem;
+  font-weight: 600;
   text-align: center;
-  color: #333;
+  color: #666;
   line-height: 1.2;
 }
 
 .nav-item.active .nav-title {
-  color: #354d7c !important;
-  font-weight: 600;
+  color: white !important;
+  font-weight: 700;
 }
 
-/* Content Section */
+/* Enhanced Content Section */
 .content-section {
-  padding: 16px;
-  min-height: 300px;
+  padding: 24px 16px;
+  min-height: 400px;
 }
 
-.section-content {
-  width: 100%;
-}
-
-.empty-state {
+.section-loading {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   padding: 60px 20px;
   text-align: center;
-  color: #757575;
+}
+
+.loading-text {
+  margin-top: 16px;
+  color: #666;
+  font-size: 1rem;
+}
+
+/* Enhanced Order Cards */
+.orders-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.order-card {
+  border: 1px solid #e0e0e0;
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+
+.order-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  border-color: #354d7c;
+}
+
+.order-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 16px 20px;
+  background: #f8fafc;
+}
+
+.order-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.order-number {
+  font-weight: 700;
+  color: #354d7c;
+  font-size: 1rem;
+}
+
+.order-date {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.order-items {
+  padding: 16px 20px;
+}
+
+.order-item {
+  display: flex;
+  gap: 16px;
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.order-item:last-child {
+  border-bottom: none;
+}
+
+.product-image {
+  border-radius: 8px;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.product-image:hover {
+  transform: scale(1.05);
+}
+
+.item-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.product-name {
+  font-weight: 600;
+  color: #333;
+  cursor: pointer;
+  transition: color 0.2s ease;
+  margin: 0;
+  font-size: 1rem;
+}
+
+.product-name:hover {
+  color: #354d7c;
+}
+
+.item-specs {
+  display: flex;
+  gap: 16px;
+  font-size: 0.9rem;
+  color: #666;
+}
+
+.variants {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.order-actions {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  background: #fafafa;
+}
+
+.order-total {
+  font-size: 1.1rem;
+  color: #354d7c;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Enhanced Empty State */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 80px 20px;
+  text-align: center;
+}
+
+.empty-icon {
+  margin-bottom: 24px;
+}
+
+.empty-title {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 12px;
 }
 
 .empty-text {
-  margin: 16px 0;
   font-size: 1rem;
-  color: #999;
+  color: #666;
+  margin-bottom: 24px;
+  max-width: 300px;
+}
+
+.empty-action-btn {
+  border-radius: 12px;
+  padding: 12px 32px;
+  font-weight: 600;
 }
 
 /* Responsive styles */
 @media (max-width: 1024px) {
-  .shop-btn {
-    font-size: 0.9rem;
-    padding: 6px 18px;
-    height: 44px;
-  }
-
-  .settings-btn {
-    width: 44px;
-    height: 44px;
-  }
-
-  .name-row {
-    font-size: 1.4rem;
+  .nav-grid {
+    grid-template-columns: repeat(3, 1fr);
   }
 }
 
 @media (max-width: 768px) {
+  .profile-header {
+    padding: 90px 20px 24px !important;
+  }
+
+  .nav-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 12px;
+  }
+
+  .order-actions {
+    flex-direction: column;
+    gap: 16px;
+    align-items: stretch;
+  }
+
+  .action-buttons {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 600px) {
   .shop-btn-container {
     top: 16px;
     left: 12px;
@@ -722,144 +1048,97 @@ const viewOrder = (orderId) => {
   }
 
   .profile-header {
-    padding: 70px 18px 18px 18px;
+    padding: 80px 16px 20px !important;
+    border-bottom-left-radius: 20px;
+    border-bottom-right-radius: 20px;
+  }
+
+  .profile-inline {
     gap: 16px;
-    margin-top: 15px;
+  }
+
+  .name-row {
+    font-size: 1.4rem;
+  }
+
+  .email-row {
+    font-size: 0.9rem;
+  }
+
+  .shopee-nav-section {
+    margin: -16px 12px 0;
+    padding: 20px 12px;
   }
 
   .nav-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 12px;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
   }
 
   .nav-item {
-    padding: 10px 6px;
+    padding: 12px 6px;
+    gap: 8px;
   }
 
-  .nav-icon-container {
-    width: 42px;
-    height: 42px;
+  .nav-icon-wrapper {
+    width: 40px;
+    height: 40px;
   }
 
   .nav-title {
     font-size: 0.7rem;
   }
-}
 
-@media (max-width: 600px) {
-  .shop-btn-container {
-    top: 12px;
-    left: 8px;
+  .content-section {
+    padding: 20px 12px;
   }
 
-  .settings-btn {
-    top: 12px;
-    right: 8px;
-    width: 40px;
-    height: 40px;
-  }
-
-  .profile-header {
-    padding: 60px 16px 16px 16px;
+  .order-header {
     flex-direction: column;
     gap: 12px;
-    margin-top: 10px;
-  }
-
-  .shop-btn {
-    font-size: 0.8rem;
-    padding: 4px 14px;
-    height: 36px;
-    min-width: 120px;
-  }
-
-  .name-row {
-    font-size: 1.1rem;
-  }
-
-  .email-row {
-    font-size: 0.85rem;
-  }
-
-  .nav-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 8px;
-  }
-
-  .nav-item {
-    padding: 8px 4px;
-  }
-
-  .nav-icon-container {
-    width: 36px;
-    height: 36px;
-  }
-
-  .nav-title {
-    font-size: 0.65rem;
-  }
-
-  .badge {
-    font-size: 9px;
-    padding: 1px 4px;
-    min-width: 16px;
+    align-items: flex-start;
   }
 }
 
 @media (max-width: 380px) {
   .nav-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 6px;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .nav-title {
-    font-size: 0.6rem;
+    font-size: 0.65rem;
   }
 }
 
-/* Animation for buttons and nav items */
-.shop-btn,
-.settings-btn,
-.edit-btn,
-.nav-item {
+/* Animation enhancements */
+.v-avatar,
+.v-btn,
+.nav-item,
+.order-card {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-/* Ensure proper spacing for main content */
-.v-main {
-  position: relative;
+/* Custom scrollbar for orders container */
+.orders-container {
+  scrollbar-width: thin;
+  scrollbar-color: #c1c1c1 #f1f1f1;
 }
 
-/* Additional styles for the order cards */
-.order-card {
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+.orders-container::-webkit-scrollbar {
+  width: 6px;
 }
 
-.order-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+.orders-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 10px;
 }
 
-.v-card-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+.orders-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 10px;
 }
 
-.v-card-actions .v-btn {
-  flex: 1;
-  min-width: 120px;
+.orders-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
 }
-
-/* Responsive adjustments for buttons */
-@media (max-width: 600px) {
-  .v-card-actions {
-    flex-direction: column;
-  }
-  
-  .v-card-actions .v-btn {
-    width: 100%;
-  }
-}
-
 </style>

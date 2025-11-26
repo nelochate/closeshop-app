@@ -553,8 +553,8 @@ const getLocationStatusText = (accuracy) => {
             </v-btn>
 
             <!-- Badge -->
-            <div 
-              v-if="unreadNotifications > 0" 
+            <div
+              v-if="unreadNotifications > 0"
               class="notification-badge"
               :class="{ 'badge-large': unreadNotifications > 9 }"
             >
@@ -563,7 +563,7 @@ const getLocationStatusText = (accuracy) => {
           </div>
         </div>
       </v-sheet>
-      
+
       <!-- ... rest of your template remains the same ... -->
       <v-container class="py-4" style="max-width: 720px">
         <!-- 🏬 Nearby Stores -->
@@ -654,7 +654,7 @@ const getLocationStatusText = (accuracy) => {
         </v-alert>
       </v-container>
     </v-main>
-    
+
     <!-- ... survey and bottom nav remain the same ... -->
     <div v-if="!hasAnsweredSurvey" class="floating-survey-wrapper">
       <transition name="fade">
@@ -723,6 +723,7 @@ const getLocationStatusText = (accuracy) => {
   position: sticky;
   top: 0;
   z-index: 10;
+  padding-bottom: 18px;
 }
 
 .hero-row {
