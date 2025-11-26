@@ -40,12 +40,60 @@ onMounted(async () => {
   await initializePage()
 })
 
+// 🎫 GENERATE TRANSACTION NUMBER (BASE FUNCTION)
+const generateTransactionNumber = () => {
+  const timestamp = Date.now().toString(36)
+  const random1 = Math.floor(Math.random() * 1e6)
+    .toString(36)
+    .padStart(5, '0')
+  const random2 = Math.floor(Math.random() * 1e6)
+    .toString(36)
+    .padStart(5, '0')
+  return `TX-${timestamp}-${random1}-${random2}`.toUpperCase()
+}
+
+// 🎫 GENERATE UNIQUE TRANSACTION NUMBER
+const generateUniqueTransactionNumber = async (): Promise<string> => {
+  let attempts = 0
+  const maxAttempts = 5
+
+  while (attempts < maxAttempts) {
+    const candidate = generateTransactionNumber()
+
+    // Check if this transaction number already exists
+    const { data: existingOrder, error } = await supabase
+      .from('orders')
+      .select('transaction_number')
+      .eq('transaction_number', candidate)
+      .maybeSingle()
+
+    if (error) {
+      console.warn('⚠️ Error checking transaction number:', error)
+      // If there's an error, we'll use the candidate anyway
+      return candidate
+    }
+
+    if (!existingOrder) {
+      // Transaction number is unique
+      return candidate
+    }
+
+    attempts++
+    console.log(`🔄 Transaction number ${candidate} exists, generating new one...`)
+  }
+
+  // Fallback: add more randomness after max attempts
+  return generateTransactionNumber() + '-' + Math.random().toString(36).substring(2, 4)
+}
+
 // 🔄 INITIALIZE PAGE
 const initializePage = async () => {
   console.log('🚀 Initializing purchase page...')
 
-  // Generate transaction number first
-  transactionNumber.value = generateTransactionNumber()
+  // Generate unique transaction number
+  if (!transactionNumber.value) {
+    transactionNumber.value = await generateUniqueTransactionNumber()
+  }
 
   // Load items
   await loadItems()
@@ -71,18 +119,34 @@ const loadItems = async () => {
   console.log('📍 Route params:', route.params)
   console.log('📍 Route query:', route.query)
 
-  // Method 1: Navigation state (from Buy Now)
+  // Method 1: Navigation state (from Buy Now) - IMPROVED
   if (history.state?.items && history.state.items.length > 0) {
     console.log('📦 Items found in navigation state')
     items.value = history.state.items.map((item) => ({
       ...item,
       product_id: item.product_id || item.id,
       quantity: item.quantity || 1,
+      // Preserve variety data from navigation state
+      selectedSize: item.size || item.selectedSize,
+      selectedVariety: item.variety || item.selectedVariety,
+      varietyData:
+        item.varietyData ||
+        (item.variety
+          ? {
+              name: item.variety,
+              price: item.varietyPrice || item.price,
+            }
+          : null),
+      // Ensure price uses variety price if available
+      price: item.varietyPrice || item.price,
     }))
     fromCart.value = history.state.fromCart || false
+
+    console.log('✅ Items processed from navigation state:', items.value)
     return
   }
 
+  // Rest of your existing loadItems code...
   // Method 2: Product ID from route params (direct link)
   if (route.params.id) {
     console.log('🛍️ Fetching product from route ID:', route.params.id)
@@ -101,8 +165,7 @@ const loadItems = async () => {
   console.log('🛒 Falling back to cart items')
   await fetchCartItems()
 }
-
-// 🛍️ FETCH SINGLE PRODUCT
+// 🛍️ FETCH SINGLE PRODUCT (with varieties support)
 const fetchProductFromId = async (productId: string) => {
   try {
     console.log('📡 Fetching product details for:', productId)
@@ -129,6 +192,31 @@ const fetchProductFromId = async (productId: string) => {
       return
     }
 
+    // Check if we have variety selection from route query
+    const selectedVariety = route.query.variety as string
+    const selectedSize = route.query.size as string
+    let finalPrice = product.price
+    let itemName = product.prod_name
+    let varietyData = null
+
+    // If variety is selected, find it in the varieties JSONB
+    if (selectedVariety && product.varieties) {
+      try {
+        const varieties = Array.isArray(product.varieties)
+          ? product.varieties
+          : JSON.parse(product.varieties)
+
+        const variety = varieties.find((v: any) => v.name === selectedVariety)
+        if (variety) {
+          finalPrice = variety.price || product.price
+          itemName = `${product.prod_name} - ${variety.name}`
+          varietyData = variety
+        }
+      } catch (parseError) {
+        console.warn('⚠️ Error parsing varieties:', parseError)
+      }
+    }
+
     // Transform product to item format
     const mainImage = getMainImage(product.main_img_urls)
 
@@ -136,11 +224,13 @@ const fetchProductFromId = async (productId: string) => {
       {
         id: product.id,
         product_id: product.id,
-        name: product.prod_name,
-        price: product.price,
+        name: itemName,
+        price: finalPrice,
+        varietyPrice: finalPrice, // Store separately for reference
         quantity: 1,
-        size: null,
-        variety: null,
+        selectedSize: selectedSize,
+        selectedVariety: selectedVariety,
+        varietyData: varietyData,
         image: mainImage,
         shop_id: product.shop?.id,
         product: product,
@@ -155,7 +245,7 @@ const fetchProductFromId = async (productId: string) => {
   }
 }
 
-// 🛒 FETCH CART ITEMS
+// 🛒 FETCH CART ITEMS (with varieties support)
 const fetchCartItems = async () => {
   try {
     const {
@@ -196,12 +286,44 @@ const fetchCartItems = async () => {
     items.value = data.map((item) => {
       const mainImage = getMainImage(item.product?.main_img_urls)
 
+      // Handle variety selection from cart item
+      let finalPrice = item.product?.price || 0
+      let itemName = item.product?.prod_name || 'Unnamed Product'
+      let varietyData = item.variety_data
+
+      // If we have variety_data from cart, use it
+      if (item.variety_data) {
+        finalPrice = item.variety_data.price || item.product?.price || 0
+        itemName = `${item.product?.prod_name} - ${item.variety_data.name}`
+      }
+      // Fallback to parsing from product varieties
+      else if (item.selected_variety && item.product?.varieties) {
+        try {
+          const varieties = Array.isArray(item.product.varieties)
+            ? item.product.varieties
+            : JSON.parse(item.product.varieties)
+
+          const variety = varieties.find((v: any) => v.name === item.selected_variety)
+          if (variety) {
+            finalPrice = variety.price || item.product.price
+            itemName = `${item.product.prod_name} - ${variety.name}`
+            varietyData = variety
+          }
+        } catch (parseError) {
+          console.warn('⚠️ Error parsing varieties:', parseError)
+        }
+      }
+
       return {
         id: item.product_id,
         product_id: item.product_id,
-        name: item.product?.prod_name || 'Unnamed Product',
-        price: item.product?.price || 0,
+        name: itemName,
+        price: finalPrice,
+        varietyPrice: finalPrice,
         quantity: item.quantity || 1,
+        selectedSize: item.selected_size,
+        selectedVariety: item.selected_variety,
+        varietyData: varietyData,
         image: mainImage,
         cart_item_id: item.id,
         shop_id: item.product?.shop?.id,
@@ -278,17 +400,18 @@ const initializeDateTime = () => {
   deliveryTime.value = `${hours.toString().padStart(2, '0')}:${minutes}`
 }
 
-// 🎫 GENERATE TRANSACTION NUMBER
-const generateTransactionNumber = () => {
-  const timestamp = Date.now().toString(36)
-  const random = Math.floor(Math.random() * 1e6)
-    .toString(36)
-    .padStart(5, '0')
-  return `TX-${timestamp}-${random}`.toUpperCase()
-}
+// 🖼️ IMPROVED IMAGE HELPER WITH VARIETY SUPPORT
+const getMainImage = (imgUrls: any, varietyData: any = null): string => {
+  // First priority: Use variety image if available
+  if (varietyData?.images && varietyData.images.length > 0) {
+    const varietyImg = varietyData.images[0]
+    if (varietyImg && varietyImg !== '/placeholder.png') {
+      console.log('🖼️ Using variety image:', varietyImg)
+      return varietyImg
+    }
+  }
 
-// 🖼️ IMAGE HELPER
-const getMainImage = (imgUrls: any): string => {
+  // Second priority: Use product main image
   if (!imgUrls) return '/placeholder.png'
 
   if (Array.isArray(imgUrls)) {
@@ -306,7 +429,6 @@ const getMainImage = (imgUrls: any): string => {
 
   return '/placeholder.png'
 }
-
 // 💰 COMPUTED: TOTAL PRICE
 const totalPrice = computed(() => {
   return items.value.reduce((sum, item) => {
@@ -407,6 +529,8 @@ const formattedDate = computed(() => {
     day: 'numeric',
   })
 })
+
+// ✅ COMPLETE CHECKOUT FUNCTION
 const handleCheckout = async () => {
   // Validation
   if (!buyer.value) {
@@ -426,11 +550,12 @@ const handleCheckout = async () => {
 
   console.log('🛒 Starting checkout process...')
   console.log('Items:', items.value)
+  console.log('Transaction Number:', transactionNumber.value)
 
   try {
     // Since each user has only 1 shop, get the shop_id from the first item
-    const shopId = items.value[0]?.shop_id
-    
+    const shopId = items.value[0]?.shop_id || items.value[0]?.product?.shop_id
+
     if (!shopId) {
       alert('Shop information not found for items')
       return
@@ -452,24 +577,33 @@ const handleCheckout = async () => {
         delivery_date: deliveryDate.value,
         delivery_time: deliveryTime.value,
         note: note.value,
-        shop_id: shopId, // ✅ SET THE SHOP ID
+        shop_id: shopId,
       })
       .select()
       .single()
 
-    if (orderError) throw orderError
+    if (orderError) {
+      console.error('❌ Order creation error details:', orderError)
+      throw orderError
+    }
 
     console.log('✅ Order created with shop_id:', shopId)
 
-    // Create order items
-    const orderItems = items.value.map((item) => ({
-      order_id: order.id,
-      product_id: item.product_id,
-      quantity: item.quantity,
-      price: item.price,
-      selected_size: item.size,
-      selected_variety: item.variety,
-    }))
+    // Create order items - handle both main products and varieties
+    const orderItems = items.value.map((item) => {
+      // Check if this is a variety selection
+      const isVariety = item.selectedVariety && item.varietyPrice
+
+      return {
+        order_id: order.id,
+        product_id: item.product_id, // Always use the main product ID
+        quantity: item.quantity,
+        price: isVariety ? item.varietyPrice : item.price, // Use variety price if selected
+        selected_size: item.selectedSize,
+        selected_variety: item.selectedVariety, // Store the selected variety name
+        variety_data: item.varietyData, // Store the entire variety data
+      }
+    })
 
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
     if (itemsError) throw itemsError
@@ -514,45 +648,9 @@ const handleCheckout = async () => {
         totalAmount: totalPrice.value,
       },
     })
-
   } catch (err) {
     console.error('❌ Checkout error:', err)
     alert('Failed to complete checkout. Please try again.')
-  }
-}
-// 💬 SEND ORDER MESSAGES TO ALL SELLERS (for cart checkout)
-const sendOrderMessagesToSellers = async (orderId: string) => {
-  try {
-    console.log('💬 Sending order messages to all sellers...')
-
-    // Group items by shop
-    const itemsByShop = {}
-    items.value.forEach((item) => {
-      const shopId = item.shop_id
-      if (!shopId) {
-        console.warn('⚠️ Item missing shop_id:', item)
-        return
-      }
-
-      if (!itemsByShop[shopId]) {
-        itemsByShop[shopId] = []
-      }
-      itemsByShop[shopId].push(item)
-    })
-
-    console.log('🏪 Items grouped by shop:', itemsByShop)
-
-    // Send message to each shop
-    const promises = Object.keys(itemsByShop).map(async (shopId) => {
-      const shopItems = itemsByShop[shopId]
-      await sendOrderMessageToSeller(orderId, shopId, shopItems)
-    })
-
-    await Promise.all(promises)
-    console.log('✅ All order messages sent successfully!')
-  } catch (err) {
-    console.error('❌ Error in sendOrderMessagesToSellers:', err)
-    // Don't throw here to avoid blocking checkout
   }
 }
 
@@ -647,9 +745,19 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
 
     // Create order message for this shop's items
     const itemsSummary = shopItems
-      .map(
-        (item) => `${item.name} (x${item.quantity}) - ₱${(item.price * item.quantity).toFixed(2)}`,
-      )
+      .map((item) => {
+        let itemDetails = `${item.name} (x${item.quantity}) - ₱${(item.price * item.quantity).toFixed(2)}`
+
+        // Add variety and size information if available
+        if (item.selectedVariety || item.selectedSize) {
+          const details = []
+          if (item.selectedVariety) details.push(`Variety: ${item.selectedVariety}`)
+          if (item.selectedSize) details.push(`Size: ${item.selectedSize}`)
+          itemDetails += ` [${details.join(', ')}]`
+        }
+
+        return itemDetails
+      })
       .join('\n')
 
     const orderMessage = `🛍️ New Order Received!\n\nShop: ${shopName}\nTransaction #: ${transactionNumber.value}\nTotal Amount: ₱${shopItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}\n\nItems:\n${itemsSummary}\n\nDelivery: ${deliveryOption.value}\nPayment: ${paymentMethod.value}\nSchedule: ${formattedDate.value} at ${deliveryTime.value}\n\nNote: ${note.value || 'No message'}`
@@ -757,7 +865,6 @@ const getOrCreateProfile = async (userId: string) => {
 </script>
 
 <template>
-  <!-- Your template remains the same -->
   <v-app>
     <v-main>
       <!-- App Bar -->
@@ -829,12 +936,26 @@ const getOrCreateProfile = async (userId: string) => {
             <v-list-item v-for="item in items" :key="item.id" class="list-item">
               <template #prepend>
                 <v-avatar class="item-avatar" rounded>
-                  <v-img :src="item.image" :alt="item.name" cover class="product-image" />
+                  <v-img
+                    :src="getMainImage(item.product?.main_img_urls, item.varietyData)"
+                    :alt="item.name"
+                    cover
+                    class="product-image"
+                  />
                 </v-avatar>
               </template>
 
               <v-list-item-title class="item-name">
                 {{ item.name }}
+                <!-- Display variety and size information -->
+                <div v-if="item.selectedVariety || item.selectedSize" class="item-variety-info">
+                  <span v-if="item.selectedVariety" class="variety-tag">
+                    {{ item.selectedVariety }}
+                  </span>
+                  <span v-if="item.selectedSize" class="size-tag">
+                    Size: {{ item.selectedSize }}
+                  </span>
+                </div>
               </v-list-item-title>
               <v-list-item-subtitle class="item-price">
                 ₱{{ item.price.toLocaleString() }} × {{ item.quantity }}
@@ -1041,8 +1162,6 @@ const getOrCreateProfile = async (userId: string) => {
     </v-main>
   </v-app>
 </template>
-
-<!-- Your styles remain the same -->
 <style scoped>
 /* Global Styles */
 :root {
@@ -1575,5 +1694,32 @@ const getOrCreateProfile = async (userId: string) => {
 .v-container {
   max-width: 800px;
   margin: 0 auto;
+}
+
+.item-variety-info {
+  margin-top: 4px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.variety-tag {
+  background: #e3f2fd;
+  color: #1976d2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid #bbdefb;
+}
+
+.size-tag {
+  background: #f3e5f5;
+  color: #7b1fa2;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  font-weight: 500;
+  border: 1px solid #e1bee7;
 }
 </style>

@@ -11,7 +11,7 @@ const cartItems = ref([]) // Replace cart store with local state
 const selectedItems = ref([])
 const shopSelection = ref({})
 
-// ✅ Fetch cart directly
+// ✅ Fetch cart directly - UPDATED TO INCLUDE VARIETY DATA
 const fetchCart = async () => {
   try {
     const {
@@ -37,73 +37,25 @@ const fetchCart = async () => {
 
     if (error) throw error
     cartItems.value = data || []
+    
+    // Debug: Log cart items to see variety data
+    console.log('🛒 Cart items loaded:', data)
+    data?.forEach(item => {
+      console.log('📦 Cart item:', {
+        id: item.id,
+        product_name: item.product?.prod_name,
+        selected_size: item.selected_size,
+        selected_variety: item.selected_variety,
+        variety_data: item.variety_data
+      })
+    })
   } catch (err) {
     console.error('Error fetching cart:', err)
     cartItems.value = []
   }
 }
 
-// ✅ Add to cart function (for your productdetail.vue)
-const addToCart = async (productId, quantity = 1) => {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      alert('Please login to add to cart')
-      return
-    }
-
-    // Check if item already exists in cart
-    const { data: existingItem } = await supabase
-      .from('cart_items')
-      .select('id, quantity')
-      .eq('user_id', user.id)
-      .eq('product_id', productId)
-      .single()
-
-    if (existingItem) {
-      // Update quantity if item exists
-      const { error } = await supabase
-        .from('cart_items')
-        .update({ quantity: existingItem.quantity + quantity })
-        .eq('id', existingItem.id)
-
-      if (error) throw error
-    } else {
-      // Add new item to cart
-      const { error } = await supabase.from('cart_items').insert({
-        user_id: user.id,
-        product_id: productId,
-        quantity: quantity,
-      })
-
-      if (error) throw error
-    }
-
-    await fetchCart() // Refresh cart
-    alert('Product added to cart!')
-  } catch (err) {
-    console.error('Error adding to cart:', err)
-    alert('Error adding product to cart')
-  }
-}
-
-// ✅ Delete from cart
-const deleteFromCart = async (cartItemId) => {
-  try {
-    const { error } = await supabase.from('cart_items').delete().eq('id', cartItemId)
-
-    if (error) throw error
-    await fetchCart() // Refresh cart
-  } catch (err) {
-    console.error('Error deleting from cart:', err)
-    alert('Error deleting item from cart')
-  }
-}
-
-// ✅ Update quantity
-// ✅ Enhanced Update quantity with auto-delete
+// ✅ Enhanced Update quantity with variety support
 const updateQuantity = async (itemId, newQty) => {
   if (newQty < 1) {
     // If quantity becomes 0 or negative, delete the item
@@ -121,6 +73,19 @@ const updateQuantity = async (itemId, newQty) => {
     await fetchCart() // Refresh cart
   } catch (err) {
     console.error('Error updating quantity:', err)
+  }
+}
+
+// ✅ Delete from cart
+const deleteFromCart = async (cartItemId) => {
+  try {
+    const { error } = await supabase.from('cart_items').delete().eq('id', cartItemId)
+
+    if (error) throw error
+    await fetchCart() // Refresh cart
+  } catch (err) {
+    console.error('Error deleting from cart:', err)
+    alert('Error deleting item from cart')
   }
 }
 
@@ -223,18 +188,54 @@ const deleteSelectedItems = async () => {
   }
 }
 
+// ✅ Get display price for item (considers variety)
+const getItemPrice = (item) => {
+  // If variety data exists and has price, use variety price
+  if (item.variety_data && item.variety_data.price !== undefined && item.variety_data.price !== null) {
+    return item.variety_data.price
+  }
+  // Otherwise use product base price
+  return item.product?.price || 0
+}
 
+// ✅ Get display name for item (includes variety info)
+const getItemDisplayName = (item) => {
+  let name = item.product?.prod_name || 'Unnamed Product'
+  
+  // Add variety name if exists
+  if (item.selected_variety) {
+    name += ` - ${item.selected_variety}`
+  }
+  
+  // Add size if exists
+  if (item.selected_size) {
+    name += ` (${item.selected_size})`
+  }
+  
+  return name
+}
 
-// Initialize
-onMounted(async () => {
-  loading.value = true
-  await fetchCart()
-  loading.value = false
-})
+// ✅ Get display image for item (uses variety image if available)
+const getItemImage = (item) => {
+  // If variety has images, use the first variety image
+  if (item.variety_data?.images && item.variety_data.images.length > 0) {
+    return item.variety_data.images[0]
+  }
+  
+  // Otherwise use product main image
+  if (typeof item.product?.main_img_urls === 'string') {
+    try {
+      const parsed = JSON.parse(item.product.main_img_urls)
+      return parsed?.[0] || '/placeholder.png'
+    } catch {
+      return item.product.main_img_urls || '/placeholder.png'
+    }
+  }
+  
+  return item.product?.main_img_urls?.[0] || '/placeholder.png'
+}
 
-
-// ✅ Enhanced Checkout function
-// ✅ Enhanced Checkout function with shop_id
+// ✅ Enhanced Checkout function with variety support
 const checkoutSelected = () => {
   const selectedCartItems = cartItems.value.filter(i => selectedItems.value.includes(i.id))
   
@@ -243,23 +244,24 @@ const checkoutSelected = () => {
     return
   }
 
-  // Transform cart items to match purchase view format
+  // Transform cart items to match purchase view format WITH VARIETY DATA
   const itemsForCheckout = selectedCartItems.map(item => ({
     id: item.product_id,
     product_id: item.product_id,
-    name: item.product?.prod_name || 'Unnamed Product',
-    price: item.product?.price || 0,
+    name: getItemDisplayName(item),
+    price: getItemPrice(item), // Use the correct price (variety or base)
     quantity: item.quantity,
-    image: (typeof item.product?.main_img_urls === 'string'
-      ? JSON.parse(item.product.main_img_urls)[0]
-      : item.product?.main_img_urls?.[0]) || '/placeholder.png',
-    cart_item_id: item.id, // Keep reference to cart item for cleanup
-    shop_id: item.product?.shop?.id || item.product?.shop_id, // CRITICAL: Include shop_id
-    product: item.product // Include full product data for shop info
+    image: getItemImage(item), // Use correct image (variety or base)
+    cart_item_id: item.id,
+    shop_id: item.product?.shop?.id || item.product?.shop_id,
+    product: item.product,
+    // ADD VARIETY DATA FOR CHECKOUT
+    selected_size: item.selected_size,
+    selected_variety: item.selected_variety,
+    variety_data: item.variety_data
   }))
 
-  console.log('🛒 Items for checkout:', itemsForCheckout)
-  console.log('🏪 Shop IDs:', itemsForCheckout.map(item => item.shop_id))
+  console.log('🛒 Items for checkout with varieties:', itemsForCheckout)
 
   // Navigate to purchase view with selected items
   router.push({
@@ -270,12 +272,29 @@ const checkoutSelected = () => {
     }
   })
 }
+
+// ✅ Back button function
+const goBack = () => {
+  router.back()
+}
+
+// Initialize
+onMounted(async () => {
+  loading.value = true
+  await fetchCart()
+  loading.value = false
+})
 </script>
 
 <template>
   <v-app>
-    <!-- Header -->
+    <!-- Header with Back Button -->
     <v-app-bar class="app-bar" flat color="#3f83c7" dark>
+      <!-- Back Button -->
+      <v-btn icon @click="goBack" class="mr-2">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      
       <v-toolbar-title><strong>Cart</strong></v-toolbar-title>
       <v-spacer />
       <v-btn
@@ -300,6 +319,14 @@ const checkoutSelected = () => {
         <div v-else-if="cartItems.length === 0" class="content">
           <h2 class="text-h6 font-weight-bold">Your cart is empty</h2>
           <v-icon size="64" color="grey">mdi-cart-outline</v-icon>
+          <v-btn 
+            color="primary" 
+            class="mt-4" 
+            @click="goBack"
+          >
+            <v-icon left>mdi-arrow-left</v-icon>
+            Continue Shopping
+          </v-btn>
         </div>
 
         <!-- Cart Items Grouped by Shop -->
@@ -341,11 +368,7 @@ const checkoutSelected = () => {
                     color="primary"
                   />
                   <v-img
-                    :src="
-                      (typeof item.product?.main_img_urls === 'string'
-                        ? JSON.parse(item.product.main_img_urls)[0]
-                        : item.product?.main_img_urls?.[0]) || '/placeholder.png'
-                    "
+                    :src="getItemImage(item)"
                     width="70"
                     height="70"
                     class="rounded-lg ml-2"
@@ -354,10 +377,23 @@ const checkoutSelected = () => {
                 </template>
 
                 <v-list-item-title class="font-weight-medium ms-3">
-                  {{ item.product?.prod_name || 'Unnamed Product' }}
+                  {{ getItemDisplayName(item) }}
                 </v-list-item-title>
+                
+                <!-- Display variety and size information -->
                 <v-list-item-subtitle class="ms-3">
-                  ₱{{ item.product?.price?.toFixed(2) || '0.00' }}
+                  <div v-if="item.selected_variety || item.selected_size" class="text-caption">
+                    <span v-if="item.selected_variety" class="text-primary">
+                      {{ item.selected_variety }}
+                    </span>
+                    <span v-if="item.selected_variety && item.selected_size"> • </span>
+                    <span v-if="item.selected_size">
+                      Size: {{ item.selected_size }}
+                    </span>
+                  </div>
+                  <div class="text-body-2 font-weight-bold mt-1">
+                    ₱{{ getItemPrice(item).toFixed(2) }}
+                  </div>
                 </v-list-item-subtitle>
 
                 <template #append>
@@ -387,7 +423,7 @@ const checkoutSelected = () => {
                     </div>
 
                     <div class="font-weight-bold text-primary mt-2">
-                      ₱{{ ((item.product?.price || 0) * item.quantity).toFixed(2) }}
+                      ₱{{ (getItemPrice(item) * item.quantity).toFixed(2) }}
                     </div>
                     <v-btn
                       icon
@@ -432,7 +468,7 @@ const checkoutSelected = () => {
           Total: ₱{{
             cartItems
               .filter((i) => selectedItems.includes(i.id))
-              .reduce((sum, i) => sum + (i.product?.price || 0) * i.quantity, 0)
+              .reduce((sum, i) => sum + (getItemPrice(i) * i.quantity), 0)
               .toFixed(2)
           }}
         </div>
@@ -483,5 +519,6 @@ const checkoutSelected = () => {
   right: 0;
   background: #fff;
   z-index: 1100;
+  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
 }
 </style>
