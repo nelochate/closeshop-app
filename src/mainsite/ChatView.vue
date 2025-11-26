@@ -681,7 +681,7 @@ onUnmounted(() => {
 
 <template>
   <v-app>
-    <v-app-bar flat color="primary" dark>
+    <v-app-bar class="top-nav" flat color="primary" dark>
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -814,6 +814,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.top-nav{
+  padding-top: 22px;
+}
+
 .chat-container {
   display: flex;
   flex-direction: column;
@@ -822,6 +826,7 @@ onUnmounted(() => {
   height: calc(100vh - 120px);
   overflow-y: auto;
   background: #f9fafb;
+  padding-top: 40px !important;
 }
 
 .loading-state,

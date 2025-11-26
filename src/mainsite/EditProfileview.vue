@@ -435,6 +435,7 @@ const displayPhone = computed(() => {
   background: linear-gradient(135deg, #5276b0, #354d7c);
   color: white;
   border-radius: 16px;
+  margin-top: 18px;
 }
 .info-card {
   border-radius: 16px;

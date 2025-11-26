@@ -109,14 +109,14 @@ const fetchConversations = async () => {
         console.log(`💌 Messages for conversation ${conv.id}:`, messages)
 
         // Get the latest message
-        const latestMessage = messages && messages.length > 0 
+        const latestMessage = messages && messages.length > 0
           ? messages[0] // Already ordered by created_at desc
           : null
 
         console.log('💌 Latest message:', latestMessage)
 
         // Check if there are unread messages for current user
-        const unreadMessages = messages?.filter(msg => 
+        const unreadMessages = messages?.filter(msg =>
           msg.receiver_id === user.id && !msg.is_read
         ) || []
 
@@ -155,7 +155,7 @@ const fetchConversations = async () => {
             hour: '2-digit',
             minute: '2-digit'
           })
-          
+
           // Check if the latest message itself is unread
           const isLatestMessageUnread = latestMessage.receiver_id === user.id && !latestMessage.is_read
           isUnread = isUnread || isLatestMessageUnread
@@ -211,10 +211,10 @@ const deleteConversation = async (conversationId: string) => {
     }
 
     console.log('✅ Conversation deleted successfully')
-    
+
     // Remove from local state
     conversations.value = conversations.value.filter(conv => conv.id !== conversationId)
-    
+
     // Close dialog
     showDeleteDialog.value = false
     conversationToDelete.value = null
@@ -269,10 +269,10 @@ const fetchConversationsWithRPC = async () => {
     */
 
     // Then call it like:
-    // const { data, error } = await supabase.rpc('get_user_conversations', { 
-    //   user_profile_id: user.id 
+    // const { data, error } = await supabase.rpc('get_user_conversations', {
+    //   user_profile_id: user.id
     // })
-    
+
   } catch (err) {
     console.error('RPC method error:', err)
     // Fallback to the regular method
@@ -419,8 +419,8 @@ setInterval(fetchConversations, 30000)
             <template #prepend>
               <div class="avatar-container">
                 <v-avatar size="56" class="conversation-avatar">
-                  <v-img 
-                    :src="conversation.avatar" 
+                  <v-img
+                    :src="conversation.avatar"
                     :alt="conversation.otherUserName"
                     cover
                   />
@@ -445,29 +445,29 @@ setInterval(fetchConversations, 30000)
                 class="ml-2"
               />
             </v-list-item-title>
-            
-            <v-list-item-subtitle 
+
+            <v-list-item-subtitle
               class="conversation-preview"
               :class="{ 'unread-message': conversation.unread }"
             >
               <span v-if="conversation.sender" class="sender-name">
-                {{ conversation.sender }}: 
+                {{ conversation.sender }}:
               </span>
               {{ conversation.lastMessage }}
             </v-list-item-subtitle>
 
             <template #append>
               <div class="conversation-meta">
-                <div 
+                <div
                   class="message-time"
                   :class="{ 'unread-time': conversation.unread }"
                 >
                   {{ conversation.time }}
                 </div>
                 <div class="action-buttons">
-                  <v-icon 
-                    v-if="conversation.unread" 
-                    color="primary" 
+                  <v-icon
+                    v-if="conversation.unread"
+                    color="primary"
                     size="16"
                     class="mt-1 mr-1"
                   >
@@ -498,22 +498,22 @@ setInterval(fetchConversations, 30000)
           Delete Conversation?
         </v-card-title>
         <v-card-text>
-          Are you sure you want to delete this conversation with 
-          <strong>{{ conversationToDelete?.otherUserName }}</strong>? 
+          Are you sure you want to delete this conversation with
+          <strong>{{ conversationToDelete?.otherUserName }}</strong>?
           This action cannot be undone and will delete all messages in this conversation.
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn 
-            text 
+          <v-btn
+            text
             @click="cancelDelete"
             :disabled="deleting"
           >
             Cancel
           </v-btn>
-          <v-btn 
-            color="error" 
-            variant="flat" 
+          <v-btn
+            color="error"
+            variant="flat"
             @click="deleteConversation(conversationToDelete?.id)"
             :loading="deleting"
           >
@@ -537,6 +537,7 @@ setInterval(fetchConversations, 30000)
 .messages-view {
   min-height: calc(100vh - 120px);
   background-color: #f8fafc;
+  margin-top: 32px;
 }
 
 .loading-container {
@@ -681,24 +682,24 @@ setInterval(fetchConversations, 30000)
   .conversation-item {
     padding: 12px 16px;
   }
-  
+
   .conversation-avatar {
     width: 48px !important;
     height: 48px !important;
   }
-  
+
   .conversation-title {
     font-size: 0.9rem;
   }
-  
+
   .conversation-preview {
     font-size: 0.8rem;
   }
-  
+
   .unread-message {
     font-size: 0.8rem;
   }
-  
+
   .conversation-meta {
     min-width: 70px;
   }
