@@ -118,15 +118,14 @@ const fetchShopOrders = async () => {
     ordersLoading.value = true
     console.log('📦 Fetching orders for shop:', shopId.value)
 
-    // SIMPLIFIED APPROACH: Query orders directly by shop_id with all related data
+    // METHOD 1: Direct orders query (preferred)
     const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
-      .select(
-        `
+      .select(`
         *,
-        order_items (
+        order_items!inner (
           *,
-          products (
+          products!inner (
             id,
             prod_name,
             main_img_urls,
@@ -138,19 +137,21 @@ const fetchShopOrders = async () => {
           first_name,
           last_name,
           phone
-        ),
-        addresses (*)
-      `,
-      )
+        )
+      `)
       .eq('shop_id', shopId.value)
       .order('created_at', { ascending: false })
 
     if (ordersError) {
       console.error('❌ Error fetching orders:', ordersError)
-      throw ordersError
+      
+      // Fallback to METHOD 2: Query via order_items
+      console.log('🔄 Trying fallback method...')
+      await fetchOrdersViaOrderItems()
+      return
     }
 
-    console.log('✅ Orders found:', ordersData?.length || 0)
+    console.log('✅ Orders found via direct query:', ordersData?.length || 0)
 
     if (!ordersData || ordersData.length === 0) {
       console.log('📭 No orders found for this shop')
@@ -158,67 +159,108 @@ const fetchShopOrders = async () => {
       return
     }
 
-    console.log('📋 Raw orders data:', ordersData)
-
-    // Transform the data - flatten order items
-    orders.value = ordersData.flatMap(
-      (order) =>
-        order.order_items?.map((item) => ({
-          id: item.id, // order_item id
-          order_id: order.id,
-          product_id: item.product_id,
-          product_name: item.products?.prod_name || 'Unknown Product',
-          product_img: getProductImage(item.products),
-          quantity: item.quantity || 1,
-          price: item.price || 0,
-          selected_size: item.selected_size || null,
-          selected_variety: item.selected_variety || null,
-          status: order.status || 'pending',
-          created_at: order.created_at,
-          updated_at: order.updated_at,
-          note: order.note || null,
-          total_amount: order.total_amount || 0,
-          delivery_option: order.delivery_option || null,
-          delivery_date: order.delivery_date || null,
-          delivery_time: order.delivery_time || null,
-          payment_method: order.payment_method || null,
-          transaction_number: order.transaction_number || null,
-          buyer: order.profiles
-            ? {
-                first_name: order.profiles.first_name,
-                last_name: order.profiles.last_name,
-                phone: order.profiles.phone,
-              }
-            : null,
-          address: order.addresses
-            ? {
-                street: order.addresses.street,
-                city: order.addresses.city_name || order.addresses.city,
-                province: order.addresses.province,
-                phone: order.addresses.phone,
-              }
-            : null,
-        })) || [],
+    // Transform the data
+    orders.value = ordersData.flatMap(order => 
+      order.order_items.map(item => ({
+        id: item.id,
+        order_id: order.id,
+        product_id: item.product_id,
+        product_name: item.products?.prod_name || 'Unknown Product',
+        product_img: getProductImage(item.products),
+        quantity: item.quantity || 1,
+        price: item.price || 0,
+        selected_size: item.selected_size || null,
+        selected_variety: item.selected_variety || null,
+        status: order.status || 'pending',
+        created_at: order.created_at,
+        updated_at: order.updated_at,
+        note: order.note || null,
+        total_amount: order.total_amount || 0,
+        delivery_option: order.delivery_option || null,
+        buyer: order.profiles ? {
+          first_name: order.profiles.first_name,
+          last_name: order.profiles.last_name,
+          phone: order.profiles.phone,
+        } : null,
+      }))
     )
 
-    console.log('✅ Final transformed orders:', orders.value.length)
-    console.log('📊 Orders by status:', {
-      pending: orders.value.filter((o) => o.status === 'pending').length,
-      paid: orders.value.filter((o) => o.status === 'paid').length,
-      shipped: orders.value.filter((o) => o.status === 'shipped').length,
-      delivered: orders.value.filter((o) => o.status === 'delivered').length,
-      cancelled: orders.value.filter((o) => o.status === 'cancelled').length,
-    })
+    console.log('✅ Final orders:', orders.value.length)
 
-    // Debug: Show sample order if available
-    if (orders.value.length > 0) {
-      console.log('🔍 Sample order:', orders.value[0])
-    }
   } catch (err) {
     console.error('❌ Error in fetchShopOrders:', err)
     orders.value = []
   } finally {
     ordersLoading.value = false
+  }
+}
+
+// Fallback method: Query via order_items and products
+const fetchOrdersViaOrderItems = async () => {
+  try {
+    console.log('🔄 Using fallback method: querying via order_items...')
+
+    const { data: orderItems, error } = await supabase
+      .from('order_items')
+      .select(`
+        *,
+        products!inner (
+          id,
+          prod_name,
+          main_img_urls,
+          shop_id
+        ),
+        orders (
+          *,
+          profiles:user_id (
+            id,
+            first_name,
+            last_name,
+            phone
+          )
+        )
+      `)
+      .eq('products.shop_id', shopId.value)
+      .order('created_at', { ascending: false })
+
+    if (error) throw error
+
+    console.log('✅ Order items found via fallback:', orderItems?.length || 0)
+
+    if (!orderItems || orderItems.length === 0) {
+      orders.value = []
+      return
+    }
+
+    // Transform the data
+    orders.value = orderItems.map(item => ({
+      id: item.id,
+      order_id: item.order_id,
+      product_id: item.product_id,
+      product_name: item.products?.prod_name || 'Unknown Product',
+      product_img: getProductImage(item.products),
+      quantity: item.quantity || 1,
+      price: item.price || 0,
+      selected_size: item.selected_size || null,
+      selected_variety: item.selected_variety || null,
+      status: item.orders?.status || 'pending',
+      created_at: item.orders?.created_at || item.created_at,
+      updated_at: item.orders?.updated_at,
+      note: item.orders?.note || null,
+      total_amount: item.orders?.total_amount || 0,
+      delivery_option: item.orders?.delivery_option || null,
+      buyer: item.orders?.profiles ? {
+        first_name: item.orders.profiles.first_name,
+        last_name: item.orders.profiles.last_name,
+        phone: item.orders.profiles.phone,
+      } : null,
+    }))
+
+    console.log('✅ Final orders via fallback:', orders.value.length)
+
+  } catch (err) {
+    console.error('❌ Error in fallback method:', err)
+    orders.value = []
   }
 }
 
