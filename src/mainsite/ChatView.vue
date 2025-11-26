@@ -195,7 +195,9 @@ const findProductById = async (productId: string): Promise<any> => {
         price,
         main_img_urls,
         shop_id,
-        description
+        description,
+        has_varieties,
+        varieties
       `)
       .eq('id', productId)
       .single()
@@ -248,7 +250,9 @@ const findProductByName = async (productName: string): Promise<any> => {
         price,
         main_img_urls,
         shop_id,
-        description
+        description,
+        has_varieties,
+        varieties
       `)
       .ilike('prod_name', `%${cleanProductName}%`)
       .limit(5)
@@ -329,7 +333,9 @@ const getOrderProductInfo = async (content: string): Promise<{product: any, prod
     main_img_urls: null,
     shop_id: null,
     description: 'Product from order',
-    shop: null
+    shop: null,
+    has_varieties: false,
+    varieties: null
   }
 
   return { product: fallbackProduct, productId: fallbackProductId }
@@ -378,7 +384,9 @@ const loadMessages = async () => {
                 price,
                 main_img_urls,
                 shop_id,
-                description
+                description,
+                has_varieties,
+                varieties
               `)
               .eq('id', msg.product_id)
               .single()
@@ -415,7 +423,8 @@ const loadMessages = async () => {
           console.log('🎯 Final product result:', { 
             productId, 
             productName: product?.prod_name,
-            hasProduct: !!product 
+            hasProduct: !!product,
+            hasVarieties: product?.has_varieties
           })
           return {
             ...msg,
@@ -464,7 +473,9 @@ const subscribeMessages = async () => {
                 price,
                 main_img_urls,
                 shop_id,
-                description
+                description,
+                has_varieties,
+                varieties
               `)
               .eq('id', payload.new.product_id)
               .single()
@@ -562,12 +573,13 @@ const sendProductMessage = async (product: any) => {
   }
 }
 
-// ✅ ALWAYS WORKING: View product details
+// ✅ ALWAYS WORKING: View product details - INCLUDES VARIETIES
 const viewProduct = (productId: string) => {
   console.log('👁️ Viewing product with ID:', productId)
   
   if (productId && !productId.startsWith('order-')) {
     // Normal product ID - navigate to product page using your route
+    // This works for both main products AND products with varieties
     console.log('✅ Navigating to product page:', productId)
     router.push(`/viewproduct/${productId}`)
   } else {
@@ -743,6 +755,13 @@ onUnmounted(() => {
                   <div class="product-price">₱{{ msg.product.price?.toFixed(2) }}</div>
                   <div class="product-shop" v-if="msg.product.shop">
                     {{ msg.product.shop.business_name }}
+                  </div>
+                  <!-- Show varieties indicator if product has varieties -->
+                  <div v-if="msg.product.has_varieties" class="varieties-indicator">
+                    <v-chip size="x-small" color="primary" variant="outlined">
+                      <v-icon left small>mdi-palette</v-icon>
+                      Has Varieties
+                    </v-chip>
                   </div>
                 </div>
               </div>
@@ -925,6 +944,10 @@ onUnmounted(() => {
 
 .message-row.me .product-shop {
   color: rgba(255, 255, 255, 0.7);
+}
+
+.varieties-indicator {
+  margin-top: 4px;
 }
 
 /* Action buttons for product messages */
