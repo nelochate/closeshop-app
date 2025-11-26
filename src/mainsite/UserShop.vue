@@ -24,7 +24,7 @@ const transactionOptions = [
   { title: 'Pending Orders', value: 'pending' },
   { title: 'Processing Orders', value: 'processing' },
   { title: 'Completed Orders', value: 'completed' },
-  { title: 'Cancelled Orders', value: 'cancelled' }
+  { title: 'Cancelled Orders', value: 'cancelled' },
 ]
 
 // Orders state
@@ -35,260 +35,392 @@ const rejectDialog = ref(false)
 const rejectReason = ref('')
 const processingOrder = ref(false)
 
-// CORRECTED: Fetch orders for this shop
-const fetchShopOrders = async () => {
-  if (!shopId.value) return
-
+// Add this missing function - place it after your state declarations
+const getProductImage = (product: any) => {
+  if (!product?.main_img_urls) return '/placeholder.png'
   try {
-    ordersLoading.value = true
-    console.log('Fetching orders for shop:', shopId.value)
-
-    // Query to get orders with products from this shop
-    const { data, error } = await supabase
-      .from('order_items')
-      .select(`
-        id,
-        order_id,
-        quantity,
-        price,
-        selected_size,
-        selected_variety,
-        product_id,
-        products!inner(
-          id,
-          prod_name,
-          main_img_urls,
-          description,
-          shop_id
-        ),
-        orders!inner(
-          id,
-          user_id,
-          total_amount,
-          status,
-          payment_method,
-          created_at,
-          delivery_date,
-          delivery_time,
-          note,
-          transaction_number,
-          delivery_option,
-          buyer:profiles!orders_user_id_fkey(
-            first_name,
-            last_name,
-            avatar_url,
-            phone
-          ),
-          address:addresses!orders_address_id_fkey(
-            recipient_name,
-            phone,
-            street,
-            barangay_name,
-            city_name,
-            province_name
-          )
-        )
-      `)
-      .eq('products.shop_id', shopId.value)
-      .order('created_at', { ascending: false }, { foreignTable: 'orders' })
-
-    if (error) {
-      console.error('Error fetching orders:', error)
-      throw error
+    if (typeof product.main_img_urls === 'string') {
+      const parsed = JSON.parse(product.main_img_urls)
+      return Array.isArray(parsed) ? parsed[0] : parsed
     }
-
-    console.log('Raw order items data:', data)
-
-    // Transform the data to group by order
-    const ordersMap = new Map()
-    
-    data?.forEach(item => {
-      const orderId = item.orders.id
-      
-      if (!ordersMap.has(orderId)) {
-        // Create order entry
-        ordersMap.set(orderId, {
-          ...item.orders,
-          order_items: []
-        })
-      }
-      
-      // Add order item
-      const order = ordersMap.get(orderId)
-      order.order_items.push({
-        id: item.id,
-        product_id: item.product_id,
-        quantity: item.quantity,
-        price: item.price,
-        selected_size: item.selected_size,
-        selected_variety: item.selected_variety,
-        products: item.products
-      })
-    })
-
-    orders.value = Array.from(ordersMap.values())
-    console.log('Transformed orders:', orders.value)
-
-  } catch (err) {
-    console.error('Error loading orders:', err)
-  } finally {
-    ordersLoading.value = false
+    if (Array.isArray(product.main_img_urls)) {
+      return product.main_img_urls[0]
+    }
+    return '/placeholder.png'
+  } catch {
+    return '/placeholder.png'
   }
 }
+// Fetch shop data
+const fetchShopData = async () => {
+  try {
+    console.log('🛍️ Fetching shop data...')
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
-// ALTERNATIVE: If above doesn't work, try this direct orders query
-const fetchShopOrdersAlternative = async () => {
-  if (!shopId.value) return
+    if (!user) {
+      console.error('❌ No user found')
+      return
+    }
+
+    // Get shop data
+    const { data: shopData, error: shopError } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('owner_id', user.id)
+      .single()
+
+    if (shopError) {
+      console.error('❌ Error fetching shop:', shopError)
+      if (shopError.code === 'PGRST116') {
+        console.log('No shop found for user')
+        shopId.value = null
+      }
+      return
+    }
+
+    console.log('✅ Shop data:', shopData)
+    shopId.value = shopData.id
+    businessAvatar.value = shopData.avatar_url || ''
+    coverPhoto.value = shopData.cover_photo || ''
+    businessName.value = shopData.business_name || 'My Business'
+    description.value = shopData.description || ''
+    timeOpen.value = shopData.time_open || 'N/A'
+    timeClose.value = shopData.time_close || 'N/A'
+    manualStatus.value = shopData.manual_status || 'auto'
+    address.value = shopData.address || 'No address set'
+  } catch (err) {
+    console.error('❌ Error in fetchShopData:', err)
+    shopId.value = null
+  }
+}
+// Replace your current fetchShopOrders with this corrected version
+const fetchShopOrders = async () => {
+  if (!shopId.value) {
+    console.log('❌ No shop ID available')
+    return
+  }
 
   try {
     ordersLoading.value = true
+    console.log('📦 Fetching orders for shop:', shopId.value)
 
-    // First get all products from this shop
-    const { data: shopProducts, error: productsError } = await supabase
+    // Step 1: Get all products for this shop
+    const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id')
+      .select('id, prod_name, main_img_urls')
       .eq('shop_id', shopId.value)
 
-    if (productsError) throw productsError
+    if (productsError) {
+      console.error('❌ Error fetching products:', productsError)
+      throw productsError
+    }
 
-    const productIds = shopProducts?.map(p => p.id) || []
-    
-    if (productIds.length === 0) {
+    console.log('✅ Products found:', products?.length || 0)
+
+    if (!products || products.length === 0) {
       orders.value = []
       return
     }
 
-    // Then get order items for these products
+    const productIds = products.map((p) => p.id)
+    console.log('📋 Product IDs:', productIds)
+
+    // Step 2: Get order items for these products
     const { data: orderItems, error: itemsError } = await supabase
       .from('order_items')
-      .select(`
-        *,
-        products(*),
-        orders(
-          *,
-          buyer:profiles!orders_user_id_fkey(*),
-          address:addresses!orders_address_id_fkey(*)
-        )
-      `)
+      .select('*')
       .in('product_id', productIds)
-      .order('created_at', { ascending: false }, { foreignTable: 'orders' })
+      .order('created_at', { ascending: false })
 
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      console.error('❌ Error fetching order items:', itemsError)
+      throw itemsError
+    }
 
-    // Transform data
-    const ordersMap = new Map()
-    
-    orderItems?.forEach(item => {
-      const orderId = item.orders.id
-      
-      if (!ordersMap.has(orderId)) {
-        ordersMap.set(orderId, {
-          ...item.orders,
-          order_items: []
-        })
+    console.log('✅ Order items found:', orderItems?.length || 0)
+
+    if (!orderItems || orderItems.length === 0) {
+      orders.value = []
+      return
+    }
+
+    // Step 3: Get the actual orders for these order items
+    const orderIds = orderItems.map((item) => item.order_id)
+    console.log('📋 Order IDs:', orderIds)
+
+    const { data: ordersData, error: ordersError } = await supabase
+      .from('orders')
+      .select('*')
+      .in('id', orderIds)
+
+    if (ordersError) {
+      console.error('❌ Error fetching orders:', ordersError)
+      throw ordersError
+    }
+
+    console.log('✅ Orders found:', ordersData?.length || 0)
+    console.log('📋 Orders data:', ordersData) // Add this to debug
+
+    // Step 4: Get buyer information for these orders
+    const buyerIds = [...new Set(ordersData?.map((order) => order.user_id).filter(Boolean) || [])]
+    console.log('📋 Buyer IDs:', buyerIds)
+
+    let buyers = []
+    if (buyerIds.length > 0) {
+      const { data: buyersData, error: buyersError } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, phone')
+        .in('id', buyerIds)
+
+      if (buyersError) {
+        console.error('❌ Error fetching buyers:', buyersError)
+      } else {
+        buyers = buyersData || []
+        console.log('✅ Buyers data:', buyers) // Add this to debug
       }
-      
-      const order = ordersMap.get(orderId)
-      order.order_items.push({
-        id: item.id,
-        product_id: item.product_id,
-        quantity: item.quantity,
-        price: item.price,
-        selected_size: item.selected_size,
-        selected_variety: item.selected_variety,
-        products: item.products
+    }
+
+    console.log('✅ Buyers found:', buyers.length)
+
+    // Step 5: Combine all the data - FIXED: Check if data exists
+    orders.value = orderItems.map((item) => {
+      const order = ordersData?.find((o) => o.id === item.order_id)
+      const product = products?.find((p) => p.id === item.product_id)
+      const buyer = buyers?.find((b) => b.id === order?.user_id)
+
+      // Debug each item
+      console.log('🔍 Processing order item:', {
+        itemId: item.id,
+        orderId: item.order_id,
+        productId: item.product_id,
+        foundOrder: !!order,
+        foundProduct: !!product,
+        foundBuyer: !!buyer,
+        orderStatus: order?.status,
       })
+
+      return {
+        id: item.id,
+        order_id: order?.id,
+        product_id: item.product_id,
+        product_name: product?.prod_name || 'Unknown Product',
+        product_img: getProductImage(product),
+        quantity: item.quantity || 1,
+        price: item.price || 0,
+        selected_size: item.selected_size || null,
+        selected_variety: item.selected_variety || null,
+        status: order?.status || 'pending',
+        created_at: order?.created_at || item.created_at,
+        updated_at: order?.updated_at,
+        note: order?.note || null,
+        buyer: buyer
+          ? {
+              first_name: buyer.first_name,
+              last_name: buyer.last_name,
+              phone: buyer.phone,
+            }
+          : null,
+      }
     })
 
-    orders.value = Array.from(ordersMap.values())
-    console.log('Alternative method orders:', orders.value)
-
+    console.log('✅ Final transformed orders:', orders.value)
   } catch (err) {
-    console.error('Error loading orders (alternative):', err)
+    console.error('❌ Error in fetchShopOrders:', err)
+    orders.value = []
   } finally {
     ordersLoading.value = false
   }
 }
+const debugOrders = async () => {
+  if (!shopId.value) {
+    console.log('❌ No shop ID for debug')
+    return
+  }
 
-// Fetch shop data
-const fetchShopData = async () => {
   try {
-    const { data: { user }, error: userError } = await supabase.auth.getUser()
-    if (userError || !user) throw new Error('User not logged in')
+    console.log('🐛 DEBUG: Checking database state...')
 
-    const { data, error } = await supabase
-      .from('shops')
-      .select('id, business_name, description, logo_url, physical_store, open_time, close_time, barangay, building, street, house_no, postal, manual_status')
-      .eq('owner_id', user.id)
-      .maybeSingle()
+    // Check products
+    const { data: products, error: productsError } = await supabase
+      .from('products')
+      .select('id, prod_name, main_img_urls')
+      .eq('shop_id', shopId.value)
 
-    if (error) throw error
+    console.log('🐛 DEBUG - Products:', products)
+    if (productsError) console.error('🐛 DEBUG - Products error:', productsError)
 
-    shopId.value = data?.id || null
-    businessName.value = data?.business_name || 'No name'
-    description.value = data?.description || 'No description provided'
-    businessAvatar.value = data?.logo_url || ''
-    coverPhoto.value = data?.physical_store || ''
-    manualStatus.value = data?.manual_status || 'auto'
+    // Check order_items for our products
+    if (products && products.length > 0) {
+      const productIds = products.map(p => p.id)
+      const { data: relatedOrderItems, error: relatedError } = await supabase
+        .from('order_items')
+        .select(`
+          *,
+          orders (
+            id,
+            status,
+            user_id,
+            created_at
+          )
+        `)
+        .in('product_id', productIds)
+        .limit(10)
 
-    // Format time
-    timeOpen.value = data?.open_time ? convertTo12Hour(data.open_time) : 'N/A'
-    timeClose.value = data?.close_time ? convertTo12Hour(data.close_time) : 'N/A'
-
-    address.value = [
-      data?.house_no,
-      data?.building,
-      data?.street,
-      data?.barangay,
-      'Butuan City',
-      'Agusan del Norte',
-      data?.postal,
-    ].filter(Boolean).join(', ')
+      console.log('🐛 DEBUG - Related order items with orders:', relatedOrderItems)
+      if (relatedError) console.error('🐛 DEBUG - Related order items error:', relatedError)
+    }
 
   } catch (err) {
-    console.error('Error loading shop info:', err)
+    console.error('🐛 DEBUG - Error:', err)
+  }
+}
+// Update test function to use correct column names
+const testDatabaseConnection = async () => {
+  try {
+    console.log('🧪 Testing database connection...')
+
+    // Test 1: Check if we have any orders at all
+    const { data: testOrders, error: testError } = await supabase
+      .from('orders')
+      .select('*')
+      .limit(5)
+
+    console.log('🧪 Test orders:', testOrders)
+    if (testError) console.error('🧪 Test orders error:', testError)
+
+    // Test 2: Check if we have any order_items
+    const { data: testItems, error: testItemsError } = await supabase
+      .from('order_items')
+      .select('*')
+      .limit(5)
+
+    console.log('🧪 Test order items:', testItems)
+    if (testItemsError) console.error('🧪 Test order items error:', testItemsError)
+
+    // Test 3: Check if any order_items belong to our products - FIXED COLUMN NAME
+    if (shopId.value) {
+      const { data: shopProducts, error: shopProductsError } = await supabase
+        .from('products')
+        .select('id, prod_name') // Changed from product_name to prod_name
+        .eq('shop_id', shopId.value)
+
+      console.log('🧪 Shop products:', shopProducts)
+      if (shopProductsError) console.error('🧪 Shop products error:', shopProductsError)
+
+      if (shopProducts && shopProducts.length > 0) {
+        const productIds = shopProducts.map((p) => p.id)
+        const { data: relatedOrderItems, error: relatedError } = await supabase
+          .from('order_items')
+          .select('*')
+          .in('product_id', productIds)
+          .limit(5)
+
+        console.log('🧪 Related order items:', relatedOrderItems)
+        if (relatedError) console.error('🧪 Related order items error:', relatedError)
+      }
+    }
+  } catch (err) {
+    console.error('🧪 Test error:', err)
   }
 }
 
+// Call this in your onMounted to test
+onMounted(async () => {
+  await fetchShopData()
+  if (shopId.value) {
+    await testDatabaseConnection() // Add this for testing
+    await debugOrders()
+    await fetchShopOrders()
+  }
+})
+// Add this computed property to help with debugging
+const debugInfo = computed(() => {
+  return {
+    shopId: shopId.value,
+    totalOrders: orders.value.length,
+    ordersByStatus: {
+      pending: orders.value.filter((o) => o.status === 'pending').length,
+      paid: orders.value.filter((o) => o.status === 'paid').length,
+      shipped: orders.value.filter((o) => o.status === 'shipped').length,
+      delivered: orders.value.filter((o) => o.status === 'delivered').length,
+      cancelled: orders.value.filter((o) => o.status === 'cancelled').length,
+    },
+    sampleOrder: orders.value[0] || null,
+  }
+})
+// Call this in onMounted to debug
+onMounted(async () => {
+  await fetchShopData()
+  if (shopId.value) {
+    await debugOrders() // Add this for debugging
+    await fetchShopOrders()
+  }
+})
+// Order Statistics - Update to match new structure
+const orderStats = computed(() => {
+  const pending = orders.value.filter((o) => o.status === 'pending').length
+  const processing = orders.value.filter((o) => ['paid', 'shipped'].includes(o.status)).length
+  const completed = orders.value.filter((o) => o.status === 'delivered').length
+  const cancelled = orders.value.filter((o) => o.status === 'cancelled').length
+
+  return { pending, processing, completed, cancelled }
+})
+
 // Filter orders based on selected filter
 const filteredOrders = computed(() => {
-  if (!orders.value) return []
+  if (!orders.value || orders.value.length === 0) {
+    return []
+  }
 
+  let filtered = []
   switch (transactionFilter.value) {
     case 'pending':
-      return orders.value.filter(order => order.status === 'pending')
+      filtered = orders.value.filter((order) => order.status === 'pending')
+      break
     case 'processing':
-      return orders.value.filter(order => ['paid', 'shipped'].includes(order.status))
+      filtered = orders.value.filter((order) => ['paid', 'shipped'].includes(order.status))
+      break
     case 'completed':
-      return orders.value.filter(order => order.status === 'delivered')
+      filtered = orders.value.filter((order) => order.status === 'delivered')
+      break
     case 'cancelled':
-      return orders.value.filter(order => order.status === 'cancelled')
+      filtered = orders.value.filter((order) => order.status === 'cancelled')
+      break
     default:
-      return orders.value
+      filtered = orders.value
   }
+
+  console.log(`🔍 Filtered ${filtered.length} orders for status: ${transactionFilter.value}`)
+  return filtered
 })
 
 // Order management functions
 const acceptOrder = async (order: any) => {
+  if (!confirm('Are you sure you want to accept this order?')) return
+
   try {
     processingOrder.value = true
+    console.log('✅ Accepting order:', order.order_id)
 
     const { error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'paid',
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', order.id)
+      .eq('id', order.order_id)
 
     if (error) throw error
 
+    // Refresh orders to show updated status
     await fetchShopOrders()
-    alert('Order accepted successfully!')
-    
+
+    alert('Order accepted successfully! The order is now marked as paid and ready for processing.')
   } catch (err) {
-    console.error('Error accepting order:', err)
-    alert('Failed to accept order')
+    console.error('❌ Error accepting order:', err)
+    alert('Failed to accept order. Please try again.')
   } finally {
     processingOrder.value = false
   }
@@ -300,78 +432,83 @@ const rejectOrder = async (order: any) => {
     return
   }
 
+  if (!confirm('Are you sure you want to reject this order? This action cannot be undone.')) return
+
   try {
     processingOrder.value = true
+    console.log('❌ Rejecting order:', order.order_id)
 
     const { error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'cancelled',
         note: rejectReason.value.trim(),
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', order.id)
+      .eq('id', order.order_id)
 
     if (error) throw error
 
     await fetchShopOrders()
     rejectDialog.value = false
     rejectReason.value = ''
-    alert('Order rejected successfully!')
-    
+
+    alert('Order rejected successfully! The buyer has been notified.')
   } catch (err) {
-    console.error('Error rejecting order:', err)
-    alert('Failed to reject order')
+    console.error('❌ Error rejecting order:', err)
+    alert('Failed to reject order. Please try again.')
   } finally {
     processingOrder.value = false
   }
 }
 
 const markAsShipped = async (order: any) => {
+  if (!confirm('Mark this order as shipped?')) return
+
   try {
     processingOrder.value = true
 
     const { error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'shipped',
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', order.id)
+      .eq('id', order.order_id)
 
     if (error) throw error
 
     await fetchShopOrders()
-    alert('Order marked as shipped!')
-    
+    alert('Order marked as shipped! The buyer has been notified.')
   } catch (err) {
     console.error('Error marking as shipped:', err)
-    alert('Failed to mark as shipped')
+    alert('Failed to mark as shipped. Please try again.')
   } finally {
     processingOrder.value = false
   }
 }
 
 const markAsDelivered = async (order: any) => {
+  if (!confirm('Mark this order as delivered?')) return
+
   try {
     processingOrder.value = true
 
     const { error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'delivered',
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
-      .eq('id', order.id)
+      .eq('id', order.order_id)
 
     if (error) throw error
 
     await fetchShopOrders()
-    alert('Order marked as delivered!')
-    
+    alert('Order marked as delivered! Transaction completed successfully.')
   } catch (err) {
     console.error('Error marking as delivered:', err)
-    alert('Failed to mark as delivered')
+    alert('Failed to mark as delivered. Please try again.')
   } finally {
     processingOrder.value = false
   }
@@ -403,15 +540,6 @@ const formatCurrency = (amount: number) => {
   return `₱${amount?.toFixed(2) || '0.00'}`
 }
 
-const formatDate = (dateString: string) => {
-  if (!dateString) return 'Not set'
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric'
-  })
-}
-
 const formatDateTime = (dateString: string) => {
   if (!dateString) return 'Not set'
   return new Date(dateString).toLocaleDateString('en-US', {
@@ -419,69 +547,73 @@ const formatDateTime = (dateString: string) => {
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   })
-}
-
-const getProductImage = (product: any) => {
-  if (!product?.main_img_urls) return '/placeholder.png'
-  try {
-    if (typeof product.main_img_urls === 'string') {
-      const parsed = JSON.parse(product.main_img_urls)
-      return Array.isArray(parsed) ? parsed[0] : parsed
-    }
-    if (Array.isArray(product.main_img_urls)) {
-      return product.main_img_urls[0]
-    }
-    return '/placeholder.png'
-  } catch {
-    return '/placeholder.png'
-  }
 }
 
 const getStatusColor = (status: string) => {
   switch (status) {
-    case 'pending': return 'orange'
-    case 'paid': return 'blue'
-    case 'shipped': return 'purple'
-    case 'delivered': return 'green'
-    case 'cancelled': return 'red'
-    default: return 'grey'
+    case 'pending':
+      return 'orange'
+    case 'paid':
+      return 'blue'
+    case 'shipped':
+      return 'purple'
+    case 'delivered':
+      return 'green'
+    case 'cancelled':
+      return 'red'
+    default:
+      return 'grey'
   }
 }
 
 const getStatusIcon = (status: string) => {
   switch (status) {
-    case 'pending': return 'mdi-clock-outline'
-    case 'paid': return 'mdi-credit-card-check'
-    case 'shipped': return 'mdi-truck-delivery'
-    case 'delivered': return 'mdi-check-circle'
-    case 'cancelled': return 'mdi-close-circle'
-    default: return 'mdi-help-circle'
+    case 'pending':
+      return 'mdi-clock-outline'
+    case 'paid':
+      return 'mdi-credit-card-check'
+    case 'shipped':
+      return 'mdi-truck-delivery'
+    case 'delivered':
+      return 'mdi-check-circle'
+    case 'cancelled':
+      return 'mdi-close-circle'
+    default:
+      return 'mdi-help-circle'
   }
 }
 
 const getStatusText = (status: string) => {
   switch (status) {
-    case 'pending': return 'Pending Payment'
-    case 'paid': return 'Paid - Ready to Ship'
-    case 'shipped': return 'Shipped'
-    case 'delivered': return 'Delivered'
-    case 'cancelled': return 'Cancelled'
-    default: return status
+    case 'pending':
+      return 'Pending Approval'
+    case 'paid':
+      return 'Paid - Ready to Ship'
+    case 'shipped':
+      return 'Shipped'
+    case 'delivered':
+      return 'Delivered'
+    case 'cancelled':
+      return 'Cancelled'
+    default:
+      return status
   }
 }
 
 const getOrderItemTotal = (item: any) => {
-  return (item.price * item.quantity) || 0
+  return item.price * item.quantity || 0
 }
 
 // Shop management functions
 const toggleShopStatus = async () => {
   try {
     loading.value = true
-    const { data: { user } } = await supabase.auth.getUser()
-    
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
     let newStatus: 'open' | 'closed' | 'auto'
     if (manualStatus.value === 'auto') newStatus = 'open'
     else if (manualStatus.value === 'open') newStatus = 'closed'
@@ -489,14 +621,16 @@ const toggleShopStatus = async () => {
 
     const { data, error } = await supabase.rpc('update_shop_status', {
       p_owner_id: user.id,
-      p_manual_status: newStatus
+      p_manual_status: newStatus,
     })
 
     if (error) throw error
     if (!data?.success) throw new Error('Update failed')
 
     manualStatus.value = newStatus
-    alert(`Shop is now ${newStatus === 'auto' ? 'AUTOMATIC' : 'MANUALLY ' + newStatus.toUpperCase()}`)
+    alert(
+      `Shop is now ${newStatus === 'auto' ? 'AUTOMATIC' : 'MANUALLY ' + newStatus.toUpperCase()}`,
+    )
   } catch (err) {
     alert('Failed to update shop status')
   } finally {
@@ -505,99 +639,104 @@ const toggleShopStatus = async () => {
 }
 
 const getCurrentStatusDisplay = () => {
-  if (manualStatus.value === 'open') return {
-    text: 'Manually Open', color: 'green', icon: 'mdi-store-check',
-    buttonText: 'Switch to Closed', buttonColor: 'red'
-  }
-  if (manualStatus.value === 'closed') return {
-    text: 'Manually Closed', color: 'red', icon: 'mdi-store-remove',
-    buttonText: 'Switch to Auto Mode', buttonColor: 'blue'
-  }
+  if (manualStatus.value === 'open')
+    return {
+      text: 'Manually Open',
+      color: 'green',
+      icon: 'mdi-store-check',
+      buttonText: 'Switch to Closed',
+      buttonColor: 'red',
+    }
+  if (manualStatus.value === 'closed')
+    return {
+      text: 'Manually Closed',
+      color: 'red',
+      icon: 'mdi-store-remove',
+      buttonText: 'Switch to Auto Mode',
+      buttonColor: 'blue',
+    }
   return {
-    text: 'Auto (Based on Hours)', color: 'blue', icon: 'mdi-clock',
-    buttonText: 'Switch to Open', buttonColor: 'green'
+    text: 'Auto (Based on Hours)',
+    color: 'blue',
+    icon: 'mdi-clock',
+    buttonText: 'Switch to Open',
+    buttonColor: 'green',
   }
 }
 
 const isShopCurrentlyOpen = () => {
   if (manualStatus.value === 'open') return true
   if (manualStatus.value === 'closed') return false
+
+  // Auto mode: check business hours
   const now = new Date()
-  return now.getHours() >= 8 && now.getHours() < 20
+  const currentHour = now.getHours()
+  const currentMinute = now.getMinutes()
+
+  // Parse open time
+  const openTime = timeOpen.value
+  if (openTime && openTime !== 'N/A') {
+    const [openHour, openMinute] = openTime.split(':').map(Number)
+
+    // Parse close time
+    const closeTime = timeClose.value
+    if (closeTime && closeTime !== 'N/A') {
+      const [closeHour, closeMinute] = closeTime.split(':').map(Number)
+
+      // Check if current time is within business hours
+      const currentTotalMinutes = currentHour * 60 + currentMinute
+      const openTotalMinutes = openHour * 60 + openMinute
+      const closeTotalMinutes = closeHour * 60 + closeMinute
+
+      return currentTotalMinutes >= openTotalMinutes && currentTotalMinutes <= closeTotalMinutes
+    }
+  }
+
+  // Default to 8 AM - 8 PM if no hours set
+  return currentHour >= 8 && currentHour < 20
 }
 
-const deleteShop = async () => {
-  if (!confirm('Are you sure you want to delete your shop?')) return
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    const { error } = await supabase.from('shops').delete().eq('owner_id', user.id)
-    if (error) throw error
-    
-    shopId.value = null
-    businessAvatar.value = ''
-    businessName.value = ''
-    description.value = ''
-    alert('Shop deleted successfully')
-    router.push('/')
-  } catch (err) {
-    alert('Failed to delete shop')
+// Refresh data
+const refreshData = async () => {
+  console.log('🔄 Refreshing data...')
+  await fetchShopData()
+  if (shopId.value) {
+    await fetchShopOrders()
   }
 }
-
-const editShop = () => {
-  if (!shopId.value) {
-    alert('Shop ID not found')
-    return
-  }
-  router.push({ name: 'shop-build', params: { id: shopId.value } })
-}
-
-onMounted(() => {
-  fetchShopData()
-  // Try the first method, if it fails, try the alternative
-  fetchShopOrders().catch(() => {
-    console.log('Trying alternative order fetching method...')
-    fetchShopOrdersAlternative()
-  })
-})
 </script>
 
 <template>
   <v-app>
-    <!-- Top Bar -->
+    <!-- Update your top bar to include refresh -->
     <v-app-bar class="top-bar" flat color="primary" dark>
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="text-h6">Business Profile</v-toolbar-title>
-
-      <!-- Dropdown menu -->
-      <v-menu>
-        <template #activator="{ props }">
-          <v-btn icon v-bind="props">
-            <v-icon>mdi-menu</v-icon>
-          </v-btn>
-        </template>
-
-        <v-list>
-          <v-list-item @click="editShop">
-            <v-list-item-title>
-              <v-icon start small>mdi-pencil</v-icon>
-              Edit Shop
-            </v-list-item-title>
-          </v-list-item>
-
-          <v-list-item @click="deleteShop">
-            <v-list-item-title>
-              <v-icon start small>mdi-delete</v-icon>
-              Delete Shop
-            </v-list-item-title>
-          </v-list-item>
-        </v-list>
-      </v-menu>
+      <v-spacer></v-spacer>
+      <v-btn icon @click="refreshData" title="Refresh Data" :loading="ordersLoading">
+        <v-icon>mdi-refresh</v-icon>
+      </v-btn>
     </v-app-bar>
 
     <v-main>
+      <!-- Replace your current debug alert with this -->
+      <v-alert v-if="shopId" type="info" class="ma-4">
+        <strong>Shop Info:</strong>
+        Shop ID: {{ shopId }} | Total Orders: {{ orders.length }} | Filtered:
+        {{ filteredOrders.length }}
+        <br />
+        <strong>Status Breakdown:</strong>
+        Pending: {{ orderStats.pending }} | Processing: {{ orderStats.processing }} | Completed:
+        {{ orderStats.completed }} | Cancelled: {{ orderStats.cancelled }}
+      </v-alert>
+
+      <v-alert v-else type="warning" class="ma-4">
+        <strong>No Shop Found:</strong> Please create a shop first to view orders.
+        <v-btn small @click="fetchShopData" class="ml-2"> Check Again </v-btn>
+      </v-alert>
+
       <!-- Cover + Logo -->
       <v-container class="pa-0">
         <v-img v-if="coverPhoto" :src="coverPhoto" height="180" cover class="cover-photo" />
@@ -633,7 +772,6 @@ onMounted(() => {
                 </v-chip>
               </p>
 
-              <!-- Single toggle button -->
               <v-btn
                 :color="getCurrentStatusDisplay().buttonColor"
                 :loading="loading"
@@ -653,7 +791,6 @@ onMounted(() => {
                 }}
               </p>
 
-              <!-- Quick status summary -->
               <div class="mt-2">
                 <v-chip
                   v-if="manualStatus === 'auto'"
@@ -690,7 +827,7 @@ onMounted(() => {
           <v-col cols="6" sm="3">
             <v-card color="orange-lighten-5" class="text-center pa-3">
               <div class="text-h6 font-weight-bold text-orange">
-                {{ orders.filter(o => o.status === 'pending').length }}
+                {{ orderStats.pending }}
               </div>
               <div class="text-caption text-orange">Pending</div>
             </v-card>
@@ -698,7 +835,7 @@ onMounted(() => {
           <v-col cols="6" sm="3">
             <v-card color="blue-lighten-5" class="text-center pa-3">
               <div class="text-h6 font-weight-bold text-blue">
-                {{ orders.filter(o => ['paid', 'shipped'].includes(o.status)).length }}
+                {{ orderStats.processing }}
               </div>
               <div class="text-caption text-blue">Processing</div>
             </v-card>
@@ -706,7 +843,7 @@ onMounted(() => {
           <v-col cols="6" sm="3">
             <v-card color="green-lighten-5" class="text-center pa-3">
               <div class="text-h6 font-weight-bold text-green">
-                {{ orders.filter(o => o.status === 'delivered').length }}
+                {{ orderStats.completed }}
               </div>
               <div class="text-caption text-green">Completed</div>
             </v-card>
@@ -714,7 +851,7 @@ onMounted(() => {
           <v-col cols="6" sm="3">
             <v-card color="red-lighten-5" class="text-center pa-3">
               <div class="text-h6 font-weight-bold text-red">
-                {{ orders.filter(o => o.status === 'cancelled').length }}
+                {{ orderStats.cancelled }}
               </div>
               <div class="text-caption text-red">Cancelled</div>
             </v-card>
@@ -730,7 +867,7 @@ onMounted(() => {
           class="mb-4"
         />
 
-        <!-- Orders List -->
+        <!-- Orders List - Grid Layout like Buyer Section -->
         <div v-if="ordersLoading" class="text-center py-8">
           <v-progress-circular indeterminate color="primary"></v-progress-circular>
           <p class="mt-2">Loading orders...</p>
@@ -738,212 +875,150 @@ onMounted(() => {
 
         <div v-else-if="filteredOrders.length === 0" class="text-center py-8">
           <v-icon size="64" color="grey-lighten-2">mdi-cart-off</v-icon>
-          <p class="mt-2 text-grey">No {{ transactionOptions.find(opt => opt.value === transactionFilter)?.title.toLowerCase() }} found</p>
+          <p class="mt-2 text-grey">
+            No
+            {{
+              transactionOptions.find((opt) => opt.value === transactionFilter)?.title.toLowerCase()
+            }}
+            found
+          </p>
+          <p class="text-caption text-grey mt-2" v-if="shopId">
+            When customers purchase your products, orders will appear here.
+          </p>
         </div>
 
-        <div v-else class="orders-list">
-          <v-card
-            v-for="order in filteredOrders"
-            :key="order.id"
-            class="mb-6 order-card"
-            elevation="2"
-            :class="`status-${order.status}`"
-          >
-            <!-- Order Header -->
-            <v-card-title class="d-flex justify-space-between align-center pb-0">
-              <div class="d-flex align-center">
-                <v-icon color="primary" class="mr-2">mdi-receipt</v-icon>
-                <div>
-                  <div class="text-h6">Order #{{ order.transaction_number || order.id.slice(-8) }}</div>
-                  <div class="text-caption text-medium-emphasis">
-                    {{ formatDateTime(order.created_at) }}
-                  </div>
-                </div>
-              </div>
-              <v-chip :color="getStatusColor(order.status)" class="font-weight-bold">
-                <v-icon start small>{{ getStatusIcon(order.status) }}</v-icon>
-                {{ getStatusText(order.status) }}
-              </v-chip>
-            </v-card-title>
+        <!-- Grid Layout for Orders -->
+        <div v-else class="orders-grid">
+          <v-row dense>
+            <v-col v-for="order in filteredOrders" :key="order.id" cols="12" sm="6" md="4">
+              <v-card class="order-card" elevation="2" :class="`status-${order.status}`">
+                <!-- Product Image -->
+                <v-img :src="order.product_img" height="200px" cover class="product-image" />
 
-            <v-card-text class="pt-4">
-              <!-- Buyer & Delivery Information -->
-              <v-row class="mb-4">
-                <v-col cols="12" md="6">
-                  <div class="info-section">
-                    <h4 class="text-subtitle-2 font-weight-bold mb-2">
-                      <v-icon small class="mr-1">mdi-account</v-icon>
-                      Buyer Information
-                    </h4>
-                    <div class="pl-4">
-                      <div><strong>Name:</strong> {{ order.buyer?.first_name }} {{ order.buyer?.last_name }}</div>
-                      <div v-if="order.buyer?.phone"><strong>Phone:</strong> {{ order.buyer.phone }}</div>
-                    </div>
-                  </div>
-                </v-col>
-                <v-col cols="12" md="6">
-                  <div class="info-section" v-if="order.address">
-                    <h4 class="text-subtitle-2 font-weight-bold mb-2">
-                      <v-icon small class="mr-1">mdi-truck-delivery</v-icon>
-                      Delivery Information
-                    </h4>
-                    <div class="pl-4">
-                      <div><strong>Recipient:</strong> {{ order.address.recipient_name }}</div>
-                      <div><strong>Phone:</strong> {{ order.address.phone }}</div>
-                      <div class="text-caption">
-                        {{ order.address.street }}, {{ order.address.barangay_name }}, 
-                        {{ order.address.city_name }}, {{ order.address.province_name }}
-                      </div>
-                    </div>
-                  </div>
-                </v-col>
-              </v-row>
+                <v-card-title class="product-name">
+                  {{ order.product_name || 'Product' }}
+                </v-card-title>
 
-              <!-- Order Items -->
-              <v-divider class="my-3"></v-divider>
-              <h4 class="text-subtitle-2 font-weight-bold mb-3">Order Items</h4>
-              
-              <v-card
-                v-for="item in order.order_items"
-                :key="item.id"
-                class="mb-3 item-card"
-                variant="outlined"
-              >
-                <v-card-text class="pa-4">
-                  <div class="d-flex align-start">
-                    <v-img
-                      :src="getProductImage(item.products)"
-                      width="80"
-                      height="80"
-                      class="mr-4 rounded"
-                      cover
-                    />
-                    <div class="flex-grow-1">
-                      <div class="d-flex justify-space-between align-start">
-                        <div>
-                          <h5 class="text-subtitle-1 font-weight-medium">{{ item.products?.prod_name }}</h5>
-                          <div class="text-caption text-medium-emphasis mb-2">
-                            {{ item.products?.description }}
-                          </div>
-                          <div class="text-caption">
-                            <span v-if="item.selected_size" class="mr-3">
-                              <strong>Size:</strong> {{ item.selected_size }}
-                            </span>
-                            <span v-if="item.selected_variety">
-                              <strong>Variety:</strong> {{ item.selected_variety }}
-                            </span>
-                          </div>
-                        </div>
-                        <div class="text-right">
-                          <div class="text-subtitle-1 font-weight-bold text-primary">
-                            {{ formatCurrency(getOrderItemTotal(item)) }}
-                          </div>
-                          <div class="text-caption text-medium-emphasis">
-                            {{ formatCurrency(item.price) }} × {{ item.quantity }}
-                          </div>
-                        </div>
-                      </div>
+                <v-card-subtitle class="pb-0">
+                  <div class="d-flex justify-space-between align-center">
+                    <v-chip small :color="getStatusColor(order.status)" class="font-weight-bold">
+                      <v-icon start small>{{ getStatusIcon(order.status) }}</v-icon>
+                      {{ getStatusText(order.status) }}
+                    </v-chip>
+                    <span class="text-caption text-medium-emphasis">
+                      {{ formatDateTime(order.created_at) }}
+                    </span>
+                  </div>
+                </v-card-subtitle>
+
+                <v-card-text class="pt-2">
+                  <!-- Order Details -->
+                  <div class="order-details">
+                    <div><strong>Quantity:</strong> {{ order.quantity }}</div>
+                    <div><strong>Price:</strong> {{ formatCurrency(order.price) }}</div>
+                    <div>
+                      <strong>Total:</strong> {{ formatCurrency(getOrderItemTotal(order)) }}
                     </div>
+                    <div v-if="order.selected_size">
+                      <strong>Size:</strong> {{ order.selected_size }}
+                    </div>
+                    <div v-if="order.selected_variety">
+                      <strong>Variety:</strong> {{ order.selected_variety }}
+                    </div>
+                  </div>
+
+                  <!-- Buyer Information -->
+                  <div class="buyer-info mt-3" v-if="order.buyer">
+                    <div class="text-caption text-medium-emphasis">
+                      <strong>Buyer:</strong> {{ order.buyer.first_name }}
+                      {{ order.buyer.last_name }}
+                    </div>
+                    <div v-if="order.buyer.phone" class="text-caption text-medium-emphasis">
+                      <strong>Phone:</strong> {{ order.buyer.phone }}
+                    </div>
+                  </div>
+
+                  <!-- Order Notes -->
+                  <div v-if="order.note" class="order-notes mt-2 pa-2 bg-grey-lighten-4 rounded">
+                    <strong>Note:</strong> {{ order.note }}
                   </div>
                 </v-card-text>
+
+                <!-- Action Buttons -->
+                <v-card-actions class="action-buttons">
+                  <!-- PENDING ORDERS - Accept/Decline -->
+                  <template v-if="order.status === 'pending'">
+                    <v-btn
+                      color="success"
+                      block
+                      @click="acceptOrder(order)"
+                      :loading="processingOrder"
+                      size="small"
+                    >
+                      <v-icon left>mdi-check</v-icon>
+                      Accept Order
+                    </v-btn>
+                    <v-btn
+                      color="error"
+                      variant="outlined"
+                      block
+                      @click="openRejectDialog(order)"
+                      :loading="processingOrder"
+                      size="small"
+                      class="mt-2"
+                    >
+                      <v-icon left>mdi-close</v-icon>
+                      Decline Order
+                    </v-btn>
+                  </template>
+
+                  <!-- PAID ORDERS - Mark as Shipped -->
+                  <template v-else-if="order.status === 'paid'">
+                    <v-btn
+                      color="primary"
+                      block
+                      @click="markAsShipped(order)"
+                      :loading="processingOrder"
+                      size="small"
+                    >
+                      <v-icon left>mdi-truck</v-icon>
+                      Mark as Shipped
+                    </v-btn>
+                  </template>
+
+                  <!-- SHIPPED ORDERS - Mark as Delivered -->
+                  <template v-else-if="order.status === 'shipped'">
+                    <v-btn
+                      color="success"
+                      block
+                      @click="markAsDelivered(order)"
+                      :loading="processingOrder"
+                      size="small"
+                    >
+                      <v-icon left>mdi-check-circle</v-icon>
+                      Mark as Delivered
+                    </v-btn>
+                  </template>
+
+                  <!-- DELIVERED ORDERS - Completed -->
+                  <template v-else-if="order.status === 'delivered'">
+                    <div class="completed-status text-center w-100">
+                      <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
+                      <span class="text-success font-weight-medium">Order Completed</span>
+                    </div>
+                  </template>
+
+                  <!-- CANCELLED ORDERS -->
+                  <template v-else-if="order.status === 'cancelled'">
+                    <div class="cancelled-status text-center w-100">
+                      <v-icon color="error" class="mr-2">mdi-close-circle</v-icon>
+                      <span class="text-error font-weight-medium">Order Cancelled</span>
+                    </div>
+                  </template>
+                </v-card-actions>
               </v-card>
-
-              <!-- Order Summary -->
-              <v-divider class="my-3"></v-divider>
-              <div class="order-summary">
-                <div class="d-flex justify-space-between mb-2">
-                  <span class="text-body-2">Subtotal:</span>
-                  <span class="text-body-2">{{ formatCurrency(order.total_amount) }}</span>
-                </div>
-                <div class="d-flex justify-space-between mb-2">
-                  <span class="text-body-2">Payment Method:</span>
-                  <span class="text-body-2">{{ order.payment_method || 'Not specified' }}</span>
-                </div>
-                <div class="d-flex justify-space-between mb-2" v-if="order.delivery_option">
-                  <span class="text-body-2">Delivery Option:</span>
-                  <span class="text-body-2">{{ order.delivery_option }}</span>
-                </div>
-                <v-divider class="my-2"></v-divider>
-                <div class="d-flex justify-space-between font-weight-bold text-h6">
-                  <span>Total Amount:</span>
-                  <span class="text-primary">{{ formatCurrency(order.total_amount) }}</span>
-                </div>
-              </div>
-
-              <!-- Order Notes -->
-              <div v-if="order.note" class="mt-4 pa-3 bg-grey-lighten-4 rounded">
-                <strong>Customer Note:</strong> {{ order.note }}
-              </div>
-
-              <!-- Action Buttons -->
-              <div class="mt-4 action-buttons">
-                <template v-if="order.status === 'pending'">
-                  <v-btn
-                    color="success"
-                    class="mr-2"
-                    @click="acceptOrder(order)"
-                    :loading="processingOrder"
-                    size="large"
-                  >
-                    <v-icon left>mdi-check</v-icon>
-                    Accept Order
-                  </v-btn>
-                  <v-btn
-                    color="error"
-                    variant="outlined"
-                    @click="openRejectDialog(order)"
-                    :loading="processingOrder"
-                    size="large"
-                  >
-                    <v-icon left>mdi-close</v-icon>
-                    Reject Order
-                  </v-btn>
-                </template>
-
-                <template v-else-if="order.status === 'paid'">
-                  <v-btn
-                    color="primary"
-                    @click="markAsShipped(order)"
-                    :loading="processingOrder"
-                    size="large"
-                  >
-                    <v-icon left>mdi-truck</v-icon>
-                    Mark as Shipped
-                  </v-btn>
-                  <span class="text-caption text-grey ml-3">
-                    Order has been paid and is ready for shipping
-                  </span>
-                </template>
-
-                <template v-else-if="order.status === 'shipped'">
-                  <v-btn
-                    color="success"
-                    @click="markAsDelivered(order)"
-                    :loading="processingOrder"
-                    size="large"
-                  >
-                    <v-icon left>mdi-check-circle</v-icon>
-                    Mark as Delivered
-                  </v-btn>
-                  <span class="text-caption text-grey ml-3">Order is in transit to customer</span>
-                </template>
-
-                <template v-else-if="order.status === 'delivered'">
-                  <div class="d-flex align-center">
-                    <v-icon color="success" class="mr-2">mdi-check-circle</v-icon>
-                    <span class="text-success font-weight-medium">Order completed successfully</span>
-                  </div>
-                </template>
-
-                <template v-else-if="order.status === 'cancelled'">
-                  <div class="d-flex align-center">
-                    <v-icon color="error" class="mr-2">mdi-close-circle</v-icon>
-                    <span class="text-error font-weight-medium">Order has been cancelled</span>
-                  </div>
-                </template>
-              </div>
-            </v-card-text>
-          </v-card>
+            </v-col>
+          </v-row>
         </div>
       </v-container>
     </v-main>
@@ -953,27 +1028,22 @@ onMounted(() => {
       <v-card>
         <v-card-title class="d-flex align-center">
           <v-icon color="error" class="mr-2">mdi-alert-circle</v-icon>
-          Reject Order
+          Decline Order
         </v-card-title>
         <v-card-text>
-          <p class="mb-3">Please provide a reason for rejecting order #{{ selectedOrder?.transaction_number || selectedOrder?.id?.slice(-8) }}:</p>
+          <p class="mb-3">Please provide a reason for declining this order:</p>
           <v-textarea
             v-model="rejectReason"
-            label="Rejection Reason"
+            label="Decline Reason"
             variant="outlined"
             rows="3"
-            placeholder="Please explain why you are rejecting this order..."
+            placeholder="Please explain why you are declining this order..."
             required
-            :rules="[v => !!v || 'Rejection reason is required']"
           ></v-textarea>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn
-            variant="text"
-            @click="rejectDialog = false"
-            :disabled="processingOrder"
-          >
+          <v-btn variant="text" @click="rejectDialog = false" :disabled="processingOrder">
             Cancel
           </v-btn>
           <v-btn
@@ -983,7 +1053,7 @@ onMounted(() => {
             :disabled="!rejectReason.trim()"
           >
             <v-icon left>mdi-cancel</v-icon>
-            Reject Order
+            Decline Order
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -1031,9 +1101,23 @@ onMounted(() => {
   font-weight: 600;
 }
 
+/* Grid Layout for Orders */
+.orders-grid {
+  width: 100%;
+}
+
 .order-card {
   border-radius: 12px;
   overflow: hidden;
+  transition:
+    transform 0.2s ease,
+    box-shadow 0.2s ease;
+  height: 100%;
+}
+
+.order-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .order-card.status-pending {
@@ -1056,37 +1140,74 @@ onMounted(() => {
   border-left: 4px solid #f44336;
 }
 
-.item-card {
-  border-radius: 8px;
+.product-image {
+  cursor: pointer;
 }
 
-.info-section {
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 12px;
+.product-name {
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.2;
+  padding-bottom: 8px;
 }
 
-.order-summary {
-  background: #f8f9fa;
-  border-radius: 8px;
-  padding: 16px;
+.order-details {
+  font-size: 0.875rem;
+}
+
+.buyer-info {
+  border-top: 1px solid #e0e0e0;
+  padding-top: 8px;
+}
+
+.order-notes {
+  font-size: 0.8rem;
+  border-left: 3px solid #ff9800;
 }
 
 .action-buttons {
+  padding: 12px;
   display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 8px;
 }
 
+.completed-status,
+.cancelled-status {
+  padding: 8px;
+  border-radius: 6px;
+}
+
+.completed-status {
+  background-color: #e8f5e8;
+}
+
+.cancelled-status {
+  background-color: #ffebee;
+}
+
+/* Responsive adjustments */
 @media (max-width: 768px) {
-  .action-buttons {
-    flex-direction: column;
-    align-items: stretch;
+  .orders-grid .v-col {
+    margin-bottom: 16px;
   }
-  
-  .action-buttons .v-btn {
-    margin: 4px 0;
+
+  .order-card {
+    margin-bottom: 0;
+  }
+}
+
+@media (max-width: 600px) {
+  .orders-grid .v-col {
+    margin-bottom: 12px;
+  }
+
+  .product-name {
+    font-size: 0.9rem;
+  }
+
+  .order-details {
+    font-size: 0.8rem;
   }
 }
 </style>
