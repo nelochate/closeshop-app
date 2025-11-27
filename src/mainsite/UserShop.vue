@@ -33,28 +33,6 @@ const transactionOptions = [
   { title: 'Cancelled', value: 'cancelled' },
 ]
 
-// Computed: Filtered orders based on selected filter
-const filteredOrders = computed(() => {
-  if (transactionFilter.value === 'all') {
-    return orders.value
-  }
-
-  return orders.value.filter((order) => {
-    switch (transactionFilter.value) {
-      case 'pending':
-        return order.payment_status === 'pending'
-      case 'paid':
-        return order.payment_status === 'paid'
-      case 'delivered':
-        return order.delivery_status === 'delivered'
-      case 'cancelled':
-        return order.status === 'cancelled' || order.payment_status === 'cancelled'
-      default:
-        return true
-    }
-  })
-})
-
 // Function to convert 24-hour time to 12-hour format
 const convertTo12Hour = (time24: string) => {
   if (!time24 || time24 === 'N/A') return 'N/A'
@@ -109,9 +87,9 @@ const fetchOrders = async () => {
     }
 
     // Extract IDs for related data
-    const orderIds = basicOrders.map(order => order.id)
-    const addressIds = basicOrders.map(order => order.address_id).filter(Boolean)
-    const userIds = basicOrders.map(order => order.user_id).filter(Boolean)
+    const orderIds = basicOrders.map((order) => order.id)
+    const addressIds = basicOrders.map((order) => order.address_id).filter(Boolean)
+    const userIds = basicOrders.map((order) => order.user_id).filter(Boolean)
 
     // Fetch addresses separately
     let addressesMap = new Map()
@@ -122,7 +100,7 @@ const fetchOrders = async () => {
         .in('id', addressIds)
 
       if (!addressesError && addressesData) {
-        addressesData.forEach(addr => {
+        addressesData.forEach((addr) => {
           addressesMap.set(addr.id, addr)
         })
       }
@@ -137,7 +115,7 @@ const fetchOrders = async () => {
         .in('id', userIds)
 
       if (!profilesError && profilesData) {
-        profilesData.forEach(profile => {
+        profilesData.forEach((profile) => {
           profilesMap.set(profile.id, profile)
         })
       }
@@ -148,7 +126,8 @@ const fetchOrders = async () => {
     if (orderIds.length > 0) {
       const { data: orderItemsData, error: orderItemsError } = await supabase
         .from('order_items')
-        .select(`
+        .select(
+          `
           *,
           product:products (
             id,
@@ -157,11 +136,12 @@ const fetchOrders = async () => {
             price,
             varieties
           )
-        `)
+        `,
+        )
         .in('order_id', orderIds)
 
       if (!orderItemsError && orderItemsData) {
-        orderItemsData.forEach(item => {
+        orderItemsData.forEach((item) => {
           if (!orderItemsMap.has(item.order_id)) {
             orderItemsMap.set(item.order_id, [])
           }
@@ -180,15 +160,15 @@ const fetchOrders = async () => {
     if (ordersError) throw ordersError
 
     // Combine all data manually
-    const combinedOrders = ordersData?.map(order => ({
-      ...order,
-      addresses: addressesMap.get(order.address_id) || null,
-      profiles: profilesMap.get(order.user_id) || null,
-      order_items: orderItemsMap.get(order.id) || []
-    })) || []
+    const combinedOrders =
+      ordersData?.map((order) => ({
+        ...order,
+        addresses: addressesMap.get(order.address_id) || null,
+        profiles: profilesMap.get(order.user_id) || null,
+        order_items: orderItemsMap.get(order.id) || [],
+      })) || []
 
     orders.value = combinedOrders
-
   } catch (err) {
     console.error('❌ Error in fetchOrders:', err)
     ordersError.value = 'Error loading orders. Please try again.'
@@ -242,6 +222,28 @@ const markAsDelivered = async (orderId: string) => {
   }
 }
 
+// Computed: Filtered orders based on selected filter - UPDATED for delivered orders
+const filteredOrders = computed(() => {
+  if (transactionFilter.value === 'all') {
+    return orders.value
+  }
+
+  return orders.value.filter((order) => {
+    switch (transactionFilter.value) {
+      case 'pending':
+        return order.payment_status === 'pending'
+      case 'paid':
+        return order.payment_status === 'paid' && order.delivery_status !== 'delivered'
+      case 'delivered':
+        return order.delivery_status === 'delivered'
+      case 'cancelled':
+        return order.status === 'cancelled' || order.payment_status === 'cancelled'
+      default:
+        return true
+    }
+  })
+})
+
 const cancelOrder = async (orderId: string) => {
   if (!confirm('Cancel this order? This action cannot be undone.')) return
 
@@ -275,6 +277,7 @@ const getStatusColor = (order: any) => {
   return 'grey'
 }
 
+// Status helpers - UPDATED getStatusText function
 const getStatusText = (order: any) => {
   if (order.status === 'cancelled') return 'Cancelled ❌'
   if (order.payment_status === 'paid' && order.delivery_status === 'delivered')
@@ -939,9 +942,7 @@ watch(shopId, (newShopId) => {
                           }}
                           at
                           {{
-                            order.delivery_time
-                              ? convertTo12Hour(order.delivery_time)
-                              : 'Not set'
+                            order.delivery_time ? convertTo12Hour(order.delivery_time) : 'Not set'
                           }}
                         </p>
                       </v-col>
@@ -978,13 +979,7 @@ watch(shopId, (newShopId) => {
                         </div>
                       </div>
                     </v-alert>
-                    <v-alert
-                      v-else
-                      type="warning"
-                      density="compact"
-                      class="mt-3"
-                      rounded="lg"
-                    >
+                    <v-alert v-else type="warning" density="compact" class="mt-3" rounded="lg">
                       <div class="d-flex align-start">
                         <v-icon color="warning" class="mr-2 mt-1">mdi-map-marker-off</v-icon>
                         <div>
@@ -1138,27 +1133,29 @@ watch(shopId, (newShopId) => {
                   <v-divider class="my-4"></v-divider>
                   <div class="order-actions">
                     <div class="d-flex flex-wrap gap-2 justify-center justify-sm-start my-2">
+                      <!-- Approve Payment Button - Only show for pending payments that aren't cancelled -->
                       <v-btn
                         color="success"
                         size="small"
                         variant="flat"
-                        v-if="order.payment_status !== 'paid' && order.status !== 'cancelled'"
+                        v-if="order.payment_status === 'pending' && order.status !== 'cancelled'"
                         @click="approvePayment(order.id)"
                         rounded="lg"
-                        class="action-button my-4"
+                        class="action-button my-2"
                       >
                         <v-icon start small>mdi-check</v-icon>
                         Approve Payment
                       </v-btn>
 
+                      <!-- Mark as Delivered Button - Only show for paid orders that aren't delivered yet and aren't cancelled -->
                       <v-btn
                         color="info"
                         size="small"
                         variant="flat"
                         v-if="
+                          order.payment_status === 'paid' &&
                           order.delivery_status !== 'delivered' &&
-                          order.status !== 'cancelled' &&
-                          order.payment_status === 'paid'
+                          order.status !== 'cancelled'
                         "
                         @click="markAsDelivered(order.id)"
                         rounded="lg"
@@ -1168,11 +1165,12 @@ watch(shopId, (newShopId) => {
                         Mark Delivered
                       </v-btn>
 
+                      <!-- Cancel Order Button - Only show for orders that aren't already cancelled -->
                       <v-btn
                         color="error"
                         size="small"
                         variant="outlined"
-                        v-if="order.status !== 'cancelled'"
+                        v-if="order.status !== 'cancelled' && order.payment_status !== 'cancelled'"
                         @click="cancelOrder(order.id)"
                         rounded="lg"
                         class="action-button my-2"
@@ -1181,6 +1179,7 @@ watch(shopId, (newShopId) => {
                         Cancel Order
                       </v-btn>
 
+                      <!-- View Details Button - Always show -->
                       <v-btn
                         color="primary"
                         size="small"
@@ -1379,21 +1378,28 @@ watch(shopId, (newShopId) => {
 }
 
 /* Enhanced status colors */
+.status-completed {
+  background-color: #e8f5e8;
+  color: #1b5e20;
+  border: 1px solid #4caf50;
+}
+
+.status-delivered {
+  background-color: #e3f2fd;
+  color: #1565c0;
+  border: 1px solid #2196f3;
+}
+
 .status-pending {
   background-color: #fff3e0;
   color: #e65100;
+  border: 1px solid #ff9800;
 }
-.status-paid {
-  background-color: #e8f5e8;
-  color: #2e7d32;
-}
-.status-delivered {
-  background-color: #e8f5e8;
-  color: #1b5e20;
-}
+
 .status-cancelled {
   background-color: #ffebee;
   color: #c62828;
+  border: 1px solid #f44336;
 }
 
 /* Responsive adjustments */
@@ -1484,7 +1490,7 @@ watch(shopId, (newShopId) => {
 
   .avatar-border {
     width: 90px !important;
-    height:90px !important;
+    height: 90px !important;
   }
 
   .business-card .v-card-text {
