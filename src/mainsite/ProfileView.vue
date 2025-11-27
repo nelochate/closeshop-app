@@ -177,7 +177,7 @@ const loadOrderCounts = async () => {
             (o) =>
               o.payment_status === 'failed' ||
               o.status === 'failed' ||
-              (o.payment_status === 'pending' && o.status !== 'cancelled'),
+              (o.payment_status === 'rejected' && o.status !== 'cancelled'),
           ).length
           break
         default:
