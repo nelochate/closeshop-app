@@ -229,9 +229,9 @@ const loadItems = async () => {
         item.varietyData ||
         (item.variety
           ? {
-              name: item.variety,
-              price: item.varietyPrice || item.price,
-            }
+            name: item.variety,
+            price: item.varietyPrice || item.price,
+          }
           : null),
       price: item.varietyPrice || item.price,
     }))
@@ -513,11 +513,10 @@ const initializeDateTime = () => {
   const day = deliveryDateObj.getDate().toString().padStart(2, '0')
   deliveryDate.value = `${year}-${month}-${day}`
 
-  // Set default time
+  // Set default time with proper validation
   const isToday = deliveryDateObj.toDateString() === now.toDateString()
 
   if (isToday) {
-    // Today - set to current time + 1 hour, but within shop hours
     const currentHour = now.getHours()
     const deliveryHour = Math.max(currentHour + 1, shopSchedule.value.openHour)
     const minutes = now.getMinutes().toString().padStart(2, '0')
@@ -526,28 +525,31 @@ const initializeDateTime = () => {
     selectedHour.value = hour12.toString().padStart(2, '0')
     selectedMinute.value = minutes
     selectedPeriod.value = deliveryHour >= 12 ? 'PM' : 'AM'
+
+    // Update delivery time immediately
     deliveryTime.value = `${deliveryHour.toString().padStart(2, '0')}:${minutes}`
   } else {
-    // Future date - set to shop opening time
     const hour12 = shopSchedule.value.openHour % 12 || 12
     selectedHour.value = hour12.toString().padStart(2, '0')
     selectedMinute.value = '00'
     selectedPeriod.value = shopSchedule.value.openHour >= 12 ? 'PM' : 'AM'
+
+    // Update delivery time immediately
     deliveryTime.value = `${shopSchedule.value.openHour.toString().padStart(2, '0')}:00`
   }
 
-  console.log('✅ Date/time initialized:', {
-    date: deliveryDate.value,
-    time: deliveryTime.value,
-    selectedDay: deliveryDateObj.getDay(),
-    dayName: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][deliveryDateObj.getDay()]
-  })
+  console.log('✅ Date/time fully initialized')
 }
 
-// 🏪 SHOP HOURS VALIDATION - COMPLETELY REWRITTEN
+// 🏪 SHOP HOURS VALIDATION - FIXED DATE HANDLING
 const scheduleError = ref('')
-const isWithinShopHours = (date: string, time: string): boolean => {
-  console.log('🔍 SCHEDULE VALIDATION START:', { date, time })
+const isWithinShopHours = (date: any, time: string): boolean => {
+  console.log('🔍 SCHEDULE VALIDATION START:', {
+    date,
+    time,
+    dateType: typeof date,
+    dateValue: date
+  })
   console.log('🔍 Current shop schedule:', shopSchedule.value)
 
   // Reset error
@@ -560,20 +562,59 @@ const isWithinShopHours = (date: string, time: string): boolean => {
   }
 
   try {
-    // Create date object from selected date and time
-    const selectedDateTime = new Date(`${date}T${time}:00`)
+    let selectedDateTime: Date
+
+    // Handle different date input types
+    if (date instanceof Date) {
+      // Date is already a Date object - clone it and set the time
+      selectedDateTime = new Date(date)
+      console.log('📅 Using existing Date object:', selectedDateTime.toString())
+    } else if (typeof date === 'string') {
+      // Date is a string - parse it
+      selectedDateTime = new Date(date)
+      console.log('📅 Parsing date from string:', date)
+    } else {
+      console.error('❌ Invalid date type:', typeof date)
+      scheduleError.value = 'Invalid date selection.'
+      return false
+    }
+
+    // Validate time format
+    const timeRegex = /^([0-1]?[0-9]|2[0-3]):([0-5][0-9])$/
+    if (!timeRegex.test(time)) {
+      console.error('❌ Invalid time format:', time)
+      scheduleError.value = 'Invalid time format. Please select a valid time.'
+      return false
+    }
+
+    // Parse time components and set them on the date
+    const [hours, minutes] = time.split(':').map(Number)
+
+    // Validate time components
+    if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 23 || minutes < 0 || minutes > 59) {
+      scheduleError.value = 'Invalid time selected. Please choose a valid time.'
+      return false
+    }
+
+    // Set the time on the date object
+    selectedDateTime.setHours(hours, minutes, 0, 0)
+
     const now = new Date()
 
     console.log('🔍 Date analysis:', {
-      selected: selectedDateTime.toString(),
-      selectedDate: date,
-      selectedTime: time,
-      now: now.toString()
+      originalDate: date,
+      selectedDateTime: selectedDateTime.toString(),
+      selectedDateTimeISO: selectedDateTime.toISOString(),
+      hours,
+      minutes,
+      now: now.toString(),
+      isValidDate: !isNaN(selectedDateTime.getTime())
     })
 
     // Check if selected date is valid
     if (isNaN(selectedDateTime.getTime())) {
-      scheduleError.value = 'Invalid date/time selection.'
+      console.error('❌ Invalid date/time combination:', { date, time })
+      scheduleError.value = 'Invalid date/time selection. Please try again.'
       return false
     }
 
@@ -608,16 +649,13 @@ const isWithinShopHours = (date: string, time: string): boolean => {
       return false
     }
 
-    // Parse time components
-    const [hours, minutes] = time.split(':').map(Number)
+    // Calculate time in minutes for comparison
     const selectedTimeInMinutes = hours * 60 + minutes
     const openTimeInMinutes = shopSchedule.value.openHour * 60
     const closeTimeInMinutes = shopSchedule.value.closeHour * 60
 
     console.log('🔍 Time analysis:', {
       selectedTime: time,
-      hours,
-      minutes,
       selectedTimeInMinutes,
       openTimeInMinutes,
       closeTimeInMinutes,
@@ -687,14 +725,17 @@ const confirmDateTime = () => {
 
 // 🗓️ IMPROVED DATE CHANGE HANDLER
 const handleDateChange = (newDate: string) => {
-  deliveryDate.value = newDate
   console.log('📅 Date changed to:', newDate)
+  deliveryDate.value = newDate
 
-  // Auto-validate when date changes
-  if (deliveryTime.value) {
+  // Auto-validate when date changes (only if we have time)
+  if (deliveryTime.value && validateTimeComponents()) {
+    console.log('🔄 Auto-validating after date change...')
     const isValid = isWithinShopHours(deliveryDate.value, deliveryTime.value)
     if (!isValid) {
       console.log('⚠️ Date change caused validation issue:', scheduleError.value)
+    } else {
+      console.log('✅ Date change validation passed')
     }
   }
 }
@@ -721,56 +762,105 @@ const maxDate = computed(() => {
 const hours12 = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'))
 const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'))
 
+// 🕒 TIME PICKER FUNCTIONS - IMPROVED
 const updateTime = () => {
-  if (!selectedHour.value || !selectedMinute.value) {
-    console.log('⚠️ Time not fully selected yet')
+  console.log('🕒 Updating time with:', {
+    hour: selectedHour.value,
+    minute: selectedMinute.value,
+    period: selectedPeriod.value
+  })
+
+  // Check if we have all required time components
+  if (!selectedHour.value || !selectedMinute.value || !selectedPeriod.value) {
+    console.log('⚠️ Time components missing, skipping update')
     return
   }
 
-  let hourNum = parseInt(selectedHour.value)
+  try {
+    let hourNum = parseInt(selectedHour.value)
 
-  // Convert to 24-hour format
-  if (selectedPeriod.value === 'PM' && hourNum < 12) {
-    hourNum += 12
-  }
-  if (selectedPeriod.value === 'AM' && hourNum === 12) {
-    hourNum = 0
-  }
-
-  deliveryTime.value = `${hourNum.toString().padStart(2, '0')}:${selectedMinute.value}`
-
-  console.log('🕒 Time updated:', {
-    selectedHour: selectedHour.value,
-    selectedMinute: selectedMinute.value,
-    period: selectedPeriod.value,
-    deliveryTime: deliveryTime.value
-  })
-
-  // Auto-validate when time changes
-  if (deliveryDate.value) {
-    const isValid = isWithinShopHours(deliveryDate.value, deliveryTime.value)
-    if (!isValid) {
-      console.log('⚠️ Time change caused validation issue:', scheduleError.value)
+    // Validate hour
+    if (isNaN(hourNum) || hourNum < 1 || hourNum > 12) {
+      console.error('❌ Invalid hour:', selectedHour.value)
+      return
     }
+
+    // Convert to 24-hour format
+    if (selectedPeriod.value === 'PM' && hourNum < 12) {
+      hourNum += 12
+    } else if (selectedPeriod.value === 'AM' && hourNum === 12) {
+      hourNum = 0
+    }
+
+    // Ensure hour is within valid range
+    if (hourNum < 0 || hourNum > 23) {
+      console.error('❌ Invalid 24-hour time:', hourNum)
+      return
+    }
+
+    const minuteNum = parseInt(selectedMinute.value)
+    if (isNaN(minuteNum) || minuteNum < 0 || minuteNum > 59) {
+      console.error('❌ Invalid minute:', selectedMinute.value)
+      return
+    }
+
+    // Format time as HH:MM
+    deliveryTime.value = `${hourNum.toString().padStart(2, '0')}:${selectedMinute.value.padStart(2, '0')}`
+
+    console.log('✅ Time updated successfully:', {
+      selectedHour: selectedHour.value,
+      selectedMinute: selectedMinute.value,
+      period: selectedPeriod.value,
+      deliveryTime: deliveryTime.value,
+      hour24: hourNum
+    })
+
+    // Auto-validate when time changes
+    if (deliveryDate.value && deliveryTime.value) {
+      console.log('🔄 Auto-validating schedule...')
+      const isValid = isWithinShopHours(deliveryDate.value, deliveryTime.value)
+      if (!isValid) {
+        console.log('⚠️ Time change caused validation issue:', scheduleError.value)
+      } else {
+        console.log('✅ Time change validation passed')
+      }
+    }
+
+  } catch (error) {
+    console.error('❌ Error updating time:', error)
+    scheduleError.value = 'Error setting time. Please try again.'
   }
 }
-
 const selectHour = (hour: string) => {
-  selectedHour.value = hour
   console.log('⏰ Hour selected:', hour)
-  updateTime()
+  selectedHour.value = hour
+
+  // Validate before updating
+  if (validateTimeComponents()) {
+    updateTime()
+  } else {
+    console.log('❌ Hour selection validation failed')
+  }
 }
 
 const selectMinute = (minute: string) => {
-  selectedMinute.value = minute
   console.log('⏰ Minute selected:', minute)
-  updateTime()
+  selectedMinute.value = minute
+
+  // Validate before updating
+  if (validateTimeComponents()) {
+    updateTime()
+  } else {
+    console.log('❌ Minute selection validation failed')
+  }
 }
 
-// Watch for period changes
+// Watch for period changes with validation
 watch(selectedPeriod, (newPeriod) => {
   console.log('🔄 Period changed to:', newPeriod)
-  updateTime()
+  if (validateTimeComponents()) {
+    updateTime()
+  }
 })
 
 // 🕒 HELPER: Convert to 12-hour format
@@ -819,6 +909,29 @@ const formattedDate = computed(() => {
 
   return dateString
 })
+
+// 🕒 TIME VALIDATION HELPER
+const validateTimeComponents = (): boolean => {
+  const hour = parseInt(selectedHour.value)
+  const minute = parseInt(selectedMinute.value)
+
+  if (isNaN(hour) || hour < 1 || hour > 12) {
+    scheduleError.value = 'Please select a valid hour (1-12).'
+    return false
+  }
+
+  if (isNaN(minute) || minute < 0 || minute > 59) {
+    scheduleError.value = 'Please select a valid minute (0-59).'
+    return false
+  }
+
+  if (!selectedPeriod.value) {
+    scheduleError.value = 'Please select AM or PM.'
+    return false
+  }
+
+  return true
+}
 
 // 🖼️ IMAGE HELPER
 const getMainImage = (imgUrls: any, varietyData: any = null): string => {
@@ -1196,6 +1309,26 @@ const getOrCreateProfile = async (userId: string) => {
   }
 }
 
+// 🐛 DEBUG HELPER
+const debugScheduleValidation = () => {
+  console.log('🐛 DEBUG SCHEDULE VALIDATION:')
+  console.log('deliveryDate:', deliveryDate.value, 'type:', typeof deliveryDate.value)
+  console.log('deliveryTime:', deliveryTime.value, 'type:', typeof deliveryTime.value)
+
+  if (deliveryDate.value && deliveryTime.value) {
+    const testDate = new Date(deliveryDate.value)
+    console.log('Test Date object:', testDate.toString())
+    console.log('Test Date valid:', !isNaN(testDate.getTime()))
+
+    const isValid = isWithinShopHours(testDate, deliveryTime.value)
+    console.log('Validation result:', isValid)
+    console.log('Error message:', scheduleError.value)
+  }
+}
+
+// Call this temporarily to test
+debugScheduleValidation()
+
 // 👀 DEBUG WATCHERS
 watch(
   items,
@@ -1216,6 +1349,19 @@ watch(
 <template>
   <v-app>
     <v-main>
+
+      <!-- Add this debug section temporarily -->
+      <v-alert v-if="false" type="info" class="mb-4">
+        <strong>Debug Time Info:</strong><br>
+        Selected Hour: {{ selectedHour }}<br>
+        Selected Minute: {{ selectedMinute }}<br>
+        Selected Period: {{ selectedPeriod }}<br>
+        Delivery Time: {{ deliveryTime }}<br>
+        Delivery Date: {{ deliveryDate }}<br>
+        Schedule Error: {{ scheduleError }}<br>
+        Shop Hours: {{ shopSchedule.openHour }}:00 - {{ shopSchedule.closeHour }}:00<br>
+        Open Days: {{ shopSchedule.openDays }}
+      </v-alert>
       <!-- App Bar -->
       <v-app-bar color="#438fda" dark flat>
         <v-btn icon @click="router.back()">
@@ -1386,111 +1532,89 @@ watch(
       </div>
 
       <!-- Date & Time Picker Dialog -->
-<v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
-  <v-card class="datetime-card">
-    <v-card-title class="datetime-title">
-      Select Delivery Schedule
-      <v-chip color="info" size="small" class="ms-2">
-        Butuan City Only
-      </v-chip>
-    </v-card-title>
-    <v-card-text class="datetime-content">
-      <!-- Updated Date Picker with change handler -->
-      <v-date-picker
-        v-model="deliveryDate"
-        color="primary"
-        elevation="0"
-        show-adjacent-months
-        :min="minDate"
-        :max="maxDate"
-        class="date-picker"
-        @update:model-value="handleDateChange"
-      ></v-date-picker>
+      <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
+        <v-card class="datetime-card">
+          <v-card-title class="datetime-title">
+            Select Delivery Schedule
+            <v-chip color="info" size="small" class="ms-2">
+              Butuan City Only
+            </v-chip>
+          </v-card-title>
+          <v-card-text class="datetime-content">
+            <!-- Use the formatted date string for the date picker -->
+            <v-date-picker v-model="deliveryDate" color="primary" elevation="0" show-adjacent-months :min="minDate"
+              :max="maxDate" class="date-picker" @update:model-value="handleDateChange"></v-date-picker>
 
-      <v-divider class="my-4"></v-divider>
+            <!-- Rest of your time picker code remains the same -->
+            <v-divider class="my-4"></v-divider>
 
-      <div class="time-section">
-        <div class="time-label">Select Time</div>
-        <div class="time-wheels">
-          <div class="time-wheel">
-            <div class="time-wheel-label">Hour</div>
-            <v-virtual-scroll :items="hours12" height="160" item-height="40">
-              <template #default="{ item }">
-                <div class="time-item" :class="{ active: item === selectedHour }" @click="selectHour(item)">
-                  {{ item }}
+            <div class="time-section">
+              <div class="time-label">Select Time</div>
+              <div class="time-wheels">
+                <div class="time-wheel">
+                  <div class="time-wheel-label">Hour</div>
+                  <v-virtual-scroll :items="hours12" height="160" item-height="40">
+                    <template #default="{ item }">
+                      <div class="time-item" :class="{ active: item === selectedHour }" @click="selectHour(item)">
+                        {{ item }}
+                      </div>
+                    </template>
+                  </v-virtual-scroll>
                 </div>
-              </template>
-            </v-virtual-scroll>
-          </div>
-          <div class="time-separator">:</div>
-          <div class="time-wheel">
-            <div class="time-wheel-label">Minute</div>
-            <v-virtual-scroll :items="minutes" height="160" item-height="40">
-              <template #default="{ item }">
-                <div class="time-item" :class="{ active: item === selectedMinute }" @click="selectMinute(item)">
-                  {{ item }}
+                <div class="time-separator">:</div>
+                <div class="time-wheel">
+                  <div class="time-wheel-label">Minute</div>
+                  <v-virtual-scroll :items="minutes" height="160" item-height="40">
+                    <template #default="{ item }">
+                      <div class="time-item" :class="{ active: item === selectedMinute }" @click="selectMinute(item)">
+                        {{ item }}
+                      </div>
+                    </template>
+                  </v-virtual-scroll>
                 </div>
-              </template>
-            </v-virtual-scroll>
-          </div>
-        </div>
+              </div>
 
-        <div class="period-toggle">
-          <v-btn-toggle v-model="selectedPeriod" color="primary" rounded="pill" divided class="period-buttons">
-            <v-btn value="AM" class="period-btn">AM</v-btn>
-            <v-btn value="PM" class="period-btn">PM</v-btn>
-          </v-btn-toggle>
-        </div>
+              <div class="period-toggle">
+                <v-btn-toggle v-model="selectedPeriod" color="primary" rounded="pill" divided class="period-buttons">
+                  <v-btn value="AM" class="period-btn">AM</v-btn>
+                  <v-btn value="PM" class="period-btn">PM</v-btn>
+                </v-btn-toggle>
+              </div>
 
-        <div class="selected-schedule">
-          <div class="schedule-label">Selected Schedule</div>
-          <div class="schedule-display">
-            {{ formattedDate }} — {{ selectedHour || '--' }}:{{ selectedMinute || '--' }} {{ selectedPeriod }}
-          </div>
+              <div class="selected-schedule">
+                <div class="schedule-label">Selected Schedule</div>
+                <div class="schedule-display">
+                  {{ formattedDate }} — {{ selectedHour || '--' }}:{{ selectedMinute || '--' }} {{ selectedPeriod }}
+                </div>
 
-          <!-- Real-time validation feedback -->
-          <div v-if="deliveryDate && deliveryTime" class="validation-feedback mt-2">
-            <v-alert
-              v-if="scheduleError"
-              type="error"
-              density="compact"
-              class="mb-0"
-            >
-              {{ scheduleError }}
-            </v-alert>
-            <v-alert
-              v-else
-              type="success"
-              density="compact"
-              class="mb-0"
-            >
-              ✅ This time slot is available!
-            </v-alert>
-          </div>
+                <!-- Real-time validation feedback -->
+                <div v-if="deliveryDate && deliveryTime" class="validation-feedback mt-2">
+                  <v-alert v-if="scheduleError" type="error" density="compact" class="mb-0">
+                    {{ scheduleError }}
+                  </v-alert>
+                  <v-alert v-else type="success" density="compact" class="mb-0">
+                    ✅ This time slot is available!
+                  </v-alert>
+                </div>
 
-          <div v-else class="text-caption text-medium-emphasis mt-2">
-            Please select both date and time
-          </div>
-        </div>
-      </div>
-    </v-card-text>
+                <div v-else class="text-caption text-medium-emphasis mt-2">
+                  Please select both date and time
+                </div>
+              </div>
+            </div>
+          </v-card-text>
 
-    <v-card-actions class="datetime-actions">
-      <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn">
-        Cancel
-      </v-btn>
-      <v-btn
-        color="primary"
-        variant="flat"
-        @click="confirmDateTime"
-        class="confirm-datetime-btn"
-        :disabled="!!scheduleError || !deliveryDate || !deliveryTime"
-      >
-        Confirm Schedule
-      </v-btn>
-    </v-card-actions>
-  </v-card>
-</v-dialog>
+          <v-card-actions class="datetime-actions">
+            <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn">
+              Cancel
+            </v-btn>
+            <v-btn color="primary" variant="flat" @click="confirmDateTime" class="confirm-datetime-btn"
+              :disabled="!!scheduleError || !deliveryDate || !deliveryTime">
+              Confirm Schedule
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
     </v-main>
   </v-app>
