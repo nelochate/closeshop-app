@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
@@ -18,6 +18,11 @@ const showReviewDialog = ref(false)
 const showImageDialog = ref(false)
 const currentImage = ref('')
 const selectedProduct = ref<any>(null)
+
+// Image upload state
+const uploadingImages = ref(false)
+const imagePreviews = ref<{id: string, file: File, url: string}[]>([])
+const uploadProgress = ref(0)
 
 // New review form
 const newReview = ref({
@@ -162,21 +167,116 @@ const openReviewDialog = (product: any) => {
   showReviewDialog.value = true
 }
 
-// Handle photo upload - MISSING FUNCTION ADDED
+// Handle photo upload
 const handlePhotoUpload = (event: Event) => {
   const input = event.target as HTMLInputElement
   if (!input.files || input.files.length === 0) return
 
-  // For now, we'll just store the file names
-  // In a real app, you would upload these files to storage and get URLs
-  const fileNames = Array.from(input.files).map(file => file.name)
-  newReview.value.photos = [...newReview.value.photos, ...fileNames]
+  const files = Array.from(input.files)
   
-  console.log('Photos selected:', fileNames)
-  // Note: In production, you would need to:
-  // 1. Upload files to Supabase Storage
-  // 2. Get the public URLs
-  // 3. Store those URLs in newReview.value.photos
+  // Validate file count
+  const totalFiles = imagePreviews.value.length + files.length
+  if (totalFiles > 5) {
+    alert('Maximum 5 images allowed')
+    input.value = '' // Reset input
+    return
+  }
+
+  // Validate file sizes and types
+  for (const file of files) {
+    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+      alert(`File ${file.name} is too large. Maximum size is 5MB.`)
+      input.value = '' // Reset input
+      return
+    }
+    
+    if (!file.type.startsWith('image/')) {
+      alert(`File ${file.name} is not an image.`)
+      input.value = '' // Reset input
+      return
+    }
+  }
+
+  // Create previews
+  files.forEach(file => {
+    const preview = {
+      id: Math.random().toString(36).substr(2, 9),
+      file: file,
+      url: URL.createObjectURL(file)
+    }
+    imagePreviews.value.push(preview)
+  })
+
+  // Clear the input for future selections
+  input.value = ''
+}
+
+// Remove image from preview
+const removeImage = (index: number) => {
+  URL.revokeObjectURL(imagePreviews.value[index].url)
+  imagePreviews.value.splice(index, 1)
+}
+
+// Upload images to Supabase Storage
+const uploadImagesToStorage = async (): Promise<string[]> => {
+  if (imagePreviews.value.length === 0) return []
+
+  uploadingImages.value = true
+  uploadProgress.value = 0
+
+  const uploadedUrls: string[] = []
+  const totalFiles = imagePreviews.value.length
+
+  try {
+    for (let i = 0; i < imagePreviews.value.length; i++) {
+      const preview = imagePreviews.value[i]
+      const file = preview.file
+      
+      // Generate unique filename
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${Math.random().toString(36).substr(2, 9)}-${Date.now()}.${fileExt}`
+      const filePath = `review-${newReview.value.product_id}/${fileName}`
+
+      // Upload file to Supabase Storage
+      const { data, error } = await supabase.storage
+        .from('review-images')
+        .upload(filePath, file, {
+          cacheControl: '3600',
+          upsert: false
+        })
+
+      if (error) {
+        console.error('Error uploading image:', error)
+        throw new Error(`Failed to upload ${file.name}: ${error.message}`)
+      }
+
+      // Get public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('review-images')
+        .getPublicUrl(data.path)
+
+      uploadedUrls.push(publicUrl)
+
+      // Update progress
+      uploadProgress.value = ((i + 1) / totalFiles) * 100
+    }
+
+    return uploadedUrls
+  } catch (error) {
+    console.error('Error uploading images:', error)
+    throw error
+  } finally {
+    uploadingImages.value = false
+    uploadProgress.value = 0
+  }
+}
+
+// Clean up image previews
+const cleanupImagePreviews = () => {
+  imagePreviews.value.forEach(preview => {
+    URL.revokeObjectURL(preview.url)
+  })
+  imagePreviews.value = []
 }
 
 // Submit a new review
@@ -191,21 +291,36 @@ const submitReview = async () => {
     const { data: userData } = await supabase.auth.getUser()
     if (!userData.user) throw new Error('User not authenticated')
 
-    const { error } = await supabase.from('reviews').insert({
+    // Upload images first if any
+    let photoUrls: string[] = []
+    if (imagePreviews.value.length > 0) {
+      photoUrls = await uploadImagesToStorage()
+    }
+
+    // Insert review with image URLs
+    const reviewData = {
       product_id: newReview.value.product_id,
       rating: newReview.value.rating,
       comment: newReview.value.comment.trim(),
-      photos: newReview.value.photos,
+      photos: photoUrls.length > 0 ? photoUrls : null,
       user_id: userData.user.id,
       user_name: userData.user.user_metadata?.full_name || 
                 `${userData.user.user_metadata?.first_name || ''} ${userData.user.user_metadata?.last_name || ''}`.trim() ||
                 'Anonymous',
-      user_avatar: userData.user.user_metadata?.avatar_url || null
-    })
+      user_avatar: userData.user.user_metadata?.avatar_url || null,
+      is_verified: true
+    }
+
+    const { data, error } = await supabase
+      .from('reviews')
+      .insert(reviewData)
+      .select()
+      .single()
 
     if (error) throw error
     
     // Reset form and close dialog
+    cleanupImagePreviews()
     showReviewDialog.value = false
     newReview.value = {
       product_id: '',
@@ -216,9 +331,11 @@ const submitReview = async () => {
     
     // Reload reviews
     await loadReviews()
+    
+    console.log('Review submitted successfully with images:', photoUrls)
   } catch (error) {
     console.error('Error submitting review:', error)
-    alert('Failed to submit review. Please try again.')
+    alert('Failed to submit review: ' + (error as Error).message)
   } finally {
     isSubmitting.value = false
   }
@@ -251,8 +368,15 @@ const viewImage = (imageUrl: string) => {
 
 // Close dialogs
 const closeReviewDialog = () => {
+  cleanupImagePreviews()
   showReviewDialog.value = false
   selectedProduct.value = null
+  newReview.value = {
+    product_id: '',
+    rating: 0,
+    comment: '',
+    photos: []
+  }
 }
 
 const closeImageDialog = () => {
@@ -273,6 +397,11 @@ const formatDate = (dateString: string) => {
 onMounted(async () => {
   await loadOrderItems()
   await loadReviews()
+})
+
+// Clean up on unmount
+onUnmounted(() => {
+  cleanupImagePreviews()
 })
 
 // Watch for order items changes
@@ -605,22 +734,82 @@ watch(orderItems, () => {
               class="mb-4"
             />
 
-            <!-- Photo Upload (Optional) -->
+            <!-- Photo Upload Section -->
             <div class="mb-4">
               <div class="text-body-2 mb-2">Add Photos (Optional)</div>
+              
+              <!-- File Input -->
               <v-file-input
                 multiple
                 prepend-icon="mdi-camera"
                 variant="outlined"
                 label="Upload photos"
                 accept="image/*"
+                :loading="uploadingImages"
+                :disabled="uploadingImages || imagePreviews.length >= 5"
                 @change="handlePhotoUpload"
+                :rules="[
+                  (files: File[]) => !files || files.length <= 5 || 'Maximum 5 images allowed',
+                  (files: File[]) => !files || Array.from(files).every(file => file.size <= 5 * 1024 * 1024) || 'Each file must be less than 5MB'
+                ]"
               />
-              <div v-if="newReview.photos.length > 0" class="mt-2">
-                <div class="text-caption text-grey">Selected photos:</div>
-                <div class="text-caption">
-                  {{ newReview.photos.join(', ') }}
+
+              <!-- Upload Progress -->
+              <v-progress-linear
+                v-if="uploadingImages && uploadProgress > 0"
+                :model-value="uploadProgress"
+                color="primary"
+                height="8"
+                class="mt-2"
+                rounded
+              >
+                <template v-slot:default>
+                  <span class="text-caption">{{ Math.round(uploadProgress) }}%</span>
+                </template>
+              </v-progress-linear>
+
+              <!-- Image Previews -->
+              <div v-if="imagePreviews.length > 0" class="mt-3">
+                <div class="text-caption text-grey mb-2">
+                  {{ imagePreviews.length }} image{{ imagePreviews.length !== 1 ? 's' : '' }} selected
+                  ({{ 5 - imagePreviews.length }} remaining)
                 </div>
+                <v-row dense>
+                  <v-col
+                    v-for="(preview, index) in imagePreviews"
+                    :key="preview.id"
+                    cols="4"
+                    sm="3"
+                    md="2"
+                  >
+                    <v-card variant="outlined" class="image-preview-card">
+                      <v-img
+                        :src="preview.url"
+                        aspect-ratio="1"
+                        cover
+                        class="rounded-t"
+                      />
+                      <v-card-actions class="pa-1 justify-center">
+                        <v-btn
+                          icon
+                          size="x-small"
+                          color="error"
+                          @click="removeImage(index)"
+                          :disabled="uploadingImages"
+                        >
+                          <v-icon>mdi-delete</v-icon>
+                        </v-btn>
+                      </v-card-actions>
+                    </v-card>
+                  </v-col>
+                </v-row>
+              </div>
+
+              <!-- Help Text -->
+              <div class="text-caption text-grey mt-2">
+                • Maximum 5 images<br>
+                • Each image should be less than 5MB<br>
+                • Supported formats: JPG, PNG, WebP
               </div>
             </div>
           </v-card-text>
@@ -675,6 +864,16 @@ watch(orderItems, () => {
 .reviews-list {
   max-height: 600px;
   overflow-y: auto;
+}
+
+.image-preview-card {
+  position: relative;
+  transition: all 0.3s ease;
+}
+
+.image-preview-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 /* Custom scrollbar */
