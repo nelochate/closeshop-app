@@ -19,7 +19,7 @@ const deliveryOption = ref('meetup')
 const paymentMethod = ref('cash')
 const note = ref('')
 
-// 📅 DATE & TIME STATE
+// 📅 DATE & TIME STATE - FLEXIBLE DATE SELECTION
 const showDateTimePicker = ref(false)
 const deliveryDate = ref('')
 const deliveryTime = ref('')
@@ -29,10 +29,11 @@ const selectedPeriod = ref<'AM' | 'PM'>('AM')
 
 // 🏪 SHOP STATE
 const shopSchedule = ref({
-  openDays: [1, 2, 3, 4, 5, 6], // Monday to Saturday
-  openHour: 9,
-  closeHour: 19,
+  openDays: [1, 2, 3, 4, 5, 6], // Default: Monday to Saturday
+  openHour: 9, // Default opening hour
+  closeHour: 19, // Default closing hour
   meetupDetails: 'Main Entrance',
+  manualStatus: 'auto'
 })
 
 // 🎯 INITIALIZATION
@@ -69,12 +70,10 @@ const generateUniqueTransactionNumber = async (): Promise<string> => {
 
     if (error) {
       console.warn('⚠️ Error checking transaction number:', error)
-      // If there's an error, we'll use the candidate anyway
       return candidate
     }
 
     if (!existingOrder) {
-      // Transaction number is unique
       return candidate
     }
 
@@ -82,7 +81,6 @@ const generateUniqueTransactionNumber = async (): Promise<string> => {
     console.log(`🔄 Transaction number ${candidate} exists, generating new one...`)
   }
 
-  // Fallback: add more randomness after max attempts
   return generateTransactionNumber() + '-' + Math.random().toString(36).substring(2, 4)
 }
 
@@ -95,13 +93,16 @@ const initializePage = async () => {
     transactionNumber.value = await generateUniqueTransactionNumber()
   }
 
-  // Load items
+  // Load items first to get shop_id
   await loadItems()
+
+  // Load shop data (needed for schedule validation)
+  await loadShopData()
 
   // Load user data
   await loadUserData()
 
-  // Initialize date/time
+  // Initialize date/time with default within 24 hours
   initializeDateTime()
 
   console.log('✅ Page initialized:', {
@@ -109,7 +110,103 @@ const initializePage = async () => {
     transactionNumber: transactionNumber.value,
     buyer: buyer.value,
     address: address.value,
+    shopSchedule: shopSchedule.value
   })
+}
+
+// 🏪 LOAD SHOP DATA FROM SUPABASE
+// 🏪 LOAD SHOP DATA FROM SUPABASE - CORRECTED
+const loadShopData = async () => {
+  try {
+    console.log('🏪 Loading shop data for items...')
+
+    let shopId = items.value[0]?.shop_id || items.value[0]?.product?.shop_id
+
+    if (!shopId) {
+      console.warn('⚠️ No shop ID found, using default schedule')
+      shopSchedule.value = {
+        openDays: [0, 1, 2, 3, 4, 5, 6], // Include Sunday (0)
+        openHour: 9,
+        closeHour: 19,
+        meetupDetails: 'Main Entrance',
+        manualStatus: 'auto'
+      }
+      return
+    }
+
+    console.log('🔍 Fetching shop data for ID:', shopId)
+
+    const { data: shop, error } = await supabase
+      .from('shops')
+      .select('open_time, close_time, open_days, manual_status, physical_store, meetup_details')
+      .eq('id', shopId)
+      .single()
+
+    if (error) {
+      console.error('❌ Error fetching shop data:', error)
+      // Use default that includes Sunday
+      shopSchedule.value = {
+        openDays: [0, 1, 2, 3, 4, 5, 6],
+        openHour: 9,
+        closeHour: 19,
+        meetupDetails: 'Main Entrance',
+        manualStatus: 'auto'
+      }
+      return
+    }
+
+    console.log('📊 Raw shop data:', shop)
+
+    // Parse open days - CRITICAL FIX
+    let openDays = [0, 1, 2, 3, 4, 5, 6] // Default includes Sunday
+
+    if (shop.open_days && Array.isArray(shop.open_days)) {
+      openDays = shop.open_days
+      console.log('✅ Using shop open_days:', openDays)
+    } else {
+      console.log('ℹ️ Using default open_days (includes Sunday)')
+    }
+
+    // Parse times safely
+    const parseTimeToHour = (time: any) => {
+      if (!time) return 9 // Default opening
+
+      try {
+        if (typeof time === 'string') {
+          return parseInt(time.split(':')[0])
+        }
+        // Handle if it's a Date object or other format
+        return 9
+      } catch {
+        return 9
+      }
+    }
+
+    const openHour = parseTimeToHour(shop.open_time)
+    const closeHour = parseTimeToHour(shop.close_time)
+
+    shopSchedule.value = {
+      openDays,
+      openHour,
+      closeHour,
+      meetupDetails: shop.meetup_details || shop.physical_store || 'Main Entrance',
+      manualStatus: shop.manual_status || 'auto'
+    }
+
+    console.log('✅ Final shop schedule:', shopSchedule.value)
+    console.log('🔍 Open days include Sunday (0):', shopSchedule.value.openDays.includes(0))
+
+  } catch (err) {
+    console.error('❌ Error loading shop data:', err)
+    // Always include Sunday in fallback
+    shopSchedule.value = {
+      openDays: [0, 1, 2, 3, 4, 5, 6],
+      openHour: 9,
+      closeHour: 19,
+      meetupDetails: 'Main Entrance',
+      manualStatus: 'auto'
+    }
+  }
 }
 
 // 📦 LOAD ITEMS WITH MULTIPLE FALLBACKS
@@ -119,14 +216,13 @@ const loadItems = async () => {
   console.log('📍 Route params:', route.params)
   console.log('📍 Route query:', route.query)
 
-  // Method 1: Navigation state (from Buy Now) - IMPROVED
+  // Method 1: Navigation state (from Buy Now)
   if (history.state?.items && history.state.items.length > 0) {
     console.log('📦 Items found in navigation state')
     items.value = history.state.items.map((item) => ({
       ...item,
       product_id: item.product_id || item.id,
       quantity: item.quantity || 1,
-      // Preserve variety data from navigation state
       selectedSize: item.size || item.selectedSize,
       selectedVariety: item.variety || item.selectedVariety,
       varietyData:
@@ -137,7 +233,6 @@ const loadItems = async () => {
               price: item.varietyPrice || item.price,
             }
           : null),
-      // Ensure price uses variety price if available
       price: item.varietyPrice || item.price,
     }))
     fromCart.value = history.state.fromCart || false
@@ -146,8 +241,7 @@ const loadItems = async () => {
     return
   }
 
-  // Rest of your existing loadItems code...
-  // Method 2: Product ID from route params (direct link)
+  // Method 2: Product ID from route params
   if (route.params.id) {
     console.log('🛍️ Fetching product from route ID:', route.params.id)
     await fetchProductFromId(route.params.id as string)
@@ -165,7 +259,8 @@ const loadItems = async () => {
   console.log('🛒 Falling back to cart items')
   await fetchCartItems()
 }
-// 🛍️ FETCH SINGLE PRODUCT (with varieties support)
+
+// 🛍️ FETCH SINGLE PRODUCT
 const fetchProductFromId = async (productId: string) => {
   try {
     console.log('📡 Fetching product details for:', productId)
@@ -176,7 +271,7 @@ const fetchProductFromId = async (productId: string) => {
         `
         *,
         shop:shops(*)
-      `,
+      `
       )
       .eq('id', productId)
       .single()
@@ -226,7 +321,7 @@ const fetchProductFromId = async (productId: string) => {
         product_id: product.id,
         name: itemName,
         price: finalPrice,
-        varietyPrice: finalPrice, // Store separately for reference
+        varietyPrice: finalPrice,
         quantity: 1,
         selectedSize: selectedSize,
         selectedVariety: selectedVariety,
@@ -245,7 +340,7 @@ const fetchProductFromId = async (productId: string) => {
   }
 }
 
-// 🛒 FETCH CART ITEMS (with varieties support)
+// 🛒 FETCH CART ITEMS
 const fetchCartItems = async () => {
   try {
     const {
@@ -267,7 +362,7 @@ const fetchCartItems = async () => {
           *,
           shop:shops (*)
         )
-      `,
+      `
       )
       .order('created_at', { ascending: false })
 
@@ -377,36 +472,360 @@ const loadUserData = async () => {
   }
 }
 
-// 🕒 INITIALIZE DATE/TIME
+// 🕒 INITIALIZE DATE/TIME - IMPROVED
 const initializeDateTime = () => {
   const now = new Date()
+  console.log('🕒 Initializing date/time, current time:', now.toString())
 
-  // Set date (YYYY-MM-DD)
-  const year = now.getFullYear()
-  const month = (now.getMonth() + 1).toString().padStart(2, '0')
-  const day = now.getDate().toString().padStart(2, '0')
+  // Find next available delivery date
+  let deliveryDateObj = new Date(now)
+  let attempts = 0
+  const maxAttempts = 7
+
+  while (attempts < maxAttempts) {
+    const day = deliveryDateObj.getDay()
+    const isOpenDay = shopSchedule.value.openDays.includes(day)
+
+    console.log(`🕒 Checking date: ${deliveryDateObj.toDateString()}, day: ${day}, open: ${isOpenDay}`)
+
+    if (isOpenDay) {
+      // Check if we can deliver today
+      const currentHour = now.getHours()
+      const isToday = deliveryDateObj.toDateString() === now.toDateString()
+
+      if (isToday && currentHour < shopSchedule.value.closeHour) {
+        // Can deliver today
+        break
+      } else if (!isToday) {
+        // Can deliver on this future date
+        break
+      }
+    }
+
+    // Move to next day
+    deliveryDateObj.setDate(deliveryDateObj.getDate() + 1)
+    attempts++
+  }
+
+  // Format date
+  const year = deliveryDateObj.getFullYear()
+  const month = (deliveryDateObj.getMonth() + 1).toString().padStart(2, '0')
+  const day = deliveryDateObj.getDate().toString().padStart(2, '0')
   deliveryDate.value = `${year}-${month}-${day}`
 
-  // Set time (12-hour format)
-  const hours = now.getHours()
-  const minutes = now.getMinutes().toString().padStart(2, '0')
+  // Set default time
+  const isToday = deliveryDateObj.toDateString() === now.toDateString()
 
-  const hour12 = hours % 12 || 12
-  selectedHour.value = hour12.toString().padStart(2, '0')
-  selectedMinute.value = minutes
-  selectedPeriod.value = hours >= 12 ? 'PM' : 'AM'
+  if (isToday) {
+    // Today - set to current time + 1 hour, but within shop hours
+    const currentHour = now.getHours()
+    const deliveryHour = Math.max(currentHour + 1, shopSchedule.value.openHour)
+    const minutes = now.getMinutes().toString().padStart(2, '0')
 
-  // Set 24-hour format for delivery
-  deliveryTime.value = `${hours.toString().padStart(2, '0')}:${minutes}`
+    const hour12 = deliveryHour % 12 || 12
+    selectedHour.value = hour12.toString().padStart(2, '0')
+    selectedMinute.value = minutes
+    selectedPeriod.value = deliveryHour >= 12 ? 'PM' : 'AM'
+    deliveryTime.value = `${deliveryHour.toString().padStart(2, '0')}:${minutes}`
+  } else {
+    // Future date - set to shop opening time
+    const hour12 = shopSchedule.value.openHour % 12 || 12
+    selectedHour.value = hour12.toString().padStart(2, '0')
+    selectedMinute.value = '00'
+    selectedPeriod.value = shopSchedule.value.openHour >= 12 ? 'PM' : 'AM'
+    deliveryTime.value = `${shopSchedule.value.openHour.toString().padStart(2, '0')}:00`
+  }
+
+  console.log('✅ Date/time initialized:', {
+    date: deliveryDate.value,
+    time: deliveryTime.value,
+    selectedDay: deliveryDateObj.getDay(),
+    dayName: ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'][deliveryDateObj.getDay()]
+  })
 }
 
-// 🖼️ IMPROVED IMAGE HELPER WITH VARIETY SUPPORT
+// 🏪 SHOP HOURS VALIDATION - COMPLETELY REWRITTEN
+const scheduleError = ref('')
+const isWithinShopHours = (date: string, time: string): boolean => {
+  console.log('🔍 SCHEDULE VALIDATION START:', { date, time })
+  console.log('🔍 Current shop schedule:', shopSchedule.value)
+
+  // Reset error
+  scheduleError.value = ''
+
+  // Basic validation
+  if (!date || !time) {
+    scheduleError.value = 'Please select both date and time.'
+    return false
+  }
+
+  try {
+    // Create date object from selected date and time
+    const selectedDateTime = new Date(`${date}T${time}:00`)
+    const now = new Date()
+
+    console.log('🔍 Date analysis:', {
+      selected: selectedDateTime.toString(),
+      selectedDate: date,
+      selectedTime: time,
+      now: now.toString()
+    })
+
+    // Check if selected date is valid
+    if (isNaN(selectedDateTime.getTime())) {
+      scheduleError.value = 'Invalid date/time selection.'
+      return false
+    }
+
+    // Check if selected date is in the past
+    if (selectedDateTime < now) {
+      scheduleError.value = 'Cannot select a date/time in the past. Please choose a future date and time.'
+      return false
+    }
+
+    // Check if shop is manually closed
+    if (shopSchedule.value.manualStatus === 'closed') {
+      scheduleError.value = 'Shop is currently closed. Please select another time or contact the seller.'
+      return false
+    }
+
+    // Get day of week (0 = Sunday, 1 = Monday, etc.)
+    const dayOfWeek = selectedDateTime.getDay()
+    const dayNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+    const dayName = dayNames[dayOfWeek]
+
+    console.log('🔍 Day analysis:', {
+      dayOfWeek,
+      dayName,
+      openDays: shopSchedule.value.openDays,
+      includesDay: shopSchedule.value.openDays.includes(dayOfWeek)
+    })
+
+    // Check if day is within open days
+    if (!shopSchedule.value.openDays.includes(dayOfWeek)) {
+      scheduleError.value = `Shop is closed on ${dayName}. Please select another day.`
+      console.log('❌ Day validation failed - shop closed on:', dayName)
+      return false
+    }
+
+    // Parse time components
+    const [hours, minutes] = time.split(':').map(Number)
+    const selectedTimeInMinutes = hours * 60 + minutes
+    const openTimeInMinutes = shopSchedule.value.openHour * 60
+    const closeTimeInMinutes = shopSchedule.value.closeHour * 60
+
+    console.log('🔍 Time analysis:', {
+      selectedTime: time,
+      hours,
+      minutes,
+      selectedTimeInMinutes,
+      openTimeInMinutes,
+      closeTimeInMinutes,
+      openHour: shopSchedule.value.openHour,
+      closeHour: shopSchedule.value.closeHour
+    })
+
+    // Check if time is within open hours
+    if (selectedTimeInMinutes < openTimeInMinutes) {
+      const openTime12 = convertTo12Hour(`${shopSchedule.value.openHour.toString().padStart(2, '0')}:00`)
+      scheduleError.value = `Shop opens at ${openTime12}. Please select a later time.`
+      return false
+    }
+
+    if (selectedTimeInMinutes >= closeTimeInMinutes) {
+      const closeTime12 = convertTo12Hour(`${shopSchedule.value.closeHour.toString().padStart(2, '0')}:00`)
+      scheduleError.value = `Shop closes at ${closeTime12}. Please select an earlier time.`
+      return false
+    }
+
+    // Additional check: If selecting today, ensure time is in the future
+    const today = new Date()
+    const isToday = selectedDateTime.toDateString() === today.toDateString()
+    if (isToday) {
+      const currentTimeInMinutes = today.getHours() * 60 + today.getMinutes()
+      if (selectedTimeInMinutes <= currentTimeInMinutes) {
+        scheduleError.value = 'Please select a future time for today\'s delivery.'
+        return false
+      }
+    }
+
+    console.log('✅ Schedule validation PASSED')
+    scheduleError.value = ''
+    return true
+
+  } catch (error) {
+    console.error('❌ Error in schedule validation:', error)
+    scheduleError.value = 'Invalid date/time selection. Please try again.'
+    return false
+  }
+}
+
+// 📅 DATE/TIME CONFIRMATION - FIXED
+const confirmDateTime = () => {
+  updateTime()
+
+  console.log('🕒 Confirming date/time:', {
+    date: deliveryDate.value,
+    time: deliveryTime.value,
+    selectedHour: selectedHour.value,
+    selectedMinute: selectedMinute.value,
+    period: selectedPeriod.value
+  })
+
+  // Validate the selected schedule
+  const isValid = isWithinShopHours(deliveryDate.value, deliveryTime.value)
+
+  if (!isValid) {
+    console.log('❌ Schedule validation failed:', scheduleError.value)
+    alert(scheduleError.value)
+    return
+  }
+
+  console.log('✅ Schedule confirmed successfully')
+  showDateTimePicker.value = false
+}
+
+// 🗓️ IMPROVED DATE CHANGE HANDLER
+const handleDateChange = (newDate: string) => {
+  deliveryDate.value = newDate
+  console.log('📅 Date changed to:', newDate)
+
+  // Auto-validate when date changes
+  if (deliveryTime.value) {
+    const isValid = isWithinShopHours(deliveryDate.value, deliveryTime.value)
+    if (!isValid) {
+      console.log('⚠️ Date change caused validation issue:', scheduleError.value)
+    }
+  }
+}
+
+// 🗓️ MIN/MAX DATES FOR DATE PICKER
+const minDate = computed(() => {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = (today.getMonth() + 1).toString().padStart(2, '0')
+  const day = today.getDate().toString().padStart(2, '0')
+  return `${year}-${month}-${day}`
+})
+
+const maxDate = computed(() => {
+  const max = new Date()
+  max.setDate(max.getDate() + 30)
+  const year = max.getFullYear()
+  const month = (max.getMonth() + 1).toString().padStart(2, '0')
+  const day = max.getDate().toString().padStart(2, '0')
+  return `${year}-${month}-${day}`
+})
+
+// 🕒 TIME PICKER FUNCTIONS - IMPROVED
+const hours12 = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'))
+const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'))
+
+const updateTime = () => {
+  if (!selectedHour.value || !selectedMinute.value) {
+    console.log('⚠️ Time not fully selected yet')
+    return
+  }
+
+  let hourNum = parseInt(selectedHour.value)
+
+  // Convert to 24-hour format
+  if (selectedPeriod.value === 'PM' && hourNum < 12) {
+    hourNum += 12
+  }
+  if (selectedPeriod.value === 'AM' && hourNum === 12) {
+    hourNum = 0
+  }
+
+  deliveryTime.value = `${hourNum.toString().padStart(2, '0')}:${selectedMinute.value}`
+
+  console.log('🕒 Time updated:', {
+    selectedHour: selectedHour.value,
+    selectedMinute: selectedMinute.value,
+    period: selectedPeriod.value,
+    deliveryTime: deliveryTime.value
+  })
+
+  // Auto-validate when time changes
+  if (deliveryDate.value) {
+    const isValid = isWithinShopHours(deliveryDate.value, deliveryTime.value)
+    if (!isValid) {
+      console.log('⚠️ Time change caused validation issue:', scheduleError.value)
+    }
+  }
+}
+
+const selectHour = (hour: string) => {
+  selectedHour.value = hour
+  console.log('⏰ Hour selected:', hour)
+  updateTime()
+}
+
+const selectMinute = (minute: string) => {
+  selectedMinute.value = minute
+  console.log('⏰ Minute selected:', minute)
+  updateTime()
+}
+
+// Watch for period changes
+watch(selectedPeriod, (newPeriod) => {
+  console.log('🔄 Period changed to:', newPeriod)
+  updateTime()
+})
+
+// 🕒 HELPER: Convert to 12-hour format
+const convertTo12Hour = (time24: string) => {
+  if (!time24 || time24 === 'N/A') return 'N/A'
+
+  try {
+    const [hours, minutes] = time24.split(':')
+    const hour = parseInt(hours)
+    const minute = minutes || '00'
+
+    if (isNaN(hour)) return time24
+
+    const period = hour >= 12 ? 'PM' : 'AM'
+    const hour12 = hour % 12 || 12
+
+    return `${hour12}:${minute} ${period}`
+  } catch (error) {
+    console.error('Error converting time:', error)
+    return time24
+  }
+}
+
+// 📅 FORMATTED DATE DISPLAY
+const formattedDate = computed(() => {
+  if (!deliveryDate.value) return 'Not set'
+
+  const selected = new Date(deliveryDate.value)
+  const today = new Date()
+  const tomorrow = new Date(today)
+  tomorrow.setDate(tomorrow.getDate() + 1)
+
+  let dateString = selected.toLocaleDateString('en-US', {
+    weekday: 'short',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+
+  // Add relative day indicator
+  if (selected.toDateString() === today.toDateString()) {
+    dateString = `Today (${dateString})`
+  } else if (selected.toDateString() === tomorrow.toDateString()) {
+    dateString = `Tomorrow (${dateString})`
+  }
+
+  return dateString
+})
+
+// 🖼️ IMAGE HELPER
 const getMainImage = (imgUrls: any, varietyData: any = null): string => {
   // First priority: Use variety image if available
   if (varietyData?.images && varietyData.images.length > 0) {
     const varietyImg = varietyData.images[0]
     if (varietyImg && varietyImg !== '/placeholder.png') {
-      console.log('🖼️ Using variety image:', varietyImg)
       return varietyImg
     }
   }
@@ -429,6 +848,7 @@ const getMainImage = (imgUrls: any, varietyData: any = null): string => {
 
   return '/placeholder.png'
 }
+
 // 💰 COMPUTED: TOTAL PRICE
 const totalPrice = computed(() => {
   return items.value.reduce((sum, item) => {
@@ -447,62 +867,6 @@ const decreaseQty = (item: any) => {
   }
 }
 
-// 🕒 TIME PICKER FUNCTIONS
-const hours12 = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'))
-const minutes = Array.from({ length: 60 }, (_, i) => i.toString().padStart(2, '0'))
-
-const updateTime = () => {
-  let hourNum = parseInt(selectedHour.value)
-  if (selectedPeriod.value === 'PM' && hourNum < 12) hourNum += 12
-  if (selectedPeriod.value === 'AM' && hourNum === 12) hourNum = 0
-  deliveryTime.value = `${hourNum.toString().padStart(2, '0')}:${selectedMinute.value}`
-}
-
-const selectHour = (hour: string) => {
-  selectedHour.value = hour
-  updateTime()
-}
-
-const selectMinute = (minute: string) => {
-  selectedMinute.value = minute
-  updateTime()
-}
-
-watch(selectedPeriod, updateTime)
-
-// 📅 DATE/TIME CONFIRMATION
-const confirmDateTime = () => {
-  updateTime()
-  if (!isWithinShopHours(deliveryDate.value, deliveryTime.value)) {
-    alert(scheduleError.value)
-    return
-  }
-  showDateTimePicker.value = false
-}
-
-// 🏪 SHOP HOURS VALIDATION
-const scheduleError = ref('')
-const isWithinShopHours = (date: string, time: string) => {
-  if (!date || !time) return false
-
-  const selected = new Date(`${date}T${time}`)
-  const day = selected.getDay()
-  const hour = selected.getHours()
-
-  if (!shopSchedule.value.openDays.includes(day)) {
-    scheduleError.value = 'Shop is closed on that day.'
-    return false
-  }
-
-  if (hour < shopSchedule.value.openHour || hour >= shopSchedule.value.closeHour) {
-    scheduleError.value = `Please select between ${shopSchedule.value.openHour}:00 and ${shopSchedule.value.closeHour}:00.`
-    return false
-  }
-
-  scheduleError.value = ''
-  return true
-}
-
 // 📋 DELIVERY OPTIONS
 const deliveryOptions = [
   { label: 'Meet Up', value: 'meetup' },
@@ -517,18 +881,6 @@ const deliveryOptionsDisplay = computed(() =>
       : opt,
   ),
 )
-
-// 📅 FORMATTED DATE DISPLAY
-const formattedDate = computed(() => {
-  if (!deliveryDate.value) return 'Not set'
-  const date = new Date(deliveryDate.value)
-  return date.toLocaleDateString('en-US', {
-    weekday: 'short',
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  })
-})
 
 // ✅ COMPLETE CHECKOUT FUNCTION
 const handleCheckout = async () => {
@@ -548,12 +900,15 @@ const handleCheckout = async () => {
     return
   }
 
+  // Validate delivery schedule
+  if (!isWithinShopHours(deliveryDate.value, deliveryTime.value)) {
+    alert(scheduleError.value || 'Please select a valid delivery schedule')
+    return
+  }
+
   console.log('🛒 Starting checkout process...')
-  console.log('Items:', items.value)
-  console.log('Transaction Number:', transactionNumber.value)
 
   try {
-    // Since each user has only 1 shop, get the shop_id from the first item
     const shopId = items.value[0]?.shop_id || items.value[0]?.product?.shop_id
 
     if (!shopId) {
@@ -589,19 +944,18 @@ const handleCheckout = async () => {
 
     console.log('✅ Order created with shop_id:', shopId)
 
-    // Create order items - handle both main products and varieties
+    // Create order items
     const orderItems = items.value.map((item) => {
-      // Check if this is a variety selection
       const isVariety = item.selectedVariety && item.varietyPrice
 
       return {
         order_id: order.id,
-        product_id: item.product_id, // Always use the main product ID
+        product_id: item.product_id,
         quantity: item.quantity,
-        price: isVariety ? item.varietyPrice : item.price, // Use variety price if selected
+        price: isVariety ? item.varietyPrice : item.price,
         selected_size: item.selectedSize,
-        selected_variety: item.selectedVariety, // Store the selected variety name
-        variety_data: item.varietyData, // Store the entire variety data
+        selected_variety: item.selectedVariety,
+        variety_data: item.varietyData,
       }
     })
 
@@ -654,7 +1008,7 @@ const handleCheckout = async () => {
   }
 }
 
-// 💬 SEND ORDER MESSAGE TO SPECIFIC SELLER
+// 💬 SEND ORDER MESSAGE TO SELLER
 const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopItems: any[]) => {
   try {
     console.log(`💬 Sending order message to shop: ${shopId}`)
@@ -743,12 +1097,11 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       return
     }
 
-    // Create order message for this shop's items
+    // Create order message
     const itemsSummary = shopItems
       .map((item) => {
         let itemDetails = `${item.name} (x${item.quantity}) - ₱${(item.price * item.quantity).toFixed(2)}`
 
-        // Add variety and size information if available
         if (item.selectedVariety || item.selectedSize) {
           const details = []
           if (item.selectedVariety) details.push(`Variety: ${item.selectedVariety}`)
@@ -781,25 +1134,9 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
     console.log(`✅ Order message sent to ${shopName} successfully!`)
   } catch (err) {
     console.error('❌ Error in sendOrderMessageToSeller:', err)
-    throw err // Re-throw to handle in parent function
+    throw err
   }
 }
-
-// 👀 DEBUG WATCHERS
-watch(
-  items,
-  (newItems) => {
-    console.log('🛒 Items updated:', newItems)
-  },
-  { immediate: true },
-)
-
-watch(
-  () => route.params,
-  (newParams) => {
-    console.log('📍 Route params updated:', newParams)
-  },
-)
 
 // 🔧 HELPER: GET OR CREATE PROFILE
 const getOrCreateProfile = async (userId: string) => {
@@ -821,17 +1158,13 @@ const getOrCreateProfile = async (userId: string) => {
     // If profile doesn't exist, create one
     console.log('📝 Creating new profile for user:', userId)
 
-    // Get user email from auth to use in profile
-    const { data: userData } = await supabase.auth.admin.getUserById(userId)
-    const userEmail = userData?.user?.email || ''
-
     const { data: newProfile, error: createError } = await supabase
       .from('profiles')
       .insert({
         id: userId,
-        first_name: 'Seller', // Default name
-        last_name: 'User',
-        role: 'seller',
+        first_name: 'User',
+        last_name: 'Profile',
+        role: 'customer',
         created_at: new Date().toISOString(),
       })
       .select()
@@ -862,6 +1195,22 @@ const getOrCreateProfile = async (userId: string) => {
     return null
   }
 }
+
+// 👀 DEBUG WATCHERS
+watch(
+  items,
+  (newItems) => {
+    console.log('🛒 Items updated:', newItems)
+  },
+  { immediate: true },
+)
+
+watch(
+  () => route.params,
+  (newParams) => {
+    console.log('📍 Route params updated:', newParams)
+  },
+)
 </script>
 
 <template>
@@ -878,7 +1227,7 @@ const getOrCreateProfile = async (userId: string) => {
       </v-app-bar>
 
       <v-container fluid class="py-4 px-3 main-content">
-        <!-- Debug Info (remove in production) -->
+        <!-- Debug Info -->
         <v-alert v-if="items.length === 0" type="warning" class="mb-4">
           No items loaded. Please go back and try again.
           <br />Transaction #: {{ transactionNumber }}
@@ -904,20 +1253,16 @@ const getOrCreateProfile = async (userId: string) => {
               <p><strong>Transaction No.:</strong> {{ transactionNumber }}</p>
               <p>
                 <strong>Delivery Schedule:</strong> {{ formattedDate }}
-                {{ deliveryTime ? `at ${deliveryTime}` : '' }}
+                {{ deliveryTime ? `at ${convertTo12Hour(deliveryTime)}` : '' }}
               </p>
+              <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
               <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
               <div class="button-group mt-2">
                 <v-btn size="small" color="primary" variant="tonal" class="action-btn">
                   Change Address
                 </v-btn>
-                <v-btn
-                  size="small"
-                  color="primary"
-                  variant="tonal"
-                  @click="showDateTimePicker = true"
-                  class="action-btn"
-                >
+                <v-btn size="small" color="primary" variant="tonal" @click="showDateTimePicker = true"
+                  class="action-btn">
                   Change Schedule
                 </v-btn>
               </div>
@@ -936,18 +1281,13 @@ const getOrCreateProfile = async (userId: string) => {
             <v-list-item v-for="item in items" :key="item.id" class="list-item">
               <template #prepend>
                 <v-avatar class="item-avatar" rounded>
-                  <v-img
-                    :src="getMainImage(item.product?.main_img_urls, item.varietyData)"
-                    :alt="item.name"
-                    cover
-                    class="product-image"
-                  />
+                  <v-img :src="getMainImage(item.product?.main_img_urls, item.varietyData)" :alt="item.name" cover
+                    class="product-image" />
                 </v-avatar>
               </template>
 
               <v-list-item-title class="item-name">
                 {{ item.name }}
-                <!-- Display variety and size information -->
                 <div v-if="item.selectedVariety || item.selectedSize" class="item-variety-info">
                   <span v-if="item.selectedVariety" class="variety-tag">
                     {{ item.selectedVariety }}
@@ -967,24 +1307,12 @@ const getOrCreateProfile = async (userId: string) => {
               <template #append>
                 <div class="item-actions">
                   <div class="quantity-controls">
-                    <v-btn
-                      size="x-small"
-                      color="error"
-                      variant="tonal"
-                      @click="decreaseQty(item)"
-                      class="qty-btn"
-                      :disabled="item.quantity <= 1"
-                    >
+                    <v-btn size="x-small" color="error" variant="tonal" @click="decreaseQty(item)" class="qty-btn"
+                      :disabled="item.quantity <= 1">
                       −
                     </v-btn>
                     <span class="quantity-display">{{ item.quantity }}</span>
-                    <v-btn
-                      size="x-small"
-                      color="primary"
-                      variant="tonal"
-                      @click="increaseQty(item)"
-                      class="qty-btn"
-                    >
+                    <v-btn size="x-small" color="primary" variant="tonal" @click="increaseQty(item)" class="qty-btn">
                       +
                     </v-btn>
                   </div>
@@ -1011,16 +1339,8 @@ const getOrCreateProfile = async (userId: string) => {
             Message to Seller
           </v-card-title>
           <v-card-text>
-            <v-textarea
-              v-model="note"
-              label="Write something to the seller..."
-              auto-grow
-              rows="2"
-              outlined
-              dense
-              placeholder="Any special instructions or requests..."
-              class="note-textarea"
-            ></v-textarea>
+            <v-textarea v-model="note" label="Write something to the seller..." auto-grow rows="2" outlined dense
+              placeholder="Any special instructions or requests..." class="note-textarea"></v-textarea>
           </v-card-text>
         </v-card>
 
@@ -1031,16 +1351,8 @@ const getOrCreateProfile = async (userId: string) => {
             Delivery Option
           </v-card-title>
           <v-card-text>
-            <v-select
-              v-model="deliveryOption"
-              :items="deliveryOptionsDisplay"
-              item-title="label"
-              item-value="value"
-              label="Select delivery option"
-              outlined
-              dense
-              class="delivery-select"
-            ></v-select>
+            <v-select v-model="deliveryOption" :items="deliveryOptionsDisplay" item-title="label" item-value="value"
+              label="Select delivery option" outlined dense class="delivery-select"></v-select>
           </v-card-text>
         </v-card>
 
@@ -1065,15 +1377,8 @@ const getOrCreateProfile = async (userId: string) => {
             <div class="total-label">Total Amount:</div>
             <div class="total-amount">₱{{ totalPrice.toLocaleString() }}</div>
           </div>
-          <v-btn
-            color="primary"
-            size="large"
-            @click="handleCheckout"
-            class="place-order-btn"
-            :disabled="!items.length || !buyer || !address"
-            :loading="false"
-            block
-          >
+          <v-btn color="primary" size="large" @click="handleCheckout" class="place-order-btn"
+            :disabled="!items.length || !buyer || !address" :loading="false" block>
             <v-icon left>mdi-check</v-icon>
             Place Order
           </v-btn>
@@ -1081,87 +1386,116 @@ const getOrCreateProfile = async (userId: string) => {
       </div>
 
       <!-- Date & Time Picker Dialog -->
-      <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
-        <v-card class="datetime-card">
-          <v-card-title class="datetime-title"> Select Delivery Schedule </v-card-title>
-          <v-card-text class="datetime-content">
-            <v-date-picker
-              v-model="deliveryDate"
-              color="primary"
-              elevation="0"
-              show-adjacent-months
-              class="date-picker"
-            ></v-date-picker>
-            <v-divider class="my-4"></v-divider>
-            <div class="time-section">
-              <div class="time-label">Select Time</div>
-              <div class="time-wheels">
-                <div class="time-wheel">
-                  <v-virtual-scroll :items="hours12" height="160" item-height="40">
-                    <template #default="{ item }">
-                      <div
-                        class="time-item"
-                        :class="{ active: item === selectedHour }"
-                        @click="selectHour(item)"
-                      >
-                        {{ item }}
-                      </div>
-                    </template>
-                  </v-virtual-scroll>
+<v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
+  <v-card class="datetime-card">
+    <v-card-title class="datetime-title">
+      Select Delivery Schedule
+      <v-chip color="info" size="small" class="ms-2">
+        Butuan City Only
+      </v-chip>
+    </v-card-title>
+    <v-card-text class="datetime-content">
+      <!-- Updated Date Picker with change handler -->
+      <v-date-picker
+        v-model="deliveryDate"
+        color="primary"
+        elevation="0"
+        show-adjacent-months
+        :min="minDate"
+        :max="maxDate"
+        class="date-picker"
+        @update:model-value="handleDateChange"
+      ></v-date-picker>
+
+      <v-divider class="my-4"></v-divider>
+
+      <div class="time-section">
+        <div class="time-label">Select Time</div>
+        <div class="time-wheels">
+          <div class="time-wheel">
+            <div class="time-wheel-label">Hour</div>
+            <v-virtual-scroll :items="hours12" height="160" item-height="40">
+              <template #default="{ item }">
+                <div class="time-item" :class="{ active: item === selectedHour }" @click="selectHour(item)">
+                  {{ item }}
                 </div>
-                <div class="time-separator">:</div>
-                <div class="time-wheel">
-                  <v-virtual-scroll :items="minutes" height="160" item-height="40">
-                    <template #default="{ item }">
-                      <div
-                        class="time-item"
-                        :class="{ active: item === selectedMinute }"
-                        @click="selectMinute(item)"
-                      >
-                        {{ item }}
-                      </div>
-                    </template>
-                  </v-virtual-scroll>
+              </template>
+            </v-virtual-scroll>
+          </div>
+          <div class="time-separator">:</div>
+          <div class="time-wheel">
+            <div class="time-wheel-label">Minute</div>
+            <v-virtual-scroll :items="minutes" height="160" item-height="40">
+              <template #default="{ item }">
+                <div class="time-item" :class="{ active: item === selectedMinute }" @click="selectMinute(item)">
+                  {{ item }}
                 </div>
-              </div>
-              <div class="period-toggle">
-                <v-btn-toggle
-                  v-model="selectedPeriod"
-                  color="primary"
-                  rounded="pill"
-                  divided
-                  class="period-buttons"
-                >
-                  <v-btn value="AM" class="period-btn">AM</v-btn>
-                  <v-btn value="PM" class="period-btn">PM</v-btn>
-                </v-btn-toggle>
-              </div>
-              <div class="selected-schedule">
-                <div class="schedule-label">Selected Schedule</div>
-                <div class="schedule-display">
-                  {{ formattedDate }} — {{ selectedHour }}:{{ selectedMinute }} {{ selectedPeriod }}
-                </div>
-              </div>
-            </div>
-          </v-card-text>
-          <v-card-actions class="datetime-actions">
-            <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn">
-              Cancel
-            </v-btn>
-            <v-btn
-              color="primary"
-              variant="flat"
-              @click="confirmDateTime"
-              class="confirm-datetime-btn"
+              </template>
+            </v-virtual-scroll>
+          </div>
+        </div>
+
+        <div class="period-toggle">
+          <v-btn-toggle v-model="selectedPeriod" color="primary" rounded="pill" divided class="period-buttons">
+            <v-btn value="AM" class="period-btn">AM</v-btn>
+            <v-btn value="PM" class="period-btn">PM</v-btn>
+          </v-btn-toggle>
+        </div>
+
+        <div class="selected-schedule">
+          <div class="schedule-label">Selected Schedule</div>
+          <div class="schedule-display">
+            {{ formattedDate }} — {{ selectedHour || '--' }}:{{ selectedMinute || '--' }} {{ selectedPeriod }}
+          </div>
+
+          <!-- Real-time validation feedback -->
+          <div v-if="deliveryDate && deliveryTime" class="validation-feedback mt-2">
+            <v-alert
+              v-if="scheduleError"
+              type="error"
+              density="compact"
+              class="mb-0"
             >
-              Confirm
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
+              {{ scheduleError }}
+            </v-alert>
+            <v-alert
+              v-else
+              type="success"
+              density="compact"
+              class="mb-0"
+            >
+              ✅ This time slot is available!
+            </v-alert>
+          </div>
+
+          <div v-else class="text-caption text-medium-emphasis mt-2">
+            Please select both date and time
+          </div>
+        </div>
+      </div>
+    </v-card-text>
+
+    <v-card-actions class="datetime-actions">
+      <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn">
+        Cancel
+      </v-btn>
+      <v-btn
+        color="primary"
+        variant="flat"
+        @click="confirmDateTime"
+        class="confirm-datetime-btn"
+        :disabled="!!scheduleError || !deliveryDate || !deliveryTime"
+      >
+        Confirm Schedule
+      </v-btn>
+    </v-card-actions>
+  </v-card>
+</v-dialog>
+
     </v-main>
   </v-app>
 </template>
+
 <style scoped>
 /* Global Styles */
 :root {
@@ -1508,6 +1842,11 @@ const getOrCreateProfile = async (userId: string) => {
   line-height: 1.3;
 }
 
+.schedule-error {
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .datetime-actions {
   justify-content: flex-end;
   gap: 8px;
@@ -1523,6 +1862,38 @@ const getOrCreateProfile = async (userId: string) => {
 .app-bar-title {
   font-size: 1.1rem !important;
   font-weight: 600;
+}
+
+.time-wheel-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-align: center;
+  margin-bottom: 8px;
+  text-transform: uppercase;
+}
+
+.validation-feedback {
+  font-size: 0.8rem;
+}
+
+.time-wheels {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.time-wheel {
+  width: 70px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid var(--border-color);
+  overflow: hidden;
+  text-align: center;
+  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+  padding: 8px 0;
 }
 
 /* Responsive Design */
