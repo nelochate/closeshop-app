@@ -38,7 +38,7 @@ const saveName = async () => {
 
     const trimmedFirstName = firstName.value.trim()
     const trimmedLastName = lastName.value.trim()
-    
+
     // Use existing user data instead of calling getUser() again
     const userId = authStore.userData?.id
     if (!userId) {
@@ -64,9 +64,9 @@ const saveName = async () => {
 
     // 2️⃣ Update auth metadata (can run in parallel)
     const authPromise = supabase.auth.updateUser({
-      data: { 
-        first_name: trimmedFirstName, 
-        last_name: trimmedLastName 
+      data: {
+        first_name: trimmedFirstName,
+        last_name: trimmedLastName
       }
     })
 
@@ -75,14 +75,14 @@ const saveName = async () => {
     // 3️⃣ OPTIMIZATION: Only update addresses if name actually changed
     const oldFirstName = authStore.profile?.first_name || ''
     const oldLastName = authStore.profile?.last_name || ''
-    
+
     if (trimmedFirstName !== oldFirstName || trimmedLastName !== oldLastName) {
       const oldFullName = `${oldFirstName} ${oldLastName}`.trim()
       const newFullName = `${trimmedFirstName} ${trimmedLastName}`.trim()
-      
+
       if (oldFullName && oldFullName !== newFullName) {
         console.log('📝 Updating addresses from:', oldFullName, 'to:', newFullName)
-        
+
         const addressPromise = supabase
           .from('addresses')
           .update({
@@ -99,10 +99,10 @@ const saveName = async () => {
     // Execute all updates in parallel and handle errors properly
     console.log('🚀 Executing parallel updates...')
     const results = await Promise.allSettled(updatePromises)
-    
+
     // Check for critical errors
     const errors = []
-    
+
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
         console.warn(`⚠️ Update ${index} failed:`, result.reason)
@@ -143,21 +143,21 @@ const saveName = async () => {
 
     successMessage.value = 'Name updated successfully!'
     showSuccess.value = true
-    
+
     // OPTIMIZATION 3: Faster redirect
     console.log('🔄 Redirecting...')
     setTimeout(() => {
-      router.replace({ 
-        name: 'profileview', 
-        query: { 
+      router.replace({
+        name: 'profileview',
+        query: {
           nameUpdated: Date.now()
-        } 
+        }
       })
     }, 800) // Reduced from 1500ms
 
   } catch (error) {
     console.error('❌ Save name failed:', error)
-    
+
     // More specific error handling
     if (error.message?.includes('JWT') || error.message?.includes('auth')) {
       successMessage.value = 'Session expired. Please log in again.'
@@ -168,7 +168,7 @@ const saveName = async () => {
     } else {
       successMessage.value = 'Failed to update name: ' + error.message
     }
-    
+
     showSuccess.value = true
   } finally {
     isLoading.value = false
@@ -188,9 +188,9 @@ const cancelEdit = () => {
       </v-btn>
       <v-toolbar-title class="text-h6 font-weight-bold">Edit Name</v-toolbar-title>
       <v-spacer></v-spacer>
-      <v-btn 
-        icon 
-        @click="router.push('/settings')" 
+      <v-btn
+        icon
+        @click="router.push('/settings')"
         :disabled="isLoading"
       >
         <v-icon>mdi-cog-outline</v-icon>
@@ -198,9 +198,9 @@ const cancelEdit = () => {
     </v-app-bar>
 
     <v-main class="background-gradient">
-      <v-snackbar 
-        v-model="showSuccess" 
-        :timeout="3000" 
+      <v-snackbar
+        v-model="showSuccess"
+        :timeout="3000"
         color="success"
         location="top"
         elevation="4"
@@ -229,11 +229,11 @@ const cancelEdit = () => {
               Saving...
             </v-chip>
           </v-card-title>
-          
+
           <v-card-text class="card-content">
-            <v-alert 
-              type="info" 
-              variant="tonal" 
+            <v-alert
+              type="info"
+              variant="tonal"
               class="mb-4"
               border="start"
             >
@@ -261,7 +261,7 @@ const cancelEdit = () => {
                     class="name-input"
                   />
                 </v-col>
-                
+
                 <v-col cols="12" md="6">
                   <v-text-field
                     v-model="lastName"
@@ -282,13 +282,13 @@ const cancelEdit = () => {
               </v-row>
 
               <div class="action-buttons mt-6">
-                <v-btn 
-                  type="submit" 
-                  color="primary" 
+                <v-btn
+                  type="submit"
+                  color="primary"
                   size="large"
                   :loading="isLoading"
                   :disabled="!firstName?.trim() || !lastName?.trim()"
-                  block 
+                  block
                   class="save-btn"
                 >
                   <template #loader>
@@ -302,11 +302,11 @@ const cancelEdit = () => {
                   {{ isLoading ? 'Updating...' : 'Update Name' }}
                 </v-btn>
 
-                <v-btn 
-                  variant="outlined" 
-                  color="grey" 
+                <v-btn
+                  variant="outlined"
+                  color="grey"
                   size="large"
-                  block 
+                  block
                   class="mt-2 cancel-btn"
                   @click="cancelEdit"
                   :disabled="isLoading"
@@ -382,11 +382,11 @@ const cancelEdit = () => {
     margin-top: 20px;
     padding: 8px;
   }
-  
+
   .card-header {
     padding: 16px 20px;
   }
-  
+
   .card-content {
     padding: 16px;
   }

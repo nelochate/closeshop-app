@@ -132,7 +132,11 @@ const loadOrderCounts = async () => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
-          count = orders.length
+            count = orders.filter((o) =>
+            o.payment_status === 'pending' &&
+            o.delivery_status !== 'delivered' &&
+            o.status !== 'cancelled'
+          ).length
           break
         case 'to-receive':
           // Orders that are paid but not delivered yet
@@ -247,8 +251,10 @@ const loadSectionItems = async (sectionId) => {
         query = query.or('payment_status.eq.failed,status.eq.failed')
         break
       case 'my-purchases':
-      default:
-        // Show all orders for my purchases
+        query = query
+          .eq('payment_status', 'pending')
+          .neq('delivery_status', 'delivered')
+          .neq('status', 'cancelled')
         break
     }
 
