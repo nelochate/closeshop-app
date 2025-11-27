@@ -35,7 +35,7 @@ const navItems = ref([
     title: 'To Receive & Pay',
     icon: 'mdi-package-down',
     color: '#354d7c',
-    count: 0
+    count: 0,
   },
   {
     id: 'reviews',
@@ -68,7 +68,12 @@ const navItems = ref([
 ])
 
 const selectedSection = ref('my-purchases')
-
+// Rate order function
+const rateOrder = (orderId) => {
+  if (orderId) {
+    router.push(`/rateview/${orderId}`)
+  }
+}
 // Load the user info
 const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
@@ -132,47 +137,47 @@ const loadOrderCounts = async () => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
-            count = orders.filter((o) =>
-            o.payment_status === 'pending' &&
-            o.delivery_status !== 'delivered' &&
-            o.status !== 'cancelled'
+          count = orders.filter(
+            (o) =>
+              o.payment_status === 'pending' &&
+              o.delivery_status !== 'delivered' &&
+              o.status !== 'cancelled',
           ).length
           break
         case 'to-receive':
           // Orders that are paid but not delivered yet
-          count = orders.filter((o) =>
-            o.payment_status === 'paid' &&
-            o.delivery_status !== 'delivered' &&
-            o.status !== 'cancelled'
+          count = orders.filter(
+            (o) =>
+              o.payment_status === 'paid' &&
+              o.delivery_status !== 'delivered' &&
+              o.status !== 'cancelled',
           ).length
           break
         case 'reviews':
           // Orders that are delivered but not reviewed (you might need a reviews table to check this)
-          count = orders.filter((o) =>
-            o.delivery_status === 'delivered' &&
-            o.status !== 'cancelled'
+          count = orders.filter(
+            (o) => o.delivery_status === 'delivered' && o.status !== 'cancelled',
           ).length
           break
         case 'completed':
           // Orders that are both paid and delivered
-          count = orders.filter((o) =>
-            o.payment_status === 'paid' &&
-            o.delivery_status === 'delivered'
+          count = orders.filter(
+            (o) => o.payment_status === 'paid' && o.delivery_status === 'delivered',
           ).length
           break
         case 'cancelled':
           // Orders that are cancelled
-          count = orders.filter((o) =>
-            o.status === 'cancelled' ||
-            o.payment_status === 'cancelled'
+          count = orders.filter(
+            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled',
           ).length
           break
         case 'failed':
           // Failed transactions (unpaid, rejected, or failed payments)
-          count = orders.filter((o) =>
-            o.payment_status === 'failed' ||
-            o.status === 'failed' ||
-            (o.payment_status === 'pending' && o.status !== 'cancelled')
+          count = orders.filter(
+            (o) =>
+              o.payment_status === 'failed' ||
+              o.status === 'failed' ||
+              (o.payment_status === 'pending' && o.status !== 'cancelled'),
           ).length
           break
         default:
@@ -235,14 +240,10 @@ const loadSectionItems = async (sectionId) => {
           .neq('status', 'cancelled')
         break
       case 'reviews':
-        query = query
-          .eq('delivery_status', 'delivered')
-          .neq('status', 'cancelled')
+        query = query.eq('delivery_status', 'delivered').neq('status', 'cancelled')
         break
       case 'completed':
-        query = query
-          .eq('payment_status', 'paid')
-          .eq('delivery_status', 'delivered')
+        query = query.eq('payment_status', 'paid').eq('delivery_status', 'delivered')
         break
       case 'cancelled':
         query = query.or('status.eq.cancelled,payment_status.eq.cancelled')
@@ -286,7 +287,7 @@ const loadSectionItems = async (sectionId) => {
             : item.products?.main_img_urls || null,
           selected_size: item.selected_size,
           selected_variety: item.selected_variety,
-        }))
+        })),
       }))
     }
   } catch (err) {
@@ -322,7 +323,7 @@ const formatDate = (dateString) => {
   return new Date(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
-    day: 'numeric'
+    day: 'numeric',
   })
 }
 
@@ -414,7 +415,13 @@ const goShopOrBuild = () => {
       </div>
 
       <!-- Settings Icon - Top Right -->
-      <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')" elevation="1">
+      <v-btn
+        variant="text"
+        icon
+        class="settings-btn"
+        @click="router.push('/settings')"
+        elevation="1"
+      >
         <v-icon size="29">mdi-cog-outline</v-icon>
       </v-btn>
 
@@ -503,11 +510,7 @@ const goShopOrBuild = () => {
 
                 <!-- Order Items -->
                 <div class="order-items">
-                  <div
-                    v-for="item in order.items"
-                    :key="item.id"
-                    class="order-item"
-                  >
+                  <div v-for="item in order.items" :key="item.id" class="order-item">
                     <v-img
                       :src="item.product_img || '/placeholder-product.png'"
                       height="80"
@@ -553,7 +556,9 @@ const goShopOrBuild = () => {
                       Details
                     </v-btn>
                     <v-btn
-                      v-if="order.payment_status === 'paid' && order.delivery_status !== 'delivered'"
+                      v-if="
+                        order.payment_status === 'paid' && order.delivery_status !== 'delivered'
+                      "
                       color="success"
                       variant="flat"
                       size="small"
@@ -566,6 +571,7 @@ const goShopOrBuild = () => {
                       color="secondary"
                       variant="flat"
                       size="small"
+                      @click="rateOrder(order.id)"
                     >
                       <v-icon left small>mdi-star</v-icon>
                       Review
@@ -671,7 +677,7 @@ const goShopOrBuild = () => {
   border-bottom-left-radius: 24px;
 }
 
-.profile-inline{
+.profile-inline {
   display: flex;
   align-items: center;
   gap: 20px;
