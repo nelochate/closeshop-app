@@ -46,6 +46,11 @@ const openVarietyDialog = ref(false)
 const varietyPreviewIndex = ref(0)
 const varietyImages = ref([])
 
+// Snackbar for notifications
+const snackbar = ref(false)
+const snackbarMessage = ref('')
+const snackbarColor = ref('success')
+
 // Get the main image
 const mainImage = (imgs) => {
   if (!imgs) return '/placeholder.png'
@@ -57,6 +62,13 @@ const mainImage = (imgs) => {
     // ignore JSON parse errors
   }
   return imgs
+}
+
+// Show snackbar notification
+const showSnackbar = (message, color = 'success') => {
+  snackbarMessage.value = message
+  snackbarColor.value = color
+  snackbar.value = true
 }
 
 // Fetch product + shop + reviews
@@ -576,27 +588,35 @@ const animateToCart = () => {
   }, 800)
 }
 
-// CONFIRM ADD TO CART FOR VARIETIES
-const confirmAddToCart = async () => {
-  console.log('🛒 confirmAddToCart called')
+// IMPROVED ADD TO CART FUNCTION
+const addToCart = async () => {
+  console.log('🛒 addToCart called')
   
   if (!product.value) {
     console.log('❌ Product not loaded')
-    alert('Product not loaded')
+    showSnackbar('Product not loaded', 'error')
     return
   }
 
-  const finalSize = dialogSelectedSize.value || selectedSize.value
-  const finalVariety = dialogSelectedVariety.value || selectedVariety.value
+  // Check if user is logged in
+  const { data: userData } = await supabase.auth.getUser()
+  if (!userData?.user) {
+    showSnackbar('Please login to add items to cart', 'warning')
+    return
+  }
 
+  const finalSize = selectedSize.value
+  const finalVariety = selectedVariety.value
+
+  // Validate selections
   if (product.value.has_sizes && !finalSize) {
-    alert('Please select a size')
+    showSnackbar('Please select a size', 'warning')
     return
   }
 
   const availableStock = displayStock.value
   if (quantity.value > availableStock) {
-    alert(`Only ${availableStock} items available in stock`)
+    showSnackbar(`Only ${availableStock} items available in stock`, 'warning')
     return
   }
 
@@ -611,6 +631,57 @@ const confirmAddToCart = async () => {
 
     await addToCartDirect(cartItem)
     
+    // Show success message
+    showSnackbar('Product added to cart successfully!', 'success')
+    
+    // Animate to cart
+    animateToCart()
+    
+    // Reset quantity
+    quantity.value = 1
+    
+  } catch (err) {
+    console.error('❌ addToCart error:', err)
+    showSnackbar('Failed to add to cart: ' + (err.message || 'Unknown error'), 'error')
+  }
+}
+
+// CONFIRM ADD TO CART FOR VARIETIES (for dialog)
+const confirmAddToCart = async () => {
+  console.log('🛒 confirmAddToCart called')
+  
+  if (!product.value) {
+    console.log('❌ Product not loaded')
+    showSnackbar('Product not loaded', 'error')
+    return
+  }
+
+  const finalSize = dialogSelectedSize.value || selectedSize.value
+  const finalVariety = dialogSelectedVariety.value || selectedVariety.value
+
+  if (product.value.has_sizes && !finalSize) {
+    showSnackbar('Please select a size', 'warning')
+    return
+  }
+
+  const availableStock = displayStock.value
+  if (quantity.value > availableStock) {
+    showSnackbar(`Only ${availableStock} items available in stock`, 'warning')
+    return
+  }
+
+  try {
+    const cartItem = {
+      productId: product.value.id,
+      quantity: quantity.value,
+      selectedSize: finalSize,
+      selectedVariety: finalVariety ? finalVariety.name : null,
+      varietyData: finalVariety,
+    }
+
+    await addToCartDirect(cartItem)
+    
+    showSnackbar('Product added to cart successfully!', 'success')
     animateToCart()
     showAddToCart.value = false
     quantity.value = 1
@@ -620,7 +691,7 @@ const confirmAddToCart = async () => {
     
   } catch (err) {
     console.error('❌ confirmAddToCart error:', err)
-    alert('❌ Failed to add to cart: ' + (err.message || 'Unknown error'))
+    showSnackbar('Failed to add to cart: ' + (err.message || 'Unknown error'), 'error')
   }
 }
 
@@ -629,7 +700,7 @@ const goToCart = async () => {
   console.log('🛒 goToCart called')
   
   if (!product.value) {
-    alert('Product not loaded')
+    showSnackbar('Product not loaded', 'error')
     return
   }
   
@@ -638,7 +709,7 @@ const goToCart = async () => {
     const finalVariety = selectedVariety.value
 
     if (product.value.has_sizes && !finalSize) {
-      alert('Please select a size')
+      showSnackbar('Please select a size', 'warning')
       return
     }
 
@@ -652,6 +723,7 @@ const goToCart = async () => {
 
     await addToCartDirect(cartItem)
     
+    showSnackbar('Product added to cart!', 'success')
     animateToCart()
     
     setTimeout(() => {
@@ -660,7 +732,7 @@ const goToCart = async () => {
     
   } catch (err) {
     console.error('❌ goToCart error:', err)
-    alert('Failed to add to cart: ' + (err.message || 'Unknown error'))
+    showSnackbar('Failed to add to cart: ' + (err.message || 'Unknown error'), 'error')
   }
 }
 
@@ -678,7 +750,7 @@ const shareProduct = async () => {
     }
   } else {
     navigator.clipboard.writeText(window.location.href)
-    alert('Product link copied to clipboard!')
+    showSnackbar('Product link copied to clipboard!', 'info')
   }
 }
 
@@ -707,13 +779,16 @@ const isOwner = computed(() => {
 })
 
 const buyNow = () => {
-  if (!product.value) return alert('Product not loaded')
+  if (!product.value) {
+    showSnackbar('Product not loaded', 'error')
+    return
+  }
 
   const finalSize = selectedSize.value
   const finalVariety = selectedVariety.value
 
   if (product.value.has_sizes && !finalSize) {
-    alert('Please select a size')
+    showSnackbar('Please select a size', 'warning')
     return
   }
 
@@ -799,6 +874,16 @@ watch(showAddToCart, (val) => {
   <v-app>
     <VueEasyLightbox />
 
+    <!-- Snackbar for notifications -->
+    <v-snackbar v-model="snackbar" :color="snackbarColor" :timeout="3000" location="top">
+      {{ snackbarMessage }}
+      <template v-slot:actions>
+        <v-btn variant="text" @click="snackbar = false">
+          <v-icon>mdi-close</v-icon>
+        </v-btn>
+      </template>
+    </v-snackbar>
+
     <!-- Top Nav -->
     <v-app-bar class="app-bar" color="#438fda" dark flat>
       <v-btn icon @click="router.back()">
@@ -806,7 +891,7 @@ watch(showAddToCart, (val) => {
       </v-btn>
       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
-      <v-btn icon ref="cartIconRef" @click="goToCart" :disabled="isAnimating">
+      <v-btn icon ref="cartIconRef" @click="router.push('/cartview')" :disabled="isAnimating">
         <v-badge v-if="cart.count" :content="cart.count" color="red" offset-x="-7" offset-y="-3">
           <v-icon size="28">mdi-cart-outline</v-icon>
         </v-badge>
@@ -1318,13 +1403,13 @@ watch(showAddToCart, (val) => {
             </v-btn>
           </v-col>
 
-          <!-- Add to Cart -->
+          <!-- Add to Cart - IMPROVED -->
           <v-col cols="4" class="pa-0">
             <v-btn 
               block 
               class="bottom-btn cart-btn" 
               color="#4caf50" 
-              @click="showAddToCart = true"
+              @click="addToCart()"
               :disabled="isActionDisabled || isAnimating"
               :loading="isAnimating"
             >
