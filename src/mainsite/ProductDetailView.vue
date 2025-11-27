@@ -14,6 +14,8 @@ const productId = route.params.id
 const product = ref(null)
 const loading = ref(true)
 const error = ref(null)
+const reviews = ref([])
+const reviewsLoading = ref(false)
 
 const showAddToCart = ref(false)
 const quantity = ref(1)
@@ -34,6 +36,16 @@ const isAnimating = ref(false)
 const dialogSelectedSize = ref(null)
 const dialogSelectedVariety = ref(null)
 
+// Review filter and sort
+const reviewFilter = ref('all')
+const reviewSort = ref('latest')
+
+// Image states
+const currentImage = ref('')
+const openVarietyDialog = ref(false)
+const varietyPreviewIndex = ref(0)
+const varietyImages = ref([])
+
 // Get the main image
 const mainImage = (imgs) => {
   if (!imgs) return '/placeholder.png'
@@ -47,7 +59,7 @@ const mainImage = (imgs) => {
   return imgs
 }
 
-// Fetch product + shop
+// Fetch product + shop + reviews
 onMounted(async () => {
   loading.value = true
   try {
@@ -113,6 +125,9 @@ onMounted(async () => {
       selectedSize.value = product.value.sizes[0]
     }
 
+    // Load reviews for this product
+    await loadReviews()
+
     console.log('Product loaded:', product.value)
   } catch (e) {
     error.value = e.message || 'Failed to load product'
@@ -122,33 +137,251 @@ onMounted(async () => {
   }
 })
 
-// Get price based on variety selection - IMPROVED
+// Load reviews for the current product - COMPLETE
+const loadReviews = async () => {
+  if (!productId) return
+
+  reviewsLoading.value = true
+  try {
+    const { data, error: err } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('product_id', productId)
+      .order('created_at', { ascending: false })
+
+    if (err) throw err
+    
+    // Process reviews data
+    reviews.value = (data || []).map(review => {
+      // Ensure photos is always an array
+      let photos = review.photos || []
+      
+      // If photos is a string, try to parse it as JSON
+      if (typeof photos === 'string') {
+        try {
+          photos = JSON.parse(photos)
+        } catch (e) {
+          console.warn('⚠️ Could not parse photos as JSON:', photos)
+          photos = []
+        }
+      }
+      
+      // Filter out invalid photo entries
+      photos = photos.filter(photo => 
+        photo && 
+        typeof photo === 'string' && 
+        photo.length > 0 &&
+        (photo.startsWith('http') || photo.startsWith('data:') || photo.startsWith('/') || photo.startsWith('blob:'))
+      )
+      
+      return {
+        ...review,
+        photos: photos
+      }
+    })
+    
+    console.log('📝 Reviews loaded:', reviews.value.length)
+    
+    // Debug: Check if any reviews have photos
+    const reviewsWithPhotos = reviews.value.filter(r => r.photos && r.photos.length > 0)
+    console.log('🖼️ Reviews with photos:', reviewsWithPhotos.length)
+    
+    if (reviewsWithPhotos.length > 0) {
+      reviewsWithPhotos.forEach(review => {
+        console.log('📸 Review photos:', {
+          reviewId: review.id,
+          photos: review.photos
+        })
+      })
+    }
+    
+  } catch (error) {
+    console.error('Error loading reviews:', error)
+    reviews.value = []
+  } finally {
+    reviewsLoading.value = false
+  }
+}
+
+// Test function to check review photos in database
+const checkReviewPhotosInDB = async () => {
+  try {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('id, photos, product_id')
+      .eq('product_id', productId)
+      .not('photos', 'is', null)
+    
+    if (error) throw error
+    
+    console.log('🔍 Database review photos check:', data)
+    
+    data?.forEach(review => {
+      console.log(`📊 Review ${review.id}:`, {
+        photos: review.photos,
+        photosType: typeof review.photos,
+        isArray: Array.isArray(review.photos),
+        photosLength: Array.isArray(review.photos) ? review.photos.length : 'N/A'
+      })
+    })
+    
+  } catch (error) {
+    console.error('Error checking review photos:', error)
+  }
+}
+
+// Test function to verify photo display
+const testPhotoDisplay = () => {
+  console.log('🧪 Testing photo display...')
+  
+  const reviewsWithPhotos = reviews.value.filter(r => r.photos && r.photos.length > 0)
+  console.log(`📊 Found ${reviewsWithPhotos.length} reviews with photos`)
+  
+  reviewsWithPhotos.forEach((review, index) => {
+    console.log(`\n📸 Review ${index + 1}:`, {
+      id: review.id,
+      photoCount: review.photos.length,
+      photos: review.photos
+    })
+    
+    // Test each photo URL
+    review.photos.forEach((photo, photoIndex) => {
+      const img = new Image()
+      img.onload = () => console.log(`✅ Photo ${photoIndex + 1}: Loaded successfully`)
+      img.onerror = () => console.log(`❌ Photo ${photoIndex + 1}: Failed to load - ${photo}`)
+      img.src = photo
+    })
+  })
+  
+  if (reviewsWithPhotos.length === 0) {
+    console.log('ℹ️ No reviews with photos found. Make sure:')
+    console.log('1. Reviews have photos array in database')
+    console.log('2. Photos are valid URLs or base64 strings')
+    console.log('3. Product has reviews with photos')
+  }
+}
+
+// Calculate review statistics
+const reviewStats = computed(() => {
+  if (reviews.value.length === 0) {
+    return {
+      average_rating: 0,
+      total_reviews: 0,
+      rating_distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+    }
+  }
+
+  const total = reviews.value.length
+  const average = reviews.value.reduce((sum, review) => sum + review.rating, 0) / total
+  
+  const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+  reviews.value.forEach(review => {
+    distribution[review.rating]++
+  })
+
+  return {
+    average_rating: Math.round(average * 10) / 10,
+    total_reviews: total,
+    rating_distribution: distribution
+  }
+})
+
+// Filtered and sorted reviews
+const filteredReviews = computed(() => {
+  let filtered = [...reviews.value]
+
+  // Apply rating filter
+  if (reviewFilter.value !== 'all') {
+    const rating = parseInt(reviewFilter.value)
+    filtered = filtered.filter(review => review.rating === rating)
+  }
+
+  // Apply sort
+  if (reviewSort.value === 'latest') {
+    filtered.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  } else if (reviewSort.value === 'highest') {
+    filtered.sort((a, b) => b.rating - a.rating)
+  } else if (reviewSort.value === 'lowest') {
+    filtered.sort((a, b) => a.rating - b.rating)
+  } else if (reviewSort.value === 'most_liked') {
+    filtered.sort((a, b) => (b.likes || 0) - (a.likes || 0))
+  }
+
+  return filtered
+})
+
+// Format date for reviews
+const formatDate = (dateString) => {
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric'
+  })
+}
+
+// Like a review
+const likeReview = async (reviewId) => {
+  try {
+    const { error } = await supabase.rpc('increment_review_likes', {
+      review_uuid: reviewId
+    })
+    
+    if (error) throw error
+    
+    // Update local state
+    const reviewIndex = reviews.value.findIndex(r => r.id === reviewId)
+    if (reviewIndex !== -1) {
+      reviews.value[reviewIndex].likes = (reviews.value[reviewIndex].likes || 0) + 1
+    }
+  } catch (error) {
+    console.error('Error liking review:', error)
+  }
+}
+
+// View review image in dialog
+const viewReviewImage = (imageUrl) => {
+  console.log('🖼️ Viewing review image:', imageUrl)
+  if (!imageUrl) {
+    console.log('❌ No image URL provided')
+    return
+  }
+  currentImage.value = imageUrl
+  openImageDialog.value = true
+}
+
+// Handle image loading errors
+const handleImageError = (imageUrl, index) => {
+  console.error('❌ Failed to load review image:', {
+    imageUrl,
+    index,
+    reviewId: reviews.value.find(r => r.photos?.includes(imageUrl))?.id
+  })
+}
+
+// Handle lightbox image errors
+const handleLightboxImageError = () => {
+  console.error('❌ Failed to load image in lightbox:', currentImage.value)
+}
+
+// Get price based on variety selection
 const displayPrice = computed(() => {
   if (!product.value) return 0
   
-  // If variety is selected and has its own price, use variety price
   if (selectedVariety.value && selectedVariety.value.price !== undefined && selectedVariety.value.price !== null) {
     return selectedVariety.value.price
   }
   
-  // Otherwise use product base price
   return product.value.price
 })
 
-// Get stock based on variety selection - IMPROVED
+// Get stock based on variety selection
 const displayStock = computed(() => {
   if (!product.value) return 0
-  
-  console.log('📊 Stock check - selected variety:', selectedVariety.value)
-  
-  // If variety is selected and has its own stock, use variety stock
+
   if (selectedVariety.value && selectedVariety.value.stock !== undefined && selectedVariety.value.stock !== null) {
-    console.log('📦 Using variety stock:', selectedVariety.value.stock)
     return selectedVariety.value.stock
   }
-  
-  // Otherwise use product base stock
-  console.log('📦 Using base product stock:', product.value.stock || 0)
+
   return product.value.stock || 0
 })
 
@@ -162,18 +395,15 @@ const isAnyVarietySelected = computed(() => {
   return !!selectedVariety.value
 })
 
-// Check if add to cart/buy now is disabled - IMPROVED
+// Check if add to cart/buy now is disabled
 const isActionDisabled = computed(() => {
   if (!product.value) return true
   if (displayStock.value === 0) {
-    console.log('❌ Action disabled: No stock available')
     return true
   }
   if (product.value.has_sizes && !selectedSize.value) {
-    console.log('❌ Action disabled: Size not selected')
     return true
   }
-  console.log('✅ Action enabled')
   return false
 })
 
@@ -182,7 +412,6 @@ const addToCartDirect = async (cartItem) => {
   try {
     console.log('🛒 addToCartDirect called with:', cartItem)
     
-    // Get current user
     const { data: userData, error: userError } = await supabase.auth.getUser()
     
     if (userError) {
@@ -197,17 +426,12 @@ const addToCartDirect = async (cartItem) => {
       throw new Error('Please login to add items to cart')
     }
 
-    console.log('👤 Adding to cart for user:', currentUser.id)
-
-    // Prepare variety data for storage - IMPROVED
     const varietyData = cartItem.varietyData ? {
       name: cartItem.varietyData.name,
       price: cartItem.varietyData.price,
       stock: cartItem.varietyData.stock,
       images: cartItem.varietyData.images || []
     } : null
-
-    console.log('📦 Prepared variety_data:', varietyData)
 
     // Build query for checking existing items
     let query = supabase
@@ -216,14 +440,12 @@ const addToCartDirect = async (cartItem) => {
       .eq('user_id', currentUser.id)
       .eq('product_id', cartItem.productId)
 
-    // Add size condition if size exists
     if (cartItem.selectedSize) {
       query = query.eq('selected_size', cartItem.selectedSize)
     } else {
       query = query.is('selected_size', null)
     }
 
-    // Add variety condition if variety exists
     if (cartItem.selectedVariety) {
       query = query.eq('selected_variety', cartItem.selectedVariety)
     } else {
@@ -237,14 +459,9 @@ const addToCartDirect = async (cartItem) => {
       throw checkError
     }
 
-    console.log('📊 Existing items found:', existingItems?.length || 0)
-
     if (existingItems && existingItems.length > 0) {
-      // Update quantity if item exists
       const existingItem = existingItems[0]
       const newQuantity = existingItem.quantity + cartItem.quantity
-
-      console.log('🔄 Updating existing item:', existingItem.id, 'new quantity:', newQuantity)
 
       const { error: updateError } = await supabase
         .from('cart_items')
@@ -258,12 +475,7 @@ const addToCartDirect = async (cartItem) => {
         console.error('❌ Error updating cart item:', updateError)
         throw updateError
       }
-      
-      console.log('✅ Cart item quantity updated')
     } else {
-      // Insert new item
-      console.log('➕ Inserting new cart item')
-      
       const insertData = {
         user_id: currentUser.id,
         product_id: cartItem.productId,
@@ -273,8 +485,6 @@ const addToCartDirect = async (cartItem) => {
         variety_data: varietyData
       }
 
-      console.log('📝 Insert data:', insertData)
-
       const { data, error: insertError } = await supabase
         .from('cart_items')
         .insert(insertData)
@@ -282,27 +492,19 @@ const addToCartDirect = async (cartItem) => {
 
       if (insertError) {
         console.error('❌ Error inserting cart item:', insertError)
-        console.error('Insert error details:', insertError)
         throw insertError
       }
-      
-      console.log('✅ New cart item added:', data)
     }
 
-    // Refresh cart count - improved error handling
+    // Refresh cart count
     try {
       if (cart && typeof cart.loadCart === 'function') {
         await cart.loadCart()
-        console.log('🔄 Cart store refreshed')
-      } else {
-        console.log('⚠️ Cart store or loadCart method not available')
       }
     } catch (cartError) {
       console.warn('⚠️ Could not refresh cart store:', cartError)
-      // Continue anyway since the cart item was added successfully
     }
     
-    console.log('🎉 Cart operation completed successfully')
     return true
     
   } catch (error) {
@@ -311,13 +513,12 @@ const addToCartDirect = async (cartItem) => {
   }
 }
 
-// IMPROVED FLY TO CART ANIMATION
+// FLY TO CART ANIMATION
 const animateToCart = () => {
   if (isAnimating.value) return
   
   isAnimating.value = true
   
-  // Get the product image element
   const productImg = productImgRef.value?.$el || productImgRef.value
   const cartIcon = cartIconRef.value?.$el || cartIconRef.value
   
@@ -327,11 +528,9 @@ const animateToCart = () => {
     return
   }
 
-  // Get positions
   const productRect = productImg.getBoundingClientRect()
   const cartRect = cartIcon.getBoundingClientRect()
 
-  // Create flying clone
   const clone = productImg.cloneNode(true)
   clone.style.position = 'fixed'
   clone.style.left = `${productRect.left}px`
@@ -348,10 +547,8 @@ const animateToCart = () => {
 
   document.body.appendChild(clone)
 
-  // Force reflow
   void clone.offsetWidth
 
-  // Animate to cart
   const finalLeft = cartRect.left + cartRect.width / 2 - 15
   const finalTop = cartRect.top + cartRect.height / 2 - 15
 
@@ -362,16 +559,13 @@ const animateToCart = () => {
   clone.style.opacity = '0.5'
   clone.style.transform = 'scale(0.8) rotate(360deg)'
 
-  // Bounce cart icon
   cartIcon.style.transform = 'scale(1.2)'
   cartIcon.style.transition = 'transform 0.3s ease'
 
-  // Clean up
   setTimeout(() => {
     clone.remove()
     cartIcon.style.transform = 'scale(1)'
     
-    // Add secondary bounce
     setTimeout(() => {
       cartIcon.style.transform = 'scale(1.1)'
       setTimeout(() => {
@@ -382,7 +576,7 @@ const animateToCart = () => {
   }, 800)
 }
 
-// IMPROVED CONFIRM ADD TO CART FOR VARIETIES
+// CONFIRM ADD TO CART FOR VARIETIES
 const confirmAddToCart = async () => {
   console.log('🛒 confirmAddToCart called')
   
@@ -392,37 +586,21 @@ const confirmAddToCart = async () => {
     return
   }
 
-  // Use dialog selections if available, otherwise use main selections
   const finalSize = dialogSelectedSize.value || selectedSize.value
   const finalVariety = dialogSelectedVariety.value || selectedVariety.value
 
-  console.log('📋 Selection details:', {
-    finalSize,
-    finalVariety: finalVariety ? finalVariety : 'None',
-    productHasSizes: product.value.has_sizes,
-    quantity: quantity.value,
-    displayStock: displayStock.value
-  })
-
-  // Validation - only sizes are mandatory if product has sizes
   if (product.value.has_sizes && !finalSize) {
-    console.log('❌ Size selection required')
     alert('Please select a size')
     return
   }
 
-  // Check stock - FIXED: use displayStock.value
   const availableStock = displayStock.value
-  console.log('📦 Stock check:', { availableStock, quantity: quantity.value })
-  
   if (quantity.value > availableStock) {
-    console.log('❌ Not enough stock')
     alert(`Only ${availableStock} items available in stock`)
     return
   }
 
   try {
-    // Prepare cart item with variety information
     const cartItem = {
       productId: product.value.id,
       quantity: quantity.value,
@@ -431,19 +609,12 @@ const confirmAddToCart = async () => {
       varietyData: finalVariety,
     }
 
-    console.log('📦 Cart item prepared:', cartItem)
-
-    // Use direct cart function
     await addToCartDirect(cartItem)
     
-    console.log('✅ Successfully added to cart')
-    
-    // Show success feedback with animation
     animateToCart()
     showAddToCart.value = false
     quantity.value = 1
     
-    // Reset dialog selections
     dialogSelectedSize.value = null
     dialogSelectedVariety.value = null
     
@@ -453,7 +624,7 @@ const confirmAddToCart = async () => {
   }
 }
 
-// IMPROVED GO TO CART FUNCTION FOR VARIETIES
+// GO TO CART FUNCTION FOR VARIETIES
 const goToCart = async () => {
   console.log('🛒 goToCart called')
   
@@ -466,7 +637,6 @@ const goToCart = async () => {
     const finalSize = selectedSize.value
     const finalVariety = selectedVariety.value
 
-    // Validation - only sizes are mandatory
     if (product.value.has_sizes && !finalSize) {
       alert('Please select a size')
       return
@@ -480,17 +650,10 @@ const goToCart = async () => {
       varietyData: finalVariety,
     }
 
-    console.log('📦 Cart item prepared (goToCart):', cartItem)
-
-    // Use direct cart function
     await addToCartDirect(cartItem)
     
-    console.log('✅ Added to cart, navigating to cart view')
-    
-    // Show animation before navigating
     animateToCart()
     
-    // Small delay to let animation complete before navigation
     setTimeout(() => {
       router.push('/cartview')
     }, 1000)
@@ -501,7 +664,7 @@ const goToCart = async () => {
   }
 }
 
-// Rest of your functions remain mostly the same...
+// Rest of functions
 const shareProduct = async () => {
   if (navigator.share) {
     try {
@@ -514,13 +677,11 @@ const shareProduct = async () => {
       console.log('Error sharing:', err)
     }
   } else {
-    // Fallback: copy to clipboard
     navigator.clipboard.writeText(window.location.href)
     alert('Product link copied to clipboard!')
   }
 }
 
-// routes
 const goToShop = (shopId) => {
   router.push(`/shop/${shopId}`)
 }
@@ -530,39 +691,6 @@ const goToChat = () => {
     router.push(`/chatview/${product.value.shop.owner_id}`)
   }
 }
-
-//sample rating
-const reviews = ref([
-  {
-    id: 1,
-    user_name: 'Jane Dela Cruz',
-    user_avatar: '/user1.jpg',
-    shop_rating: 4.5,
-    product_rating: 5,
-    message: 'Great quality! The product arrived fast and matches the description.',
-    likes: 12,
-    dislikes: 1,
-  },
-  {
-    id: 2,
-    user_name: 'Mark Santos',
-    user_avatar: '/user2.jpg',
-    shop_rating: 4,
-    product_rating: 4,
-    message: 'Good item, but the packaging could be better.',
-    likes: 6,
-    dislikes: 0,
-  },
-])
-
-//watcher
-watch(showAddToCart, (val) => {
-  if (val) {
-    // when dialog opens, preserve the last selected
-    dialogSelectedSize.value = selectedSize.value
-    dialogSelectedVariety.value = selectedVariety.value
-  }
-})
 
 // for dialog selections
 const previewVarietyImages = (images, index = 0) => {
@@ -578,24 +706,17 @@ const isOwner = computed(() => {
   return user.value.id === product.value.shop.owner_id
 })
 
-// Variety zoom dialog
-const openVarietyDialog = ref(false)
-const varietyPreviewIndex = ref(0)
-const varietyImages = ref([])
-
 const buyNow = () => {
   if (!product.value) return alert('Product not loaded')
 
   const finalSize = selectedSize.value
   const finalVariety = selectedVariety.value
 
-  // Validation - only sizes are mandatory
   if (product.value.has_sizes && !finalSize) {
     alert('Please select a size')
     return
   }
 
-  // Create proper item name with variety
   let itemName = product.value.prod_name
   if (finalVariety) {
     itemName = `${product.value.prod_name} - ${finalVariety.name}`
@@ -604,16 +725,16 @@ const buyNow = () => {
   const item = {
     id: product.value.id,
     product_id: product.value.id,
-    name: itemName, // Include variety in name
+    name: itemName,
     price: finalVariety?.price || product.value.price,
     quantity: 1,
     size: finalSize,
     variety: finalVariety ? finalVariety.name : null,
-    varietyData: finalVariety, // Make sure this contains the full variety object
-    varietyPrice: finalVariety?.price || product.value.price, // Add this for reference
+    varietyData: finalVariety,
+    varietyPrice: finalVariety?.price || product.value.price,
     image: mainImage(product.value.main_img_urls),
     shop_id: product.value.shop?.id,
-    product: product.value
+    product: product.value,
   }
 
   console.log('🛒 Navigating to checkout with item:', item)
@@ -623,8 +744,8 @@ const buyNow = () => {
     query: {
       productId: product.value.id,
       fromProduct: 'true',
-      variety: finalVariety ? finalVariety.name : null, // Pass variety as query param
-      size: finalSize // Pass size as query param
+      variety: finalVariety ? finalVariety.name : null,
+      size: finalSize,
     },
     state: { 
       items: [item], 
@@ -633,13 +754,13 @@ const buyNow = () => {
     }
   })
 }
-// Get variety image for display - IMPROVED
+
+// Get variety image for display
 const getVarietyImage = (variety) => {
   console.log('🖼️ Getting variety image for:', variety)
   if (variety.images && variety.images.length) {
     return variety.images[0]
   }
-  // If variety has main_img_urls, use that
   if (variety.main_img_urls && variety.main_img_urls.length) {
     return Array.isArray(variety.main_img_urls) ? variety.main_img_urls[0] : variety.main_img_urls
   }
@@ -664,6 +785,13 @@ watch(selectedVariety, (newVal) => {
 
 watch(selectedSize, (newVal) => {
   console.log('🔄 Size selection changed:', newVal)
+})
+
+watch(showAddToCart, (val) => {
+  if (val) {
+    dialogSelectedSize.value = selectedSize.value
+    dialogSelectedVariety.value = selectedVariety.value
+  }
 })
 </script>
 
@@ -733,7 +861,7 @@ watch(selectedSize, (newVal) => {
           />
         </div>
 
-        <!-- Image Lightbox -->
+        <!-- Image Lightbox for Product Images -->
         <VueEasyLightbox
           v-if="openImageDialog"
           :visible="openImageDialog"
@@ -741,6 +869,7 @@ watch(selectedSize, (newVal) => {
           :index="previewIndex"
           @hide="openImageDialog = false"
         />
+
         <!-- Variety Image Lightbox -->
         <VueEasyLightbox
           v-if="openVarietyDialog"
@@ -749,6 +878,30 @@ watch(selectedSize, (newVal) => {
           :index="varietyPreviewIndex"
           @hide="openVarietyDialog = false"
         />
+
+        <!-- Review Image Lightbox -->
+        <v-dialog v-model="openImageDialog" max-width="800px" @click:outside="openImageDialog = false">
+          <v-card>
+            <v-card-actions class="d-flex justify-end pa-2">
+              <v-btn icon @click="openImageDialog = false">
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-card-actions>
+            <v-card-text class="text-center pa-0">
+              <v-img
+                :src="currentImage"
+                max-height="600"
+                contain
+                class="rounded-b"
+                @error="handleLightboxImageError"
+              />
+              <div v-if="!currentImage" class="text-center py-8">
+                <v-icon size="64" color="grey-lighten-2">mdi-image-off</v-icon>
+                <div class="text-h6 mt-4 text-grey">Image not available</div>
+              </div>
+            </v-card-text>
+          </v-card>
+        </v-dialog>
 
         <!-- Product Info -->
         <div class="product-info mb-4">
@@ -929,10 +1082,219 @@ watch(selectedSize, (newVal) => {
             <p class="shop-name">{{ product.shop.business_name }}</p>
           </div>
         </v-card>
-      </v-sheet>
 
-      <!-- Rest of your template remains the same -->
-      <!-- ... (feedback section and dialog remain unchanged) ... -->
+        <!-- Reviews Section -->
+        <v-card class="reviews-section mb-4" elevation="1">
+          <v-card-title class="d-flex align-center">
+            <v-icon left color="amber">mdi-star</v-icon>
+            Customer Reviews
+            <v-chip v-if="reviewStats.total_reviews > 0" color="primary" size="small" class="ml-2">
+              {{ reviewStats.total_reviews }}
+            </v-chip>
+          </v-card-title>
+
+          <v-card-text>
+            <!-- Debug Buttons -->
+            <v-card-actions class="justify-end pa-0 mb-4">
+              <v-btn @click="checkReviewPhotosInDB" color="secondary" size="small">
+                Debug Review Photos
+              </v-btn>
+              <v-btn @click="testPhotoDisplay" color="primary" size="small" class="ml-2">
+                Test Photo Display
+              </v-btn>
+            </v-card-actions>
+
+            <!-- Review Statistics -->
+            <div v-if="reviewStats.total_reviews > 0" class="review-stats mb-6">
+              <v-row>
+                <v-col cols="12" md="4" class="text-center">
+                  <div class="average-rating mb-2">
+                    <div class="text-h3 text-primary font-weight-bold">
+                      {{ reviewStats.average_rating.toFixed(1) }}
+                    </div>
+                    <v-rating
+                      :model-value="reviewStats.average_rating"
+                      readonly
+                      size="small"
+                      color="amber"
+                      class="my-2"
+                    />
+                    <div class="text-caption text-grey">
+                      {{ reviewStats.total_reviews }} review{{ reviewStats.total_reviews !== 1 ? 's' : '' }}
+                    </div>
+                  </div>
+                </v-col>
+                
+                <v-col cols="12" md="8">
+                  <div class="rating-distribution">
+                    <div v-for="rating in [5,4,3,2,1]" :key="rating" class="d-flex align-center mb-2">
+                      <span class="text-caption mr-2" style="min-width: 20px">{{ rating }}</span>
+                      <v-icon color="amber" size="small">mdi-star</v-icon>
+                      <v-progress-linear
+                        :model-value="(reviewStats.rating_distribution[rating] / reviewStats.total_reviews) * 100"
+                        color="amber"
+                        height="8"
+                        class="mx-2"
+                        rounded
+                      />
+                      <span class="text-caption text-grey" style="min-width: 40px">
+                        {{ reviewStats.rating_distribution[rating] }}
+                      </span>
+                    </div>
+                  </div>
+                </v-col>
+              </v-row>
+            </div>
+
+            <!-- Review Filters -->
+            <div class="review-filters mb-4">
+              <v-row class="align-center">
+                <v-col cols="12" sm="6">
+                  <v-select
+                    v-model="reviewFilter"
+                    :items="[
+                      { title: 'All Ratings', value: 'all' },
+                      { title: '5 Stars', value: '5' },
+                      { title: '4 Stars', value: '4' },
+                      { title: '3 Stars', value: '3' },
+                      { title: '2 Stars', value: '2' },
+                      { title: '1 Star', value: '1' }
+                    ]"
+                    item-title="title"
+                    item-value="value"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    label="Filter by rating"
+                  />
+                </v-col>
+                <v-col cols="12" sm="6">
+                  <v-select
+                    v-model="reviewSort"
+                    :items="[
+                      { title: 'Latest', value: 'latest' },
+                      { title: 'Highest Rating', value: 'highest' },
+                      { title: 'Lowest Rating', value: 'lowest' },
+                      { title: 'Most Liked', value: 'most_liked' }
+                    ]"
+                    item-title="title"
+                    item-value="value"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    label="Sort by"
+                  />
+                </v-col>
+              </v-row>
+            </div>
+
+            <!-- Reviews List -->
+            <div v-if="reviewsLoading" class="text-center py-8">
+              <v-progress-circular indeterminate color="primary"></v-progress-circular>
+              <div class="text-body-2 mt-2">Loading reviews...</div>
+            </div>
+
+            <div v-else-if="filteredReviews.length === 0" class="text-center py-8">
+              <v-icon size="64" color="grey-lighten-2">mdi-comment-outline</v-icon>
+              <div class="text-h6 mt-4 text-grey">No reviews yet</div>
+              <div class="text-body-2 text-grey">Be the first to leave a review!</div>
+            </div>
+
+            <div v-else class="reviews-list">
+              <v-card
+                v-for="review in filteredReviews"
+                :key="review.id"
+                class="review-card mb-4"
+                variant="outlined"
+              >
+                <v-card-text class="pa-4">
+                  <div class="d-flex align-start">
+                    <!-- User Avatar -->
+                    <v-avatar size="48" class="mr-4">
+                      <v-img
+                        :src="review.user_avatar || '/default-avatar.png'"
+                        alt="User avatar"
+                      />
+                    </v-avatar>
+
+                    <!-- Review Content -->
+                    <div class="flex-grow-1">
+                      <div class="d-flex align-center flex-wrap mb-2">
+                        <div class="font-weight-medium mr-2">{{ review.user_name }}</div>
+                        <v-chip
+                          v-if="review.is_verified"
+                          size="x-small"
+                          color="green"
+                          class="ml-1"
+                        >
+                          <v-icon left small>mdi-check</v-icon>
+                          Verified
+                        </v-chip>
+                        <v-spacer></v-spacer>
+                        <span class="text-caption text-grey">
+                          {{ formatDate(review.created_at) }}
+                        </span>
+                      </div>
+
+                      <!-- Rating -->
+                      <v-rating
+                        :model-value="review.rating"
+                        readonly
+                        size="small"
+                        color="amber"
+                        density="compact"
+                        class="mb-2"
+                      />
+
+                      <!-- Comment -->
+                      <div class="text-body-1 mb-3">{{ review.comment }}</div>
+
+                      <!-- Photos - FULLY INTEGRATED -->
+                      <div v-if="review.photos && review.photos.length > 0" class="mb-3">
+                        <div class="text-caption text-grey mb-2">
+                          {{ review.photos.length }} photo{{ review.photos.length !== 1 ? 's' : '' }}
+                        </div>
+                        <v-row dense>
+                          <v-col
+                            v-for="(photo, index) in review.photos"
+                            :key="index"
+                            cols="4"
+                            sm="3"
+                            md="2"
+                          >
+                            <v-img
+                              :src="photo"
+                              :alt="`Review photo ${index + 1}`"
+                              aspect-ratio="1"
+                              cover
+                              class="rounded-lg cursor-pointer"
+                              @click="viewReviewImage(photo)"
+                              @error="handleImageError(photo, index)"
+                            />
+                          </v-col>
+                        </v-row>
+                      </div>
+
+                      <!-- Actions -->
+                      <div class="d-flex align-center">
+                        <v-btn
+                          variant="text"
+                          size="small"
+                          color="grey"
+                          @click="likeReview(review.id)"
+                        >
+                          <v-icon left small>mdi-thumb-up</v-icon>
+                          Helpful ({{ review.likes || 0 }})
+                        </v-btn>
+                      </div>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-sheet>
     </v-main>
 
     <!-- Bottom Nav -->
@@ -990,9 +1352,7 @@ watch(selectedSize, (newVal) => {
 </template>
 
 <style scoped>
-/* Your existing CSS plus new styles */
-
-.app-bar{
+.app-bar {
   padding-top: 20px;
 }
 .product-page {
@@ -1013,7 +1373,7 @@ watch(selectedSize, (newVal) => {
 
 .option-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .option-card--selected {
@@ -1040,7 +1400,7 @@ watch(selectedSize, (newVal) => {
 
 .variety-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
 .variety-card--selected {
@@ -1057,13 +1417,38 @@ watch(selectedSize, (newVal) => {
   border-left: 4px solid #438fda;
 }
 
+/* Review styles */
+.review-card {
+  transition: all 0.3s ease;
+}
+
+.review-card:hover {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.average-rating {
+  padding: 16px;
+  background: #f8f9fa;
+  border-radius: 12px;
+}
+
+.rating-distribution {
+  padding: 8px 0;
+}
+
+.review-filters {
+  background: #f8f9fa;
+  padding: 16px;
+  border-radius: 8px;
+}
+
 /* Animation styles */
 .fly-to-cart {
   position: fixed;
   z-index: 10000;
   pointer-events: none;
   border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
   transition: all 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
 }
 
@@ -1175,6 +1560,10 @@ watch(selectedSize, (newVal) => {
 @media (max-width: 768px) {
   .varieties-grid {
     grid-template-columns: 1fr;
+  }
+  
+  .review-stats .v-row {
+    flex-direction: column;
   }
 }
 
