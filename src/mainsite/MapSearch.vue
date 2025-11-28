@@ -70,7 +70,8 @@ const registeredShopIcon = L.icon({
 })
 
 const highlightedShopIcon = L.icon({
-  iconUrl: 'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-gold.png',
+  iconUrl:
+    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-gold.png',
   shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
   iconSize: [30, 46],
   iconAnchor: [15, 46],
@@ -932,7 +933,11 @@ const plotShops = () => {
     ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
     <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
       <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
-      <button id="route-${shop.id}" style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;" ${!isShopCurrentlyOpen(shop) ? 'disabled' : ''}>Show Routes</button>
+<button id="route-${shop.id}" 
+        style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;" 
+        ${!isShopCurrentlyOpen(shop) ? 'disabled' : ''}>
+  Show Routes
+</button>
     </div>
     ${!isShopCurrentlyOpen(shop) ? '<p style="color: #ef4444; font-size: 12px; margin-top: 4px;">Shop is currently closed</p>' : ''}
     ${shop.manual_status !== 'auto' ? '<p style="color: #f59e0b; font-size: 11px; margin-top: 2px;">⚡ Manual override</p>' : ''}
@@ -979,11 +984,17 @@ const focusOnShopMarker = async (shopId: string) => {
     return
   }
 
+  const userLat = Number(latitude.value ?? lastKnown.value?.[0])
+  const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+
+  if (!isFinite(userLat) || !isFinite(userLng)) {
+    setErrorMessage('Your location is not available for routing')
+    return
+  }
+
   // Highlight the marker with a bounce animation
   if (marker) {
     marker.setZIndexOffset(1000)
-    
-    // Add bounce animation
     marker.setIcon(highlightedShopIcon)
 
     // Revert to normal icon after 3 seconds
@@ -993,41 +1004,56 @@ const focusOnShopMarker = async (shopId: string) => {
     }, 3000)
   }
 
-  const userLat = Number(latitude.value ?? lastKnown.value?.[0])
-  const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+  routeLoading.value = true
 
-  if (isFinite(userLat) && isFinite(userLng)) {
-    routeLoading.value = true
+  try {
+    // Clear any existing routes first
+    clearAllRoutes()
 
-    try {
-      clearAllRoutes()
+    // Calculate routes from user to shop
+    const start: [number, number] = [userLat, userLng]
+    const end: [number, number] = [Number(shop.latitude), Number(shop.longitude)]
 
-      // Center map on the shop with smooth animation
-      map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
+    console.log('Calculating routes from:', start, 'to:', end)
+
+    // Get multiple route options
+    const routes = await getRouteOptions(start, end)
+    console.log('Route options received:', routes)
+
+    if (routes.length === 0) {
+      setErrorMessage('No routes found between your location and the shop')
+      return
+    }
+
+    // Store routes and draw them
+    routeOptions.value = routes
+    drawRouteOptions(routes)
+
+    // Show route menu
+    showRouteMenu.value = true
+
+    // Center map to show both locations and routes
+    const bounds = L.latLngBounds([start, end])
+    routes.forEach((route) => {
+      bounds.extend(route.coords)
+    })
+
+    if (bounds.isValid()) {
+      map.value.fitBounds(bounds.pad(0.15), {
         animate: true,
         duration: 1,
+        padding: [30, 30],
       })
-
-      // Open popup
-      marker.openPopup()
-
-      // Show success message
-      setErrorMessage(`Focused on ${shop.business_name}`, 3000)
-
-    } catch (error) {
-      console.error('Error focusing on shop:', error)
-      setErrorMessage('Error focusing on shop', 3000)
-    } finally {
-      routeLoading.value = false
     }
-  } else {
-    // Just center on shop if user location not available
-    map.value.setView([Number(shop.latitude), Number(shop.longitude)], 16, {
-      animate: true,
-      duration: 1,
-    })
+
+    // Open popup and show success message
     marker.openPopup()
-    setErrorMessage(`Focused on ${shop.business_name}`, 3000)
+    setErrorMessage(`Found ${routes.length} route options to ${shop.business_name}`, 5000)
+  } catch (error) {
+    console.error('Error calculating routes:', error)
+    setErrorMessage('Error calculating routes to shop', 3000)
+  } finally {
+    routeLoading.value = false
   }
 }
 
@@ -1144,18 +1170,18 @@ const smartSearch = async () => {
 
   try {
     // Enhanced search that matches shop name, location, AND products
-    const searchResults = shops.value.filter(shop => {
+    const searchResults = shops.value.filter((shop) => {
       const searchTerms = [
         shop.business_name?.toLowerCase(),
         shop.city?.toLowerCase(),
         shop.barangay?.toLowerCase(),
         shop.street?.toLowerCase(),
         shop.province?.toLowerCase(),
-        ...(shop.products || []).map((p: any) => p.prod_name?.toLowerCase())
+        ...(shop.products || []).map((p: any) => p.prod_name?.toLowerCase()),
       ].filter(Boolean)
 
       // Check if any search term matches the query
-      return searchTerms.some(term => term && term.includes(query))
+      return searchTerms.some((term) => term && term.includes(query))
     })
 
     // Sort by relevance and distance
@@ -1163,14 +1189,14 @@ const smartSearch = async () => {
       // Priority 1: Exact matches in business name
       const aNameMatch = a.business_name?.toLowerCase().includes(query)
       const bNameMatch = b.business_name?.toLowerCase().includes(query)
-      
+
       if (aNameMatch && !bNameMatch) return -1
       if (!aNameMatch && bNameMatch) return 1
 
       // Priority 2: Number of matching products
       const aProductMatches = getMatchingProducts(a).length
       const bProductMatches = getMatchingProducts(b).length
-      
+
       if (aProductMatches !== bProductMatches) {
         return bProductMatches - aProductMatches
       }
@@ -1186,13 +1212,12 @@ const smartSearch = async () => {
       clearSearchMarkers()
     } else {
       const matchTypes = {
-        shops: sortedResults.filter(shop => 
-          shop.business_name?.toLowerCase().includes(query) ||
-          shop.city?.toLowerCase().includes(query)
+        shops: sortedResults.filter(
+          (shop) =>
+            shop.business_name?.toLowerCase().includes(query) ||
+            shop.city?.toLowerCase().includes(query),
         ).length,
-        products: sortedResults.filter(shop => 
-          getMatchingProducts(shop).length > 0
-        ).length
+        products: sortedResults.filter((shop) => getMatchingProducts(shop).length > 0).length,
       }
 
       errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products)`
@@ -1234,16 +1259,14 @@ const clearSearch = () => {
 const getMatchingProducts = (shop: any): any[] => {
   const query = search.value.trim().toLowerCase()
   if (!query || !shop.products) return []
-  
-  return shop.products.filter((product: any) => 
-    product.prod_name?.toLowerCase().includes(query)
-  )
+
+  return shop.products.filter((product: any) => product.prod_name?.toLowerCase().includes(query))
 }
 
 // Check if shop has search matches
 const hasSearchMatch = (shop: any): boolean => {
   if (!isSearchMode.value || !search.value) return false
-  
+
   const query = search.value.toLowerCase()
   return (
     shop.business_name?.toLowerCase().includes(query) ||
@@ -1275,16 +1298,16 @@ const handleShopClick = async (shopId: string, index: number) => {
 // Focus on shop and close drawer
 const focusOnShopFromList = async (shopId: string) => {
   console.log('Focusing on shop from list:', shopId)
-  
+
   // Close the drawer first
   showShopMenu.value = false
-  
+
   // Small delay to allow drawer animation to complete
-  await new Promise(resolve => setTimeout(resolve, 300))
-  
+  await new Promise((resolve) => setTimeout(resolve, 300))
+
   // Then focus on the shop marker
   await focusOnShopMarker(shopId)
-  
+
   // Clear selection after a delay
   setTimeout(() => {
     selectedShopId.value = null
@@ -1297,8 +1320,8 @@ const openShopDetails = async (shopId: string) => {
   if (!shop) return
 
   showShopMenu.value = false
-  await new Promise(resolve => setTimeout(resolve, 300))
-  
+  await new Promise((resolve) => setTimeout(resolve, 300))
+
   router.push(`/shop/${shopId}`)
 }
 
@@ -1628,9 +1651,9 @@ onUnmounted(() => {
               :key="shop.id"
               @click="handleShopClick(shop.id, index)"
               class="mb-2 shop-list-item"
-              :class="{ 
+              :class="{
                 'bg-blue-lighten-5': isSearchMode && hasSearchMatch(shop),
-                'selected-shop': selectedShopId === shop.id
+                'selected-shop': selectedShopId === shop.id,
               }"
             >
               <template #prepend>
@@ -2066,9 +2089,15 @@ onUnmounted(() => {
 }
 
 @keyframes highlight-pulse {
-  0% { background-color: #f1f5f9; }
-  50% { background-color: #dbeafe; }
-  100% { background-color: #f1f5f9; }
+  0% {
+    background-color: #f1f5f9;
+  }
+  50% {
+    background-color: #dbeafe;
+  }
+  100% {
+    background-color: #f1f5f9;
+  }
 }
 
 /* Responsive adjustments */
@@ -2114,7 +2143,7 @@ onUnmounted(() => {
     width: 100vw !important;
     max-width: 400px;
   }
-  
+
   .shop-list-item {
     margin: 2px 4px;
   }
