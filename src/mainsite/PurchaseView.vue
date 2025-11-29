@@ -15,6 +15,8 @@ const transactionNumber = ref('')
 // 👤 USER & DELIVERY STATE
 const buyer = ref<any>(null)
 const address = ref<any>(null)
+const addresses = ref<any[]>([])
+const showAddressDialog = ref(false)
 const deliveryOption = ref('meetup')
 const paymentMethod = ref('cash')
 const note = ref('')
@@ -115,7 +117,6 @@ const initializePage = async () => {
 }
 
 // 🏪 LOAD SHOP DATA FROM SUPABASE
-// 🏪 LOAD SHOP DATA FROM SUPABASE - CORRECTED
 const loadShopData = async () => {
   try {
     console.log('🏪 Loading shop data for items...')
@@ -454,17 +455,7 @@ const loadUserData = async () => {
     buyer.value = profile
 
     // Load addresses
-    const { data: addresses } = await supabase
-      .from('addresses')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('is_default', { ascending: false })
-      .order('updated_at', { ascending: false })
-
-    if (addresses && addresses.length > 0) {
-      // Use default address or most recent
-      address.value = addresses.find((addr) => addr.is_default) || addresses[0]
-    }
+    await loadUserAddresses()
 
     console.log('✅ User data loaded:', { buyer: buyer.value, address: address.value })
   } catch (err) {
@@ -472,6 +463,77 @@ const loadUserData = async () => {
   }
 }
 
+// 🏠 LOAD USER ADDRESSES
+const loadUserAddresses = async () => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    console.log('📡 Loading addresses for user:', user.id)
+
+    const { data: userAddresses, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('is_default', { ascending: false })
+      .order('updated_at', { ascending: false })
+
+    if (error) {
+      console.error('❌ Error loading addresses:', error)
+      return
+    }
+
+    addresses.value = userAddresses || []
+
+    if (addresses.value.length > 0) {
+      // Use default address or most recent
+      address.value = addresses.value.find((addr) => addr.is_default) || addresses.value[0]
+    } else {
+      address.value = null
+    }
+
+    console.log('✅ Addresses loaded:', addresses.value)
+    console.log('✅ Selected address:', address.value)
+  } catch (err) {
+    console.error('❌ Error loading addresses:', err)
+  }
+}
+
+// 🏠 SELECT ADDRESS
+const selectAddress = (selectedAddress: any) => {
+  console.log('📍 Selecting address:', selectedAddress)
+  address.value = selectedAddress
+  showAddressDialog.value = false
+  console.log('✅ Address selected:', address.value)
+}
+
+// 🏠 ADD NEW ADDRESS
+const addNewAddress = () => {
+  showAddressDialog.value = false
+  // Navigate to add address page
+  router.push({ name: 'edit-address' })
+}
+
+// 🏠 FORMAT ADDRESS FOR DISPLAY
+const formatAddress = (addr: any): string => {
+  if (!addr) return 'No address set'
+  
+  const addressParts = [
+    addr.house_no,
+    addr.building,
+    addr.street,
+    addr.purok ? `Purok ${addr.purok}` : null,
+    addr.barangay_name,
+    addr.city_name,
+    addr.province_name,
+    addr.region_name,
+    addr.postal_code
+  ].filter(Boolean) // Remove null/empty values
+  
+  return addressParts.join(', ') || 'Address details not complete'
+}
 // 🕒 INITIALIZE DATE/TIME - IMPROVED
 const initializeDateTime = () => {
   const now = new Date()
@@ -831,6 +893,7 @@ const updateTime = () => {
     scheduleError.value = 'Error setting time. Please try again.'
   }
 }
+
 const selectHour = (hour: string) => {
   console.log('⏰ Hour selected:', hour)
   selectedHour.value = hour
@@ -1394,7 +1457,7 @@ watch(
               <p><strong>Contact:</strong> {{ address?.phone || 'Not set' }}</p>
               <p class="address-line">
                 <strong>Address:</strong>
-                {{ address ? `${address.street}, ${address.city_name}` : 'No address set' }}
+                {{ address ? formatAddress(address) : 'No address set' }}
               </p>
               <p><strong>Transaction No.:</strong> {{ transactionNumber }}</p>
               <p>
@@ -1402,9 +1465,9 @@ watch(
                 {{ deliveryTime ? `at ${convertTo12Hour(deliveryTime)}` : '' }}
               </p>
               <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
-              <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
               <div class="button-group mt-2">
-                <v-btn size="small" color="primary" variant="tonal" class="action-btn">
+                <v-btn size="small" color="primary" variant="tonal" @click="showAddressDialog = true"
+                  class="action-btn">
                   Change Address
                 </v-btn>
                 <v-btn size="small" color="primary" variant="tonal" @click="showDateTimePicker = true"
@@ -1530,6 +1593,79 @@ watch(
           </v-btn>
         </div>
       </div>
+
+      <!-- Address Selection Dialog -->
+      <v-dialog v-model="showAddressDialog" max-width="500" persistent>
+        <v-card class="address-dialog">
+          <v-card-title class="address-title">
+            <v-icon color="primary" class="mr-2">mdi-map-marker</v-icon>
+            Select Delivery Address
+          </v-card-title>
+          <v-card-text class="address-content">
+            <!-- No Addresses State -->
+            <div v-if="addresses.length === 0" class="no-addresses">
+              <v-icon size="64" color="grey-lighten-2" class="mb-3">mdi-map-marker-off</v-icon>
+              <h3 class="text-h6 mb-2">No Addresses Saved</h3>
+              <p class="text-body-2 text-medium-emphasis mb-4">
+                You haven't saved any addresses yet. Add an address to continue with your order.
+              </p>
+              <v-btn color="primary" @click="addNewAddress" block>
+                <v-icon left>mdi-plus</v-icon>
+                Add New Address
+              </v-btn>
+            </div>
+
+            <!-- Address List -->
+            <div v-else class="address-list">
+              <div class="address-list-title">Your Saved Addresses</div>
+              <v-list class="address-list-items">
+                <v-list-item v-for="addr in addresses" :key="addr.id" class="address-item"
+                  :class="{ 'address-item-selected': address?.id === addr.id }" @click="selectAddress(addr)">
+                  <template #prepend>
+                    <v-avatar color="primary" size="40" class="address-avatar">
+                      <v-icon color="white" size="20">mdi-home</v-icon>
+                    </v-avatar>
+                  </template>
+
+                  <v-list-item-title class="address-recipient">
+                    {{ addr.recipient_name || 'No name' }}
+                    <v-chip v-if="addr.is_default" color="primary" size="x-small" class="ms-2">
+                      Default
+                    </v-chip>
+                  </v-list-item-title>
+                  <v-list-item-subtitle class="address-details">
+                    <div class="address-line">{{ formatAddress(addr) }}</div>
+                    <div v-if="addr.phone" class="address-phone">
+                      <v-icon size="14" class="mr-1">mdi-phone</v-icon>
+                      {{ addr.phone }}
+                    </div>
+                  </v-list-item-subtitle>
+
+                  <template #append>
+                    <v-icon v-if="address?.id === addr.id" color="primary">mdi-check-circle</v-icon>
+                  </template>
+                </v-list-item>
+              </v-list>
+
+              <v-divider class="my-4"></v-divider>
+
+              <v-btn color="primary" variant="outlined" @click="addNewAddress" block>
+                <v-icon left>mdi-plus</v-icon>
+                Add New Address
+              </v-btn>
+            </div>
+          </v-card-text>
+          <v-card-actions class="address-actions">
+            <v-btn text @click="showAddressDialog = false" class="cancel-address-btn">
+              Cancel
+            </v-btn>
+            <v-btn v-if="addresses.length > 0" color="primary" variant="flat" @click="showAddressDialog = false"
+              class="confirm-address-btn">
+              Confirm Selection
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
 
       <!-- Date & Time Picker Dialog -->
       <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
@@ -1844,6 +1980,105 @@ watch(
   flex-shrink: 0;
 }
 
+/* Address Dialog Styles */
+.address-dialog {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+.address-title {
+  text-align: center;
+  font-weight: 700 !important;
+  font-size: 1.1rem !important;
+  color: var(--primary-color);
+  padding: 20px 20px 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.address-content {
+  padding: 16px 20px;
+}
+
+.no-addresses {
+  text-align: center;
+  padding: 20px 0;
+}
+
+.address-list-title {
+  font-weight: 600;
+  font-size: 1rem;
+  margin-bottom: 12px;
+  color: var(--text-primary);
+}
+
+.address-list-items {
+  padding: 0 !important;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.address-item {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  padding: 12px !important;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.address-item:hover {
+  border-color: var(--primary-color);
+  background-color: #f0f7ff;
+}
+
+.address-item-selected {
+  border-color: var(--primary-color);
+  background-color: #e3f2fd;
+}
+
+.address-avatar {
+  margin-right: 12px;
+}
+
+.address-recipient {
+  font-weight: 600 !important;
+  font-size: 0.95rem !important;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.address-details {
+  font-size: 0.85rem !important;
+  color: var(--text-secondary) !important;
+}
+
+.address-line {
+  line-height: 1.4;
+  margin-bottom: 4px;
+}
+
+.address-phone {
+  display: flex;
+  align-items: center;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.address-actions {
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px 20px;
+}
+
+.cancel-address-btn,
+.confirm-address-btn {
+  min-width: 80px;
+}
+
 /* Date Time Picker */
 .datetime-dialog {
   max-width: 95vw !important;
@@ -2124,6 +2359,28 @@ watch(
     width: 100%;
     justify-content: center;
   }
+
+  /* Address Dialog Mobile */
+  .address-dialog {
+    margin: 8px !important;
+  }
+
+  .address-title {
+    font-size: 1rem !important;
+    padding: 16px 16px 0 !important;
+  }
+
+  .address-content {
+    padding: 12px 16px;
+  }
+
+  .address-item {
+    padding: 10px !important;
+  }
+
+  .address-avatar {
+    margin-right: 8px;
+  }
 }
 
 @media (max-width: 400px) {
@@ -2153,6 +2410,10 @@ watch(
     padding: 12px 16px 16px;
   }
 
+  .address-actions {
+    padding: 12px 16px 16px;
+  }
+
   .bottom-nav-content {
     flex-direction: column;
     gap: 8px;
@@ -2176,7 +2437,8 @@ watch(
 .time-item,
 .period-btn,
 .cancel-datetime-btn,
-.confirm-datetime-btn {
+.confirm-datetime-btn,
+.address-item {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
