@@ -74,6 +74,107 @@ function extractImage(main_img_urls: any) {
   return PLACEHOLDER_IMG
 }
 
+// Convert time to 12-hour format
+const formatTime12Hour = (timeString: string) => {
+  if (!timeString) return ''
+  
+  try {
+    const [hours, minutes] = timeString.split(':')
+    const hour = parseInt(hours)
+    const ampm = hour >= 12 ? 'PM' : 'AM'
+    const hour12 = hour % 12 || 12
+    return `${hour12}:${minutes} ${ampm}`
+  } catch (error) {
+    console.error('Error formatting time:', error)
+    return timeString
+  }
+}
+
+// Check if shop is currently open
+const isShopOpen = computed(() => {
+  if (!shop.value) return false
+  
+  // Check manual status first
+  if (shop.value.manual_status && shop.value.manual_status !== 'auto') {
+    return shop.value.manual_status === 'open'
+  }
+  
+  // Auto status - check business hours
+  const now = new Date()
+  const currentDay = now.getDay() // 0 = Sunday, 1 = Monday, etc.
+  const currentTime = now.getHours() * 100 + now.getMinutes() // HHMM format
+  
+  // Check if shop is open today
+  const openDays = shop.value.open_days || [1, 2, 3, 4, 5, 6] // Default to Mon-Sat
+  if (!openDays.includes(currentDay)) {
+    return false
+  }
+  
+  // Check if within business hours
+  if (shop.value.open_time && shop.value.close_time) {
+    try {
+      const [openHour, openMinute] = shop.value.open_time.split(':')
+      const [closeHour, closeMinute] = shop.value.close_time.split(':')
+      
+      const openTime = parseInt(openHour) * 100 + parseInt(openMinute)
+      const closeTime = parseInt(closeHour) * 100 + parseInt(closeMinute)
+      
+      return currentTime >= openTime && currentTime <= closeTime
+    } catch (error) {
+      console.error('Error parsing business hours:', error)
+      return true // Default to open if there's an error
+    }
+  }
+  
+  return true // Default to open if no hours specified
+})
+
+// Get shop status display
+const shopStatus = computed(() => {
+  if (!shop.value) return ''
+  
+  if (shop.value.manual_status && shop.value.manual_status !== 'auto') {
+    return shop.value.manual_status === 'open' ? 'Open' : 'Closed'
+  }
+  
+  return isShopOpen.value ? 'Open' : 'Closed'
+})
+
+// Get shop status color
+const shopStatusColor = computed(() => {
+  return isShopOpen.value ? 'success' : 'error'
+})
+
+// Get shop status icon
+const shopStatusIcon = computed(() => {
+  return isShopOpen.value ? 'mdi-store-check' : 'mdi-store-remove'
+})
+
+// Get open days display
+const openDaysDisplay = computed(() => {
+  if (!shop.value?.open_days || shop.value.open_days.length === 0) {
+    return 'Mon-Sat'
+  }
+  
+  const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+  const openDayNames = shop.value.open_days.map((day: number) => dayNames[day])
+  
+  // If all days are open, show "Everyday"
+  if (openDayNames.length === 7) return 'Everyday'
+  
+  // If consecutive days from Mon-Sat, show "Mon-Sat"
+  if (JSON.stringify(shop.value.open_days) === JSON.stringify([1,2,3,4,5,6])) {
+    return 'Mon-Sat'
+  }
+  
+  // If consecutive days from Mon-Fri, show "Weekdays"
+  if (JSON.stringify(shop.value.open_days) === JSON.stringify([1,2,3,4,5])) {
+    return 'Weekdays'
+  }
+  
+  return openDayNames.join(', ')
+})
+
 // share shop
 const shareProduct = () => {
   if (navigator.share) {
@@ -188,6 +289,17 @@ const isOwner = computed(() => {
         </div>
 
         <v-container class="py-4">
+          <!-- Shop Status Badge -->
+          <div class="d-flex align-center mb-2">
+            <v-chip :color="shopStatusColor" size="small" class="mr-2">
+              <v-icon start :icon="shopStatusIcon" size="small"></v-icon>
+              {{ shopStatus }}
+            </v-chip>
+            <span class="text-caption text-medium-emphasis">
+              {{ openDaysDisplay }}
+            </span>
+          </div>
+
           <h2 class="text-h6">{{ shop?.business_name || 'Shop' }}</h2>
           <p class="text-body-2 text-medium-emphasis">
             {{ shop?.description || 'No description yet.' }}
@@ -195,7 +307,11 @@ const isOwner = computed(() => {
 
           <div class="mt-2 text-body-2">
             <p>
-              <v-icon small start>mdi-clock</v-icon> {{ shop?.open_time }} – {{ shop?.close_time }}
+              <v-icon small start>mdi-clock</v-icon> 
+              <span v-if="shop?.open_time && shop?.close_time">
+                {{ formatTime12Hour(shop.open_time) }} – {{ formatTime12Hour(shop.close_time) }}
+              </span>
+              <span v-else>Hours not specified</span>
             </p>
             <p>
               <v-icon small start>mdi-map-marker</v-icon>
@@ -235,7 +351,7 @@ const isOwner = computed(() => {
           <template v-else-if="products.length === 0">
             <div class="empty-card">
               <div class="empty-title">No products yet</div>
-              <div class="empty-sub">This shop hasn’t added products.</div>
+              <div class="empty-sub">This shop hasn't added products.</div>
             </div>
           </template>
 
