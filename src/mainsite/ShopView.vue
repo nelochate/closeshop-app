@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, nextTick, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import * as L from 'leaflet'
+import 'leaflet/dist/leaflet.css'
+
+// Fix for default markers in Leaflet
+delete (L.Icon.Default.prototype as any)._getIconUrl
+L.Icon.Default.mergeOptions({
+  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
+  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
+  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
+})
 
 // route + router
 const route = useRoute()
@@ -12,7 +21,6 @@ const shopId = route.params.id as string
 const activeTab = ref(null)
 
 //for chat feature
-
 const user = ref<any>(null)
 const userLoaded = ref(false)
 
@@ -21,16 +29,29 @@ const shop = ref<any>(null)
 const products = ref<any[]>([])
 const loading = ref(true)
 const errorMsg = ref('')
+const mapInitialized = ref(false)
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/640/360'
 
 // fetch shop
 const fetchShop = async () => {
   try {
-    const { data, error } = await supabase.from('shops').select('*').eq('id', shopId).single()
+    const { data, error } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('id', shopId)
+      .single()
 
     if (error) throw error
     shop.value = data
+    
+    // Debug log to check coordinates
+    console.log('Shop coordinates:', {
+      latitude: data.latitude,
+      longitude: data.longitude,
+      business_name: data.business_name
+    })
+    
   } catch (err: any) {
     errorMsg.value = err.message
     console.error('fetchShop error:', err)
@@ -195,37 +216,110 @@ let map: L.Map | null = null
 let shopMarker: L.Marker | null = null
 
 const initMap = () => {
-  if (!shop.value?.latitude || !shop.value?.longitude) return
-
-  // destroy old map if exists
+  // Clean up existing map
   if (map) {
     map.remove()
     map = null
+    shopMarker = null
   }
 
-  map = L.map('shop-map').setView([shop.value.latitude, shop.value.longitude], 16)
+  // Check if shop has valid coordinates
+  if (!shop.value?.latitude || !shop.value?.longitude) {
+    console.warn('Shop coordinates not available:', {
+      latitude: shop.value?.latitude,
+      longitude: shop.value?.longitude
+    })
+    return
+  }
 
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '© OpenStreetMap contributors',
-  }).addTo(map)
+  // Validate coordinates
+  const lat = Number(shop.value.latitude)
+  const lng = Number(shop.value.longitude)
+  
+  if (isNaN(lat) || isNaN(lng)) {
+    console.error('Invalid coordinates:', { lat, lng })
+    return
+  }
 
-  shopMarker = L.marker([shop.value.latitude, shop.value.longitude]).addTo(map)
-  shopMarker.bindPopup(shop.value.business_name || 'Shop').openPopup()
+  // Use nextTick to ensure DOM is ready
+  nextTick(() => {
+    const mapElement = document.getElementById('shop-map')
+    if (!mapElement) {
+      console.error('Map element not found')
+      return
+    }
+
+    try {
+      // Initialize map with validated coordinates
+      map = L.map('shop-map').setView([lat, lng], 16)
+
+      // Add tile layer
+      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '© OpenStreetMap contributors',
+        maxZoom: 19,
+      }).addTo(map)
+
+      // Add marker with proper icon and validated coordinates
+      shopMarker = L.marker([lat, lng])
+        .addTo(map)
+        .bindPopup(`
+          <div style="text-align: center;">
+            <strong>${shop.value.business_name || 'Shop'}</strong><br/>
+            <small>${shop.value.description || ''}</small>
+          </div>
+        `)
+        .openPopup()
+
+      console.log('Map initialized with coordinates:', { lat, lng })
+
+      // Force map resize to ensure proper rendering on mobile
+      setTimeout(() => {
+        map?.invalidateSize()
+      }, 100)
+
+      mapInitialized.value = true
+
+    } catch (error) {
+      console.error('Error initializing map:', error)
+    }
+  })
 }
 
-onMounted(async () => {
+// Watch for shop data changes and initialize map when coordinates are available
+watch(() => shop.value, (newShop) => {
+  if (newShop?.latitude && newShop?.longitude && !mapInitialized.value) {
+    console.log('Shop data loaded with coordinates, initializing map...')
+    // Small delay to ensure DOM is fully rendered
+    setTimeout(() => {
+      initMap()
+    }, 500)
+  }
+}, { deep: true })
+
+// Load all data
+const initializeAfterDataLoad = async () => {
   loading.value = true
-  await loadUser() // ✅ Load user first
+  await loadUser()
   await fetchShop()
   await fetchProducts()
   loading.value = false
+}
 
-  // initialize map after shop is loaded
-  initMap()
+onMounted(() => {
+  initializeAfterDataLoad()
+})
+
+// Reinitialize map when component is activated (for Vue Router)
+import { onActivated } from 'vue'
+onActivated(() => {
+  if (map && shop.value?.latitude && shop.value?.longitude) {
+    setTimeout(() => {
+      map?.invalidateSize()
+    }, 100)
+  }
 })
 
 //for chat feature
-
 const loadUser = async () => {
   try {
     const { data, error } = await supabase.auth.getUser()
@@ -238,9 +332,22 @@ const loadUser = async () => {
     userLoaded.value = true
   }
 }
+
 const isOwner = computed(() => {
   if (!user.value || !shop.value) return false
-  return user.value.id === shop.value.owner_id // adjust column name if different
+  return user.value.id === shop.value.owner_id
+})
+
+// Check if shop has valid coordinates
+const hasValidCoordinates = computed(() => {
+  if (!shop.value?.latitude || !shop.value?.longitude) return false
+  
+  const lat = Number(shop.value.latitude)
+  const lng = Number(shop.value.longitude)
+  
+  return !isNaN(lat) && !isNaN(lng) && 
+         lat >= -90 && lat <= 90 && 
+         lng >= -180 && lng <= 180
 })
 </script>
 
@@ -334,9 +441,23 @@ const isOwner = computed(() => {
         </v-container>
 
         <!-- Mini Map -->
-        <v-container>
+        <v-container v-if="hasValidCoordinates">
           <h3 class="text-h6 mb-2">Location</h3>
           <div id="shop-map"></div>
+          <div class="text-caption text-medium-emphasis mt-1 text-center">
+            Coordinates: {{ Number(shop.latitude).toFixed(6) }}, {{ Number(shop.longitude).toFixed(6) }}
+          </div>
+        </v-container>
+
+        <v-container v-else>
+          <h3 class="text-h6 mb-2">Location</h3>
+          <div class="empty-card">
+            <div class="empty-title">Location not available</div>
+            <div class="empty-sub">This shop hasn't set up their location yet.</div>
+            <div v-if="shop?.latitude || shop?.longitude" class="text-caption text-error mt-2">
+              Invalid coordinates: {{ shop?.latitude }}, {{ shop?.longitude }}
+            </div>
+          </div>
         </v-container>
 
         <!-- Products -->
@@ -410,6 +531,7 @@ const isOwner = computed(() => {
   height: 250px;
   border-radius: 12px;
   margin-bottom: 16px;
+  background: #f5f5f5;
 }
 .product-grid {
   display: grid;
@@ -458,5 +580,15 @@ const isOwner = computed(() => {
 .empty-sub {
   font-size: 12px;
   color: #6b7280;
+}
+
+/* Ensure Leaflet markers display correctly */
+:deep(.leaflet-marker-icon) {
+  margin-left: -12px !important;
+  margin-top: -41px !important;
+}
+
+:deep(.leaflet-marker-shadow) {
+  margin-left: -12px !important;
 }
 </style>
