@@ -1448,6 +1448,7 @@ onUnmounted(() => {
 
 <template>
   <v-app>
+    <!-- Hero Section - Fixed positioning -->
     <v-sheet class="hero">
       <div class="hero-row">
         <v-text-field
@@ -1476,8 +1477,9 @@ onUnmounted(() => {
       </div>
     </v-sheet>
 
-    <v-main style="position: relative; height: calc(100vh - 64px)">
-      <div id="map" style="height: 100%; width: 100%"></div>
+    <!-- Main Content Area -->
+    <v-main class="main-content">
+      <div id="map" class="map-container"></div>
 
       <!-- Boundary Loading Overlay -->
       <div v-if="boundaryLoading" class="boundary-loading">
@@ -1562,6 +1564,7 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- Error Message Alert -->
       <v-alert
         v-if="errorMsg"
         type="info"
@@ -1578,6 +1581,7 @@ onUnmounted(() => {
       </v-alert>
     </v-main>
 
+    <!-- Shop Menu Drawer -->
     <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="400">
       <v-card class="h-100 d-flex flex-column">
         <!-- Header -->
@@ -1813,77 +1817,46 @@ onUnmounted(() => {
   }
 }
 
-/* Boundary loading state */
-.boundary-loading {
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  background: rgba(255, 255, 255, 0.95);
-  padding: 16px 24px;
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  z-index: 2500;
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.8);
-  font-weight: 500;
-  color: #1f2937;
+/* FIXED: Main layout structure */
+.v-application {
+  height: 100vh;
+  overflow: hidden;
 }
 
-/* Enhanced mode chip styles */
-.mode-chip {
-  font-weight: 600;
-  padding: 8px 12px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(10px);
-  border: none;
-  margin-bottom: 8px;
-  align-self: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.mode-chip:hover {
-  transform: scale(1.05);
-}
-
-/* Map container */
-#map {
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 1;
-}
-
-.v-main {
+.main-content {
   position: relative;
+  height: calc(100vh - 120px) !important; /* Account for hero + bottom nav */
+  margin: 0 !important;
   padding: 0 !important;
 }
 
-/* Hero section - FIXED FOR SAFE AREA */
+.map-container {
+  width: 100%;
+  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  z-index: 1;
+}
+
+/* FIXED: Hero section positioning */
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding-top: env(safe-area-inset-top);
-  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  padding: 12px 16px;
   margin: 0;
   width: 100%;
-  position: sticky;
-  top: 0;
+  position: relative; /* Changed from sticky to relative */
   z-index: 10;
-  /* Ensure content doesn't go under the status bar */
-  min-height: calc(64px + env(safe-area-inset-top));
+  min-height: 64px;
+  box-sizing: border-box;
 }
 
 .hero-row {
   display: flex;
   align-items: center;
   gap: 10px;
+  width: 100%;
 }
 
 .search-field {
@@ -1917,17 +1890,17 @@ onUnmounted(() => {
   border-radius: 50% !important;
 }
 
-/* Map Controls - Adjust for safe area */
+/* FIXED: Map Controls Positioning */
 .map-controls-container {
   position: absolute;
-  bottom: max(100px, calc(100px + env(safe-area-inset-bottom)));
-  right: max(20px, env(safe-area-inset-right));
+  bottom: 100px; /* Position above bottom nav */
+  right: 20px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
   z-index: 2000;
-  max-width: calc(100vw - 40px);
+  pointer-events: none; /* Allow clicks to pass through container */
 }
 
 .map-controls-group {
@@ -1940,7 +1913,24 @@ onUnmounted(() => {
   padding: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.9);
-  margin-bottom: 25px;
+  pointer-events: auto; /* Re-enable clicks for controls */
+}
+
+.mode-chip {
+  font-weight: 600;
+  padding: 8px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(10px);
+  border: none;
+  margin-bottom: 8px;
+  align-self: center;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  pointer-events: auto;
+}
+
+.mode-chip:hover {
+  transform: scale(1.05);
 }
 
 .control-btn {
@@ -1956,6 +1946,26 @@ onUnmounted(() => {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2) !important;
   background: #f8fafc !important;
+}
+
+/* Loading Overlays */
+.boundary-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.95);
+  padding: 16px 24px;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  z-index: 2500;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  font-weight: 500;
+  color: #1f2937;
 }
 
 .route-loading {
@@ -1974,9 +1984,10 @@ onUnmounted(() => {
   backdrop-filter: blur(20px);
 }
 
+/* Error Message Alert */
 .route-info-alert {
   position: absolute;
-  top: 60px;
+  top: 20px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -1986,10 +1997,10 @@ onUnmounted(() => {
   padding: 8px 16px;
 }
 
-/* Center the content vertically and horizontally */
 .route-info-alert .d-flex {
   min-height: 32px;
 }
+
 .alert-text {
   flex: 1;
   text-align: center;
@@ -1997,13 +2008,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-/* Adjust main content area for safe area */
-.v-main {
-  position: relative;
-  height: calc(100vh - 64px - env(safe-area-inset-top)) !important;
-  padding: 0 !important;
 }
 
 /* Status badge */
@@ -2054,25 +2058,6 @@ onUnmounted(() => {
   box-shadow: 0 6px 20px rgba(59, 130, 246, 0.3) !important;
 }
 
-/* Custom scrollbar for the list */
-.v-card-text::-webkit-scrollbar {
-  width: 6px;
-}
-
-.v-card-text::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
-}
-
-.v-card-text::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
-}
-
-.v-card-text::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
-}
-
 /* Button animations */
 .v-btn {
   transition: all 0.3s ease !important;
@@ -2100,21 +2085,23 @@ onUnmounted(() => {
   }
 }
 
-/* Responsive adjustments */
+/* FIXED: Responsive adjustments */
 @media (max-width: 768px) {
   .hero {
-    padding: max(12px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-left)) 12px
-      max(12px, env(safe-area-inset-right));
+    padding: 12px;
   }
 
   .hero-row {
     gap: 8px;
-    margin-top: env(safe-area-inset-top);
+  }
+
+  .main-content {
+    height: calc(100vh - 120px) !important; /* Consistent height calculation */
   }
 
   .map-controls-container {
-    bottom: max(80px, calc(80px + env(safe-area-inset-bottom)));
-    right: max(12px, env(safe-area-inset-right));
+    bottom: 100px; /* Fixed position above bottom nav */
+    right: 12px;
   }
 
   .control-btn {
@@ -2123,7 +2110,7 @@ onUnmounted(() => {
   }
 
   .route-info-alert {
-    top: 50px;
+    top: 15px;
     width: 95%;
     padding: 6px 12px;
   }
@@ -2133,8 +2120,9 @@ onUnmounted(() => {
   }
 
   .route-info-alert .d-flex {
-    min-height: 58px;
+    min-height: 28px;
   }
+  
   .alert-text {
     font-size: 14px;
   }
@@ -2149,34 +2137,44 @@ onUnmounted(() => {
   }
 }
 
-/* Additional safe area support for very tall screens */
-@media (min-height: 800px) {
+/* FIXED: Safe area support */
+@supports (padding: max(0px)) {
   .hero {
-    padding-top: max(20px, env(safe-area-inset-top));
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: 12px;
+    padding-left: max(16px, env(safe-area-inset-left));
+    padding-right: max(16px, env(safe-area-inset-right));
   }
-
-  .hero-row {
-    margin-top: max(8px, env(safe-area-inset-top));
+  
+  .main-content {
+    height: calc(100vh - 120px - env(safe-area-inset-top)) !important;
+  }
+  
+  .map-controls-container {
+    bottom: calc(100px + env(safe-area-inset-bottom));
+    right: max(20px, env(safe-area-inset-right));
   }
 }
 
-/* Support for devices without safe-area-inset */
-@supports not (padding: max(0px)) {
-  .hero {
-    padding-top: 16px;
-  }
+/* Ensure Leaflet map tiles display properly */
+:deep(.leaflet-container) {
+  background: #f8f9fa;
+  font-family: inherit;
+}
 
-  .hero-row {
-    margin-top: 0;
-  }
+:deep(.leaflet-control-zoom a) {
+  background: white !important;
+  color: #333 !important;
+  border: 1px solid #ccc !important;
+}
 
-  .map-controls-container {
-    bottom: 100px;
-    right: 20px;
-  }
+:deep(.leaflet-popup-content-wrapper) {
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
 
-  .route-info-alert {
-    top: 80px;
-  }
+:deep(.leaflet-popup-content) {
+  margin: 16px;
+  font-family: inherit;
 }
 </style>
