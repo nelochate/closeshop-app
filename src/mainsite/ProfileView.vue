@@ -645,7 +645,7 @@ const goShopOrBuild = () => {
   font-weight: 600;
   font-size: 0.95rem;
   padding: 8px 20px;
-  height: 38px !important;
+  height: 35px !important;
   margin-left: -14px;
   max-width: 200px;
   margin-top: 12px !important;

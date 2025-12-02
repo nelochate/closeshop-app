@@ -568,7 +568,7 @@ const getLocationStatusText = (accuracy) => {
       <v-container class="py-4" style="max-width: 720px">
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
-          <h3 class="section-title">Nearby Stores</h3>
+          <h3 class="section-title">Stores Within Butuan</h3>
           <div class="location-status">
             <v-chip
               v-if="locationAccuracy !== 'none'"
@@ -717,7 +717,7 @@ const getLocationStatusText = (accuracy) => {
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding: 35px 16px calc(12px + env(safe-area-inset-top)) 16px;
+  padding: 41px 16px calc(12px + env(safe-area-inset-top)) 16px;
   margin: 0;
   width: 100%;
   position: sticky;

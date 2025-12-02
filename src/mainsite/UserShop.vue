@@ -1210,7 +1210,7 @@ watch(shopId, (newShopId) => {
 }
 
 .top-bar {
-  padding-top: 20px;
+  padding-top: 19px;
 }
 
 .cover-container {
