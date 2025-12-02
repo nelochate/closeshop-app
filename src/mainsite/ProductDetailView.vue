@@ -5,8 +5,7 @@ import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
 import VueEasyLightbox from 'vue-easy-lightbox'
 
-console.log('useRoute:', useRoute, 'useRouter:', useRouter)
-const cart = useCartStore()
+const cartStore = useCartStore()
 const route = useRoute()
 const router = useRouter()
 const productId = route.params.id
@@ -17,7 +16,9 @@ const error = ref(null)
 const reviews = ref([])
 const reviewsLoading = ref(false)
 
-const showAddToCart = ref(false)
+
+// Dialog states
+const showAddToCartDialog = ref(false)
 const quantity = ref(1)
 const selectedSize = ref(null)
 const selectedVariety = ref(null)
@@ -35,6 +36,7 @@ const isAnimating = ref(false)
 // Dialog selections
 const dialogSelectedSize = ref(null)
 const dialogSelectedVariety = ref(null)
+const dialogQuantity = ref(1)
 
 // Review filter and sort
 const reviewFilter = ref('all')
@@ -82,8 +84,7 @@ onMounted(async () => {
     // Fetch product + shop details
     const { data, error: err } = await supabase
       .from('products')
-      .select(
-        `
+      .select(`
         id,
         prod_name,
         prod_description,
@@ -101,8 +102,7 @@ onMounted(async () => {
           logo_url,
           owner_id
         )
-      `
-      )
+      `)
       .eq('id', productId)
       .single()
 
@@ -135,6 +135,7 @@ onMounted(async () => {
     // Auto-select if only one option
     if (product.value?.sizes?.length === 1) {
       selectedSize.value = product.value.sizes[0]
+      dialogSelectedSize.value = product.value.sizes[0]
     }
 
     // Load reviews for this product
@@ -149,7 +150,7 @@ onMounted(async () => {
   }
 })
 
-// Load reviews for the current product - COMPLETE
+// Load reviews for the current product
 const loadReviews = async () => {
   if (!productId) return
 
@@ -193,83 +194,11 @@ const loadReviews = async () => {
     })
 
     console.log('📝 Reviews loaded:', reviews.value.length)
-
-    // Debug: Check if any reviews have photos
-    const reviewsWithPhotos = reviews.value.filter(r => r.photos && r.photos.length > 0)
-    console.log('🖼️ Reviews with photos:', reviewsWithPhotos.length)
-
-    if (reviewsWithPhotos.length > 0) {
-      reviewsWithPhotos.forEach(review => {
-        console.log('📸 Review photos:', {
-          reviewId: review.id,
-          photos: review.photos
-        })
-      })
-    }
-
   } catch (error) {
     console.error('Error loading reviews:', error)
     reviews.value = []
   } finally {
     reviewsLoading.value = false
-  }
-}
-
-// Test function to check review photos in database
-const checkReviewPhotosInDB = async () => {
-  try {
-    const { data, error } = await supabase
-      .from('reviews')
-      .select('id, photos, product_id')
-      .eq('product_id', productId)
-      .not('photos', 'is', null)
-
-    if (error) throw error
-
-    console.log('🔍 Database review photos check:', data)
-
-    data?.forEach(review => {
-      console.log(`📊 Review ${review.id}:`, {
-        photos: review.photos,
-        photosType: typeof review.photos,
-        isArray: Array.isArray(review.photos),
-        photosLength: Array.isArray(review.photos) ? review.photos.length : 'N/A'
-      })
-    })
-
-  } catch (error) {
-    console.error('Error checking review photos:', error)
-  }
-}
-
-// Test function to verify photo display
-const testPhotoDisplay = () => {
-  console.log('🧪 Testing photo display...')
-
-  const reviewsWithPhotos = reviews.value.filter(r => r.photos && r.photos.length > 0)
-  console.log(`📊 Found ${reviewsWithPhotos.length} reviews with photos`)
-
-  reviewsWithPhotos.forEach((review, index) => {
-    console.log(`\n📸 Review ${index + 1}:`, {
-      id: review.id,
-      photoCount: review.photos.length,
-      photos: review.photos
-    })
-
-    // Test each photo URL
-    review.photos.forEach((photo, photoIndex) => {
-      const img = new Image()
-      img.onload = () => console.log(`✅ Photo ${photoIndex + 1}: Loaded successfully`)
-      img.onerror = () => console.log(`❌ Photo ${photoIndex + 1}: Failed to load - ${photo}`)
-      img.src = photo
-    })
-  })
-
-  if (reviewsWithPhotos.length === 0) {
-    console.log('ℹ️ No reviews with photos found. Make sure:')
-    console.log('1. Reviews have photos array in database')
-    console.log('2. Photos are valid URLs or base64 strings')
-    console.log('3. Product has reviews with photos')
   }
 }
 
@@ -331,25 +260,6 @@ const formatDate = (dateString) => {
   })
 }
 
-// Like a review
-const likeReview = async (reviewId) => {
-  try {
-    const { error } = await supabase.rpc('increment_review_likes', {
-      review_uuid: reviewId
-    })
-
-    if (error) throw error
-
-    // Update local state
-    const reviewIndex = reviews.value.findIndex(r => r.id === reviewId)
-    if (reviewIndex !== -1) {
-      reviews.value[reviewIndex].likes = (reviews.value[reviewIndex].likes || 0) + 1
-    }
-  } catch (error) {
-    console.error('Error liking review:', error)
-  }
-}
-
 // View review image in dialog
 const viewReviewImage = (imageUrl) => {
   console.log('🖼️ Viewing review image:', imageUrl)
@@ -359,20 +269,6 @@ const viewReviewImage = (imageUrl) => {
   }
   currentImage.value = imageUrl
   openImageDialog.value = true
-}
-
-// Handle image loading errors
-const handleImageError = (imageUrl, index) => {
-  console.error('❌ Failed to load review image:', {
-    imageUrl,
-    index,
-    reviewId: reviews.value.find(r => r.photos?.includes(imageUrl))?.id
-  })
-}
-
-// Handle lightbox image errors
-const handleLightboxImageError = () => {
-  console.error('❌ Failed to load image in lightbox:', currentImage.value)
 }
 
 // Get price based on variety selection
@@ -392,6 +288,17 @@ const displayStock = computed(() => {
 
   if (selectedVariety.value && selectedVariety.value.stock !== undefined && selectedVariety.value.stock !== null) {
     return selectedVariety.value.stock
+  }
+
+  return product.value.stock || 0
+})
+
+// Get dialog display stock
+const dialogDisplayStock = computed(() => {
+  if (!product.value) return 0
+
+  if (dialogSelectedVariety.value && dialogSelectedVariety.value.stock !== undefined && dialogSelectedVariety.value.stock !== null) {
+    return dialogSelectedVariety.value.stock
   }
 
   return product.value.stock || 0
@@ -418,112 +325,6 @@ const isActionDisabled = computed(() => {
   }
   return false
 })
-
-// IMPROVED VARIETY CART FUNCTION
-const addToCartDirect = async (cartItem) => {
-  try {
-    console.log('🛒 addToCartDirect called with:', cartItem)
-
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-
-    if (userError) {
-      console.error('❌ User auth error:', userError)
-      throw userError
-    }
-
-    const currentUser = userData?.user
-
-    if (!currentUser) {
-      console.log('❌ No user logged in')
-      throw new Error('Please login to add items to cart')
-    }
-
-    const varietyData = cartItem.varietyData ? {
-      name: cartItem.varietyData.name,
-      price: cartItem.varietyData.price,
-      stock: cartItem.varietyData.stock,
-      images: cartItem.varietyData.images || []
-    } : null
-
-    // Build query for checking existing items
-    let query = supabase
-      .from('cart_items')
-      .select('*')
-      .eq('user_id', currentUser.id)
-      .eq('product_id', cartItem.productId)
-
-    if (cartItem.selectedSize) {
-      query = query.eq('selected_size', cartItem.selectedSize)
-    } else {
-      query = query.is('selected_size', null)
-    }
-
-    if (cartItem.selectedVariety) {
-      query = query.eq('selected_variety', cartItem.selectedVariety)
-    } else {
-      query = query.is('selected_variety', null)
-    }
-
-    const { data: existingItems, error: checkError } = await query
-
-    if (checkError) {
-      console.error('❌ Error checking existing items:', checkError)
-      throw checkError
-    }
-
-    if (existingItems && existingItems.length > 0) {
-      const existingItem = existingItems[0]
-      const newQuantity = existingItem.quantity + cartItem.quantity
-
-      const { error: updateError } = await supabase
-        .from('cart_items')
-        .update({
-          quantity: newQuantity,
-          variety_data: varietyData
-        })
-        .eq('id', existingItem.id)
-
-      if (updateError) {
-        console.error('❌ Error updating cart item:', updateError)
-        throw updateError
-      }
-    } else {
-      const insertData = {
-        user_id: currentUser.id,
-        product_id: cartItem.productId,
-        quantity: cartItem.quantity,
-        selected_size: cartItem.selectedSize,
-        selected_variety: cartItem.selectedVariety,
-        variety_data: varietyData
-      }
-
-      const { data, error: insertError } = await supabase
-        .from('cart_items')
-        .insert(insertData)
-        .select()
-
-      if (insertError) {
-        console.error('❌ Error inserting cart item:', insertError)
-        throw insertError
-      }
-    }
-
-    // Refresh cart count
-    try {
-      if (cart && typeof cart.loadCart === 'function') {
-        await cart.loadCart()
-      }
-    } catch (cartError) {
-      console.warn('⚠️ Could not refresh cart store:', cartError)
-    }
-
-    return true
-
-  } catch (error) {
-    console.error('❌ Error in addToCartDirect:', error)
-    throw error
-  }
-}
 
 // FLY TO CART ANIMATION
 const animateToCart = () => {
@@ -588,65 +389,29 @@ const animateToCart = () => {
   }, 800)
 }
 
-// IMPROVED ADD TO CART FUNCTION
-const addToCart = async () => {
-  console.log('🛒 addToCart called')
-
+// OPEN ADD TO CART DIALOG
+const openAddToCartDialog = () => {
   if (!product.value) {
-    console.log('❌ Product not loaded')
     showSnackbar('Product not loaded', 'error')
     return
   }
 
   // Check if user is logged in
-  const { data: userData } = await supabase.auth.getUser()
-  if (!userData?.user) {
+  if (!user.value) {
     showSnackbar('Please login to add items to cart', 'warning')
     return
   }
 
-  const finalSize = selectedSize.value
-  const finalVariety = selectedVariety.value
+  // Set dialog values from current selections
+  dialogSelectedSize.value = selectedSize.value
+  dialogSelectedVariety.value = selectedVariety.value
+  dialogQuantity.value = 1
 
-  // Validate selections
-  if (product.value.has_sizes && !finalSize) {
-    showSnackbar('Please select a size', 'warning')
-    return
-  }
-
-  const availableStock = displayStock.value
-  if (quantity.value > availableStock) {
-    showSnackbar(`Only ${availableStock} items available in stock`, 'warning')
-    return
-  }
-
-  try {
-    const cartItem = {
-      productId: product.value.id,
-      quantity: quantity.value,
-      selectedSize: finalSize,
-      selectedVariety: finalVariety ? finalVariety.name : null,
-      varietyData: finalVariety,
-    }
-
-    await addToCartDirect(cartItem)
-
-    // Show success message
-    showSnackbar('Product added to cart successfully!', 'success')
-
-    // Animate to cart
-    animateToCart()
-
-    // Reset quantity
-    quantity.value = 1
-
-  } catch (err) {
-    console.error('❌ addToCart error:', err)
-    showSnackbar('Failed to add to cart: ' + (err.message || 'Unknown error'), 'error')
-  }
+  showAddToCartDialog.value = true
 }
 
-// CONFIRM ADD TO CART FOR VARIETIES (for dialog)
+// CONFIRM ADD TO CART (from dialog)
+// CONFIRM ADD TO CART (from dialog)
 const confirmAddToCart = async () => {
   console.log('🛒 confirmAddToCart called')
 
@@ -656,46 +421,82 @@ const confirmAddToCart = async () => {
     return
   }
 
-  const finalSize = dialogSelectedSize.value || selectedSize.value
-  const finalVariety = dialogSelectedVariety.value || selectedVariety.value
+  // Check if user is logged in
+  if (!user.value) {
+    showSnackbar('Please login to add items to cart', 'warning')
+    return
+  }
 
+  const finalSize = dialogSelectedSize.value
+  const finalVariety = dialogSelectedVariety.value
+  const finalQuantity = dialogQuantity.value
+
+  // Validate selections
   if (product.value.has_sizes && !finalSize) {
     showSnackbar('Please select a size', 'warning')
     return
   }
 
-  const availableStock = displayStock.value
-  if (quantity.value > availableStock) {
+  const availableStock = dialogDisplayStock.value
+  if (finalQuantity > availableStock) {
     showSnackbar(`Only ${availableStock} items available in stock`, 'warning')
     return
   }
 
   try {
-    const cartItem = {
-      productId: product.value.id,
-      quantity: quantity.value,
-      selectedSize: finalSize,
-      selectedVariety: finalVariety ? finalVariety.name : null,
-      varietyData: finalVariety,
+    // Prepare variety data
+    const varietyData = finalVariety ? {
+      name: finalVariety.name,
+      price: finalVariety.price,
+      stock: finalVariety.stock,
+      images: finalVariety.images || []
+    } : null
+
+    // Use cart store to add item
+    const result = await cartStore.addToCart(
+      product.value.id,
+      finalQuantity,
+      finalSize,
+      finalVariety ? finalVariety.name : null,
+      varietyData
+    )
+
+    // Check if result exists and has success property
+    if (result && result.success) {
+      showSnackbar('Product added to cart successfully!', 'success')
+
+      // Animate to cart
+      animateToCart()
+
+      // Close dialog
+      showAddToCartDialog.value = false
+
+      // Reset quantity
+      dialogQuantity.value = 1
+    } else {
+      // Handle case where result exists but success is false
+      const errorMessage = result?.error || 'Failed to add to cart'
+      throw new Error(errorMessage)
     }
-
-    await addToCartDirect(cartItem)
-
-    showSnackbar('Product added to cart successfully!', 'success')
-    animateToCart()
-    showAddToCart.value = false
-    quantity.value = 1
-
-    dialogSelectedSize.value = null
-    dialogSelectedVariety.value = null
 
   } catch (err) {
     console.error('❌ confirmAddToCart error:', err)
-    showSnackbar('Failed to add to cart: ' + (err.message || 'Unknown error'), 'error')
+
+    // Safely get error message
+    let errorMessage = 'Failed to add to cart: '
+    if (err && err.message) {
+      errorMessage += err.message
+    } else if (err && typeof err === 'string') {
+      errorMessage += err
+    } else {
+      errorMessage += 'Unknown error occurred'
+    }
+
+    showSnackbar(errorMessage, 'error')
   }
 }
 
-// GO TO CART FUNCTION FOR VARIETIES
+// GO TO CART FUNCTION
 const goToCart = async () => {
   console.log('🛒 goToCart called')
 
@@ -704,35 +505,66 @@ const goToCart = async () => {
     return
   }
 
+  // Check if user is logged in
+  if (!user.value) {
+    showSnackbar('Please login to add items to cart', 'warning')
+    return
+  }
+
+  const finalSize = selectedSize.value
+  const finalVariety = selectedVariety.value
+
+  if (product.value.has_sizes && !finalSize) {
+    showSnackbar('Please select a size', 'warning')
+    return
+  }
+
   try {
-    const finalSize = selectedSize.value
-    const finalVariety = selectedVariety.value
+    // Prepare variety data
+    const varietyData = finalVariety ? {
+      name: finalVariety.name,
+      price: finalVariety.price,
+      stock: finalVariety.stock,
+      images: finalVariety.images || []
+    } : null
 
-    if (product.value.has_sizes && !finalSize) {
-      showSnackbar('Please select a size', 'warning')
-      return
+    // Add to cart first
+    const result = await cartStore.addToCart(
+      product.value.id,
+      1,
+      finalSize,
+      finalVariety ? finalVariety.name : null,
+      varietyData
+    )
+
+    // Check result properly
+    if (result && result.success) {
+      showSnackbar('Product added to cart!', 'success')
+      animateToCart()
+
+      // Navigate to cart after animation
+      setTimeout(() => {
+        router.push('/cartview')
+      }, 1000)
+    } else {
+      const errorMessage = result?.error || 'Failed to add to cart'
+      throw new Error(errorMessage)
     }
-
-    const cartItem = {
-      productId: product.value.id,
-      quantity: 1,
-      selectedSize: finalSize,
-      selectedVariety: finalVariety ? finalVariety.name : null,
-      varietyData: finalVariety,
-    }
-
-    await addToCartDirect(cartItem)
-
-    showSnackbar('Product added to cart!', 'success')
-    animateToCart()
-
-    setTimeout(() => {
-      router.push('/cartview')
-    }, 1000)
 
   } catch (err) {
     console.error('❌ goToCart error:', err)
-    showSnackbar('Failed to add to cart: ' + (err.message || 'Unknown error'), 'error')
+
+    // Safely get error message
+    let errorMessage = 'Failed to add to cart: '
+    if (err && err.message) {
+      errorMessage += err.message
+    } else if (err && typeof err === 'string') {
+      errorMessage += err
+    } else {
+      errorMessage += 'Unknown error occurred'
+    }
+
+    showSnackbar(errorMessage, 'error')
   }
 }
 
@@ -853,21 +685,25 @@ const isVarietySelected = (variety) => {
   return selectedVariety.value && selectedVariety.value.name === variety.name
 }
 
-// DEBUG: Log variety selection changes
-watch(selectedVariety, (newVal) => {
-  console.log('🔄 Variety selection changed:', newVal)
-})
-
-watch(selectedSize, (newVal) => {
-  console.log('🔄 Size selection changed:', newVal)
-})
-
-watch(showAddToCart, (val) => {
-  if (val) {
-    dialogSelectedSize.value = selectedSize.value
-    dialogSelectedVariety.value = selectedVariety.value
+// Increment quantity in dialog
+const incrementQuantity = () => {
+  if (dialogQuantity.value < dialogDisplayStock.value) {
+    dialogQuantity.value++
   }
-})
+}
+
+// Decrement quantity in dialog
+const decrementQuantity = () => {
+  if (dialogQuantity.value > 1) {
+    dialogQuantity.value--
+  }
+}
+
+// Close dialog and reset values
+const closeAddToCartDialog = () => {
+  showAddToCartDialog.value = false
+  dialogQuantity.value = 1
+}
 </script>
 
 <template>
@@ -892,7 +728,7 @@ watch(showAddToCart, (val) => {
       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn icon ref="cartIconRef" @click="router.push('/cartview')" :disabled="isAnimating">
-        <v-badge v-if="cart.count" :content="cart.count" color="red" offset-x="-7" offset-y="-3">
+        <v-badge v-if="cartStore.count" :content="cartStore.count" color="red" offset-x="-7" offset-y="-3">
           <v-icon size="28">mdi-cart-outline</v-icon>
         </v-badge>
         <template v-else>
@@ -978,13 +814,161 @@ watch(showAddToCart, (val) => {
                 max-height="600"
                 contain
                 class="rounded-b"
-                @error="handleLightboxImageError"
               />
               <div v-if="!currentImage" class="text-center py-8">
                 <v-icon size="64" color="grey-lighten-2">mdi-image-off</v-icon>
                 <div class="text-h6 mt-4 text-grey">Image not available</div>
               </div>
             </v-card-text>
+          </v-card>
+        </v-dialog>
+
+        <!-- Add to Cart Dialog -->
+        <v-dialog v-model="showAddToCartDialog" max-width="500px" @click:outside="closeAddToCartDialog">
+          <v-card class="pa-4">
+            <v-card-title class="d-flex justify-space-between align-center">
+              <h3>Add to Cart</h3>
+              <v-btn icon @click="closeAddToCartDialog">
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-card-title>
+
+            <v-card-text>
+              <!-- Product Info -->
+              <div class="mb-4 d-flex align-center">
+                <v-avatar size="80" class="mr-3">
+                  <v-img :src="mainImage(product.main_img_urls)" />
+                </v-avatar>
+                <div>
+                  <h4 class="mb-1">{{ product.prod_name }}</h4>
+                  <div class="text-primary font-weight-bold">
+                    ₱{{ dialogSelectedVariety?.price || product.price }}
+                  </div>
+                  <div class="text-caption text-grey">
+                    Stock: {{ dialogDisplayStock }} available
+                  </div>
+                </div>
+              </div>
+
+              <!-- Size Selection -->
+              <div v-if="product.sizes && product.sizes.length" class="mb-4">
+                <p class="font-weight-medium mb-2">Select Size:</p>
+                <v-btn-toggle v-model="dialogSelectedSize" mandatory class="flex-wrap" style="gap: 6px">
+                  <v-btn
+                    v-for="size in product.sizes"
+                    :key="size"
+                    :value="size"
+                    variant="outlined"
+                    class="ma-1 rounded-pill text-capitalize"
+                    color="primary"
+                    size="small"
+                  >
+                    {{ size }}
+                  </v-btn>
+                </v-btn-toggle>
+              </div>
+
+              <!-- Variety Selection -->
+              <div v-if="product.varieties && product.varieties.length" class="mb-4">
+                <p class="font-weight-medium mb-2">Select Variety:</p>
+                <div class="varieties-list">
+                  <!-- Main Product Option -->
+                  <v-card
+                    class="mb-2"
+                    :class="{ 'option-selected': !dialogSelectedVariety }"
+                    @click="dialogSelectedVariety = null"
+                    variant="outlined"
+                  >
+                    <v-card-text class="pa-3 d-flex align-center">
+                      <v-avatar size="40" class="mr-3">
+                        <v-img :src="mainImage(product.main_img_urls)" />
+                      </v-avatar>
+                      <div class="flex-grow-1">
+                        <div class="font-weight-medium">Standard Product</div>
+                        <div class="text-caption text-grey">₱{{ product.price }}</div>
+                      </div>
+                      <v-icon v-if="!dialogSelectedVariety" color="primary">
+                        mdi-check-circle
+                      </v-icon>
+                    </v-card-text>
+                  </v-card>
+
+                  <!-- Varieties -->
+                  <v-card
+                    v-for="variety in product.varieties"
+                    :key="variety.name"
+                    class="mb-2"
+                    :class="{ 'option-selected': dialogSelectedVariety?.name === variety.name }"
+                    @click="dialogSelectedVariety = variety"
+                    variant="outlined"
+                    :disabled="variety.stock === 0"
+                  >
+                    <v-card-text class="pa-3 d-flex align-center">
+                      <v-avatar size="40" class="mr-3">
+                        <v-img :src="getVarietyImage(variety)" />
+                      </v-avatar>
+                      <div class="flex-grow-1">
+                        <div class="font-weight-medium">{{ variety.name }}</div>
+                        <div class="text-caption text-grey">₱{{ variety.price || product.price }}</div>
+                        <div class="text-caption">
+                          <v-chip v-if="variety.stock === 0" size="x-small" color="red">
+                            Out of stock
+                          </v-chip>
+                          <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
+                            {{ variety.stock }} left
+                          </v-chip>
+                        </div>
+                      </div>
+                      <v-icon v-if="dialogSelectedVariety?.name === variety.name" color="primary">
+                        mdi-check-circle
+                      </v-icon>
+                    </v-card-text>
+                  </v-card>
+                </div>
+              </div>
+
+              <!-- Quantity Selector -->
+              <div class="mb-4">
+                <p class="font-weight-medium mb-2">Quantity:</p>
+                <div class="d-flex align-center">
+                  <v-btn icon @click="decrementQuantity" :disabled="dialogQuantity <= 1">
+                    <v-icon>mdi-minus</v-icon>
+                  </v-btn>
+                  <span class="mx-4 font-weight-bold">{{ dialogQuantity }}</span>
+                  <v-btn icon @click="incrementQuantity" :disabled="dialogQuantity >= dialogDisplayStock">
+                    <v-icon>mdi-plus</v-icon>
+                  </v-btn>
+                  <span class="ml-4 text-caption text-grey">
+                    {{ dialogDisplayStock }} available
+                  </span>
+                </div>
+              </div>
+
+              <!-- Total Price -->
+              <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa;">
+                <div class="d-flex justify-space-between">
+                  <span>Total:</span>
+                  <span class="font-weight-bold text-primary">
+                    ₱{{ ((dialogSelectedVariety?.price || product.price) * dialogQuantity).toFixed(2) }}
+                  </span>
+                </div>
+              </div>
+            </v-card-text>
+
+            <v-card-actions>
+              <v-spacer />
+              <v-btn @click="closeAddToCartDialog" variant="outlined" class="mr-2">
+                Cancel
+              </v-btn>
+              <v-btn
+                color="primary"
+                @click="confirmAddToCart"
+                :disabled="dialogDisplayStock === 0 || (product.has_sizes && !dialogSelectedSize)"
+                :loading="isAnimating"
+              >
+                Add to Cart
+              </v-btn>
+            </v-card-actions>
           </v-card>
         </v-dialog>
 
@@ -1179,16 +1163,6 @@ watch(showAddToCart, (val) => {
           </v-card-title>
 
           <v-card-text>
-            <!-- Debug Buttons -->
-            <v-card-actions class="justify-end pa-0 mb-4">
-              <v-btn @click="checkReviewPhotosInDB" color="secondary" size="small">
-                Debug Review Photos
-              </v-btn>
-              <v-btn @click="testPhotoDisplay" color="primary" size="small" class="ml-2">
-                Test Photo Display
-              </v-btn>
-            </v-card-actions>
-
             <!-- Review Statistics -->
             <div v-if="reviewStats.total_reviews > 0" class="review-stats mb-6">
               <v-row>
@@ -1334,7 +1308,7 @@ watch(showAddToCart, (val) => {
                       <!-- Comment -->
                       <div class="text-body-1 mb-3">{{ review.comment }}</div>
 
-                      <!-- Photos - FULLY INTEGRATED -->
+                      <!-- Photos -->
                       <div v-if="review.photos && review.photos.length > 0" class="mb-3">
                         <div class="text-caption text-grey mb-2">
                           {{ review.photos.length }} photo{{ review.photos.length !== 1 ? 's' : '' }}
@@ -1354,23 +1328,9 @@ watch(showAddToCart, (val) => {
                               cover
                               class="rounded-lg cursor-pointer"
                               @click="viewReviewImage(photo)"
-                              @error="handleImageError(photo, index)"
                             />
                           </v-col>
                         </v-row>
-                      </div>
-
-                      <!-- Actions -->
-                      <div class="d-flex align-center">
-                        <v-btn
-                          variant="text"
-                          size="small"
-                          color="grey"
-                          @click="likeReview(review.id)"
-                        >
-                          <v-icon left small>mdi-thumb-up</v-icon>
-                          Helpful ({{ review.likes || 0 }})
-                        </v-btn>
                       </div>
                     </div>
                   </div>
@@ -1403,15 +1363,14 @@ watch(showAddToCart, (val) => {
             </v-btn>
           </v-col>
 
-          <!-- Add to Cart - IMPROVED -->
+          <!-- Add to Cart - Opens Dialog -->
           <v-col cols="4" class="pa-0">
             <v-btn
               block
               class="bottom-btn cart-btn"
               color="#4caf50"
-              @click="addToCart()"
-              :disabled="isActionDisabled || isAnimating"
-              :loading="isAnimating"
+              @click="openAddToCartDialog()"
+              :disabled="displayStock === 0"
             >
               <v-icon left size="20">mdi-cart-outline</v-icon>
               {{ displayStock === 0 ? 'Out of Stock' : 'Add to Cart' }}
@@ -1427,7 +1386,7 @@ watch(showAddToCart, (val) => {
               @click="buyNow()"
               :disabled="isActionDisabled"
             >
-              {{ displayStock === 0 ? 'Out of Stock' : 'Buy Now' }}
+              Buy Now
             </v-btn>
           </v-col>
         </template>
@@ -1496,6 +1455,16 @@ watch(showAddToCart, (val) => {
 .variety-card:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+/* Dialog styles */
+.option-selected {
+  border-color: #438fda !important;
+  background-color: #e8f3ff;
+}
+
+.total-price {
+  border-left: 4px solid #438fda;
 }
 
 .selection-summary {
