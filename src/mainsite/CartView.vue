@@ -11,6 +11,23 @@ const cartItems = ref([]) // Replace cart store with local state
 const selectedItems = ref([])
 const shopSelection = ref({})
 
+
+// Methods for navigation
+const goToCart = () => {
+  router.push({ name: '/cartview' })
+}
+
+const goHome = () => {
+  router.push({ name: '/homepage' }) // Adjust to your home route name
+}
+
+const viewOrderDetails = () => {
+  // Navigate to order details page
+  router.push({ 
+    name: 'orderdetails', 
+    params: { id: orderId.value } 
+  })
+}
 // ✅ Fetch cart directly - UPDATED TO INCLUDE VARIETY DATA
 const fetchCart = async () => {
   try {
@@ -287,200 +304,71 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-app>
-    <!-- Header with Back Button -->
-    <v-app-bar class="app-bar" flat color="#3f83c7" dark>
-      <!-- Back Button -->
-      <v-btn icon @click="goBack" class="mr-2">
-        <v-icon>mdi-arrow-left</v-icon>
+  <v-container class="d-flex flex-column align-center justify-center text-center py-8">
+    <!-- Success Icon -->
+    <v-icon color="success" size="80" class="mb-4">
+      mdi-check-circle-outline
+    </v-icon>
+    
+    <!-- Success Message -->
+    <h2 class="text-h5 font-weight-bold mb-2">Order Placed Successfully!</h2>
+    <p class="text-body-1 mb-6">
+      Your order has been confirmed. You'll receive a confirmation email shortly.
+    </p>
+    
+    <!-- Order Details -->
+    <v-card class="mb-6" width="100%" max-width="400">
+      <v-card-text>
+        <div class="text-body-2 mb-2">
+          Order #: <strong>{{ orderId }}</strong>
+        </div>
+        <div class="text-body-2 mb-2">
+          Total: <strong>₱{{ totalAmount.toFixed(2) }}</strong>
+        </div>
+        <div class="text-body-2">
+          Estimated Delivery: <strong>{{ estimatedDelivery }}</strong>
+        </div>
+      </v-card-text>
+    </v-card>
+    
+    <!-- Action Buttons -->
+    <div class="d-flex flex-column gap-3" style="width: 100%; max-width: 400px;">
+      <!-- Go to Cart Button -->
+      <v-btn
+        color="primary"
+        variant="outlined"
+        @click="goToCart"
+        class="rounded-lg py-4"
+        block
+      >
+        <v-icon left>mdi-cart</v-icon>
+        Go to Cart
       </v-btn>
       
-      <v-toolbar-title><strong>Cart</strong></v-toolbar-title>
-      <v-spacer />
+      <!-- Continue Shopping Button -->
       <v-btn
-        v-if="selectedItems.length > 0"
-        icon
-        color="white"
-        @click="deleteSelectedItems"
-        title="Delete Selected"
+        color="primary"
+        @click="goHome"
+        class="rounded-lg py-4"
+        block
       >
-        <v-icon>mdi-delete</v-icon>
+        <v-icon left>mdi-home</v-icon>
+        Go to Home
       </v-btn>
-    </v-app-bar>
-
-    <v-main>
-      <v-container fluid>
-        <!-- Loader -->
-        <div v-if="loading" class="d-flex justify-center pa-6">
-          <v-progress-circular indeterminate color="primary" />
-        </div>
-
-        <!-- Empty State -->
-        <div v-else-if="cartItems.length === 0" class="content">
-          <h2 class="text-h6 font-weight-bold">Your cart is empty</h2>
-          <v-icon size="64" color="grey">mdi-cart-outline</v-icon>
-          <v-btn 
-            color="primary" 
-            class="mt-4" 
-            @click="goBack"
-          >
-            <v-icon left>mdi-arrow-left</v-icon>
-            Continue Shopping
-          </v-btn>
-        </div>
-
-        <!-- Cart Items Grouped by Shop -->
-        <div v-else>
-          <v-list lines="two">
-            <div v-for="(group, shopId) in groupedItems" :key="shopId" class="shop-group">
-              <!-- Shop Header -->
-              <v-list-item class="shop-header">
-                <template #prepend>
-                  <v-checkbox
-                    :model-value="isShopAllSelected(shopId)"
-                    :indeterminate="isShopPartialSelected(shopId)"
-                    @click="selectAllInShop(shopId)"
-                    density="compact"
-                    color="primary"
-                  />
-                </template>
-                <v-list-item-title class="font-weight-bold">
-                  {{ group.shop.business_name }}
-                </v-list-item-title>
-                <template #append>
-                  <v-chip size="small" variant="outlined">
-                    {{ group.items.length }} item{{ group.items.length > 1 ? 's' : '' }}
-                  </v-chip>
-                </template>
-              </v-list-item>
-
-              <!-- Shop Items -->
-              <v-list-item
-                v-for="item in group.items"
-                :key="item.id"
-                class="cart-item mb-2 rounded-lg elevation-1"
-              >
-                <template #prepend>
-                  <v-checkbox
-                    :model-value="selectedItems.includes(item.id)"
-                    @click="toggleItemSelection(item.id, shopId)"
-                    density="compact"
-                    color="primary"
-                  />
-                  <v-img
-                    :src="getItemImage(item)"
-                    width="70"
-                    height="70"
-                    class="rounded-lg ml-2"
-                    cover
-                  />
-                </template>
-
-                <v-list-item-title class="font-weight-medium ms-3">
-                  {{ getItemDisplayName(item) }}
-                </v-list-item-title>
-                
-                <!-- Display variety and size information -->
-                <v-list-item-subtitle class="ms-3">
-                  <div v-if="item.selected_variety || item.selected_size" class="text-caption">
-                    <span v-if="item.selected_variety" class="text-primary">
-                      {{ item.selected_variety }}
-                    </span>
-                    <span v-if="item.selected_variety && item.selected_size"> • </span>
-                    <span v-if="item.selected_size">
-                      Size: {{ item.selected_size }}
-                    </span>
-                  </div>
-                  <div class="text-body-2 font-weight-bold mt-1">
-                    ₱{{ getItemPrice(item).toFixed(2) }}
-                  </div>
-                </v-list-item-subtitle>
-
-                <template #append>
-                  <div class="d-flex flex-column align-end">
-                    <div class="d-flex align-center mt-1">
-                      <v-btn
-                        icon
-                        size="small"
-                        variant="outlined"
-                        color="primary"
-                        @click="updateQuantity(item.id, item.quantity - 1)"
-                      >
-                        <v-icon small>mdi-minus</v-icon>
-                      </v-btn>
-
-                      <span class="mx-2">{{ item.quantity }}</span>
-
-                      <v-btn
-                        icon
-                        size="small"
-                        variant="outlined"
-                        color="primary"
-                        @click="updateQuantity(item.id, item.quantity + 1)"
-                      >
-                        <v-icon small>mdi-plus</v-icon>
-                      </v-btn>
-                    </div>
-
-                    <div class="font-weight-bold text-primary mt-2">
-                      ₱{{ (getItemPrice(item) * item.quantity).toFixed(2) }}
-                    </div>
-                    <v-btn
-                      icon
-                      variant="text"
-                      color="red"
-                      @click="deleteFromCart(item.id)"
-                      size="small"
-                    >
-                      <v-icon small>mdi-delete</v-icon>
-                    </v-btn>
-                  </div>
-                </template>
-              </v-list-item>
-
-              <v-divider class="my-4" v-if="Object.keys(groupedItems).length > 1" />
-            </div>
-          </v-list>
-        </div>
-      </v-container>
-    </v-main>
-
-    <!-- Checkout Bar -->
-    <v-sheet
-      v-if="cartItems.length"
-      elevation="6"
-      class="checkout-bar pa-3 d-flex align-center justify-space-between"
-    >
-      <div class="d-flex align-center">
-        <v-checkbox
-          :model-value="selectedItems.length === cartItems.length"
-          :indeterminate="selectedItems.length > 0 && selectedItems.length < cartItems.length"
-          @click="
-            selectedItems.length === cartItems.length
-              ? (selectedItems = [])
-              : (selectedItems = cartItems.map((i) => i.id))
-          "
-          density="compact"
-          color="primary"
-          class="mr-2"
-        />
-        <div class="font-weight-bold">
-          Total: ₱{{
-            cartItems
-              .filter((i) => selectedItems.includes(i.id))
-              .reduce((sum, i) => sum + (getItemPrice(i) * i.quantity), 0)
-              .toFixed(2)
-          }}
-        </div>
-      </div>
-      <v-btn color="primary" class="rounded-lg" @click="checkoutSelected">
-        Checkout ({{ selectedItems.length }})
+      
+      <!-- View Order Details Button -->
+      <v-btn
+        color="secondary"
+        variant="text"
+        @click="viewOrderDetails"
+        class="rounded-lg py-3"
+        block
+      >
+        <v-icon left>mdi-file-document-outline</v-icon>
+        View Order Details
       </v-btn>
-    </v-sheet>
-
-    <!-- Bottom Navigation -->
-    <BottomNav v-model="activeTab" />
-  </v-app>
+    </div>
+  </v-container>
 </template>
 
 <style scoped>
