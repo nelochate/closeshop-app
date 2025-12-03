@@ -1,5 +1,5 @@
 <script setup lang="js">
-import { ref, onMounted, watch, computed } from 'vue'
+import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
@@ -16,10 +16,9 @@ const error = ref(null)
 const reviews = ref([])
 const reviewsLoading = ref(false)
 
-
 // Dialog states
 const showAddToCartDialog = ref(false)
-const quantity = ref(1)
+const showBuyNowDialog = ref(false) // New: Buy now dialog
 const selectedSize = ref(null)
 const selectedVariety = ref(null)
 const openImageDialog = ref(false)
@@ -37,6 +36,11 @@ const isAnimating = ref(false)
 const dialogSelectedSize = ref(null)
 const dialogSelectedVariety = ref(null)
 const dialogQuantity = ref(1)
+
+// Buy now dialog selections
+const buyNowSelectedSize = ref(null) // New: for buy now dialog
+const buyNowSelectedVariety = ref(null) // New: for buy now dialog
+const buyNowQuantity = ref(1) // New: for buy now dialog
 
 // Review filter and sort
 const reviewFilter = ref('all')
@@ -136,6 +140,7 @@ onMounted(async () => {
     if (product.value?.sizes?.length === 1) {
       selectedSize.value = product.value.sizes[0]
       dialogSelectedSize.value = product.value.sizes[0]
+      buyNowSelectedSize.value = product.value.sizes[0] // Also for buy now
     }
 
     // Load reviews for this product
@@ -304,14 +309,20 @@ const dialogDisplayStock = computed(() => {
   return product.value.stock || 0
 })
 
+// Get buy now dialog display stock
+const buyNowDisplayStock = computed(() => {
+  if (!product.value) return 0
+
+  if (buyNowSelectedVariety.value && buyNowSelectedVariety.value.stock !== undefined && buyNowSelectedVariety.value.stock !== null) {
+    return buyNowSelectedVariety.value.stock
+  }
+
+  return product.value.stock || 0
+})
+
 // Check if main product is selected (no variety)
 const isMainProductSelected = computed(() => {
   return !selectedVariety.value
-})
-
-// Check if any variety is selected
-const isAnyVarietySelected = computed(() => {
-  return !!selectedVariety.value
 })
 
 // Check if add to cart/buy now is disabled
@@ -410,7 +421,94 @@ const openAddToCartDialog = () => {
   showAddToCartDialog.value = true
 }
 
-// CONFIRM ADD TO CART (from dialog)
+// OPEN BUY NOW DIALOG - New function
+const openBuyNowDialog = () => {
+  if (!product.value) {
+    showSnackbar('Product not loaded', 'error')
+    return
+  }
+
+  // Check if user is logged in
+  if (!user.value) {
+    showSnackbar('Please login to buy products', 'warning')
+    return
+  }
+
+  // If product has varieties, show dialog
+  if (product.value.varieties && product.value.varieties.length > 0) {
+    // Set buy now dialog values from current selections
+    buyNowSelectedSize.value = selectedSize.value
+    buyNowSelectedVariety.value = selectedVariety.value
+    buyNowQuantity.value = 1
+    showBuyNowDialog.value = true
+  } else {
+    // If no varieties, directly proceed to checkout
+    proceedToCheckout()
+  }
+}
+
+// PROCEED TO CHECKOUT - New function
+const proceedToCheckout = () => {
+  if (!product.value) {
+    showSnackbar('Product not loaded', 'error')
+    return
+  }
+
+  const finalSize = buyNowSelectedSize.value
+  const finalVariety = buyNowSelectedVariety.value
+  const finalQuantity = buyNowQuantity.value
+
+  // Validate selections
+  if (product.value.has_sizes && !finalSize) {
+    showSnackbar('Please select a size', 'warning')
+    return
+  }
+
+  const availableStock = buyNowDisplayStock.value
+  if (finalQuantity > availableStock) {
+    showSnackbar(`Only ${availableStock} items available in stock`, 'warning')
+    return
+  }
+
+  let itemName = product.value.prod_name
+  if (finalVariety) {
+    itemName = `${product.value.prod_name} - ${finalVariety.name}`
+  }
+
+  const item = {
+    id: product.value.id,
+    product_id: product.value.id,
+    name: itemName,
+    price: finalVariety?.price || product.value.price,
+    quantity: finalQuantity,
+    size: finalSize,
+    variety: finalVariety ? finalVariety.name : null,
+    varietyData: finalVariety,
+    varietyPrice: finalVariety?.price || product.value.price,
+    image: mainImage(product.value.main_img_urls),
+    shop_id: product.value.shop?.id,
+    product: product.value,
+  }
+
+  console.log('🛒 Navigating to checkout with item:', item)
+
+router.push({
+  name: 'purchaseview',
+  query: {
+    productId: product.value.id,
+    fromProduct: 'true',
+    variety: finalVariety ? finalVariety.name : null,
+    size: finalSize,
+    quantity: buyNowQuantity.value 
+  },
+  state: {
+    items: [item],
+    shopId: product.value.shop.id,
+    fromCart: false
+  }
+})
+}
+
 // CONFIRM ADD TO CART (from dialog)
 const confirmAddToCart = async () => {
   console.log('🛒 confirmAddToCart called')
@@ -496,78 +594,6 @@ const confirmAddToCart = async () => {
   }
 }
 
-// GO TO CART FUNCTION
-const goToCart = async () => {
-  console.log('🛒 goToCart called')
-
-  if (!product.value) {
-    showSnackbar('Product not loaded', 'error')
-    return
-  }
-
-  // Check if user is logged in
-  if (!user.value) {
-    showSnackbar('Please login to add items to cart', 'warning')
-    return
-  }
-
-  const finalSize = selectedSize.value
-  const finalVariety = selectedVariety.value
-
-  if (product.value.has_sizes && !finalSize) {
-    showSnackbar('Please select a size', 'warning')
-    return
-  }
-
-  try {
-    // Prepare variety data
-    const varietyData = finalVariety ? {
-      name: finalVariety.name,
-      price: finalVariety.price,
-      stock: finalVariety.stock,
-      images: finalVariety.images || []
-    } : null
-
-    // Add to cart first
-    const result = await cartStore.addToCart(
-      product.value.id,
-      1,
-      finalSize,
-      finalVariety ? finalVariety.name : null,
-      varietyData
-    )
-
-    // Check result properly
-    if (result && result.success) {
-      showSnackbar('Product added to cart!', 'success')
-      animateToCart()
-
-      // Navigate to cart after animation
-      setTimeout(() => {
-        router.push('/cartview')
-      }, 1000)
-    } else {
-      const errorMessage = result?.error || 'Failed to add to cart'
-      throw new Error(errorMessage)
-    }
-
-  } catch (err) {
-    console.error('❌ goToCart error:', err)
-
-    // Safely get error message
-    let errorMessage = 'Failed to add to cart: '
-    if (err && err.message) {
-      errorMessage += err.message
-    } else if (err && typeof err === 'string') {
-      errorMessage += err
-    } else {
-      errorMessage += 'Unknown error occurred'
-    }
-
-    showSnackbar(errorMessage, 'error')
-  }
-}
-
 // Rest of functions
 const shareProduct = async () => {
   if (navigator.share) {
@@ -610,58 +636,6 @@ const isOwner = computed(() => {
   return user.value.id === product.value.shop.owner_id
 })
 
-const buyNow = () => {
-  if (!product.value) {
-    showSnackbar('Product not loaded', 'error')
-    return
-  }
-
-  const finalSize = selectedSize.value
-  const finalVariety = selectedVariety.value
-
-  if (product.value.has_sizes && !finalSize) {
-    showSnackbar('Please select a size', 'warning')
-    return
-  }
-
-  let itemName = product.value.prod_name
-  if (finalVariety) {
-    itemName = `${product.value.prod_name} - ${finalVariety.name}`
-  }
-
-  const item = {
-    id: product.value.id,
-    product_id: product.value.id,
-    name: itemName,
-    price: finalVariety?.price || product.value.price,
-    quantity: 1,
-    size: finalSize,
-    variety: finalVariety ? finalVariety.name : null,
-    varietyData: finalVariety,
-    varietyPrice: finalVariety?.price || product.value.price,
-    image: mainImage(product.value.main_img_urls),
-    shop_id: product.value.shop?.id,
-    product: product.value,
-  }
-
-  console.log('🛒 Navigating to checkout with item:', item)
-
-  router.push({
-    name: 'purchaseview',
-    query: {
-      productId: product.value.id,
-      fromProduct: 'true',
-      variety: finalVariety ? finalVariety.name : null,
-      size: finalSize,
-    },
-    state: {
-      items: [item],
-      shopId: product.value.shop.id,
-      fromCart: false
-    }
-  })
-}
-
 // Get variety image for display
 const getVarietyImage = (variety) => {
   console.log('🖼️ Getting variety image for:', variety)
@@ -699,10 +673,30 @@ const decrementQuantity = () => {
   }
 }
 
+// Increment quantity in buy now dialog
+const incrementBuyNowQuantity = () => {
+  if (buyNowQuantity.value < buyNowDisplayStock.value) {
+    buyNowQuantity.value++
+  }
+}
+
+// Decrement quantity in buy now dialog
+const decrementBuyNowQuantity = () => {
+  if (buyNowQuantity.value > 1) {
+    buyNowQuantity.value--
+  }
+}
+
 // Close dialog and reset values
 const closeAddToCartDialog = () => {
   showAddToCartDialog.value = false
   dialogQuantity.value = 1
+}
+
+// Close buy now dialog
+const closeBuyNowDialog = () => {
+  showBuyNowDialog.value = false
+  buyNowQuantity.value = 1
 }
 </script>
 
@@ -967,6 +961,155 @@ const closeAddToCartDialog = () => {
                 :loading="isAnimating"
               >
                 Add to Cart
+              </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- BUY NOW DIALOG -->
+        <v-dialog v-model="showBuyNowDialog" max-width="500px" @click:outside="closeBuyNowDialog">
+          <v-card class="pa-4">
+            <v-card-title class="d-flex justify-space-between align-center">
+              <h3>Buy Now</h3>
+              <v-btn icon @click="closeBuyNowDialog">
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-card-title>
+
+            <v-card-text>
+              <!-- Product Info -->
+              <div class="mb-4 d-flex align-center">
+                <v-avatar size="80" class="mr-3">
+                  <v-img :src="mainImage(product.main_img_urls)" />
+                </v-avatar>
+                <div>
+                  <h4 class="mb-1">{{ product.prod_name }}</h4>
+                  <div class="text-primary font-weight-bold">
+                    ₱{{ buyNowSelectedVariety?.price || product.price }}
+                  </div>
+                  <div class="text-caption text-grey">
+                    Stock: {{ buyNowDisplayStock }} available
+                  </div>
+                </div>
+              </div>
+
+              <!-- Size Selection -->
+              <div v-if="product.sizes && product.sizes.length" class="mb-4">
+                <p class="font-weight-medium mb-2">Select Size:</p>
+                <v-btn-toggle v-model="buyNowSelectedSize" mandatory class="flex-wrap" style="gap: 6px">
+                  <v-btn
+                    v-for="size in product.sizes"
+                    :key="size"
+                    :value="size"
+                    variant="outlined"
+                    class="ma-1 rounded-pill text-capitalize"
+                    color="primary"
+                    size="small"
+                  >
+                    {{ size }}
+                  </v-btn>
+                </v-btn-toggle>
+              </div>
+
+              <!-- Variety Selection -->
+              <div v-if="product.varieties && product.varieties.length" class="mb-4">
+                <p class="font-weight-medium mb-2">Select Variety:</p>
+                <div class="varieties-list">
+                  <!-- Main Product Option -->
+                  <v-card
+                    class="mb-2"
+                    :class="{ 'option-selected': !buyNowSelectedVariety }"
+                    @click="buyNowSelectedVariety = null"
+                    variant="outlined"
+                  >
+                    <v-card-text class="pa-3 d-flex align-center">
+                      <v-avatar size="40" class="mr-3">
+                        <v-img :src="mainImage(product.main_img_urls)" />
+                      </v-avatar>
+                      <div class="flex-grow-1">
+                        <div class="font-weight-medium">Standard Product</div>
+                        <div class="text-caption text-grey">₱{{ product.price }}</div>
+                      </div>
+                      <v-icon v-if="!buyNowSelectedVariety" color="primary">
+                        mdi-check-circle
+                      </v-icon>
+                    </v-card-text>
+                  </v-card>
+
+                  <!-- Varieties -->
+                  <v-card
+                    v-for="variety in product.varieties"
+                    :key="variety.name"
+                    class="mb-2"
+                    :class="{ 'option-selected': buyNowSelectedVariety?.name === variety.name }"
+                    @click="buyNowSelectedVariety = variety"
+                    variant="outlined"
+                    :disabled="variety.stock === 0"
+                  >
+                    <v-card-text class="pa-3 d-flex align-center">
+                      <v-avatar size="40" class="mr-3">
+                        <v-img :src="getVarietyImage(variety)" />
+                      </v-avatar>
+                      <div class="flex-grow-1">
+                        <div class="font-weight-medium">{{ variety.name }}</div>
+                        <div class="text-caption text-grey">₱{{ variety.price || product.price }}</div>
+                        <div class="text-caption">
+                          <v-chip v-if="variety.stock === 0" size="x-small" color="red">
+                            Out of stock
+                          </v-chip>
+                          <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
+                            {{ variety.stock }} left
+                          </v-chip>
+                        </div>
+                      </div>
+                      <v-icon v-if="buyNowSelectedVariety?.name === variety.name" color="primary">
+                        mdi-check-circle
+                      </v-icon>
+                    </v-card-text>
+                  </v-card>
+                </div>
+              </div>
+
+              <!-- Quantity Selector -->
+              <div class="mb-4">
+                <p class="font-weight-medium mb-2">Quantity:</p>
+                <div class="d-flex align-center">
+                  <v-btn icon @click="decrementBuyNowQuantity" :disabled="buyNowQuantity <= 1">
+                    <v-icon>mdi-minus</v-icon>
+                  </v-btn>
+                  <span class="mx-4 font-weight-bold">{{ buyNowQuantity }}</span>
+                  <v-btn icon @click="incrementBuyNowQuantity" :disabled="buyNowQuantity >= buyNowDisplayStock">
+                    <v-icon>mdi-plus</v-icon>
+                  </v-btn>
+                  <span class="ml-4 text-caption text-grey">
+                    {{ buyNowDisplayStock }} available
+                  </span>
+                </div>
+              </div>
+
+              <!-- Total Price -->
+              <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa;">
+                <div class="d-flex justify-space-between">
+                  <span>Total:</span>
+                  <span class="font-weight-bold text-primary">
+                    ₱{{ ((buyNowSelectedVariety?.price || product.price) * buyNowQuantity).toFixed(2) }}
+                  </span>
+                </div>
+              </div>
+            </v-card-text>
+
+            <v-card-actions>
+              <v-spacer />
+              <v-btn @click="closeBuyNowDialog" variant="outlined" class="mr-2">
+                Cancel
+              </v-btn>
+              <v-btn
+                color="primary"
+                @click="proceedToCheckout"
+                :disabled="buyNowDisplayStock === 0 || (product.has_sizes && !buyNowSelectedSize)"
+                :loading="isAnimating"
+              >
+                Proceed to Checkout
               </v-btn>
             </v-card-actions>
           </v-card>
@@ -1377,13 +1520,13 @@ const closeAddToCartDialog = () => {
             </v-btn>
           </v-col>
 
-          <!-- Buy Now -->
+          <!-- Buy Now - Opens Dialog -->
           <v-col cols="4" class="pa-0">
             <v-btn
               block
               class="bottom-btn buy-now-btn"
               color="#438fda"
-              @click="buyNow()"
+              @click="openBuyNowDialog()"
               :disabled="isActionDisabled"
             >
               Buy Now
@@ -1396,6 +1539,7 @@ const closeAddToCartDialog = () => {
 </template>
 
 <style scoped>
+/* All your existing CSS styles remain the same */
 .app-bar {
   padding-top: 20px;
 }
