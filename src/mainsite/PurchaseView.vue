@@ -29,13 +29,22 @@ const selectedHour = ref('')
 const selectedMinute = ref('')
 const selectedPeriod = ref<'AM' | 'PM'>('AM')
 
+// 👤 CONTACT STATE
+const showContactDialog = ref(false)
+const contactPhone = ref('')
+const contactEmail = ref('')
+
+// 🚫 VALIDATION STATE
+const validationErrors = ref<string[]>([])
+const isProcessing = ref(false)
+
 // 🏪 SHOP STATE
 const shopSchedule = ref({
   openDays: [1, 2, 3, 4, 5, 6], // Default: Monday to Saturday
   openHour: 9, // Default opening hour
   closeHour: 19, // Default closing hour
   meetupDetails: 'Main Entrance',
-  manualStatus: 'auto'
+  manualStatus: 'auto',
 })
 
 // 🎯 INITIALIZATION
@@ -112,7 +121,7 @@ const initializePage = async () => {
     transactionNumber: transactionNumber.value,
     buyer: buyer.value,
     address: address.value,
-    shopSchedule: shopSchedule.value
+    shopSchedule: shopSchedule.value,
   })
 }
 
@@ -130,7 +139,7 @@ const loadShopData = async () => {
         openHour: 9,
         closeHour: 19,
         meetupDetails: 'Main Entrance',
-        manualStatus: 'auto'
+        manualStatus: 'auto',
       }
       return
     }
@@ -151,7 +160,7 @@ const loadShopData = async () => {
         openHour: 9,
         closeHour: 19,
         meetupDetails: 'Main Entrance',
-        manualStatus: 'auto'
+        manualStatus: 'auto',
       }
       return
     }
@@ -191,12 +200,11 @@ const loadShopData = async () => {
       openHour,
       closeHour,
       meetupDetails: shop.meetup_details || shop.physical_store || 'Main Entrance',
-      manualStatus: shop.manual_status || 'auto'
+      manualStatus: shop.manual_status || 'auto',
     }
 
     console.log('✅ Final shop schedule:', shopSchedule.value)
     console.log('🔍 Open days include Sunday (0):', shopSchedule.value.openDays.includes(0))
-
   } catch (err) {
     console.error('❌ Error loading shop data:', err)
     // Always include Sunday in fallback
@@ -205,7 +213,7 @@ const loadShopData = async () => {
       openHour: 9,
       closeHour: 19,
       meetupDetails: 'Main Entrance',
-      manualStatus: 'auto'
+      manualStatus: 'auto',
     }
   }
 }
@@ -232,16 +240,19 @@ const loadItems = async () => {
         item.varietyData ||
         (item.variety
           ? {
-            name: item.variety,
-            price: item.varietyPrice || item.price,
-          }
+              name: item.variety,
+              price: item.varietyPrice || item.price,
+            }
           : null),
       price: item.varietyPrice || item.price,
     }))
     fromCart.value = history.state.fromCart || false
 
     console.log('✅ Items processed from navigation state:', items.value)
-    console.log('✅ Quantities:', items.value.map(item => ({ name: item.name, quantity: item.quantity })))
+    console.log(
+      '✅ Quantities:',
+      items.value.map((item) => ({ name: item.name, quantity: item.quantity })),
+    )
     return
   }
 
@@ -265,7 +276,6 @@ const loadItems = async () => {
 }
 
 // 🛍️ FETCH SINGLE PRODUCT
-// In purchaseview.vue - Update fetchProductFromId function:
 const fetchProductFromId = async (productId: string) => {
   try {
     console.log('📡 Fetching product details for:', productId)
@@ -276,7 +286,7 @@ const fetchProductFromId = async (productId: string) => {
         `
         *,
         shop:shops(*)
-      `
+      `,
       )
       .eq('id', productId)
       .single()
@@ -369,7 +379,7 @@ const fetchCartItems = async () => {
           *,
           shop:shops (*)
         )
-      `
+      `,
       )
       .order('created_at', { ascending: false })
 
@@ -442,6 +452,156 @@ const fetchCartItems = async () => {
   }
 }
 
+// 📞 LOAD CONTACT INFO
+const loadContactInfo = async () => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    // Get contact info from profile - ONLY PHONE
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('phone')
+      .eq('id', user.id)
+      .single()
+
+    if (profile) {
+      contactPhone.value = profile.phone || ''
+    }
+
+    // Clear email since it's not in profile schema
+    contactEmail.value = user.email || ''
+
+    // Also check if address has phone
+    if (address.value?.phone) {
+      contactPhone.value = address.value.phone
+    }
+  } catch (err) {
+    console.error('❌ Error loading contact info:', err)
+  }
+}
+
+// 📞 UPDATE CONTACT INFO
+const updateContactInfo = async () => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) {
+      alert('Please log in to update contact info')
+      return
+    }
+
+    // Validate phone
+    if (!contactPhone.value || contactPhone.value.trim() === '') {
+      alert('Please enter a valid phone number')
+      return
+    }
+
+    // Basic phone format validation
+    const phoneRegex = /^(09|\+639)\d{9}$/
+    const cleanPhone = contactPhone.value.replace(/\s+/g, '')
+    if (!phoneRegex.test(cleanPhone)) {
+      alert('Please enter a valid Philippine phone number (09xxxxxxxxx or +639xxxxxxxxx)')
+      return
+    }
+
+    // Update profile - ONLY PHONE (no email column)
+    const { error: profileError } = await supabase
+      .from('profiles')
+      .update({
+        phone: contactPhone.value,
+        // REMOVED: email: contactEmail.value || user.email
+      })
+      .eq('id', user.id)
+
+    if (profileError) {
+      console.error('❌ Profile update error:', profileError)
+      throw profileError
+    }
+
+    // Also update current address phone if address exists
+    if (address.value) {
+      const { error: addressError } = await supabase
+        .from('addresses')
+        .update({ phone: contactPhone.value })
+        .eq('id', address.value.id)
+
+      if (addressError) {
+        console.warn('⚠️ Could not update address phone:', addressError)
+      }
+    }
+
+    alert('Contact information updated successfully!')
+    showContactDialog.value = false
+    await loadUserData() // Refresh user data
+  } catch (err) {
+    console.error('❌ Error updating contact info:', err)
+    alert('Failed to update contact information')
+  }
+}
+
+// ✅ VALIDATE ALL FIELDS BEFORE CHECKOUT - SIMPLIFIED ADDRESS VALIDATION
+const validateAllFields = (): boolean => {
+  validationErrors.value = []
+
+  // 1. Check items
+  if (!items.value || items.value.length === 0) {
+    validationErrors.value.push('No items to purchase')
+  }
+
+  // 2. Check buyer info
+  if (!buyer.value) {
+    validationErrors.value.push('User information not found')
+  }
+
+  // 3. Check address - SIMPLIFIED: Just check if an address is selected
+  if (!address.value) {
+    validationErrors.value.push('Please select a delivery address')
+  }
+  // REMOVED: No need to check individual address fields since users can only pick from saved addresses
+
+  // 4. Check contact info - REQUIRED
+  if (!contactPhone.value || contactPhone.value.trim() === '') {
+    validationErrors.value.push('Contact phone number is required')
+  } else if (!/^(09|\+639)\d{9}$/.test(contactPhone.value.replace(/\s+/g, ''))) {
+    validationErrors.value.push('Please enter a valid Philippine phone number')
+  }
+
+  // 5. Check delivery schedule
+  if (!deliveryDate.value || !deliveryTime.value) {
+    validationErrors.value.push('Delivery schedule is required')
+  } else if (!isWithinShopHours(deliveryDate.value, deliveryTime.value)) {
+    validationErrors.value.push(scheduleError.value || 'Invalid delivery schedule')
+  }
+
+  // 6. Check delivery option
+  if (!deliveryOption.value) {
+    validationErrors.value.push('Delivery option is required')
+  }
+
+  // 7. Check payment method
+  if (!paymentMethod.value) {
+    validationErrors.value.push('Payment method is required')
+  }
+
+  return validationErrors.value.length === 0
+}
+
+// 🚨 SHOW VALIDATION ALERTS
+const showValidationAlert = () => {
+  if (validationErrors.value.length > 0) {
+    const errorList = validationErrors.value
+      .map((error, index) => `${index + 1}. ${error}`)
+      .join('\n')
+    alert(`Please complete the following:\n\n${errorList}`)
+    return true
+  }
+  return false
+}
+
 // 👤 LOAD USER DATA
 const loadUserData = async () => {
   try {
@@ -460,6 +620,9 @@ const loadUserData = async () => {
 
     buyer.value = profile
 
+    // Load contact info
+    await loadContactInfo()
+
     // Load addresses
     await loadUserAddresses()
 
@@ -470,6 +633,7 @@ const loadUserData = async () => {
 }
 
 // 🏠 LOAD USER ADDRESSES
+// 🏠 LOAD USER ADDRESSES - IMPROVED
 const loadUserAddresses = async () => {
   try {
     const {
@@ -483,8 +647,8 @@ const loadUserAddresses = async () => {
       .from('addresses')
       .select('*')
       .eq('user_id', user.id)
-      .order('is_default', { ascending: false })
-      .order('updated_at', { ascending: false })
+      .order('is_default', { ascending: false }) // Default addresses first
+      .order('updated_at', { ascending: false }) // Recently updated first
 
     if (error) {
       console.error('❌ Error loading addresses:', error)
@@ -494,10 +658,20 @@ const loadUserAddresses = async () => {
     addresses.value = userAddresses || []
 
     if (addresses.value.length > 0) {
-      // Use default address or most recent
-      address.value = addresses.value.find((addr) => addr.is_default) || addresses.value[0]
+      // Use the first default address (there should be only one due to unique constraint)
+      const defaultAddress = addresses.value.find((addr) => addr.is_default)
+
+      if (defaultAddress) {
+        address.value = defaultAddress
+        console.log('✅ Using default address:', defaultAddress)
+      } else {
+        // No default address, use the most recent
+        address.value = addresses.value[0]
+        console.log('ℹ️ No default address, using most recent:', address.value)
+      }
     } else {
       address.value = null
+      console.log('ℹ️ No addresses found for user')
     }
 
     console.log('✅ Addresses loaded:', addresses.value)
@@ -522,24 +696,80 @@ const addNewAddress = () => {
   router.push({ name: 'edit-address' })
 }
 
-// 🏠 FORMAT ADDRESS FOR DISPLAY
+// 🏠 FORMAT ADDRESS FOR DISPLAY - IMPROVED
 const formatAddress = (addr: any): string => {
   if (!addr) return 'No address set'
 
-  const addressParts = [
-    addr.house_no,
-    addr.building,
-    addr.street,
-    addr.purok ? `Purok ${addr.purok}` : null,
-    addr.barangay_name,
-    addr.city_name,
-    addr.province_name,
-    addr.region_name,
-    addr.postal_code
-  ].filter(Boolean) // Remove null/empty values
+  // Build address parts in a logical order
+  const addressParts = []
 
-  return addressParts.join(', ') || 'Address details not complete'
+  // Basic address components
+  if (addr.house_no) addressParts.push(addr.house_no)
+  if (addr.building) addressParts.push(addr.building)
+  if (addr.street) addressParts.push(addr.street)
+
+  // Optional: Purok
+  if (addr.purok) addressParts.push(`Purok ${addr.purok}`)
+
+  // Barangay (important for Butuan City)
+  if (addr.barangay_name) addressParts.push(addr.barangay_name)
+
+  // City (Butuan City)
+  if (addr.city_name) addressParts.push(addr.city_name)
+
+  // Optional: Province
+  if (addr.province_name && addr.province_name !== addr.city_name) {
+    addressParts.push(addr.province_name)
+  }
+
+  // Optional: Region
+  if (addr.region_name) addressParts.push(addr.region_name)
+
+  // Optional: Postal Code
+  if (addr.postal_code) addressParts.push(addr.postal_code)
+
+  // If no address parts, return a fallback
+  if (addressParts.length === 0) {
+    return 'Address details not complete'
+  }
+
+  // Join with comma separator
+  return addressParts.join(', ')
 }
+// 🏠 SET DEFAULT ADDRESS FUNCTION
+const setDefaultAddress = async (addressId: string) => {
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (!user) return
+
+    // First, unset all other default addresses for this user
+    const { error: unsetError } = await supabase
+      .from('addresses')
+      .update({ is_default: false })
+      .eq('user_id', user.id)
+
+    if (unsetError) throw unsetError
+
+    // Then set the selected address as default
+    const { error: setError } = await supabase
+      .from('addresses')
+      .update({ is_default: true })
+      .eq('id', addressId)
+      .eq('user_id', user.id)
+
+    if (setError) throw setError
+
+    // Reload addresses
+    await loadUserAddresses()
+    alert('Default address updated successfully!')
+  } catch (err) {
+    console.error('❌ Error setting default address:', err)
+    alert('Failed to set default address')
+  }
+}
+
 // 🕒 INITIALIZE DATE/TIME - IMPROVED
 const initializeDateTime = () => {
   const now = new Date()
@@ -554,7 +784,9 @@ const initializeDateTime = () => {
     const day = deliveryDateObj.getDay()
     const isOpenDay = shopSchedule.value.openDays.includes(day)
 
-    console.log(`🕒 Checking date: ${deliveryDateObj.toDateString()}, day: ${day}, open: ${isOpenDay}`)
+    console.log(
+      `🕒 Checking date: ${deliveryDateObj.toDateString()}, day: ${day}, open: ${isOpenDay}`,
+    )
 
     if (isOpenDay) {
       // Check if we can deliver today
@@ -616,7 +848,7 @@ const isWithinShopHours = (date: any, time: string): boolean => {
     date,
     time,
     dateType: typeof date,
-    dateValue: date
+    dateValue: date,
   })
   console.log('🔍 Current shop schedule:', shopSchedule.value)
 
@@ -676,7 +908,7 @@ const isWithinShopHours = (date: any, time: string): boolean => {
       hours,
       minutes,
       now: now.toString(),
-      isValidDate: !isNaN(selectedDateTime.getTime())
+      isValidDate: !isNaN(selectedDateTime.getTime()),
     })
 
     // Check if selected date is valid
@@ -688,13 +920,15 @@ const isWithinShopHours = (date: any, time: string): boolean => {
 
     // Check if selected date is in the past
     if (selectedDateTime < now) {
-      scheduleError.value = 'Cannot select a date/time in the past. Please choose a future date and time.'
+      scheduleError.value =
+        'Cannot select a date/time in the past. Please choose a future date and time.'
       return false
     }
 
     // Check if shop is manually closed
     if (shopSchedule.value.manualStatus === 'closed') {
-      scheduleError.value = 'Shop is currently closed. Please select another time or contact the seller.'
+      scheduleError.value =
+        'Shop is currently closed. Please select another time or contact the seller.'
       return false
     }
 
@@ -707,7 +941,7 @@ const isWithinShopHours = (date: any, time: string): boolean => {
       dayOfWeek,
       dayName,
       openDays: shopSchedule.value.openDays,
-      includesDay: shopSchedule.value.openDays.includes(dayOfWeek)
+      includesDay: shopSchedule.value.openDays.includes(dayOfWeek),
     })
 
     // Check if day is within open days
@@ -728,18 +962,22 @@ const isWithinShopHours = (date: any, time: string): boolean => {
       openTimeInMinutes,
       closeTimeInMinutes,
       openHour: shopSchedule.value.openHour,
-      closeHour: shopSchedule.value.closeHour
+      closeHour: shopSchedule.value.closeHour,
     })
 
     // Check if time is within open hours
     if (selectedTimeInMinutes < openTimeInMinutes) {
-      const openTime12 = convertTo12Hour(`${shopSchedule.value.openHour.toString().padStart(2, '0')}:00`)
+      const openTime12 = convertTo12Hour(
+        `${shopSchedule.value.openHour.toString().padStart(2, '0')}:00`,
+      )
       scheduleError.value = `Shop opens at ${openTime12}. Please select a later time.`
       return false
     }
 
     if (selectedTimeInMinutes >= closeTimeInMinutes) {
-      const closeTime12 = convertTo12Hour(`${shopSchedule.value.closeHour.toString().padStart(2, '0')}:00`)
+      const closeTime12 = convertTo12Hour(
+        `${shopSchedule.value.closeHour.toString().padStart(2, '0')}:00`,
+      )
       scheduleError.value = `Shop closes at ${closeTime12}. Please select an earlier time.`
       return false
     }
@@ -750,7 +988,7 @@ const isWithinShopHours = (date: any, time: string): boolean => {
     if (isToday) {
       const currentTimeInMinutes = today.getHours() * 60 + today.getMinutes()
       if (selectedTimeInMinutes <= currentTimeInMinutes) {
-        scheduleError.value = 'Please select a future time for today\'s delivery.'
+        scheduleError.value = "Please select a future time for today's delivery."
         return false
       }
     }
@@ -758,7 +996,6 @@ const isWithinShopHours = (date: any, time: string): boolean => {
     console.log('✅ Schedule validation PASSED')
     scheduleError.value = ''
     return true
-
   } catch (error) {
     console.error('❌ Error in schedule validation:', error)
     scheduleError.value = 'Invalid date/time selection. Please try again.'
@@ -775,7 +1012,7 @@ const confirmDateTime = () => {
     time: deliveryTime.value,
     selectedHour: selectedHour.value,
     selectedMinute: selectedMinute.value,
-    period: selectedPeriod.value
+    period: selectedPeriod.value,
   })
 
   // Validate the selected schedule
@@ -835,7 +1072,7 @@ const updateTime = () => {
   console.log('🕒 Updating time with:', {
     hour: selectedHour.value,
     minute: selectedMinute.value,
-    period: selectedPeriod.value
+    period: selectedPeriod.value,
   })
 
   // Check if we have all required time components
@@ -880,7 +1117,7 @@ const updateTime = () => {
       selectedMinute: selectedMinute.value,
       period: selectedPeriod.value,
       deliveryTime: deliveryTime.value,
-      hour24: hourNum
+      hour24: hourNum,
     })
 
     // Auto-validate when time changes
@@ -893,7 +1130,6 @@ const updateTime = () => {
         console.log('✅ Time change validation passed')
       }
     }
-
   } catch (error) {
     console.error('❌ Error updating time:', error)
     scheduleError.value = 'Error setting time. Please try again.'
@@ -1064,19 +1300,35 @@ const deliveryOptionsDisplay = computed(() =>
   ),
 )
 
+// ✅ COMPLETE CHECKOUT FUNCTION - SIMPLIFIED
 // ✅ COMPLETE CHECKOUT FUNCTION
 const handleCheckout = async () => {
-  // Validation
+  console.log('🛒 Starting checkout process...')
+
+  // Validate all fields
+  if (!validateAllFields()) {
+    const errorList = validationErrors.value
+      .map((error, index) => `${index + 1}. ${error}`)
+      .join('\n')
+    alert(`Please complete the following:\n\n${errorList}`)
+    return
+  }
+
+  console.log('✅ All validations passed')
+
+  // Check if user is logged in
   if (!buyer.value) {
     alert('Please log in to continue')
     return
   }
 
+  // Check if address is selected
   if (!address.value) {
-    alert('Please set a delivery address')
+    alert('Please select a delivery address')
     return
   }
 
+  // Check if there are items
   if (!items.value.length) {
     alert('No items to checkout')
     return
@@ -1088,19 +1340,22 @@ const handleCheckout = async () => {
     return
   }
 
-  console.log('🛒 Starting checkout process...')
-
   try {
+    isProcessing.value = true
+    console.log('🔄 Processing order...')
+
+    // Get shop ID from the first item
     const shopId = items.value[0]?.shop_id || items.value[0]?.product?.shop_id
 
     if (!shopId) {
       alert('Shop information not found for items')
+      isProcessing.value = false
       return
     }
 
     console.log('🏪 Creating order for shop:', shopId)
 
-    // Create single order with shop_id
+    // 1. Create the order in database
     const { data: order, error: orderError } = await supabase
       .from('orders')
       .insert({
@@ -1120,13 +1375,15 @@ const handleCheckout = async () => {
       .single()
 
     if (orderError) {
-      console.error('❌ Order creation error details:', orderError)
-      throw orderError
+      console.error('❌ Order creation error:', orderError)
+      alert('Failed to create order. Please try again.')
+      isProcessing.value = false
+      return
     }
 
-    console.log('✅ Order created with shop_id:', shopId)
+    console.log('✅ Order created:', order)
 
-    // Create order items
+    // 2. Create order items
     const orderItems = items.value.map((item) => {
       const isVariety = item.selectedVariety && item.varietyPrice
 
@@ -1142,11 +1399,14 @@ const handleCheckout = async () => {
     })
 
     const { error: itemsError } = await supabase.from('order_items').insert(orderItems)
-    if (itemsError) throw itemsError
+    if (itemsError) {
+      console.error('❌ Order items creation error:', itemsError)
+      throw itemsError
+    }
 
     console.log('✅ Order items created')
 
-    // Create payment record
+    // 3. Create payment record
     const { error: paymentError } = await supabase.from('payments').insert({
       order_id: order.id,
       amount: totalPrice.value,
@@ -1154,28 +1414,42 @@ const handleCheckout = async () => {
       method: paymentMethod.value,
     })
 
-    if (paymentError) throw paymentError
+    if (paymentError) {
+      console.error('❌ Payment record creation error:', paymentError)
+      throw paymentError
+    }
 
     console.log('✅ Payment record created')
 
-    // Send message to seller
-    await sendOrderMessageToSeller(order.id, shopId, items.value)
+    // 4. Send message to seller
+    try {
+      await sendOrderMessageToSeller(order.id, shopId, items.value)
+    } catch (msgError) {
+      console.warn('⚠️ Could not send message to seller:', msgError)
+      // Don't fail the order if message fails
+    }
 
-    // Clean up cart if coming from cart
+    // 5. Clean up cart if coming from cart
     if (fromCart.value && cartItemIds.value.length > 0) {
-      const { error: cartError } = await supabase
-        .from('cart_items')
-        .delete()
-        .in('id', cartItemIds.value)
+      try {
+        const { error: cartError } = await supabase
+          .from('cart_items')
+          .delete()
+          .in('id', cartItemIds.value)
 
-      if (cartError) {
-        console.warn('⚠️ Cart cleanup warning:', cartError)
+        if (cartError) {
+          console.warn('⚠️ Cart cleanup warning:', cartError)
+        } else {
+          console.log('✅ Cart cleaned up')
+        }
+      } catch (cartError) {
+        console.warn('⚠️ Cart cleanup error:', cartError)
       }
     }
 
     console.log('🎯 Navigating to success page...')
 
-    // Navigate to success page
+    // 6. Navigate to success page
     router.push({
       name: 'checkout-success',
       params: { orderId: order.id },
@@ -1187,9 +1461,10 @@ const handleCheckout = async () => {
   } catch (err) {
     console.error('❌ Checkout error:', err)
     alert('Failed to complete checkout. Please try again.')
+  } finally {
+    isProcessing.value = false
   }
 }
-
 // 💬 SEND ORDER MESSAGE TO SELLER
 const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopItems: any[]) => {
   try {
@@ -1414,22 +1689,39 @@ watch(
   },
 )
 </script>
-
 <template>
   <v-app>
     <v-main>
-
       <!-- Add this debug section temporarily -->
       <v-alert v-if="false" type="info" class="mb-4">
-        <strong>Debug Time Info:</strong><br>
-        Selected Hour: {{ selectedHour }}<br>
-        Selected Minute: {{ selectedMinute }}<br>
-        Selected Period: {{ selectedPeriod }}<br>
-        Delivery Time: {{ deliveryTime }}<br>
-        Delivery Date: {{ deliveryDate }}<br>
-        Schedule Error: {{ scheduleError }}<br>
-        Shop Hours: {{ shopSchedule.openHour }}:00 - {{ shopSchedule.closeHour }}:00<br>
+        <strong>Debug Time Info:</strong><br />
+        Selected Hour: {{ selectedHour }}<br />
+        Selected Minute: {{ selectedMinute }}<br />
+        Selected Period: {{ selectedPeriod }}<br />
+        Delivery Time: {{ deliveryTime }}<br />
+        Delivery Date: {{ deliveryDate }}<br />
+        Schedule Error: {{ scheduleError }}<br />
+        Shop Hours: {{ shopSchedule.openHour }}:00 - {{ shopSchedule.closeHour }}:00<br />
         Open Days: {{ shopSchedule.openDays }}
+      </v-alert>
+      <!-- Validation Error Alert -->
+      <v-alert
+        v-if="validationErrors.length > 0"
+        type="warning"
+        class="mx-3 mt-3 mb-2"
+        density="compact"
+      >
+        <div class="d-flex align-center">
+          <v-icon class="mr-2">mdi-alert-circle</v-icon>
+          <div>
+            <strong>Complete the following to proceed:</strong>
+            <ul class="mb-0 mt-1">
+              <li v-for="error in validationErrors" :key="error" style="font-size: 0.9rem">
+                {{ error }}
+              </li>
+            </ul>
+          </div>
+        </div>
       </v-alert>
       <!-- App Bar -->
       <v-app-bar color="#438fda" dark flat>
@@ -1460,7 +1752,30 @@ watch(
                 <strong>Name:</strong> {{ buyer?.first_name || 'Loading...' }}
                 {{ buyer?.last_name }}
               </p>
-              <p><strong>Contact:</strong> {{ address?.phone || 'Not set' }}</p>
+              <p class="contact-section">
+                <strong>Contact:</strong>
+                <span :class="{ 'text-red': !contactPhone }">
+                  {{ contactPhone || 'Contact number not set' }}
+                </span>
+                <v-btn
+                  size="x-small"
+                  variant="text"
+                  color="primary"
+                  @click="showContactDialog = true"
+                  class="ml-2 contact-edit-btn"
+                  style="min-width: auto"
+                  :title="contactPhone ? 'Edit contact' : 'Add contact'"
+                >
+                  <v-icon size="small">{{ contactPhone ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
+                </v-btn>
+              </p>
+              <!-- Optional: Add this badge next to the contact if you want visual feedback -->
+              <span v-if="!contactPhone" class="ml-1" style="font-size: 0.7rem">
+                <v-chip color="warning" size="x-small" density="compact"> Required </v-chip>
+              </span>
+              <span v-else class="ml-1" style="font-size: 0.7rem">
+                <v-chip color="success" size="x-small" density="compact"> ✓ </v-chip>
+              </span>
               <p class="address-line">
                 <strong>Address:</strong>
                 {{ address ? formatAddress(address) : 'No address set' }}
@@ -1471,13 +1786,24 @@ watch(
                 {{ deliveryTime ? `at ${convertTo12Hour(deliveryTime)}` : '' }}
               </p>
               <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
+              <!-- Replace the button-group with just two buttons: -->
               <div class="button-group mt-2">
-                <v-btn size="small" color="primary" variant="tonal" @click="showAddressDialog = true"
-                  class="action-btn">
+                <v-btn
+                  size="small"
+                  color="primary"
+                  variant="tonal"
+                  @click="showAddressDialog = true"
+                  class="action-btn"
+                >
                   Change Address
                 </v-btn>
-                <v-btn size="small" color="primary" variant="tonal" @click="showDateTimePicker = true"
-                  class="action-btn">
+                <v-btn
+                  size="small"
+                  color="primary"
+                  variant="tonal"
+                  @click="showDateTimePicker = true"
+                  class="action-btn"
+                >
                   Change Schedule
                 </v-btn>
               </div>
@@ -1496,8 +1822,12 @@ watch(
             <v-list-item v-for="item in items" :key="item.id" class="list-item">
               <template #prepend>
                 <v-avatar class="item-avatar" rounded>
-                  <v-img :src="getMainImage(item.product?.main_img_urls, item.varietyData)" :alt="item.name" cover
-                    class="product-image" />
+                  <v-img
+                    :src="getMainImage(item.product?.main_img_urls, item.varietyData)"
+                    :alt="item.name"
+                    cover
+                    class="product-image"
+                  />
                 </v-avatar>
               </template>
 
@@ -1522,12 +1852,24 @@ watch(
               <template #append>
                 <div class="item-actions">
                   <div class="quantity-controls">
-                    <v-btn size="x-small" color="error" variant="tonal" @click="decreaseQty(item)" class="qty-btn"
-                      :disabled="item.quantity <= 1">
+                    <v-btn
+                      size="x-small"
+                      color="error"
+                      variant="tonal"
+                      @click="decreaseQty(item)"
+                      class="qty-btn"
+                      :disabled="item.quantity <= 1"
+                    >
                       −
                     </v-btn>
                     <span class="quantity-display">{{ item.quantity }}</span>
-                    <v-btn size="x-small" color="primary" variant="tonal" @click="increaseQty(item)" class="qty-btn">
+                    <v-btn
+                      size="x-small"
+                      color="primary"
+                      variant="tonal"
+                      @click="increaseQty(item)"
+                      class="qty-btn"
+                    >
                       +
                     </v-btn>
                   </div>
@@ -1554,8 +1896,16 @@ watch(
             Message to Seller
           </v-card-title>
           <v-card-text>
-            <v-textarea v-model="note" label="Write something to the seller..." auto-grow rows="2" outlined dense
-              placeholder="Any special instructions or requests..." class="note-textarea"></v-textarea>
+            <v-textarea
+              v-model="note"
+              label="Write something to the seller..."
+              auto-grow
+              rows="2"
+              outlined
+              dense
+              placeholder="Any special instructions or requests..."
+              class="note-textarea"
+            ></v-textarea>
           </v-card-text>
         </v-card>
 
@@ -1566,8 +1916,16 @@ watch(
             Delivery Option
           </v-card-title>
           <v-card-text>
-            <v-select v-model="deliveryOption" :items="deliveryOptionsDisplay" item-title="label" item-value="value"
-              label="Select delivery option" outlined dense class="delivery-select"></v-select>
+            <v-select
+              v-model="deliveryOption"
+              :items="deliveryOptionsDisplay"
+              item-title="label"
+              item-value="value"
+              label="Select delivery option"
+              outlined
+              dense
+              class="delivery-select"
+            ></v-select>
           </v-card-text>
         </v-card>
 
@@ -1592,15 +1950,25 @@ watch(
             <div class="total-label">Total Amount:</div>
             <div class="total-amount">₱{{ totalPrice.toLocaleString() }}</div>
           </div>
-          <v-btn color="primary" size="large" @click="handleCheckout" class="place-order-btn"
-            :disabled="!items.length || !buyer || !address" :loading="false" block>
+          <v-btn
+            color="primary"
+            size="large"
+            @click="handleCheckout"
+            class="place-order-btn"
+            :disabled="!items.length || !buyer || !address || isProcessing"
+            :loading="isProcessing"
+            block
+          >
+            <template v-slot:loader>
+              <v-progress-circular indeterminate size="20" width="2"></v-progress-circular>
+            </template>
             <v-icon left>mdi-check</v-icon>
-            Place Order
+            {{ isProcessing ? 'Processing...' : 'Place Order' }}
           </v-btn>
         </div>
       </div>
 
-      <!-- Address Selection Dialog -->
+      <!-- Address Selection Dialog - Complete Version -->
       <v-dialog v-model="showAddressDialog" max-width="500" persistent>
         <v-card class="address-dialog">
           <v-card-title class="address-title">
@@ -1613,7 +1981,7 @@ watch(
               <v-icon size="64" color="grey-lighten-2" class="mb-3">mdi-map-marker-off</v-icon>
               <h3 class="text-h6 mb-2">No Addresses Saved</h3>
               <p class="text-body-2 text-medium-emphasis mb-4">
-                You haven't saved any addresses yet. Add an address to continue with your order.
+                Add a complete address including house number, street, and barangay to continue.
               </p>
               <v-btn color="primary" @click="addNewAddress" block>
                 <v-icon left>mdi-plus</v-icon>
@@ -1623,10 +1991,19 @@ watch(
 
             <!-- Address List -->
             <div v-else class="address-list">
-              <div class="address-list-title">Your Saved Addresses</div>
+              <div class="address-list-title">Select a Delivery Address</div>
+              <v-alert type="info" density="compact" class="mb-3">
+                <small>Choose from your saved addresses. Make sure addresses are complete.</small>
+              </v-alert>
+
               <v-list class="address-list-items">
-                <v-list-item v-for="addr in addresses" :key="addr.id" class="address-item"
-                  :class="{ 'address-item-selected': address?.id === addr.id }" @click="selectAddress(addr)">
+                <v-list-item
+                  v-for="addr in addresses"
+                  :key="addr.id"
+                  class="address-item"
+                  :class="{ 'address-item-selected': address?.id === addr.id }"
+                  @click="selectAddress(addr)"
+                >
                   <template #prepend>
                     <v-avatar color="primary" size="40" class="address-avatar">
                       <v-icon color="white" size="20">mdi-home</v-icon>
@@ -1665,27 +2042,37 @@ watch(
             <v-btn text @click="showAddressDialog = false" class="cancel-address-btn">
               Cancel
             </v-btn>
-            <v-btn v-if="addresses.length > 0" color="primary" variant="flat" @click="showAddressDialog = false"
-              class="confirm-address-btn">
+            <v-btn
+              v-if="addresses.length > 0"
+              color="primary"
+              variant="flat"
+              @click="showAddressDialog = false"
+              class="confirm-address-btn"
+            >
               Confirm Selection
             </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
-
       <!-- Date & Time Picker Dialog -->
       <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
         <v-card class="datetime-card">
           <v-card-title class="datetime-title">
             Select Delivery Schedule
-            <v-chip color="info" size="small" class="ms-2">
-              Butuan City Only
-            </v-chip>
+            <v-chip color="info" size="small" class="ms-2"> Butuan City Only </v-chip>
           </v-card-title>
           <v-card-text class="datetime-content">
             <!-- Use the formatted date string for the date picker -->
-            <v-date-picker v-model="deliveryDate" color="primary" elevation="0" show-adjacent-months :min="minDate"
-              :max="maxDate" class="date-picker" @update:model-value="handleDateChange"></v-date-picker>
+            <v-date-picker
+              v-model="deliveryDate"
+              color="primary"
+              elevation="0"
+              show-adjacent-months
+              :min="minDate"
+              :max="maxDate"
+              class="date-picker"
+              @update:model-value="handleDateChange"
+            ></v-date-picker>
 
             <!-- Rest of your time picker code remains the same -->
             <v-divider class="my-4"></v-divider>
@@ -1697,7 +2084,11 @@ watch(
                   <div class="time-wheel-label">Hour</div>
                   <v-virtual-scroll :items="hours12" height="160" item-height="40">
                     <template #default="{ item }">
-                      <div class="time-item" :class="{ active: item === selectedHour }" @click="selectHour(item)">
+                      <div
+                        class="time-item"
+                        :class="{ active: item === selectedHour }"
+                        @click="selectHour(item)"
+                      >
                         {{ item }}
                       </div>
                     </template>
@@ -1708,7 +2099,11 @@ watch(
                   <div class="time-wheel-label">Minute</div>
                   <v-virtual-scroll :items="minutes" height="160" item-height="40">
                     <template #default="{ item }">
-                      <div class="time-item" :class="{ active: item === selectedMinute }" @click="selectMinute(item)">
+                      <div
+                        class="time-item"
+                        :class="{ active: item === selectedMinute }"
+                        @click="selectMinute(item)"
+                      >
                         {{ item }}
                       </div>
                     </template>
@@ -1717,7 +2112,13 @@ watch(
               </div>
 
               <div class="period-toggle">
-                <v-btn-toggle v-model="selectedPeriod" color="primary" rounded="pill" divided class="period-buttons">
+                <v-btn-toggle
+                  v-model="selectedPeriod"
+                  color="primary"
+                  rounded="pill"
+                  divided
+                  class="period-buttons"
+                >
                   <v-btn value="AM" class="period-btn">AM</v-btn>
                   <v-btn value="PM" class="period-btn">PM</v-btn>
                 </v-btn-toggle>
@@ -1726,7 +2127,8 @@ watch(
               <div class="selected-schedule">
                 <div class="schedule-label">Selected Schedule</div>
                 <div class="schedule-display">
-                  {{ formattedDate }} — {{ selectedHour || '--' }}:{{ selectedMinute || '--' }} {{ selectedPeriod }}
+                  {{ formattedDate }} — {{ selectedHour || '--' }}:{{ selectedMinute || '--' }}
+                  {{ selectedPeriod }}
                 </div>
 
                 <!-- Real-time validation feedback -->
@@ -1750,14 +2152,78 @@ watch(
             <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn">
               Cancel
             </v-btn>
-            <v-btn color="primary" variant="flat" @click="confirmDateTime" class="confirm-datetime-btn"
-              :disabled="!!scheduleError || !deliveryDate || !deliveryTime">
+            <v-btn
+              color="primary"
+              variant="flat"
+              @click="confirmDateTime"
+              class="confirm-datetime-btn"
+              :disabled="!!scheduleError || !deliveryDate || !deliveryTime"
+            >
               Confirm Schedule
             </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
+      <!-- Contact Information Dialog - Keep the dialog but update the title -->
+      <v-dialog v-model="showContactDialog" max-width="500" persistent>
+        <v-card class="contact-dialog">
+          <v-card-title class="contact-title">
+            <v-icon color="primary" class="mr-2">
+              {{ contactPhone ? 'mdi-phone-edit' : 'mdi-phone-plus' }}
+            </v-icon>
+            {{ contactPhone ? 'Update Contact' : 'Add Contact Information' }}
+          </v-card-title>
+          <v-card-text class="contact-content">
+            <div class="contact-form">
+              <v-alert :type="contactPhone ? 'info' : 'warning'" density="compact" class="mb-4">
+                <small>
+                  {{
+                    contactPhone
+                      ? 'Update your phone number for delivery coordination.'
+                      : 'Phone number is required for delivery coordination.'
+                  }}
+                </small>
+              </v-alert>
 
+              <v-text-field
+                v-model="contactPhone"
+                :label="contactPhone ? 'Phone Number *' : 'Enter Phone Number *'"
+                placeholder="09123456789 or +639123456789"
+                outlined
+                dense
+                type="tel"
+                :rules="[
+                  (v) => !!v || 'Phone number is required',
+                  (v) =>
+                    /^(09|\+639)\d{9}$/.test(v.replace(/\s+/g, '')) ||
+                    'Valid format: 09123456789 or +639123456789',
+                ]"
+                class="mb-3"
+                autofocus
+              ></v-text-field>
+
+              <div class="text-caption text-medium-emphasis mt-2">
+                * Required for delivery coordination
+              </div>
+            </div>
+          </v-card-text>
+          <v-card-actions class="contact-actions">
+            <v-btn text @click="showContactDialog = false" class="cancel-contact-btn">
+              Cancel
+            </v-btn>
+            <v-btn
+              color="primary"
+              variant="flat"
+              @click="updateContactInfo"
+              class="confirm-contact-btn"
+              :disabled="!contactPhone"
+            >
+              <v-icon left>{{ contactPhone ? 'mdi-content-save' : 'mdi-check' }}</v-icon>
+              {{ contactPhone ? 'Save Changes' : 'Add Contact' }}
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
     </v-main>
   </v-app>
 </template>
@@ -2484,5 +2950,94 @@ watch(
   font-size: 0.75rem;
   font-weight: 500;
   border: 1px solid #e1bee7;
+}
+/* Contact Dialog Styles */
+.contact-dialog {
+  border-radius: 16px !important;
+  overflow: hidden;
+}
+
+.contact-title {
+  text-align: center;
+  font-weight: 700 !important;
+  font-size: 1.1rem !important;
+  color: var(--primary-color);
+  padding: 20px 20px 0 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.contact-content {
+  padding: 16px 20px;
+}
+
+.contact-form {
+  max-width: 400px;
+  margin: 0 auto;
+}
+
+.contact-actions {
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 16px 20px 20px;
+}
+
+.cancel-contact-btn,
+.confirm-contact-btn {
+  min-width: 80px;
+}
+
+/* Validation Styles */
+.text-red {
+  color: #dc2626 !important;
+  font-weight: 500;
+}
+
+/* Responsive adjustments for contact button */
+@media (max-width: 600px) {
+  .contact-dialog {
+    margin: 8px !important;
+  }
+
+  .contact-title {
+    font-size: 1rem !important;
+    padding: 16px 16px 0 !important;
+  }
+
+  .contact-content {
+    padding: 12px 16px;
+  }
+
+  .contact-actions {
+    padding: 12px 16px 16px;
+  }
+}
+/* Add these styles to your existing CSS */
+.contact-section {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 6px 0;
+}
+
+.contact-edit-btn {
+  transition: transform 0.2s ease;
+}
+
+.contact-edit-btn:hover {
+  transform: scale(1.1);
+}
+
+/* Optional: Add a tooltip-like effect */
+.contact-section strong {
+  min-width: 65px;
+}
+
+/* If you want to make the contact section more prominent when missing */
+.contact-section .text-red {
+  font-weight: 500;
+  font-style: italic;
 }
 </style>
