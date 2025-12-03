@@ -220,10 +220,12 @@ const loadItems = async () => {
   // Method 1: Navigation state (from Buy Now)
   if (history.state?.items && history.state.items.length > 0) {
     console.log('📦 Items found in navigation state')
+
+    // Use quantity from state if available
     items.value = history.state.items.map((item) => ({
       ...item,
       product_id: item.product_id || item.id,
-      quantity: item.quantity || 1,
+      quantity: item.quantity || history.state.quantity || 1, // Use state quantity or item quantity or default to 1
       selectedSize: item.size || item.selectedSize,
       selectedVariety: item.variety || item.selectedVariety,
       varietyData:
@@ -239,6 +241,7 @@ const loadItems = async () => {
     fromCart.value = history.state.fromCart || false
 
     console.log('✅ Items processed from navigation state:', items.value)
+    console.log('✅ Quantities:', items.value.map(item => ({ name: item.name, quantity: item.quantity })))
     return
   }
 
@@ -262,6 +265,7 @@ const loadItems = async () => {
 }
 
 // 🛍️ FETCH SINGLE PRODUCT
+// In purchaseview.vue - Update fetchProductFromId function:
 const fetchProductFromId = async (productId: string) => {
   try {
     console.log('📡 Fetching product details for:', productId)
@@ -291,6 +295,9 @@ const fetchProductFromId = async (productId: string) => {
     // Check if we have variety selection from route query
     const selectedVariety = route.query.variety as string
     const selectedSize = route.query.size as string
+
+    const quantity = route.query.quantity ? parseInt(route.query.quantity as string) : 1
+
     let finalPrice = product.price
     let itemName = product.prod_name
     let varietyData = null
@@ -315,7 +322,6 @@ const fetchProductFromId = async (productId: string) => {
 
     // Transform product to item format
     const mainImage = getMainImage(product.main_img_urls)
-
     items.value = [
       {
         id: product.id,
@@ -323,7 +329,7 @@ const fetchProductFromId = async (productId: string) => {
         name: itemName,
         price: finalPrice,
         varietyPrice: finalPrice,
-        quantity: 1,
+        quantity: quantity,
         selectedSize: selectedSize,
         selectedVariety: selectedVariety,
         varietyData: varietyData,
@@ -519,7 +525,7 @@ const addNewAddress = () => {
 // 🏠 FORMAT ADDRESS FOR DISPLAY
 const formatAddress = (addr: any): string => {
   if (!addr) return 'No address set'
-  
+
   const addressParts = [
     addr.house_no,
     addr.building,
@@ -531,7 +537,7 @@ const formatAddress = (addr: any): string => {
     addr.region_name,
     addr.postal_code
   ].filter(Boolean) // Remove null/empty values
-  
+
   return addressParts.join(', ') || 'Address details not complete'
 }
 // 🕒 INITIALIZE DATE/TIME - IMPROVED
