@@ -1142,7 +1142,7 @@ const getTransactionNumber = (order: any): string => {
                         </v-col>
                       </v-row>
                       
-                      <!-- Show transaction details if available -->
+                      <!-- Show transaction details if available 
                       <div v-if="order.payments && order.payments.length > 0">
                         <v-row>
                           <v-col cols="12" sm="6">
@@ -1165,7 +1165,7 @@ const getTransactionNumber = (order: any): string => {
                           </v-col>
                         </v-row>
                       </div>
-                      
+                    -->
                       <!-- Show amount if available -->
                       <div v-if="order.payments && order.payments.length > 0 && order.payments[0].amount">
                         <div class="d-flex align-center mb-2">
