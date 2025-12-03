@@ -54,7 +54,7 @@ const convertTo12Hour = (time24: string) => {
   }
 }
 
-// Fetch orders
+// Enhanced fetchOrders function
 const fetchOrders = async () => {
   if (!shopId.value) {
     console.log('❌ No shop ID available')
@@ -67,108 +67,71 @@ const fetchOrders = async () => {
   try {
     console.log('🛍️ Fetching orders for shop:', shopId.value)
 
-    // Fetch basic orders
-    const { data: basicOrders, error: basicError } = await supabase
+    // Fetch orders with all necessary relationships
+    const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
-      .select('id, transaction_number, address_id, user_id, shop_id')
-      .eq('shop_id', shopId.value)
-
-    if (basicError) {
-      console.error('❌ Error fetching basic orders:', basicError)
-      throw basicError
-    }
-
-    console.log('🔍 Basic orders found:', basicOrders?.length || 0)
-
-    if (!basicOrders || basicOrders.length === 0) {
-      console.log('ℹ️ No orders found for this shop')
-      orders.value = []
-      return
-    }
-
-    // Extract IDs for related data
-    const orderIds = basicOrders.map((order) => order.id)
-    const addressIds = basicOrders.map((order) => order.address_id).filter(Boolean)
-    const userIds = basicOrders.map((order) => order.user_id).filter(Boolean)
-
-    // Fetch addresses separately
-    let addressesMap = new Map()
-    if (addressIds.length > 0) {
-      const { data: addressesData, error: addressesError } = await supabase
-        .from('addresses')
-        .select('*')
-        .in('id', addressIds)
-
-      if (!addressesError && addressesData) {
-        addressesData.forEach((addr) => {
-          addressesMap.set(addr.id, addr)
-        })
-      }
-    }
-
-    // Fetch profiles separately
-    let profilesMap = new Map()
-    if (userIds.length > 0) {
-      const { data: profilesData, error: profilesError } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('id', userIds)
-
-      if (!profilesError && profilesData) {
-        profilesData.forEach((profile) => {
-          profilesMap.set(profile.id, profile)
-        })
-      }
-    }
-
-    // Fetch order items with products
-    let orderItemsMap = new Map()
-    if (orderIds.length > 0) {
-      const { data: orderItemsData, error: orderItemsError } = await supabase
-        .from('order_items')
-        .select(
-          `
-          *,
+      .select(
+        `
+        *,
+        address:addresses (
+          id,
+          recipient_name,
+          phone,
+          building,
+          house_no,
+          street,
+          purok,
+          barangay_name,
+          city_name,
+          province_name,
+          region_name,
+          postal_code,
+          is_default
+        ),
+        user:profiles (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          phone
+        ),
+        order_items (
+          id,
+          product_id,
+          quantity,
+          price,
+          selected_size,
+          selected_variety,
+          variety_data,
+          created_at,
           product:products (
             id,
             prod_name,
+            prod_description,
             main_img_urls,
             price,
-            varieties
+            sizes,
+            varieties,
+            stock
           )
-        `,
+        ),
+        payments (
+          id,
+          amount,
+          status,
+          transaction_id,
+          payment_date,
+          method
         )
-        .in('order_id', orderIds)
-
-      if (!orderItemsError && orderItemsData) {
-        orderItemsData.forEach((item) => {
-          if (!orderItemsMap.has(item.order_id)) {
-            orderItemsMap.set(item.order_id, [])
-          }
-          orderItemsMap.get(item.order_id).push(item)
-        })
-      }
-    }
-
-    // Fetch complete order data
-    const { data: ordersData, error: ordersError } = await supabase
-      .from('orders')
-      .select('*')
+      `,
+      )
       .eq('shop_id', shopId.value)
       .order('created_at', { ascending: false })
 
     if (ordersError) throw ordersError
 
-    // Combine all data manually
-    const combinedOrders =
-      ordersData?.map((order) => ({
-        ...order,
-        addresses: addressesMap.get(order.address_id) || null,
-        profiles: profilesMap.get(order.user_id) || null,
-        order_items: orderItemsMap.get(order.id) || [],
-      })) || []
-
-    orders.value = combinedOrders
+    console.log('✅ Orders loaded:', ordersData?.length || 0)
+    orders.value = ordersData || []
   } catch (err) {
     console.error('❌ Error in fetchOrders:', err)
     ordersError.value = 'Error loading orders. Please try again.'
@@ -185,6 +148,7 @@ const approvePayment = async (orderId: string) => {
     const { error } = await supabase
       .from('orders')
       .update({
+        status: 'paid',
         payment_status: 'paid',
         updated_at: new Date().toISOString(),
       })
@@ -207,6 +171,7 @@ const markAsDelivered = async (orderId: string) => {
     const { error } = await supabase
       .from('orders')
       .update({
+        status: 'delivered',
         delivery_status: 'delivered',
         updated_at: new Date().toISOString(),
       })
@@ -221,28 +186,6 @@ const markAsDelivered = async (orderId: string) => {
     alert('❌ Failed to update delivery status')
   }
 }
-
-// Computed: Filtered orders based on selected filter - UPDATED for delivered orders
-const filteredOrders = computed(() => {
-  if (transactionFilter.value === 'all') {
-    return orders.value
-  }
-
-  return orders.value.filter((order) => {
-    switch (transactionFilter.value) {
-      case 'pending':
-        return order.payment_status === 'pending'
-      case 'paid':
-        return order.payment_status === 'paid' && order.delivery_status !== 'delivered'
-      case 'delivered':
-        return order.delivery_status === 'delivered'
-      case 'cancelled':
-        return order.status === 'cancelled' || order.payment_status === 'cancelled'
-      default:
-        return true
-    }
-  })
-})
 
 const cancelOrder = async (orderId: string) => {
   if (!confirm('Cancel this order? This action cannot be undone.')) return
@@ -268,32 +211,124 @@ const cancelOrder = async (orderId: string) => {
   }
 }
 
-// Status helpers
-const getStatusColor = (order: any) => {
-  if (order.status === 'cancelled') return 'error'
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'success'
-  if (order.payment_status === 'paid') return 'primary'
-  if (order.payment_status === 'pending') return 'warning'
-  return 'grey'
-}
+// Computed: Filtered orders based on selected filter
+const filteredOrders = computed(() => {
+  if (transactionFilter.value === 'all') {
+    return orders.value
+  }
 
-// Status helpers - UPDATED getStatusText function
-const getStatusText = (order: any) => {
-  if (order.status === 'cancelled') return 'Cancelled ❌'
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered')
-    return 'Completed ✅'
-  if (order.payment_status === 'paid' && order.delivery_status !== 'delivered')
-    return 'Approved - Ready for Delivery 🚚'
-  if (order.payment_status === 'pending') return 'Pending ⏳'
+  return orders.value.filter((order) => {
+    switch (transactionFilter.value) {
+      case 'pending':
+        return order.payment_status === 'pending' && order.status !== 'cancelled'
+      case 'paid':
+        return (
+          order.payment_status === 'paid' &&
+          order.delivery_status !== 'delivered' &&
+          order.status !== 'cancelled'
+        )
+      case 'delivered':
+        return order.delivery_status === 'delivered' || order.status === 'delivered'
+      case 'cancelled':
+        return order.status === 'cancelled' || order.payment_status === 'cancelled'
+      default:
+        return true
+    }
+  })
+})
+
+// Enhanced status helpers based on your schema
+const getStatusText = (order: any): string => {
+  // First check if order is cancelled
+  if (order.status === 'cancelled' || order.payment_status === 'cancelled') {
+    return 'Cancelled ❌'
+  }
+
+  // Check payment status
+  if (order.payment_status === 'pending') {
+    return 'Pending Payment ⏳'
+  }
+
+  if (order.payment_status === 'paid') {
+    // Check delivery status
+    if (order.delivery_status === 'delivered') {
+      return 'Delivered ✅'
+    }
+
+    if (order.delivery_status === 'shipped') {
+      return 'Shipped 🚚'
+    }
+
+    if (order.delivery_status === 'pending') {
+      return 'Paid - Ready for Dispatch 📦'
+    }
+
+    return 'Paid - Processing 📋'
+  }
+
+  // Fallback to general status
+  if (order.status === 'pending') return 'Order Placed 📝'
+  if (order.status === 'paid') return 'Payment Confirmed 💳'
+  if (order.status === 'shipped') return 'On the Way 🚚'
+  if (order.status === 'delivered') return 'Delivered ✅'
+
   return 'Processing 🔄'
 }
 
-const getStatusIcon = (order: any) => {
-  if (order.status === 'cancelled') return 'mdi-cancel'
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered')
+const getStatusColor = (order: any): string => {
+  if (order.status === 'cancelled' || order.payment_status === 'cancelled') {
+    return 'error'
+  }
+
+  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') {
+    return 'success'
+  }
+
+  if (order.payment_status === 'paid') {
+    return 'primary'
+  }
+
+  if (order.payment_status === 'pending') {
+    return 'warning'
+  }
+
+  // Fallback to general status colors
+  if (order.status === 'delivered') return 'success'
+  if (order.status === 'shipped') return 'info'
+  if (order.status === 'paid') return 'primary'
+  if (order.status === 'pending') return 'warning'
+
+  return 'grey'
+}
+
+const getStatusIcon = (order: any): string => {
+  if (order.status === 'cancelled' || order.payment_status === 'cancelled') {
+    return 'mdi-cancel'
+  }
+
+  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') {
     return 'mdi-check-circle'
-  if (order.payment_status === 'paid') return 'mdi-check'
-  return 'mdi-clock-outline'
+  }
+
+  if (order.payment_status === 'paid' && order.delivery_status === 'shipped') {
+    return 'mdi-truck'
+  }
+
+  if (order.payment_status === 'paid') {
+    return 'mdi-check'
+  }
+
+  if (order.payment_status === 'pending') {
+    return 'mdi-clock-outline'
+  }
+
+  // Fallback to general status icons
+  if (order.status === 'delivered') return 'mdi-check-circle'
+  if (order.status === 'shipped') return 'mdi-truck'
+  if (order.status === 'paid') return 'mdi-check'
+  if (order.status === 'pending') return 'mdi-clock-outline'
+
+  return 'mdi-help-circle'
 }
 
 const formatDate = (dateString: string) => {
@@ -304,6 +339,31 @@ const formatDate = (dateString: string) => {
     hour: '2-digit',
     minute: '2-digit',
   })
+}
+
+const formatPaymentInfo = (order: any): string => {
+  if (!order.payments || order.payments.length === 0) {
+    return 'No payment information'
+  }
+
+  const payment = order.payments[0]
+  return `${payment.method || 'Unknown'} - ${payment.status || 'Unknown'}`
+}
+
+const getPaymentStatus = (order: any): string => {
+  if (order.payment_status === 'paid') {
+    const payment = order.payments?.[0]
+    if (payment?.transaction_id) {
+      return `Transaction ID: ${payment.transaction_id}`
+    }
+    return 'Paid'
+  }
+
+  if (order.payment_status === 'pending') {
+    return 'Awaiting Payment'
+  }
+
+  return order.payment_status || 'Unknown'
 }
 
 const getMainImage = (imgUrls: any): string => {
@@ -326,7 +386,7 @@ const getMainImage = (imgUrls: any): string => {
 }
 
 // Enhanced address formatting
-const formatAddress = (address: any): string => {
+const formatFullAddress = (address: any): string => {
   if (!address) {
     return 'Address not available'
   }
@@ -411,6 +471,64 @@ const fetchShopData = async () => {
   }
 }
 
+const getOrderItemImage = (orderItem: any): string => {
+  // Try variety image first
+  if (orderItem.variety_data?.images && orderItem.variety_data.images.length > 0) {
+    const varietyImg = orderItem.variety_data.images[0]
+    if (varietyImg && varietyImg !== '/placeholder.png') {
+      return varietyImg
+    }
+  }
+
+  // Try product main image
+  if (orderItem.product?.main_img_urls) {
+    if (Array.isArray(orderItem.product.main_img_urls)) {
+      return orderItem.product.main_img_urls[0] || '/placeholder-product.png'
+    }
+
+    if (typeof orderItem.product.main_img_urls === 'string') {
+      try {
+        const parsed = JSON.parse(orderItem.product.main_img_urls)
+        return Array.isArray(parsed) ? parsed[0] : parsed
+      } catch {
+        return orderItem.product.main_img_urls
+      }
+    }
+  }
+
+  return '/placeholder-product.png'
+}
+
+const getProductDisplayName = (orderItem: any): string => {
+  if (!orderItem || !orderItem.product) {
+    return 'Product not available'
+  }
+
+  let productName = orderItem.product.prod_name || 'Unnamed Product'
+
+  // Add variety information if available
+  if (orderItem.selected_variety) {
+    productName += ` - ${orderItem.selected_variety}`
+  }
+
+  // Add size information if available
+  if (orderItem.selected_size) {
+    productName += ` (Size: ${orderItem.selected_size})`
+  }
+
+  return productName
+}
+
+const getProductPrice = (orderItem: any): number => {
+  return orderItem.price || orderItem.product?.price || 0
+}
+
+const getProductSubtotal = (orderItem: any): number => {
+  const price = getProductPrice(orderItem)
+  const quantity = orderItem.quantity || 1
+  return price * quantity
+}
+
 // Function to toggle between manual open/closed and auto mode
 const toggleShopStatus = async () => {
   try {
@@ -458,48 +576,6 @@ const toggleShopStatus = async () => {
   } finally {
     loading.value = false
   }
-}
-
-// Product display helpers
-const getProductDisplayName = (orderItem: any): string => {
-  if (!orderItem) return 'Product not available'
-
-  let productName = orderItem.product?.prod_name || 'Unnamed Product'
-
-  // Add variety information if available
-  if (orderItem.selected_variety) {
-    productName += ` - ${orderItem.selected_variety}`
-  }
-
-  // Add size information if available
-  if (orderItem.selected_size) {
-    productName += ` (Size: ${orderItem.selected_size})`
-  }
-
-  return productName
-}
-
-const getProductImage = (orderItem: any): string => {
-  // First try variety image
-  if (orderItem.variety_data?.images && orderItem.variety_data.images.length > 0) {
-    const varietyImg = orderItem.variety_data.images[0]
-    if (varietyImg && varietyImg !== '/placeholder.png') {
-      return varietyImg
-    }
-  }
-
-  // Fallback to product main image
-  return getMainImage(orderItem.product?.main_img_urls)
-}
-
-const getProductPrice = (orderItem: any): number => {
-  return orderItem.price || orderItem.product?.price || 0
-}
-
-const getProductSubtotal = (orderItem: any): number => {
-  const price = getProductPrice(orderItem)
-  const quantity = orderItem.quantity || 1
-  return price * quantity
 }
 
 // Helper to get current status display
@@ -624,6 +700,28 @@ watch(shopId, (newShopId) => {
     fetchOrders()
   }
 })
+
+// View in map
+const viewInMap = (orderId: string) => {
+  router.push({
+    name: 'order-map',
+    params: { id: orderId },
+  })
+}
+
+// Helper to get display transaction number
+const getTransactionNumber = (order: any): string => {
+  if (order.transaction_number) {
+    return order.transaction_number
+  }
+
+  // Fallback to order ID if no transaction number
+  if (order.id) {
+    return `ORDER-${order.id.substring(0, 8).toUpperCase()}`
+  }
+
+  return 'No Transaction Number'
+}
 </script>
 
 <template>
@@ -867,36 +965,53 @@ watch(shopId, (newShopId) => {
                   <div class="d-flex justify-space-between align-start mb-4">
                     <div>
                       <h4 class="text-h6 font-weight-bold text-primary">
-                        Order #: {{ order.transaction_number }}
+                        Order #: {{ getTransactionNumber(order) }}
                       </h4>
-                      <p class="text-caption text-medium-emphasis mt-1">
-                        <v-icon small class="mr-1">mdi-calendar</v-icon>
-                        {{ formatDate(order.created_at) }}
-                      </p>
+                      <div class="d-flex align-center flex-wrap gap-2 mt-1">
+                        <p class="text-caption text-medium-emphasis mb-0">
+                          <v-icon small class="mr-1">mdi-calendar</v-icon>
+                          {{ formatDate(order.created_at) }}
+                        </p>
+                        <v-divider vertical></v-divider>
+                        <p class="text-caption text-medium-emphasis mb-0">
+                          <v-icon small class="mr-1">mdi-receipt</v-icon>
+                          Order ID: {{ order.id.substring(0, 8) }}...
+                        </p>
+                      </div>
                     </div>
-                    <v-chip :color="getStatusColor(order)" size="small" variant="flat">
-                      <v-icon start small>{{ getStatusIcon(order) }}</v-icon>
-                      {{ getStatusText(order) }}
-                    </v-chip>
+                    <div class="text-right">
+                      <v-chip :color="getStatusColor(order)" size="small" variant="flat">
+                        <v-icon start small>{{ getStatusIcon(order) }}</v-icon>
+                        {{ getStatusText(order) }}
+                      </v-chip>
+                      <div class="mt-1">
+                        <p class="text-caption text-medium-emphasis">
+                          Total:
+                          <span class="font-weight-bold"
+                            >₱{{ order.total_amount?.toLocaleString() || '0' }}</span
+                          >
+                        </p>
+                      </div>
+                    </div>
                   </div>
 
-                  <!-- Customer Info - Reorganized for better mobile experience -->
+                  <!-- Customer Info -->
                   <v-card variant="outlined" class="customer-card pa-4 mb-4" rounded="lg">
                     <div class="d-flex align-center mb-3">
                       <v-avatar size="48" color="primary" class="mr-3">
                         <v-img
-                          v-if="order.profiles?.avatar_url"
-                          :src="order.profiles.avatar_url"
+                          v-if="order.user?.avatar_url"
+                          :src="order.user.avatar_url"
                           alt="Customer"
                         />
                         <span v-else class="text-white text-h6">
-                          {{ order.profiles?.first_name?.[0] }}{{ order.profiles?.last_name?.[0] }}
+                          {{ order.user?.first_name?.[0] }}{{ order.user?.last_name?.[0] }}
                         </span>
                       </v-avatar>
                       <div>
                         <h5 class="text-subtitle-1 font-weight-bold mb-1">Customer Information</h5>
                         <p class="text-caption text-medium-emphasis mb-0">
-                          {{ order.profiles?.first_name }} {{ order.profiles?.last_name }}
+                          {{ order.user?.first_name }} {{ order.user?.last_name }}
                         </p>
                       </div>
                     </div>
@@ -910,7 +1025,7 @@ watch(shopId, (newShopId) => {
                           <span class="text-caption font-weight-medium">Contact:</span>
                         </div>
                         <p class="text-body-2 ml-4 mb-3">
-                          {{ order.profiles?.phone || order.addresses?.phone || 'N/A' }}
+                          {{ order.address?.phone || order.user?.phone || 'N/A' }}
                         </p>
                       </v-col>
 
@@ -950,19 +1065,32 @@ watch(shopId, (newShopId) => {
 
                     <!-- Enhanced Address Display -->
                     <v-alert
-                      v-if="order.addresses"
+                      v-if="order.address"
                       type="info"
                       density="compact"
                       class="mt-3"
                       rounded="lg"
                     >
-                      <div class="d-flex align-start">
+                      <div class="d-flex align-start mb-2">
                         <v-icon color="info" class="mr-2 mt-1">mdi-map-marker</v-icon>
-                        <div>
+                        <div class="flex-grow-1">
                           <strong class="text-info">Delivery Address:</strong><br />
-                          {{ formatAddress(order.addresses) }}
+                          {{ formatFullAddress(order.address) }}
                         </div>
                       </div>
+
+                      <v-btn
+                        color="primary"
+                        size="x-small"
+                        variant="flat"
+                        @click="viewInMap(order.id)"
+                        rounded="lg"
+                        block
+                        class="mt-2"
+                      >
+                        <v-icon start small>mdi-map</v-icon>
+                        View in Map
+                      </v-btn>
                     </v-alert>
                     <v-alert
                       v-else-if="order.address_id"
@@ -988,6 +1116,67 @@ watch(shopId, (newShopId) => {
                         </div>
                       </div>
                     </v-alert>
+
+                    <!-- Payment Information -->
+                    <v-divider class="my-3"></v-divider>
+                    <div class="payment-info mb-3">
+                      <h6 class="text-subtitle-2 font-weight-bold mb-2">Payment Information</h6>
+                      <v-row>
+                        <v-col cols="12" sm="6">
+                          <div class="d-flex align-center mb-2">
+                            <v-icon size="18" class="mr-2 text-primary">mdi-credit-card</v-icon>
+                            <span class="text-caption font-weight-medium">Payment Method:</span>
+                          </div>
+                          <p class="text-body-2 ml-4">
+                            {{ order.payment_method || 'Not specified' }}
+                          </p>
+                        </v-col>
+                        <v-col cols="12" sm="6">
+                          <div class="d-flex align-center mb-2">
+                            <v-icon size="18" class="mr-2 text-primary">mdi-cash</v-icon>
+                            <span class="text-caption font-weight-medium">Payment Status:</span>
+                          </div>
+                          <p class="text-body-2 ml-4">
+                            {{ getPaymentStatus(order) }}
+                          </p>
+                        </v-col>
+                      </v-row>
+                      
+                      <!-- Show transaction details if available -->
+                      <div v-if="order.payments && order.payments.length > 0">
+                        <v-row>
+                          <v-col cols="12" sm="6">
+                            <div class="d-flex align-center mb-2">
+                              <v-icon size="18" class="mr-2 text-primary">mdi-receipt</v-icon>
+                              <span class="text-caption font-weight-medium">Transaction ID:</span>
+                            </div>
+                            <p class="text-body-2 ml-4">
+                              {{ order.payments[0].transaction_id || 'N/A' }}
+                            </p>
+                          </v-col>
+                          <v-col cols="12" sm="6">
+                            <div class="d-flex align-center mb-2">
+                              <v-icon size="18" class="mr-2 text-primary">mdi-calendar</v-icon>
+                              <span class="text-caption font-weight-medium">Payment Date:</span>
+                            </div>
+                            <p class="text-body-2 ml-4">
+                              {{ order.payments[0].payment_date ? formatDate(order.payments[0].payment_date) : 'N/A' }}
+                            </p>
+                          </v-col>
+                        </v-row>
+                      </div>
+                      
+                      <!-- Show amount if available -->
+                      <div v-if="order.payments && order.payments.length > 0 && order.payments[0].amount">
+                        <div class="d-flex align-center mb-2">
+                          <v-icon size="18" class="mr-2 text-primary">mdi-cash-multiple</v-icon>
+                          <span class="text-caption font-weight-medium">Amount Paid:</span>
+                        </div>
+                        <p class="text-body-2 ml-4">
+                          ₱{{ order.payments[0].amount?.toLocaleString() || '0' }}
+                        </p>
+                      </div>
+                    </div>
                   </v-card>
 
                   <!-- Order Items -->
@@ -1014,96 +1203,199 @@ watch(shopId, (newShopId) => {
                     </v-alert>
 
                     <!-- Order items list -->
-                    <v-card
+                    <div
                       v-for="orderItem in order.order_items"
                       :key="orderItem.id"
-                      variant="outlined"
-                      class="mb-3 order-item-card"
-                      rounded="lg"
+                      class="order-item-details"
                     >
-                      <v-card-text class="pa-3">
-                        <div class="d-flex align-center">
-                          <v-img
-                            :src="getProductImage(orderItem)"
-                            width="60"
-                            height="60"
-                            cover
-                            class="rounded-lg mr-3 product-image elevation-1"
-                            :alt="getProductDisplayName(orderItem)"
-                          />
-                          <div class="flex-grow-1">
-                            <h6 class="text-body-1 font-weight-medium mb-1">
-                              {{ getProductDisplayName(orderItem) }}
-                            </h6>
+                      <v-card variant="outlined" class="mb-3 order-item-card" rounded="lg">
+                        <v-card-text class="pa-3">
+                          <div class="d-flex align-start">
+                            <v-img
+                              :src="getOrderItemImage(orderItem)"
+                              width="80"
+                              height="80"
+                              cover
+                              class="rounded-lg mr-3 product-image elevation-1"
+                              :alt="getProductDisplayName(orderItem)"
+                            />
+                            <div class="flex-grow-1">
+                              <div class="d-flex justify-space-between align-start">
+                                <div>
+                                  <h6 class="text-body-1 font-weight-medium mb-1">
+                                    {{ getProductDisplayName(orderItem) }}
+                                  </h6>
 
-                            <div class="d-flex flex-wrap justify-space-between align-center mb-1">
-                              <p class="text-caption mb-1">
-                                <strong>Quantity:</strong> {{ orderItem.quantity || 1 }}
-                              </p>
-                              <p class="text-caption mb-1">
-                                <strong>Unit Price:</strong> ₱{{
-                                  getProductPrice(orderItem).toLocaleString()
-                                }}
-                              </p>
+                                  <!-- Product Variants -->
+                                  <div
+                                    v-if="orderItem.selected_size || orderItem.selected_variety"
+                                    class="mb-2"
+                                  >
+                                    <v-chip
+                                      v-if="orderItem.selected_size"
+                                      size="x-small"
+                                      class="mr-1 mb-1"
+                                      color="primary"
+                                      variant="outlined"
+                                    >
+                                      Size: {{ orderItem.selected_size }}
+                                    </v-chip>
+                                    <v-chip
+                                      v-if="orderItem.selected_variety"
+                                      size="x-small"
+                                      color="secondary"
+                                      variant="outlined"
+                                    >
+                                      {{ orderItem.selected_variety }}
+                                    </v-chip>
+                                  </div>
+
+                                  <!-- Product Description -->
+                                  <p
+                                    v-if="orderItem.product?.prod_description"
+                                    class="text-caption text-medium-emphasis mb-2"
+                                  >
+                                    {{ orderItem.product.prod_description.substring(0, 100) }}...
+                                  </p>
+                                </div>
+
+                                <!-- Price -->
+                                <div class="text-right">
+                                  <p class="text-caption text-medium-emphasis mb-1">Unit Price</p>
+                                  <p class="text-body-1 font-weight-bold text-primary">
+                                    ₱{{ getProductPrice(orderItem).toLocaleString() }}
+                                  </p>
+                                </div>
+                              </div>
+
+                              <!-- Quantity and Subtotal -->
+                              <div class="d-flex justify-space-between align-center mt-2">
+                                <div>
+                                  <span class="text-caption text-medium-emphasis mr-3"
+                                    >Quantity:</span
+                                  >
+                                  <span class="text-body-2 font-weight-medium">{{
+                                    orderItem.quantity || 1
+                                  }}</span>
+                                </div>
+                                <div>
+                                  <span class="text-caption text-medium-emphasis mr-2"
+                                    >Subtotal:</span
+                                  >
+                                  <span class="text-body-1 font-weight-bold text-primary">
+                                    ₱{{ getProductSubtotal(orderItem).toLocaleString() }}
+                                  </span>
+                                </div>
+                              </div>
                             </div>
+                          </div>
+                        </v-card-text>
+                      </v-card>
+                    </div>
 
-                            <div class="d-flex flex-wrap justify-space-between align-center">
-                              <div
-                                v-if="orderItem.selected_size || orderItem.selected_variety"
-                                class="text-caption mb-1"
-                              >
-                                <v-chip
-                                  v-if="orderItem.selected_size"
-                                  size="x-small"
-                                  class="mr-1"
-                                  color="primary"
-                                  variant="outlined"
-                                >
-                                  Size: {{ orderItem.selected_size }}
-                                </v-chip>
-                                <v-chip
-                                  v-if="orderItem.selected_variety"
-                                  size="x-small"
-                                  color="secondary"
-                                  variant="outlined"
-                                >
-                                  {{ orderItem.selected_variety }}
+                    <!-- Enhanced Order Summary -->
+                    <v-card variant="outlined" class="mt-4 summary-card" rounded="lg">
+                      <v-card-text class="pa-4">
+                        <v-row class="mb-3">
+                          <v-col cols="12" sm="6">
+                            <div class="text-left">
+                              <h6 class="text-subtitle-1 font-weight-bold mb-2">Order Summary</h6>
+                              <div class="text-caption text-medium-emphasis">
+                                <div class="d-flex justify-space-between mb-1">
+                                  <span>Transaction #:</span>
+                                  <span class="font-weight-medium">{{ getTransactionNumber(order) }}</span>
+                                </div>
+                                <div class="d-flex justify-space-between mb-1">
+                                  <span>Order Date:</span>
+                                  <span>{{ formatDate(order.created_at) }}</span>
+                                </div>
+                                <div class="d-flex justify-space-between mb-1">
+                                  <span>Items:</span>
+                                  <span>{{ order.order_items?.length || 0 }}</span>
+                                </div>
+                                <div class="d-flex justify-space-between mb-1">
+                                  <span>Total Units:</span>
+                                  <span>
+                                    {{
+                                      order.order_items?.reduce(
+                                        (total: number, item: any) => total + (item.quantity || 1),
+                                        0,
+                                      ) || 0
+                                    }}
+                                  </span>
+                                </div>
+                                <div class="d-flex justify-space-between mb-1">
+                                  <span>Payment Method:</span>
+                                  <span>{{ order.payment_method || 'Not specified' }}</span>
+                                </div>
+                                <div class="d-flex justify-space-between">
+                                  <span>Delivery Option:</span>
+                                  <span>{{ order.delivery_option || 'Not specified' }}</span>
+                                </div>
+                              </div>
+                            </div>
+                          </v-col>
+                          <v-col cols="12" sm="6">
+                            <div class="text-right">
+                              <h6 class="text-subtitle-2 text-medium-emphasis mb-2">
+                                Total Amount
+                              </h6>
+                              <h4 class="text-h4 font-weight-bold text-primary">
+                                ₱{{ order.total_amount?.toLocaleString() || '0' }}
+                              </h4>
+                              <p class="text-caption text-medium-emphasis mt-2">
+                                Including all applicable taxes and fees
+                              </p>
+                              <div class="mt-3">
+                                <v-chip size="small" :color="getStatusColor(order)" variant="flat">
+                                  <v-icon start small>{{ getStatusIcon(order) }}</v-icon>
+                                  {{ getStatusText(order) }}
                                 </v-chip>
                               </div>
-                              <p class="text-body-2 font-weight-bold text-primary mb-0">
-                                Subtotal: ₱{{ getProductSubtotal(orderItem).toLocaleString() }}
-                              </p>
                             </div>
-                          </div>
-                        </div>
-                      </v-card-text>
-                    </v-card>
+                          </v-col>
+                        </v-row>
 
-                    <!-- Order Summary -->
-                    <v-card variant="outlined" class="mt-3 summary-card" rounded="lg">
-                      <v-card-text class="pa-4">
-                        <div class="d-flex justify-space-between align-center">
-                          <div>
-                            <h6 class="text-subtitle-1 font-weight-bold">Order Summary</h6>
-                            <p class="text-caption text-medium-emphasis mb-0">
-                              {{ order.order_items?.length || 0 }} item{{
-                                order.order_items?.length !== 1 ? 's' : ''
-                              }}
-                              •
-                              {{
-                                order.order_items?.reduce(
-                                  (total: number, item: any) => total + (item.quantity || 1),
-                                  0,
-                                ) || 0
-                              }}
-                              total units
-                            </p>
-                          </div>
-                          <div class="text-right">
-                            <p class="text-caption text-medium-emphasis mb-1">Total Amount</p>
-                            <h4 class="text-h5 font-weight-bold text-primary">
-                              ₱{{ order.total_amount?.toLocaleString() || '0' }}
-                            </h4>
+                        <!-- Order Timeline -->
+                        <v-divider class="my-3"></v-divider>
+                        <div class="order-timeline mt-3">
+                          <h6 class="text-subtitle-2 font-weight-bold mb-2">Order Timeline</h6>
+                          <div class="timeline">
+                            <div class="timeline-item">
+                              <v-icon small color="primary">mdi-check-circle</v-icon>
+                              <span class="ml-2 text-caption"
+                                >Order Placed: {{ formatDate(order.created_at) }}</span
+                              >
+                            </div>
+                            <div
+                              v-if="order.updated_at && order.updated_at !== order.created_at"
+                              class="timeline-item"
+                            >
+                              <v-icon small :color="getStatusColor(order)">{{
+                                getStatusIcon(order)
+                              }}</v-icon>
+                              <span class="ml-2 text-caption"
+                                >Last Updated: {{ formatDate(order.updated_at) }}</span
+                              >
+                            </div>
+                            <div v-if="order.delivery_date" class="timeline-item">
+                              <v-icon small color="info">mdi-calendar</v-icon>
+                              <span class="ml-2 text-caption">
+                                Scheduled Delivery:
+                                {{
+                                  new Date(order.delivery_date).toLocaleDateString('en-US', {
+                                    weekday: 'short',
+                                    year: 'numeric',
+                                    month: 'short',
+                                    day: 'numeric',
+                                  })
+                                }}
+                                at
+                                {{
+                                  order.delivery_time ? convertTo12Hour(order.delivery_time) : ''
+                                }}
+                              </span>
+                            </div>
                           </div>
                         </div>
                       </v-card-text>
@@ -1129,11 +1421,11 @@ watch(shopId, (newShopId) => {
                     No special instructions from customer
                   </div>
 
-                  <!-- Action Buttons - Improved for mobile -->
+                  <!-- Action Buttons -->
                   <v-divider class="my-4"></v-divider>
                   <div class="order-actions">
                     <div class="d-flex flex-wrap gap-2 justify-center justify-sm-start my-2">
-                      <!-- Approve Payment Button - Only show for pending payments that aren't cancelled -->
+                      <!-- Approve Payment Button -->
                       <v-btn
                         color="success"
                         size="small"
@@ -1147,7 +1439,7 @@ watch(shopId, (newShopId) => {
                         Approve Payment
                       </v-btn>
 
-                      <!-- Mark as Delivered Button - Only show for paid orders that aren't delivered yet and aren't cancelled -->
+                      <!-- Mark as Delivered Button -->
                       <v-btn
                         color="info"
                         size="small"
@@ -1165,7 +1457,7 @@ watch(shopId, (newShopId) => {
                         Mark Delivered
                       </v-btn>
 
-                      <!-- Cancel Order Button - Only show for orders that aren't already cancelled -->
+                      <!-- Cancel Order Button -->
                       <v-btn
                         color="error"
                         size="small"
@@ -1179,7 +1471,7 @@ watch(shopId, (newShopId) => {
                         Cancel Order
                       </v-btn>
 
-                      <!-- View Details Button - Always show -->
+                      <!-- View Details Button -->
                       <v-btn
                         color="primary"
                         size="small"
@@ -1402,6 +1694,29 @@ watch(shopId, (newShopId) => {
   border: 1px solid #f44336;
 }
 
+/* New styles for enhanced order display */
+.order-item-details {
+  border-left: 3px solid #4285f4;
+  background: #f8f9fa;
+}
+
+.payment-info {
+  background: linear-gradient(135deg, #f1f8ff 0%, #e3f2fd 100%);
+  border-radius: 12px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+/* Enhanced status badges */
+.status-badge {
+  font-weight: 600;
+  padding: 4px 12px;
+  border-radius: 20px;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
 /* Responsive adjustments */
 @media (max-width: 960px) {
   .avatar-wrapper {
@@ -1476,6 +1791,16 @@ watch(shopId, (newShopId) => {
     flex: 0 0 100%;
     max-width: 100%;
   }
+
+  .order-item-details .d-flex {
+    flex-direction: column;
+  }
+
+  .order-item-details .v-img {
+    width: 100% !important;
+    height: 150px !important;
+    margin-bottom: 12px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1527,5 +1852,32 @@ watch(shopId, (newShopId) => {
 .orders-container {
   scrollbar-width: thin;
   scrollbar-color: #c1c1c1 #f1f1f1;
+}
+
+/* Order Timeline Styles */
+.order-timeline {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  border-radius: 8px;
+  padding: 12px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.timeline-item {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+}
+
+.timeline-item .v-icon {
+  margin-right: 8px;
+}
+
+.timeline-item span {
+  font-size: 0.75rem;
 }
 </style>

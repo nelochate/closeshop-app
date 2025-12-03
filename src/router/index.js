@@ -191,6 +191,15 @@ const routes = [
   name: 'orderdetails',
   component: () => import('@/mainsite/OrderDetails.vue'),
   props: true,
+},
+{
+  path: '/ordermap/:id',
+  name: 'order-map',
+  component: () => import('@/mainsite/OrderMapView.vue'),
+  meta: { 
+    requiresAuth: true,
+    requiresSeller: true // Optional: Add if you have seller-only routes
+  }
 }
 ]
 
