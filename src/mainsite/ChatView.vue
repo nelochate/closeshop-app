@@ -14,6 +14,9 @@ const newMessage = ref('')
 const otherUserProfile = ref<any>(null)
 const shopInfo = ref<any>(null)
 const loading = ref(true)
+const sending = ref(false)
+const sendError = ref<string | null>(null)
+
 let subscription: any = null
 let timeUpdateInterval: any = null
 
@@ -63,32 +66,86 @@ const fetchOtherUserInfo = async () => {
   }
 }
 
-// ✅ Fetch or create a conversation
+// ✅ Check authentication before any operation
+const checkAuth = async (): Promise<string | null> => {
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error) {
+      console.error('Auth error:', error)
+      return null
+    }
+    return user?.id || null
+  } catch (error) {
+    console.error('Unexpected auth error:', error)
+    return null
+  }
+}
+
+// ✅ Fetch or create a conversation with better error handling
 const getOrCreateConversation = async () => {
-  const { data: auth } = await supabase.auth.getUser()
-  if (!auth.user) return
-  userId.value = auth.user.id
+  try {
+    const currentUserId = await checkAuth()
+    if (!currentUserId) {
+      console.error('User not authenticated')
+      return
+    }
+    
+    userId.value = currentUserId
 
-  const { data: existing, error } = await supabase
-    .from('conversations')
-    .select('id')
-    .or(
-      `and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`,
-    )
-    .maybeSingle()
-
-  if (error) console.error('Conversation fetch error:', error)
-
-  if (existing) {
-    conversationId.value = existing.id
-  } else {
-    const { data: created, error: createErr } = await supabase
+    // Check if conversation already exists
+    const { data: existing, error: fetchError } = await supabase
       .from('conversations')
-      .insert({ user1: userId.value, user2: otherUserId })
       .select('id')
-      .single()
-    if (createErr) console.error('Conversation create error:', createErr)
-    conversationId.value = created?.id || null
+      .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+      .maybeSingle()
+
+    if (fetchError) {
+      console.error('Conversation fetch error:', fetchError)
+      return
+    }
+
+    if (existing) {
+      conversationId.value = existing.id
+      console.log('✅ Existing conversation found:', existing.id)
+    } else {
+      // Create new conversation
+      const { data: created, error: createError } = await supabase
+        .from('conversations')
+        .insert([
+          { 
+            user1: userId.value, 
+            user2: otherUserId,
+            created_at: new Date().toISOString()
+          }
+        ])
+        .select('id')
+        .single()
+
+      if (createError) {
+        console.error('Conversation create error:', createError)
+        
+        // If it's a duplicate key error, try to fetch again
+        if (createError.code === '23505') {
+          const { data: retry } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+            .maybeSingle()
+          
+          if (retry) {
+            conversationId.value = retry.id
+          }
+        }
+        return
+      }
+
+      if (created) {
+        conversationId.value = created.id
+        console.log('✅ New conversation created:', created.id)
+      }
+    }
+  } catch (error) {
+    console.error('❌ Unexpected error in getOrCreateConversation:', error)
   }
 }
 
@@ -96,14 +153,13 @@ const getOrCreateConversation = async () => {
 const extractProductIdFromOrder = (content: string): string | null => {
   console.log('🔍 Extracting product ID from:', content)
   
-  // Try multiple patterns to extract product ID
   const patterns = [
-    /Product ID:\s*([a-f0-9-]{36})/i, // "Product ID: uuid"
-    /product_id=([a-f0-9-]{36})/i, // "product_id=uuid"
-    /pid=([a-f0-9-]{36})/i, // "pid=uuid"
-    /ID:\s*([a-f0-9-]{36})/i, // "ID: uuid"
-    /product[:\s]+([a-f0-9-]{36})/i, // "product: uuid"
-    /item[:\s]+([a-f0-9-]{36})/i, // "item: uuid"
+    /Product ID:\s*([a-f0-9-]{36})/i,
+    /product_id=([a-f0-9-]{36})/i,
+    /pid=([a-f0-9-]{36})/i,
+    /ID:\s*([a-f0-9-]{36})/i,
+    /product[:\s]+([a-f0-9-]{36})/i,
+    /item[:\s]+([a-f0-9-]{36})/i,
   ]
   
   for (const pattern of patterns) {
@@ -146,7 +202,6 @@ const extractProductNameFromOrder = (content: string): string | null => {
 // ✅ NEW: Get product ID from order items table (MOST RELIABLE METHOD)
 const getProductIdFromOrderItems = async (orderContent: string): Promise<string | null> => {
   try {
-    // Extract order ID from the message
     const orderIdMatch = orderContent.match(/Transaction #:\s*([a-f0-9-]{36})/i)
     if (!orderIdMatch) {
       console.log('❌ No order ID found in message')
@@ -156,7 +211,6 @@ const getProductIdFromOrderItems = async (orderContent: string): Promise<string 
     const orderId = orderIdMatch[1]
     console.log('🔍 Found order ID:', orderId)
 
-    // Get the product ID from order_items table
     const { data: orderItems, error } = await supabase
       .from('order_items')
       .select('product_id')
@@ -214,7 +268,6 @@ const findProductById = async (productId: string): Promise<any> => {
 
     console.log('✅ Found product by ID:', product.prod_name)
     
-    // Fetch shop info
     if (product.shop_id) {
       const { data: shop } = await supabase
         .from('shops')
@@ -236,12 +289,10 @@ const findProductByName = async (productName: string): Promise<any> => {
   try {
     console.log('🔍 Searching for product by name:', productName)
     
-    // Clean product name
     const cleanProductName = productName.replace(/[^\w\s-]/g, '').trim()
     
     if (!cleanProductName) return null
 
-    // Try to find product
     let { data: products, error } = await supabase
       .from('products')
       .select(`
@@ -267,11 +318,9 @@ const findProductByName = async (productName: string): Promise<any> => {
       return null
     }
 
-    // Return the first match
     const product = products[0]
     console.log('✅ Found product by name:', product.prod_name)
     
-    // Fetch shop info
     if (product.shop_id) {
       const { data: shop } = await supabase
         .from('shops')
@@ -288,11 +337,16 @@ const findProductByName = async (productName: string): Promise<any> => {
   }
 }
 
+// ✅ Generate a fallback product ID if none is available
+const generateFallbackProductId = (): string => {
+  return `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+}
+
 // ✅ IMPROVED: Get guaranteed product info for order notification
 const getOrderProductInfo = async (content: string): Promise<{product: any, productId: string}> => {
   console.log('🛒 Processing order notification for product info')
   
-  // Strategy 1: Try to get product ID from order_items table (most reliable)
+  // Strategy 1: Try to get product ID from order_items table
   const orderProductId = await getProductIdFromOrderItems(content)
   if (orderProductId) {
     const product = await findProductById(orderProductId)
@@ -341,11 +395,6 @@ const getOrderProductInfo = async (content: string): Promise<{product: any, prod
   return { product: fallbackProduct, productId: fallbackProductId }
 }
 
-// ✅ Generate a fallback product ID if none is available
-const generateFallbackProductId = (): string => {
-  return `order-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
-}
-
 // ✅ IMPROVED: Load messages with guaranteed product info
 const loadMessages = async () => {
   if (!conversationId.value) return
@@ -373,7 +422,6 @@ const loadMessages = async () => {
       data.map(async (msg) => {
         console.log('💬 Processing message:', msg.id, 'Content:', msg.content)
 
-        // For product share messages
         if (msg.product_id) {
           try {
             const { data: product, error: productError } = await supabase
@@ -416,7 +464,6 @@ const loadMessages = async () => {
           }
         }
 
-        // For order notification messages - ALWAYS get product info
         if (isOrderNotification(msg.content)) {
           console.log('🛒 Processing order notification:', msg.id)
           const { product, productId } = await getOrderProductInfo(msg.content)
@@ -429,7 +476,7 @@ const loadMessages = async () => {
           return {
             ...msg,
             orderProduct: product,
-            orderProductId: productId // Store the guaranteed product ID
+            orderProductId: productId
           }
         }
 
@@ -462,7 +509,6 @@ const subscribeMessages = async () => {
         console.log('🆕 New message received:', payload.new)
         let newMessageWithData = { ...payload.new }
 
-        // For product share messages
         if (payload.new.product_id) {
           try {
             const { data: product } = await supabase
@@ -495,7 +541,6 @@ const subscribeMessages = async () => {
           }
         }
 
-        // For order notification messages - ALWAYS get product info
         if (isOrderNotification(payload.new.content)) {
           console.log('🛒 Processing new order notification')
           const { product, productId } = await getOrderProductInfo(payload.new.content)
@@ -523,30 +568,102 @@ const markMessageAsRead = async (messageId: string) => {
   }
 }
 
-// ✅ Send a regular text message
+// ✅ FIXED: Send a regular text message with workaround for notifications trigger
 const sendMessage = async () => {
-  if (!newMessage.value.trim() || !conversationId.value || !userId.value) return
-
-  const msg = {
-    conversation_id: conversationId.value,
-    sender_id: userId.value,
-    receiver_id: otherUserId,
-    content: newMessage.value,
-    is_read: false,
-    product_id: null,
-  }
+  if (sending.value) return
+  
+  sending.value = true
+  sendError.value = null
 
   try {
-    const { data, error } = await supabase.from('messages').insert([msg]).select('*').single()
-    if (!error) {
+    // Check authentication first
+    const currentUserId = await checkAuth()
+    if (!currentUserId) {
+      alert('Please sign in to send messages')
+      router.push('/login')
+      return
+    }
+
+    if (!newMessage.value.trim() || !conversationId.value) {
+      console.error('Cannot send message: missing required data')
+      return
+    }
+
+    const msg = {
+      conversation_id: conversationId.value,
+      sender_id: currentUserId,
+      receiver_id: otherUserId,
+      content: newMessage.value.trim(),
+      is_read: false,
+      product_id: null,
+    }
+
+    console.log('📤 Sending message:', msg)
+
+    // Try sending message directly with minimal columns to avoid trigger issues
+    const { data, error } = await supabase
+      .from('messages')
+      .insert([{
+        conversation_id: msg.conversation_id,
+        sender_id: msg.sender_id,
+        receiver_id: msg.receiver_id,
+        content: msg.content,
+        is_read: msg.is_read
+      }])
+      .select()
+      .single()
+
+    if (error) {
+      console.error('❌ Supabase error sending message:', error)
+      
+      // If it's a notifications trigger error, try alternative approach
+      if (error.message.includes('notifications')) {
+        console.log('⚠️ Notifications trigger error detected, trying alternative...')
+        
+        // Try without select to see if it works
+        const { error: simpleError } = await supabase
+          .from('messages')
+          .insert([{
+            conversation_id: msg.conversation_id,
+            sender_id: msg.sender_id,
+            receiver_id: msg.receiver_id,
+            content: msg.content,
+            is_read: msg.is_read,
+            product_id: null
+          }])
+        
+        if (simpleError) {
+          console.error('❌ Alternative insert also failed:', simpleError)
+          alert('Unable to send message due to database permissions. Please try again later.')
+        } else {
+          // If insert succeeded without select, manually add to messages array
+          const manualMsg = {
+            id: `temp-${Date.now()}`,
+            ...msg,
+            created_at: new Date().toISOString()
+          }
+          messages.value.push(manualMsg)
+          scrollToBottom()
+          console.log('✅ Message sent (manual fallback)')
+        }
+      } else {
+        alert(`Error sending message: ${error.message}`)
+      }
+      return
+    }
+
+    if (data) {
+      console.log('✅ Message sent successfully:', data)
       messages.value.push(data)
       scrollToBottom()
     }
   } catch (err) {
     console.error('❌ Unexpected error sending message:', err)
+    alert('Failed to send message. Please try again.')
+  } finally {
+    sending.value = false
+    newMessage.value = ''
   }
-
-  newMessage.value = ''
 }
 
 // ✅ Send a product message
@@ -578,12 +695,9 @@ const viewProduct = (productId: string) => {
   console.log('👁️ Viewing product with ID:', productId)
   
   if (productId && !productId.startsWith('order-')) {
-    // Normal product ID - navigate to product page using your route
-    // This works for both main products AND products with varieties
     console.log('✅ Navigating to product page:', productId)
     router.push(`/viewproduct/${productId}`)
   } else {
-    // Fallback product ID - show products catalog
     console.log('⚠️ Fallback product ID, showing product catalog')
     router.push('/products')
   }
@@ -593,26 +707,22 @@ const viewProduct = (productId: string) => {
 const getOrderProductId = (msg: any): string => {
   console.log('🔍 Getting product ID for message:', msg.id)
   
-  // Priority 1: Use the guaranteed product ID we stored
   if (msg.orderProductId) {
     console.log('✅ Using stored orderProductId:', msg.orderProductId)
     return msg.orderProductId
   }
   
-  // Priority 2: Use product ID from found product
   if (msg.orderProduct?.id) {
     console.log('✅ Using orderProduct.id:', msg.orderProduct.id)
     return msg.orderProduct.id
   }
   
-  // Priority 3: Extract from message content
   const extractedId = extractProductIdFromOrder(msg.content)
   if (extractedId) {
     console.log('✅ Using extracted ID:', extractedId)
     return extractedId
   }
   
-  // Final fallback: Generate a fallback ID
   const fallbackId = generateFallbackProductId()
   console.log('⚠️ Using fallback ID:', fallbackId)
   return fallbackId
@@ -713,7 +823,7 @@ onUnmounted(() => {
             :key="msg.id"
             :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
           >
-            <!-- Order Notification Message with ALWAYS WORKING View Product Button -->
+            <!-- Order Notification Message -->
             <div v-if="isOrderNotification(msg.content)" class="order-notification">
               <div class="notification-header">
                 <v-icon color="green" small>mdi-cart</v-icon>
@@ -723,7 +833,6 @@ onUnmounted(() => {
                 {{ msg.content }}
               </div>
               
-              <!-- ALWAYS WORKING View Product Button -->
               <div class="order-action-buttons">
                 <v-btn
                   color="primary"
@@ -756,7 +865,6 @@ onUnmounted(() => {
                   <div class="product-shop" v-if="msg.product.shop">
                     {{ msg.product.shop.business_name }}
                   </div>
-                  <!-- Show varieties indicator if product has varieties -->
                   <div v-if="msg.product.has_varieties" class="varieties-indicator">
                     <v-chip size="x-small" color="primary" variant="outlined">
                       <v-icon left small>mdi-palette</v-icon>
@@ -804,9 +912,15 @@ onUnmounted(() => {
         hide-details
         class="flex-grow-1"
         @keyup.enter="sendMessage"
-        :disabled="loading"
+        :disabled="loading || sending"
       />
-      <v-btn icon color="primary" @click="sendMessage" :disabled="!newMessage.trim() || loading">
+      <v-btn 
+        icon 
+        color="primary" 
+        @click="sendMessage" 
+        :disabled="!newMessage.trim() || loading || sending"
+        :loading="sending"
+      >
         <v-icon>mdi-send</v-icon>
       </v-btn>
     </v-footer>
