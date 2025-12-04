@@ -1643,7 +1643,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
 }
 
 .cover-placeholder {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #eeeeee 0%, #e5e2e9 100%);
   border-radius: 0 0 16px 16px;
   display: flex;
   align-items: center;
@@ -1687,14 +1687,14 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
 .status-toggle-btn {
   font-weight: 600;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(196, 187, 187, 0.1);
 }
 
 /* Action Button */
 .action-btn {
   background: linear-gradient(135deg, #667eea 0%, #5668af 100%);
   color: white;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.2);
+  box-shadow: 0 4px 15px rgba(255, 255, 255, 0.205);
   transition: all 0.3s ease;
   border: none;
 }
@@ -1858,19 +1858,15 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
 /* Dark mode support */
 @media (prefers-color-scheme: dark) {
-  .background-gradient {
-    background: linear-gradient(135deg, #1e1e2e 0%, #2d2d44 100%);
-  }
-
   .business-card,
   .info-card,
   .order-card {
-    background: #2d2d44;
-    border-color: #3d3d5c;
+    background: #ffffff;
+    border-color: #000000;
   }
 
   .customer-card {
-    background: #2a2a3e;
+    background: #ffffff;
     border-color: #3d3d5c;
   }
 }
@@ -1878,7 +1874,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
 /* High contrast mode */
 @media (prefers-contrast: high) {
   .border-top {
-    border-top: 2px solid #000;
+    border-top: 2px solid #ffffff;
   }
 
   .order-item-mobile {
