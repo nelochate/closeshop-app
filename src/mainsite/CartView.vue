@@ -175,14 +175,6 @@ const toggleShopSelection = (shopId) => {
   }
 }
 
-// ✅ Check if all items in a shop are selected
-const isShopAllSelected = (shopId) => {
-  const shop = shopGroups.value[shopId]
-  if (!shop || shop.items.length === 0) return false
-
-  return shop.items.every(item => selectedItems.value.includes(item.id))
-}
-
 // ✅ Check if some items in a shop are selected
 const isShopPartialSelected = (shopId) => {
   const shop = shopGroups.value[shopId]
@@ -255,7 +247,7 @@ const debugCart = () => {
     </v-app-bar>
 
     <v-main>
-      <v-container fluid class="pb-12">
+      <v-container fluid class="container pb-12">
         <!-- Loader -->
         <div v-if="loading" class="d-flex justify-center align-center pa-12">
           <v-progress-circular indeterminate color="primary" />
@@ -504,6 +496,10 @@ const debugCart = () => {
   position: sticky;
   top: 0;
   z-index: 1000;
+}
+
+.container {
+  margin-top: 16px;
 }
 
 .content {
