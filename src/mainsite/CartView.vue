@@ -10,7 +10,17 @@ const loading = ref(true)
 const cartItems = ref([]) // Replace cart store with local state
 const selectedItems = ref([])
 const shopSelection = ref({})
+const collapsedShops = ref({}) // Track which shops are collapsed
 
+// Toggle shop collapse state
+const toggleShopCollapse = (shopId) => {
+  collapsedShops.value[shopId] = !collapsedShops.value[shopId]
+}
+
+// Check if shop is collapsed
+const isShopCollapsed = (shopId) => {
+  return collapsedShops.value[shopId] === true
+}
 
 // Methods for navigation
 const goToCart = () => {
@@ -22,12 +32,11 @@ const goHome = () => {
 }
 
 const viewOrderDetails = () => {
-  // Navigate to order details page
-  router.push({ 
-    name: 'orderdetails', 
-    params: { id: orderId.value } 
-  })
+  // Navigate to order details page - you need to have an orderId to pass
+  // For now, we'll navigate to orders page
+  router.push({ name: 'orders' })
 }
+
 // ✅ Fetch cart directly - UPDATED TO INCLUDE VARIETY DATA
 const fetchCart = async () => {
   try {
@@ -48,12 +57,23 @@ const fetchCart = async () => {
           *,
           shop:shops (*)
         )
-      `,
+      `
       )
+      .eq('user_id', user.id) // Added filter for current user
       .order('created_at', { ascending: false })
 
     if (error) throw error
     cartItems.value = data || []
+    
+    // Initialize collapsed state for all shops (default: collapsed false)
+    if (data && data.length > 0) {
+      const shopIds = [...new Set(data.map(item => item.product?.shop?.id || item.product?.shop_id).filter(Boolean))]
+      shopIds.forEach(shopId => {
+        if (collapsedShops.value[shopId] === undefined) {
+          collapsedShops.value[shopId] = false // Default to expanded
+        }
+      })
+    }
     
     // Debug: Log cart items to see variety data
     console.log('🛒 Cart items loaded:', data)
@@ -130,6 +150,20 @@ const groupedItems = computed(() => {
 
   return groups
 })
+
+// ✅ Calculate shop subtotal
+const getShopSubtotal = (shopId) => {
+  const shopItems = groupedItems.value[shopId]?.items || []
+  return shopItems.reduce((total, item) => {
+    return total + (getItemPrice(item) * item.quantity)
+  }, 0)
+}
+
+// ✅ Calculate shop total items
+const getShopItemCount = (shopId) => {
+  const shopItems = groupedItems.value[shopId]?.items || []
+  return shopItems.reduce((total, item) => total + item.quantity, 0)
+}
 
 // ✅ Select all items in a shop
 const selectAllInShop = (shopId) => {
@@ -252,6 +286,22 @@ const getItemImage = (item) => {
   return item.product?.main_img_urls?.[0] || '/placeholder.png'
 }
 
+// ✅ Calculate subtotal for selected items
+const selectedSubtotal = computed(() => {
+  return selectedItems.value.reduce((total, itemId) => {
+    const item = cartItems.value.find(i => i.id === itemId)
+    if (item) {
+      return total + (getItemPrice(item) * item.quantity)
+    }
+    return total
+  }, 0)
+})
+
+// ✅ Calculate total items count
+const totalItemsCount = computed(() => {
+  return cartItems.value.reduce((total, item) => total + item.quantity, 0)
+})
+
 // ✅ Enhanced Checkout function with variety support
 const checkoutSelected = () => {
   const selectedCartItems = cartItems.value.filter(i => selectedItems.value.includes(i.id))
@@ -304,71 +354,222 @@ onMounted(async () => {
 </script>
 
 <template>
-  <v-container class="d-flex flex-column align-center justify-center text-center py-8">
-    <!-- Success Icon -->
-    <v-icon color="success" size="80" class="mb-4">
-      mdi-check-circle-outline
-    </v-icon>
-    
-    <!-- Success Message -->
-    <h2 class="text-h5 font-weight-bold mb-2">Order Placed Successfully!</h2>
-    <p class="text-body-1 mb-6">
-      Your order has been confirmed. You'll receive a confirmation email shortly.
-    </p>
-    
-    <!-- Order Details -->
-    <v-card class="mb-6" width="100%" max-width="400">
-      <v-card-text>
-        <div class="text-body-2 mb-2">
-          Order #: <strong>{{ orderId }}</strong>
+  <!-- This is now the actual cart view, not the success view -->
+  <v-app>
+    <!-- App Bar -->
+    <v-app-bar color="primary" flat dense>
+      <v-app-bar-nav-icon @click="goBack">
+        <v-icon color="white">mdi-arrow-left</v-icon>
+      </v-app-bar-nav-icon>
+      <v-app-bar-title class="text-h6 font-weight-bold text-white">
+        Shopping Cart ({{ totalItemsCount }})
+      </v-app-bar-title>
+    </v-app-bar>
+
+    <v-main>
+      <!-- Loading State -->
+      <div v-if="loading" class="d-flex justify-center align-center py-12">
+        <v-progress-circular indeterminate color="primary" size="64"></v-progress-circular>
+      </div>
+
+      <!-- Empty Cart -->
+      <div v-else-if="cartItems.length === 0" class="d-flex flex-column align-center justify-center py-16">
+        <v-icon size="120" color="grey-lighten-2" class="mb-4">mdi-cart-outline</v-icon>
+        <div class="text-h5 text-grey-darken-2 font-weight-medium mb-2">Your cart is empty</div>
+        <div class="text-body-1 text-grey mb-6">Add some products to get started</div>
+        <v-btn color="primary" @click="goHome" rounded="lg">
+          <v-icon left>mdi-store</v-icon>
+          Continue Shopping
+        </v-btn>
+      </div>
+
+      <!-- Cart Items -->
+      <div v-else>
+        <!-- Shop Groups -->
+        <div v-for="(group, shopId) in groupedItems" :key="shopId" class="shop-group">
+          <!-- Shop Header with Collapse Toggle -->
+          <v-card flat class="shop-header" @click="toggleShopCollapse(shopId)" style="cursor: pointer;">
+            <v-card-text class="d-flex align-center py-3">
+              <!-- Shop Selection Checkbox -->
+              <div @click.stop>
+                <v-checkbox
+                  :model-value="isShopAllSelected(shopId)"
+                  :indeterminate="isShopPartialSelected(shopId)"
+                  @click="selectAllInShop(shopId)"
+                  hide-details
+                  class="mr-2"
+                ></v-checkbox>
+              </div>
+              
+              <!-- Shop Logo -->
+              <v-avatar size="36" class="mr-3">
+                <v-img
+                  v-if="group.shop.logo_url"
+                  :src="group.shop.logo_url"
+                  :alt="group.shop.business_name"
+                ></v-img>
+                <v-icon v-else color="primary">mdi-store</v-icon>
+              </v-avatar>
+              
+              <!-- Shop Info -->
+              <div class="flex-grow-1">
+                <div class="d-flex justify-space-between align-center">
+                  <div>
+                    <div class="text-subtitle-1 font-weight-medium">{{ group.shop.business_name }}</div>
+                    <div class="text-caption text-grey">
+                      {{ getShopItemCount(shopId) }} item{{ getShopItemCount(shopId) !== 1 ? 's' : '' }} • ₱{{ getShopSubtotal(shopId).toFixed(2) }}
+                    </div>
+                  </div>
+                  <div class="d-flex align-center">
+                    <!-- Collapse/Expand Icon -->
+                    <v-icon :class="{ 'rotate-180': isShopCollapsed(shopId) }" class="transition-all">
+                      mdi-chevron-down
+                    </v-icon>
+                  </div>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+
+          <!-- Items in this Shop (Collapsible) -->
+          <v-expand-transition>
+            <div v-show="!isShopCollapsed(shopId)">
+              <v-card
+                v-for="item in group.items"
+                :key="item.id"
+                class="cart-item mb-2"
+                flat
+              >
+                <v-card-text class="pa-4">
+                  <div class="d-flex align-start">
+                    <!-- Item Selection Checkbox -->
+                    <div @click.stop>
+                      <v-checkbox
+                        :model-value="selectedItems.includes(item.id)"
+                        @click="toggleItemSelection(item.id, shopId)"
+                        hide-details
+                        class="mt-0 mr-3"
+                      ></v-checkbox>
+                    </div>
+
+                    <!-- Product Image -->
+                    <v-avatar size="80" rounded="lg" class="mr-4">
+                      <v-img
+                        :src="getItemImage(item)"
+                        :alt="getItemDisplayName(item)"
+                        cover
+                      ></v-img>
+                    </v-avatar>
+
+                    <!-- Product Details -->
+                    <div class="flex-grow-1">
+                      <!-- Product Name & Price -->
+                      <div class="d-flex justify-space-between mb-2">
+                        <div>
+                          <div class="text-body-1 font-weight-medium mb-1">
+                            {{ getItemDisplayName(item) }}
+                          </div>
+                          <div class="text-h6 text-primary">
+                            ₱{{ getItemPrice(item).toFixed(2) }}
+                          </div>
+                          <!-- Variant info -->
+                          <div v-if="item.selected_variety || item.selected_size" class="text-caption text-grey mt-1">
+                            <span v-if="item.selected_variety">{{ item.selected_variety }}</span>
+                            <span v-if="item.selected_variety && item.selected_size"> • </span>
+                            <span v-if="item.selected_size">Size: {{ item.selected_size }}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <!-- Quantity Controls -->
+                      <div class="d-flex align-center justify-space-between mt-3">
+                        <div class="d-flex align-center">
+                          <v-btn
+                            icon
+                            size="small"
+                            :disabled="item.quantity <= 1"
+                            @click="updateQuantity(item.id, item.quantity - 1)"
+                          >
+                            <v-icon>mdi-minus</v-icon>
+                          </v-btn>
+                          <div class="mx-3 text-body-1">{{ item.quantity }}</div>
+                          <v-btn
+                            icon
+                            size="small"
+                            @click="updateQuantity(item.id, item.quantity + 1)"
+                          >
+                            <v-icon>mdi-plus</v-icon>
+                          </v-btn>
+                        </div>
+                        
+                        <!-- Delete Button -->
+                        <v-btn
+                          icon
+                          size="small"
+                          color="error"
+                          @click="deleteFromCart(item.id)"
+                        >
+                          <v-icon>mdi-trash-can-outline</v-icon>
+                        </v-btn>
+                      </div>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </div>
+          </v-expand-transition>
+
+          <!-- Shop Footer (only shows when collapsed) -->
+          <v-card v-if="isShopCollapsed(shopId)" flat class="shop-footer mt-2">
+            <v-card-text class="py-3 text-center">
+              <div class="text-caption text-grey">
+                {{ group.items.length }} item{{ group.items.length !== 1 ? 's' : '' }} collapsed • 
+                Click to expand
+              </div>
+            </v-card-text>
+          </v-card>
         </div>
-        <div class="text-body-2 mb-2">
-          Total: <strong>₱{{ totalAmount.toFixed(2) }}</strong>
+
+        <!-- Checkout Bar -->
+        <div class="checkout-bar-wrapper">
+          <v-bottom-navigation class="checkout-bar" fixed>
+            <div class="d-flex align-center justify-space-between pa-4" style="width: 100%;">
+              <div>
+                <div class="text-subtitle-1 font-weight-bold">
+                  ₱{{ selectedSubtotal.toFixed(2) }}
+                </div>
+                <div class="text-caption text-grey">
+                  {{ selectedItems.length }} item{{ selectedItems.length !== 1 ? 's' : '' }} selected
+                </div>
+              </div>
+              <div class="d-flex gap-2">
+                <v-btn
+                  v-if="selectedItems.length > 0"
+                  color="error"
+                  variant="text"
+                  @click="deleteSelectedItems"
+                  :disabled="loading"
+                >
+                  Delete
+                </v-btn>
+                <v-btn
+                  color="primary"
+                  @click="checkoutSelected"
+                  :disabled="selectedItems.length === 0 || loading"
+                  :loading="loading"
+                >
+                  Checkout
+                </v-btn>
+              </div>
+            </div>
+          </v-bottom-navigation>
         </div>
-        <div class="text-body-2">
-          Estimated Delivery: <strong>{{ estimatedDelivery }}</strong>
-        </div>
-      </v-card-text>
-    </v-card>
-    
-    <!-- Action Buttons -->
-    <div class="d-flex flex-column gap-3" style="width: 100%; max-width: 400px;">
-      <!-- Go to Cart Button -->
-      <v-btn
-        color="primary"
-        variant="outlined"
-        @click="goToCart"
-        class="rounded-lg py-4"
-        block
-      >
-        <v-icon left>mdi-cart</v-icon>
-        Go to Cart
-      </v-btn>
-      
-      <!-- Continue Shopping Button -->
-      <v-btn
-        color="primary"
-        @click="goHome"
-        class="rounded-lg py-4"
-        block
-      >
-        <v-icon left>mdi-home</v-icon>
-        Go to Home
-      </v-btn>
-      
-      <!-- View Order Details Button -->
-      <v-btn
-        color="secondary"
-        variant="text"
-        @click="viewOrderDetails"
-        class="rounded-lg py-3"
-        block
-      >
-        <v-icon left>mdi-file-document-outline</v-icon>
-        View Order Details
-      </v-btn>
-    </div>
-  </v-container>
+      </div>
+    </v-main>
+
+    <!-- Bottom Navigation -->
+    <BottomNav :activeTab="activeTab" />
+  </v-app>
 </template>
 
 <style scoped>
@@ -388,16 +589,37 @@ onMounted(async () => {
 
 .cart-item {
   background: #fff;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  transition: all 0.3s ease;
+}
+
+.cart-item:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-1px);
 }
 
 .shop-header {
-  background: #f5f5f5;
-  border-bottom: 1px solid #e0e0e0;
-  margin-top: 8px;
+  background: #f8f9fa;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  margin-top: 12px;
+  transition: all 0.3s ease;
+}
+
+.shop-header:hover {
+  background: #e9ecef;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
 }
 
 .shop-group {
   margin-bottom: 16px;
+}
+
+.shop-footer {
+  background: #f8f9fa;
+  border: 1px dashed #dee2e6;
+  border-radius: 8px;
 }
 
 .checkout-bar {
@@ -408,5 +630,56 @@ onMounted(async () => {
   background: #fff;
   z-index: 1100;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
+  border-top: 1px solid #e0e0e0;
+}
+
+.checkout-bar-wrapper {
+  padding-bottom: 120px; /* Space for checkout bar */
+}
+
+/* Rotate animation for collapse icon */
+.rotate-180 {
+  transform: rotate(180deg);
+}
+
+.transition-all {
+  transition: all 0.3s ease;
+}
+
+/* Improved scroll area */
+.v-main {
+  padding-bottom: 120px;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 600px) {
+  .shop-header .text-subtitle-1 {
+    font-size: 0.9rem;
+  }
+  
+  .cart-item .v-avatar {
+    width: 70px !important;
+    height: 70px !important;
+  }
+  
+  .v-card-text {
+    padding: 12px !important;
+  }
+  
+  .checkout-bar .v-btn {
+    min-width: 80px;
+  }
+}
+
+/* Add smooth transitions for collapsed sections */
+.v-expand-transition-enter-active,
+.v-expand-transition-leave-active {
+  transition: all 0.3s ease;
+}
+
+.v-expand-transition-enter-from,
+.v-expand-transition-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
 }
 </style>
