@@ -7,7 +7,7 @@ import '@mdi/font/css/materialdesignicons.css'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import { useNotificationStore } from '@/stores/notification'
-
+import 'mapbox-gl/dist/mapbox-gl.css'//for mapbox
 //import pwa elements
 import {defineCustomElements} from '@ionic/pwa-elements/loader';
 //initialize pwa elements
