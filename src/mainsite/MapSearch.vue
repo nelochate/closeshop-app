@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { ref, onMounted, watch, onUnmounted, nextTick } from 'vue'
-import L from 'leaflet'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@/composables/useGeolocation'
 import { Capacitor } from '@capacitor/core'
@@ -8,9 +7,11 @@ import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
 
+// Import Mapbox - use dynamic import to avoid SSR issues
+let mapboxgl: any = null
+
 /* -------------------- MAPBOX CONFIG -------------------- */
-const MAPBOX_ACCESS_TOKEN =
-  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 /* -------------------- ROUTE OPTIONS INTERFACE -------------------- */
 interface RouteOption {
@@ -24,9 +25,7 @@ interface RouteOption {
 
 /* -------------------- STATE -------------------- */
 const activeTab = ref('map')
-const cityBoundaryLayer = ref<L.GeoJSON | null>(null)
-const cityBoundaryPolygon = ref<L.Polygon | null>(null)
-const map = ref<L.Map | null>(null)
+const map = ref<any>(null)
 const router = useRouter()
 const search = ref('')
 const shops = ref<any[]>([])
@@ -46,40 +45,54 @@ const isSearchMode = ref(false)
 const boundaryLoading = ref(false)
 const hasValidLocation = ref(false)
 const selectedShopId = ref<string | null>(null)
+const showBoundary = ref(true)
+
+/* -------------------- ROUTE TYPE SELECTOR -------------------- */
+type RouteType = 'driving' | 'walking' | 'cycling'
+const selectedRouteType = ref<RouteType>('driving') // Default to driving
+const routeOptions = ref<RouteOption[]>([]) // All calculated routes
+const showRoutePanel = ref(false) // Control visibility of route panel
+
+/* -------------------- ROUTE CONFIG -------------------- */
+const routeConfig = {
+  driving: {
+    label: 'Car',
+    icon: 'mdi-car',
+    color: '#3b82f6',
+    activeColor: '#1d4ed8'
+  },
+  walking: {
+    label: 'Walking',
+    icon: 'mdi-walk',
+    color: '#10b981',
+    activeColor: '#059669'
+  },
+  cycling: {
+    label: 'Cycling',
+    icon: 'mdi-bike',
+    color: '#f59e0b',
+    activeColor: '#d97706'
+  }
+}
 
 /* -------------------- GEOLOCATION -------------------- */
 const { latitude, longitude, requestPermission, startWatching, stopWatching } = useGeolocation()
-let userMarker: L.Marker | null = null
-let shopMarkers: L.Marker[] = []
+let userMarker: any = null
+let shopMarkers: any[] = []
+let cityBoundarySourceId: string | null = null
 const locating = ref(false)
 let fetchTimeout: number | null = null
 
-/* -------------------- ICONS -------------------- */
-const userIcon = L.icon({
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-})
-
-const registeredShopIcon = L.icon({
-  iconUrl:
-    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-red.png',
-  iconSize: [25, 41],
-  iconAnchor: [12, 41],
-})
-
-const highlightedShopIcon = L.icon({
-  iconUrl:
-    'https://cdn.jsdelivr.net/gh/pointhi/leaflet-color-markers@master/img/marker-icon-gold.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-  iconSize: [30, 46],
-  iconAnchor: [15, 46],
-})
-
 /* -------------------- MAP INITIALIZATION -------------------- */
-const initializeMap = (): Promise<void> => {
-  return new Promise((resolve) => {
+const initializeMap = async (): Promise<void> => {
+  try {
+    // Dynamically import mapbox-gl to avoid SSR issues
+    if (typeof window !== 'undefined') {
+      const mapboxModule = await import('mapbox-gl')
+      mapboxgl = mapboxModule.default
+      mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN
+    }
+
     if (map.value) {
       try {
         map.value.remove()
@@ -89,68 +102,129 @@ const initializeMap = (): Promise<void> => {
       map.value = null
     }
 
-    nextTick(() => {
-      try {
-        const mapContainer = document.getElementById('map')
-        if (!mapContainer) {
-          console.error('Map container not found')
-          resolve()
-          return
-        }
+    await nextTick()
 
-        // Clear container
-        mapContainer.innerHTML = ''
+    const mapContainer = document.getElementById('map')
+    if (!mapContainer) {
+      console.error('Map container not found')
+      return
+    }
+    
+    // Clear container
+    mapContainer.innerHTML = ''
 
-        map.value = L.map('map', {
-          center: [8.95, 125.53], // Default center (Philippines)
-          zoom: 13,
-          zoomControl: false,
-          attributionControl: true,
-          fadeAnimation: true,
-          markerZoomAnimation: true,
-        })
+    // Load cached location
+    loadCachedLocation()
+    const initialCenter = lastKnown.value ?? [8.95, 125.53]
 
-        // Add tile layer
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-          attribution: '© OpenStreetMap contributors',
-          maxZoom: 19,
-        }).addTo(map.value)
+    // Create map
+    map.value = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: [initialCenter[1], initialCenter[0]], // Mapbox uses [lng, lat]
+      zoom: 13,
+      attributionControl: false,
+      interactive: true,
+      pitchWithRotate: false,
+      dragRotate: false,
+      touchZoomRotate: true,
+      maxZoom: 19,
+      minZoom: 3,
+    })
 
-        // Add zoom control
-        L.control
-          .zoom({
-            position: 'topright',
-          })
-          .addTo(map.value)
+    // Add navigation control
+    map.value.addControl(
+      new mapboxgl.NavigationControl({
+        showCompass: false,
+        showZoom: true,
+        visualizePitch: false,
+      }),
+      'top-right'
+    )
 
-        // Load cached location
-        loadCachedLocation()
-        const placeholder = lastKnown.value ?? [8.95, 125.53]
+    // Add geolocate control
+    const geolocate = new mapboxgl.GeolocateControl({
+      positionOptions: {
+        enableHighAccuracy: true,
+      },
+      trackUserLocation: true,
+      showUserLocation: true,
+      showAccuracyCircle: true,
+    })
+    map.value.addControl(geolocate, 'top-right')
 
-        // Create user marker
-        userMarker = L.marker(placeholder, {
-          icon: userIcon,
-          zIndexOffset: 1000,
-        })
-          .addTo(map.value)
-          .bindPopup(lastKnown.value ? 'Last known location' : 'Locating you...')
+    // Add attribution
+    map.value.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
 
-        // Force map resize
-        setTimeout(() => {
-          map.value?.invalidateSize(true)
-          mapInitialized.value = true
-          console.log('Map initialized successfully')
-          resolve()
-        }, 100)
-      } catch (error) {
-        console.error('Error initializing map:', error)
-        resolve()
+    // Handle map load
+    map.value.on('load', async () => {
+      console.log('Mapbox map loaded successfully')
+      mapInitialized.value = true
+      
+      // Add user marker
+      createUserMarker(initialCenter[0], initialCenter[1])
+      
+      // Force map resize
+      setTimeout(() => {
+        map.value?.resize()
+      }, 100)
+      
+      // Load city boundary if we have location
+      if (lastKnown.value) {
+        await highlightUserCityBoundary(lastKnown.value[0], lastKnown.value[1])
       }
     })
-  })
+
+    // Handle map errors
+    map.value.on('error', (e: any) => {
+      console.error('Mapbox error:', e)
+    })
+
+    console.log('Map initialized successfully')
+  } catch (error) {
+    console.error('Error initializing map:', error)
+  }
 }
 
-/* -------------------- CITY BOUNDARY DETECTION -------------------- */
+/* -------------------- USER MARKER -------------------- */
+const createUserMarker = (lat: number, lng: number) => {
+  if (!map.value || !mapboxgl) return
+
+  // Remove existing marker
+  if (userMarker) {
+    userMarker.remove()
+  }
+
+  // Create custom HTML marker
+  const el = document.createElement('div')
+  el.className = 'user-marker'
+  el.innerHTML = `
+    <div class="user-marker-pulse"></div>
+    <div class="user-marker-inner">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="#3B82F6">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+      </svg>
+    </div>
+  `
+
+  userMarker = new mapboxgl.Marker({
+    element: el,
+    anchor: 'center',
+  })
+    .setLngLat([lng, lat])
+    .addTo(map.value)
+
+  // Add popup
+  const popup = new mapboxgl.Popup({
+    closeButton: false,
+    offset: 25,
+    className: 'user-popup',
+  }).setHTML('<div class="p-2"><strong>You are here</strong></div>')
+
+  userMarker.setPopup(popup)
+}
+
+/* -------------------- CITY BOUNDARY DETECTION & DISPLAY -------------------- */
 const detectUserCity = async (lat: number, lng: number): Promise<string | null> => {
   try {
     console.log('Detecting city for:', lat, lng)
@@ -187,32 +261,42 @@ const detectUserCity = async (lat: number, lng: number): Promise<string | null> 
   }
 }
 
-const fetchCityBoundary = async (cityName: string): Promise<any> => {
+const fetchCityBoundaryData = async (cityName: string): Promise<any> => {
   try {
-    console.log('Fetching boundary for:', cityName)
+    console.log('Fetching boundary data for:', cityName)
 
-    // Use OpenStreetMap Nominatim for boundary data
+    // Use Nominatim OpenStreetMap API for city boundaries
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName)}&format=json&polygon_geojson=1&limit=1`,
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName + ', Philippines')}&format=json&polygon_geojson=1&addressdetails=1`,
     )
 
     if (!response.ok) throw new Error('Boundary fetch failed')
 
     const data = await response.json()
-    console.log('Boundary data:', data)
+    console.log('Boundary data from Nominatim:', data)
 
-    if (data && data.length > 0 && data[0].geojson) {
-      return {
-        type: 'Feature',
-        geometry: data[0].geojson,
-        properties: {
-          name: cityName,
-          display_name: data[0].display_name,
-        },
+    if (data && data.length > 0) {
+      // Try to find a result with polygon data
+      const cityData = data.find((item: any) => 
+        item.geojson && 
+        (item.geojson.type === 'Polygon' || item.geojson.type === 'MultiPolygon') &&
+        (item.type === 'administrative' || item.class === 'boundary')
+      )
+
+      if (cityData && cityData.geojson) {
+        return {
+          type: 'Feature',
+          geometry: cityData.geojson,
+          properties: {
+            name: cityData.display_name,
+            osm_type: cityData.osm_type,
+            osm_id: cityData.osm_id,
+          },
+        }
       }
     }
 
-    // Fallback: Create circular boundary
+    // Fallback to circular boundary
     console.log('Using circular boundary as fallback')
     return createCircularBoundary(latitude.value!, longitude.value!)
   } catch (error) {
@@ -245,7 +329,7 @@ const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) 
         Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(newLat),
       )
 
-    coordinates.push([(newLat * 180) / Math.PI, (newLng * 180) / Math.PI])
+    coordinates.push([(newLng * 180) / Math.PI, (newLat * 180) / Math.PI]) // [lng, lat]
   }
 
   coordinates.push(coordinates[0]) // Close polygon
@@ -264,8 +348,8 @@ const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) 
 }
 
 const highlightUserCityBoundary = async (lat: number, lng: number) => {
-  if (!map.value) {
-    console.error('Map not available for boundary highlighting')
+  if (!map.value || !mapboxgl || !showBoundary.value) {
+    console.log('Boundary display is disabled or map not available')
     return
   }
 
@@ -288,7 +372,7 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
     }
 
     // Fetch boundary data
-    const boundaryData = await fetchCityBoundary(detectedCity)
+    const boundaryData = await fetchCityBoundaryData(detectedCity)
 
     if (!boundaryData) {
       console.warn('Could not fetch boundary data')
@@ -297,53 +381,87 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
       return
     }
 
-    // Create and style the boundary layer
-    cityBoundaryLayer.value = L.geoJSON(boundaryData, {
-      style: {
-        fillColor: '#3b82f6',
-        fillOpacity: 0.1,
-        color: '#3b82f6',
-        weight: 3,
-        opacity: 0.8,
-        dashArray: '10, 10',
-        className: 'city-boundary',
-      },
-      onEachFeature: (feature, layer) => {
-        if (feature.properties) {
-          const popupContent = feature.properties.isFallback
-            ? `<div style="text-align: center;">
-                 <strong>${feature.properties.name}</strong><br>
-                 <small>Approximate boundary (5km radius)</small>
-               </div>`
-            : `<div style="text-align: center;">
-                 <strong>${feature.properties.name}</strong><br>
-                 <small>${feature.properties.display_name || ''}</small>
-               </div>`
+    // Add boundary source to map
+    const sourceId = 'city-boundary-source'
+    const fillLayerId = 'city-boundary-fill'
+    const lineLayerId = 'city-boundary-line'
 
-          layer.bindPopup(popupContent)
-        }
-      },
-    }).addTo(map.value)
-
-    // Store the polygon for spatial queries
-    const layers = cityBoundaryLayer.value.getLayers()
-    if (layers.length > 0 && layers[0] instanceof L.Polygon) {
-      cityBoundaryPolygon.value = layers[0] as L.Polygon
-    }
-
-    // Fit map to show boundary and user location
-    const bounds = cityBoundaryLayer.value.getBounds()
-    if (bounds.isValid()) {
-      bounds.extend([lat, lng]) // Include user location
-      map.value.fitBounds(bounds.pad(0.1), {
-        animate: true,
-        duration: 1,
-        maxZoom: 15,
-        padding: [20, 20],
+    if (!map.value.getSource(sourceId)) {
+      map.value.addSource(sourceId, {
+        type: 'geojson',
+        data: boundaryData,
       })
     } else {
-      // Fallback: Center on user
-      map.value.setView([lat, lng], 14, { animate: true, duration: 1 })
+      const source = map.value.getSource(sourceId)
+      source.setData(boundaryData)
+    }
+
+    // Add fill layer if not exists
+    if (!map.value.getLayer(fillLayerId)) {
+      map.value.addLayer({
+        id: fillLayerId,
+        type: 'fill',
+        source: sourceId,
+        paint: {
+          'fill-color': '#3b82f6',
+          'fill-opacity': 0.1,
+          'fill-outline-color': '#3b82f6',
+        },
+      })
+    }
+
+    // Add line layer if not exists
+    if (!map.value.getLayer(lineLayerId)) {
+      map.value.addLayer({
+        id: lineLayerId,
+        type: 'line',
+        source: sourceId,
+        paint: {
+          'line-color': '#3b82f6',
+          'line-width': 3,
+          'line-opacity': 0.8,
+          'line-dasharray': [2, 2],
+        },
+      })
+    }
+
+    // Fit map to boundary
+    try {
+      const bounds = new mapboxgl.LngLatBounds()
+      
+      if (boundaryData.geometry.type === 'Polygon') {
+        boundaryData.geometry.coordinates[0].forEach((coord: [number, number]) => {
+          bounds.extend(coord)
+        })
+      } else if (boundaryData.geometry.type === 'MultiPolygon') {
+        boundaryData.geometry.coordinates[0][0].forEach((coord: [number, number]) => {
+          bounds.extend(coord)
+        })
+      } else if (boundaryData.geometry.type === 'Point') {
+        bounds.extend(boundaryData.geometry.coordinates as [number, number])
+      }
+      
+      // Include user location
+      bounds.extend([lng, lat])
+      
+      // Only fit bounds if we have valid bounds
+      if (bounds.getNorth() !== bounds.getSouth() && bounds.getEast() !== bounds.getWest()) {
+        map.value.fitBounds(bounds, {
+          padding: 50,
+          animate: true,
+          duration: 1000,
+          maxZoom: 15,
+        })
+      }
+    } catch (boundsError) {
+      console.warn('Could not fit bounds to boundary:', boundsError)
+      // Fallback to centering on user
+      map.value.flyTo({
+        center: [lng, lat],
+        zoom: 13,
+        animate: true,
+        duration: 1000,
+      })
     }
 
     setErrorMessage(`Showing shops in ${detectedCity}`, 3000)
@@ -357,18 +475,38 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
 }
 
 const clearCityBoundary = () => {
-  if (cityBoundaryLayer.value) {
-    map.value?.removeLayer(cityBoundaryLayer.value)
-    cityBoundaryLayer.value = null
-  }
+  if (!map.value || !mapboxgl) return
 
-  if (cityBoundaryPolygon.value) {
-    map.value?.removeLayer(cityBoundaryPolygon.value)
-    cityBoundaryPolygon.value = null
+  // Remove layers
+  const layers = ['city-boundary-fill', 'city-boundary-line']
+  layers.forEach(layerId => {
+    if (map.value.getLayer(layerId)) {
+      map.value.removeLayer(layerId)
+    }
+  })
+
+  // Remove source
+  const sourceId = 'city-boundary-source'
+  if (map.value.getSource(sourceId)) {
+    map.value.removeSource(sourceId)
   }
 
   userCity.value = null
-  setErrorMessage('City boundary cleared')
+  console.log('City boundary cleared')
+}
+
+const toggleBoundaryVisibility = () => {
+  showBoundary.value = !showBoundary.value
+  
+  if (showBoundary.value && latitude.value && longitude.value) {
+    // Redraw boundary if turned on
+    highlightUserCityBoundary(latitude.value, longitude.value)
+  } else {
+    // Clear boundary if turned off
+    clearCityBoundary()
+  }
+  
+  setErrorMessage(showBoundary.value ? 'City boundary enabled' : 'City boundary disabled', 2000)
 }
 
 /* -------------------- BOUNDARY CHECK -------------------- */
@@ -382,13 +520,6 @@ const isShopWithinBoundary = (shop: any): boolean => {
 
   if (!isFinite(shopLat) || !isFinite(shopLng)) {
     return isShopInSameCity(shop)
-  }
-
-  // If we have a boundary polygon, use bounds check
-  if (cityBoundaryPolygon.value) {
-    const shopPoint = L.latLng(shopLat, shopLng)
-    const bounds = cityBoundaryPolygon.value.getBounds()
-    return bounds.contains(shopPoint)
   }
 
   // Fallback to city name matching
@@ -443,7 +574,7 @@ function saveCachedLocation(lat: number, lng: number) {
 
 /* -------------------- RECENTER -------------------- */
 const recenterToUser = async () => {
-  if (!map.value) return
+  if (!map.value || !mapboxgl) return
 
   locating.value = true
   errorMsg.value = null
@@ -476,14 +607,15 @@ const recenterToUser = async () => {
 
     // Update user marker
     if (userMarker) {
-      userMarker.setLatLng([targetLat, targetLng])
-      userMarker.setPopupContent('You are here')
+      userMarker.setLngLat([targetLng, targetLat])
     }
 
     // Center map
-    map.value.setView([targetLat, targetLng], 16, {
-      animate: true,
-      duration: 0.5,
+    map.value.flyTo({
+      center: [targetLng, targetLat],
+      zoom: 16,
+      essential: true,
+      duration: 1000,
     })
 
     // Save and refresh boundary
@@ -498,11 +630,8 @@ const recenterToUser = async () => {
 }
 
 /* -------------------- ROUTE MANAGEMENT -------------------- */
-let currentRouteLayers: L.Polyline[] = []
-let currentRouteMarkers: L.Marker[] = []
-const selectedRouteIndex = ref<number | null>(null)
-const routeOptions = ref<RouteOption[]>([])
-const showRouteMenu = ref(false)
+let currentRouteLayers: string[] = []
+let currentRouteMarkers: any[] = []
 
 /* -------------------- MULTIPLE ROUTING VIA MAPBOX -------------------- */
 const getRouteOptions = async (
@@ -516,7 +645,7 @@ const getRouteOptions = async (
 
     const routeOptions: RouteOption[] = []
     const profiles = [
-      { type: 'driving' as const, color: '#3b82f6', name: 'Driving' },
+      { type: 'driving' as const, color: '#3b82f6', name: 'Car' },
       { type: 'walking' as const, color: '#10b981', name: 'Walking' },
       { type: 'cycling' as const, color: '#f59e0b', name: 'Cycling' },
     ]
@@ -598,7 +727,7 @@ const createStraightLineRoute = (
   const estimatedDuration = (distance / 1000 / speedEstimates[type]) * 3600
 
   const typeNames = {
-    driving: 'Driving',
+    driving: 'Car',
     walking: 'Walking',
     cycling: 'Cycling',
   }
@@ -613,150 +742,229 @@ const createStraightLineRoute = (
     coords: [start, end],
     distance,
     duration: estimatedDuration,
-    summary: `${typeNames[type]} Route (Fallback)`,
+    summary: `${typeNames[type]} Route`,
     color: colors[type],
     type,
   }
 }
 
-/* -------------------- DRAW MULTIPLE ROUTES -------------------- */
-const drawRouteOptions = (routes: RouteOption[]) => {
-  if (!map.value || !routes.length) return
+/* -------------------- DRAW ROUTE -------------------- */
+const drawRoute = (route: RouteOption) => {
+  if (!map.value || !mapboxgl || !route) return
 
-  clearAllRoutes()
+  clearRoutes()
 
-  routes.forEach((route, index) => {
-    try {
-      const routeLayer = L.polyline(route.coords, {
+  try {
+    const routeId = `route-${route.type}`
+    const geojson = {
+      type: 'Feature',
+      geometry: {
+        type: 'LineString',
+        coordinates: route.coords.map(coord => [coord[1], coord[0]]), // Convert to [lng, lat]
+      },
+      properties: {
+        type: route.type,
         color: route.color,
-        weight: index === 0 ? 6 : 4,
-        opacity: 0.8,
-        lineCap: 'round',
-        lineJoin: 'round',
-        className: `route-line route-${index}`,
-      }).addTo(map.value)
-
-      routeLayer.on('click', (e) => {
-        selectRoute(index)
-        routeLayer.bringToFront()
-      })
-
-      routeLayer.on('mouseover', function () {
-        this.setStyle({
-          weight: this.options.weight + 2,
-          opacity: 1,
-        })
-        routeLayer.bringToFront()
-      })
-
-      routeLayer.on('mouseout', function () {
-        const isSelected = selectedRouteIndex.value === index
-        this.setStyle({
-          weight: isSelected ? 8 : index === 0 ? 6 : 4,
-          opacity: isSelected ? 1 : 0.8,
-        })
-      })
-
-      currentRouteLayers.push(routeLayer)
-
-      const distanceKm = (route.distance / 1000).toFixed(1)
-      const durationMin = Math.round(route.duration / 60)
-
-      const midpointIndex = Math.floor(route.coords.length / 2)
-      if (midpointIndex < route.coords.length) {
-        const midpoint = route.coords[midpointIndex]
-
-        const typeIcons = {
-          driving: '🚗',
-          walking: '🚶',
-          cycling: '🚴',
-        }
-
-        const infoMarker = L.marker(midpoint, {
-          icon: L.divIcon({
-            html: `
-              <div style="
-                background: ${route.color};
-                color: white;
-                padding: 8px 12px;
-                border-radius: 20px;
-                font-size: 12px;
-                font-weight: bold;
-                white-space: nowrap;
-                box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-                border: 3px solid white;
-                backdrop-filter: blur(4px);
-                text-align: center;
-              ">
-                <div>${typeIcons[route.type]} ${route.summary}</div>
-                <div style="font-size: 10px; opacity: 0.9;">
-                  ${distanceKm} km • ${durationMin} min
-                </div>
-                ${index === 0 ? '<div style="font-size: 9px; color: #fef08a;">★ FASTEST</div>' : ''}
-              </div>
-            `,
-            className: 'route-info-marker',
-            iconSize: [100, 50],
-            iconAnchor: [50, 25],
-          }),
-        }).addTo(map.value)
-
-        currentRouteMarkers.push(infoMarker)
-      }
-    } catch (error) {
-      console.error('Error drawing route:', error)
+      },
     }
-  })
 
-  selectRoute(0)
-
-  const bounds = L.latLngBounds(routes.flatMap((route) => route.coords))
-  if (bounds.isValid()) {
-    map.value.fitBounds(bounds.pad(0.15), {
-      animate: false,
-      padding: [30, 30],
+    // Add source
+    map.value.addSource(routeId, {
+      type: 'geojson',
+      data: geojson,
     })
+
+    // Add layer
+    map.value.addLayer({
+      id: routeId,
+      type: 'line',
+      source: routeId,
+      layout: {
+        'line-join': 'round',
+        'line-cap': 'round',
+      },
+      paint: {
+        'line-color': route.color,
+        'line-width': 6,
+        'line-opacity': 0.8,
+      },
+    })
+
+    currentRouteLayers.push(routeId)
+
+    // Fit bounds to route
+    const bounds = new mapboxgl.LngLatBounds()
+    route.coords.forEach(coord => {
+      bounds.extend([coord[1], coord[0]])
+    })
+
+    if (bounds.getNorth() !== bounds.getSouth() && bounds.getEast() !== bounds.getWest()) {
+      map.value.fitBounds(bounds, {
+        padding: 50,
+        animate: false,
+        duration: 0,
+      })
+    }
+
+    // Show route info
+    const distanceKm = (route.distance / 1000).toFixed(1)
+    const durationMin = Math.round(route.duration / 60)
+    setErrorMessage(
+      `${routeConfig[route.type].label} Route: ${distanceKm} km • ${durationMin} min`,
+      5000
+    )
+  } catch (error) {
+    console.error('Error drawing route:', error)
   }
 }
 
-/* -------------------- SELECT ROUTE -------------------- */
-const selectRoute = (index: number) => {
-  selectedRouteIndex.value = index
-  const route = routeOptions.value[index]
+/* -------------------- CLEAR ROUTES -------------------- */
+const clearRoutes = () => {
+  if (!map.value || !mapboxgl) return
 
-  if (!route || !map.value) return
+  // Remove layers
+  currentRouteLayers.forEach(layerId => {
+    if (map.value.getLayer(layerId)) {
+      map.value.removeLayer(layerId)
+    }
+    if (map.value.getSource(layerId)) {
+      map.value.removeSource(layerId)
+    }
+  })
 
-  const distanceKm = (route.distance / 1000).toFixed(1)
-  const durationMin = Math.round(route.duration / 60)
+  // Remove markers
+  currentRouteMarkers.forEach(marker => {
+    marker.remove()
+  })
 
-  const typeIcons = {
-    driving: '🚗',
-    walking: '🚶',
-    cycling: '🚴',
-  }
-
-  setErrorMessage(
-    `Selected: ${typeIcons[route.type]} ${route.summary} • ${distanceKm} km • ${durationMin} min • Click other routes to compare`,
-  )
+  currentRouteLayers = []
+  currentRouteMarkers = []
 }
 
 /* -------------------- CLEAR ALL ROUTES -------------------- */
 const clearAllRoutes = () => {
-  currentRouteLayers.forEach((layer) => {
-    if (map.value && map.value.hasLayer(layer)) {
-      map.value.removeLayer(layer)
-    }
-  })
-  currentRouteMarkers.forEach((marker) => {
-    if (map.value && map.value.hasLayer(marker)) {
-      map.value.removeLayer(marker)
-    }
-  })
-  currentRouteLayers = []
-  currentRouteMarkers = []
+  clearRoutes()
   routeOptions.value = []
-  selectedRouteIndex.value = null
-  showRouteMenu.value = false
+  showRoutePanel.value = false
+  selectedRouteType.value = 'driving'
+  console.log('All routes cleared')
+}
+
+/* -------------------- SELECT ROUTE TYPE -------------------- */
+const selectRouteType = async (type: RouteType) => {
+  selectedRouteType.value = type
+  
+  // Find the route for the selected type
+  const route = routeOptions.value.find(r => r.type === type)
+  if (route) {
+    drawRoute(route)
+  } else {
+    // If route not found, try to get it
+    await calculateAndDisplayRoute(type)
+  }
+}
+
+/* -------------------- CALCULATE AND DISPLAY SPECIFIC ROUTE -------------------- */
+const calculateAndDisplayRoute = async (type: RouteType) => {
+  routeLoading.value = true
+  
+  try {
+    // Find the shop that's currently selected
+    const shop = shops.value.find(s => s.id === selectedShopId.value)
+    if (!shop || !shop.latitude || !shop.longitude) {
+      setErrorMessage('Shop location not available')
+      return
+    }
+
+    const userLat = Number(latitude.value ?? lastKnown.value?.[0])
+    const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+
+    if (!isFinite(userLat) || !isFinite(userLng)) {
+      setErrorMessage('Your location is not available')
+      return
+    }
+
+    const start: [number, number] = [userLat, userLng]
+    const end: [number, number] = [Number(shop.latitude), Number(shop.longitude)]
+
+    // Calculate specific route type
+    const route = await getSingleRoute(start, end, type)
+    
+    if (route) {
+      // Add to route options if not already there
+      const existingIndex = routeOptions.value.findIndex(r => r.type === type)
+      if (existingIndex >= 0) {
+        routeOptions.value[existingIndex] = route
+      } else {
+        routeOptions.value.push(route)
+      }
+      
+      // Draw the route
+      drawRoute(route)
+    } else {
+      setErrorMessage(`${type} route not available`, 3000)
+    }
+  } catch (error) {
+    console.error('Error calculating route:', error)
+    setErrorMessage('Failed to calculate route', 3000)
+  } finally {
+    routeLoading.value = false
+  }
+}
+
+/* -------------------- GET SINGLE ROUTE -------------------- */
+const getSingleRoute = async (
+  start: [number, number],
+  end: [number, number],
+  type: 'driving' | 'walking' | 'cycling'
+): Promise<RouteOption | null> => {
+  try {
+    const coordinates = `${start[1]},${start[0]};${end[1]},${end[0]}`
+    const url = `https://api.mapbox.com/directions/v5/mapbox/${type}/${coordinates}?alternatives=false&geometries=geojson&steps=false&overview=full&access_token=${MAPBOX_ACCESS_TOKEN}`
+
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), 10000)
+
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Accept: 'application/json',
+      },
+    })
+
+    clearTimeout(timeoutId)
+
+    if (!res.ok) return null
+
+    const data = await res.json()
+
+    if (!data.routes || data.routes.length === 0) return null
+
+    const mapboxRoute = data.routes[0]
+
+    if (mapboxRoute.geometry && mapboxRoute.geometry.coordinates) {
+      const coords = mapboxRoute.geometry.coordinates.map((coord: [number, number]) => [
+        coord[1], // lat
+        coord[0], // lon
+      ])
+
+      const color = routeConfig[type].color
+
+      return {
+        coords,
+        distance: mapboxRoute.distance,
+        duration: mapboxRoute.duration,
+        summary: `${routeConfig[type].label} Route`,
+        color,
+        type,
+      }
+    }
+  } catch (err) {
+    console.warn(`Failed to get ${type} route:`, err)
+  }
+  
+  return null
 }
 
 /* -------------------- DISTANCE CALCULATION -------------------- */
@@ -880,18 +1088,88 @@ const toggleDisplayMode = (mode: 'within' | 'outside') => {
   }
 }
 
+/* -------------------- SHOP POPUP -------------------- */
+const createShopPopup = (shop: any): string => {
+  const productList = (shop.products || [])
+    .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
+    .join('')
+
+  const statusDisplay = getShopStatusDisplay(shop)
+  
+  return `
+    <div style="text-align:center; min-width: 240px; max-width: 300px;" class="shop-popup-content">
+      <div style="position: relative;">
+        <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" 
+             width="80" height="80" 
+             style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
+        <div style="position: absolute; top: -5px; right: -5px; 
+                    background: ${statusDisplay.color}; color: white; 
+                    padding: 2px 8px; border-radius: 12px; font-size: 10px; 
+                    font-weight: bold; cursor: help;"
+             title="${statusDisplay.tooltip}">
+          ${statusDisplay.text}
+          ${shop.manual_status !== 'auto' ? ' ⚡' : ''}
+        </div>
+      </div>
+      <p><strong>${shop.business_name}</strong></p>
+      <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
+      <p style="margin:2px 0; font-size:14px;">
+        ${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}
+      </p>
+      ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
+      <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
+        <button id="view-${shop.id}" 
+                class="popup-btn view-btn"
+                style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">
+          View Shop
+        </button>
+        <button id="route-${shop.id}" 
+                class="popup-btn route-btn"
+                style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">
+          Show Route
+        </button>
+      </div>
+      ${!isShopCurrentlyOpen(shop) ? '<p style="color: #ef4444; font-size: 12px; margin-top: 4px;">Shop is currently closed</p>' : ''}
+      ${shop.manual_status !== 'auto' ? '<p style="color: #f59e0b; font-size: 11px; margin-top: 2px;">⚡ Manual override</p>' : ''}
+    </div>
+  `
+}
+
+/* -------------------- ATTACH POPUP EVENT HANDLERS -------------------- */
+const attachPopupEventHandlers = (popup: any, shopId: string) => {
+  // Wait for popup to be added to DOM
+  setTimeout(() => {
+    const viewBtn = document.getElementById(`view-${shopId}`)
+    const routeBtn = document.getElementById(`route-${shopId}`)
+    
+    if (viewBtn) {
+      viewBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        openShopDetails(shopId)
+      })
+    }
+    
+    if (routeBtn) {
+      routeBtn.addEventListener('click', (e) => {
+        e.stopPropagation()
+        focusOnShopMarker(shopId)
+      })
+    }
+  }, 100)
+}
+
 /* -------------------- MARKER MANAGEMENT -------------------- */
 const clearShopMarkers = () => {
   shopMarkers.forEach((m) => {
     try {
-      map.value?.removeLayer(m)
+      m.remove()
     } catch {}
   })
   shopMarkers = []
 }
 
 const plotShops = () => {
-  if (!map.value) return
+  if (!map.value || !mapboxgl) return
   clearShopMarkers()
 
   for (const shop of filteredShops.value) {
@@ -901,65 +1179,47 @@ const plotShops = () => {
     const lng = Number(shop.longitude)
     if (!isFinite(lat) || !isFinite(lng)) continue
 
-    const marker = L.marker([lat, lng], {
-      icon: registeredShopIcon,
-      title: shop.business_name,
-    }) as any
-
-    marker.shopId = shop.id
-    marker.shopData = shop
-    marker.addTo(map.value)
-
-    const productList = (shop.products || [])
-      .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
-      .join('')
-
-    const statusDisplay = getShopStatusDisplay(shop)
-    marker.bindPopup(`
-  <div style="text-align:center; min-width: 240px;">
-    <div style="position: relative;">
-      <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" width="80" height="80" style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
-      <div
-        style="position: absolute; top: -5px; right: -5px; background: ${statusDisplay.color}; color: white; padding: 2px 8px; border-radius: 12px; font-size: 10px; font-weight: bold; cursor: help;"
-        title="${statusDisplay.tooltip}"
-      >
-        ${statusDisplay.text}
-        ${shop.manual_status !== 'auto' ? ' ⚡' : ''}
+    // Create custom marker
+    const el = document.createElement('div')
+    el.className = 'shop-marker'
+    el.innerHTML = `
+      <div class="shop-marker-inner" data-shop-id="${shop.id}">
+        <svg width="28" height="40" viewBox="0 0 24 24" fill="#EF4444">
+          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+        </svg>
       </div>
-    </div>
-    <p><strong>${shop.business_name}</strong></p>
-    <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
-    <p style="margin:2px 0; font-size:14px;">${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}</p>
-    ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
-    <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
-      <button id="view-${shop.id}" style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">View Shop</button>
-<button id="route-${shop.id}" 
-        style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;" 
-        ${!isShopCurrentlyOpen(shop) ? 'disabled' : ''}>
-  Show Routes
-</button>
-    </div>
-    ${!isShopCurrentlyOpen(shop) ? '<p style="color: #ef4444; font-size: 12px; margin-top: 4px;">Shop is currently closed</p>' : ''}
-    ${shop.manual_status !== 'auto' ? '<p style="color: #f59e0b; font-size: 11px; margin-top: 2px;">⚡ Manual override</p>' : ''}
-  </div>
-`)
+    `
 
-    marker.on('popupopen', () => {
-      const viewBtn = document.getElementById(`view-${shop.id}`)
-      const routeBtn = document.getElementById(`route-${shop.id}`)
+    const marker = new mapboxgl.Marker({
+      element: el,
+      anchor: 'bottom',
+    })
+      .setLngLat([lng, lat])
+      .addTo(map.value)
 
-      if (viewBtn) {
-        viewBtn.onclick = () => router.push(`/shop/${shop.id}`)
-      }
+    // Create popup
+    const popup = new mapboxgl.Popup({
+      offset: 25,
+      closeButton: true,
+      className: 'shop-popup',
+    }).setHTML(createShopPopup(shop))
 
-      if (routeBtn) {
-        routeBtn.onclick = async () => {
-          await focusOnShopMarker(shop.id)
-        }
-      }
+    // Attach event handlers to popup buttons
+    popup.on('open', () => {
+      attachPopupEventHandlers(popup, shop.id)
     })
 
+    marker.setPopup(popup)
+
+    // Store shop data
+    marker.shopId = shop.id
+    marker.shopData = shop
     shopMarkers.push(marker)
+
+    // Add click handler to marker
+    el.addEventListener('click', () => {
+      marker.togglePopup()
+    })
   }
 }
 
@@ -969,14 +1229,7 @@ const focusOnShopMarker = async (shopId: string) => {
   setErrorMessage(null)
 
   let marker = shopMarkers.find((m: any) => m.shopId === shopId)
-  if (!marker) {
-    marker = searchResultMarkers.find((m: any) => m.shopId === shopId)
-  }
-
-  if (!marker || !map.value) {
-    setErrorMessage('Shop location not found')
-    return
-  }
+  if (!marker) return
 
   const shop = marker.shopData
   if (!shop || !shop.latitude || !shop.longitude) {
@@ -992,15 +1245,12 @@ const focusOnShopMarker = async (shopId: string) => {
     return
   }
 
-  // Highlight the marker with a bounce animation
-  if (marker) {
-    marker.setZIndexOffset(1000)
-    marker.setIcon(highlightedShopIcon)
-
-    // Revert to normal icon after 3 seconds
+  // Highlight the marker
+  const markerEl = marker.getElement()
+  if (markerEl) {
+    markerEl.classList.add('shop-marker-highlighted')
     setTimeout(() => {
-      marker.setIcon(registeredShopIcon)
-      marker.setZIndexOffset(0)
+      markerEl.classList.remove('shop-marker-highlighted')
     }, 3000)
   }
 
@@ -1025,30 +1275,36 @@ const focusOnShopMarker = async (shopId: string) => {
       return
     }
 
-    // Store routes and draw them
+    // Store all routes
     routeOptions.value = routes
-    drawRouteOptions(routes)
-
-    // Show route menu
-    showRouteMenu.value = true
-
-    // Center map to show both locations and routes
-    const bounds = L.latLngBounds([start, end])
-    routes.forEach((route) => {
-      bounds.extend(route.coords)
-    })
-
-    if (bounds.isValid()) {
-      map.value.fitBounds(bounds.pad(0.15), {
-        animate: true,
-        duration: 1,
-        padding: [30, 30],
-      })
+    
+    // Show route panel
+    showRoutePanel.value = true
+    
+    // Set default route type to driving if available, otherwise first available
+    const defaultType = routes.find(r => r.type === 'driving') ? 'driving' : routes[0].type
+    selectedRouteType.value = defaultType
+    
+    // Draw the default route
+    const defaultRoute = routes.find(r => r.type === defaultType) || routes[0]
+    if (defaultRoute) {
+      drawRoute(defaultRoute)
     }
 
-    // Open popup and show success message
-    marker.openPopup()
-    setErrorMessage(`Found ${routes.length} route options to ${shop.business_name}`, 5000)
+    // Fly to shop
+    map.value.flyTo({
+      center: [end[1], end[0]],
+      zoom: 14,
+      essential: true,
+      duration: 1000,
+    })
+
+    // Open popup
+    if (marker.getPopup()) {
+      marker.togglePopup()
+    }
+
+    setErrorMessage(`Found ${routes.length} route options`, 3000)
   } catch (error) {
     console.error('Error calculating routes:', error)
     setErrorMessage('Error calculating routes to shop', 3000)
@@ -1058,7 +1314,6 @@ const focusOnShopMarker = async (shopId: string) => {
 }
 
 /* -------------------- HELPERS -------------------- */
-/* -------------------- SHOP STATUS HELPERS -------------------- */
 const getFullAddress = (shop: any) => {
   if (shop.detected_address) return shop.detected_address
   const parts = [
@@ -1082,11 +1337,8 @@ const convertTimeToNumber = (timeStr: string): number => {
 }
 
 const isShopCurrentlyOpen = (shop: any): boolean => {
-  // First check manual status - note: your schema uses manual_status, not is_open
   if (shop.manual_status === 'closed') return false
   if (shop.manual_status === 'open') return true
-
-  // If auto mode, check business hours
   return isShopOpenByHours(shop)
 }
 
@@ -1125,41 +1377,26 @@ const getShopStatusDisplay = (shop: any): { text: string; color: string; tooltip
 
 const isShopOpenByHours = (shop: any): boolean => {
   const now = new Date()
-  const currentDay = now.getDay() // 0 = Sunday, 1 = Monday, etc.
+  const currentDay = now.getDay()
   const currentTime = now.getHours() * 100 + now.getMinutes()
 
-  // Check if shop is open today
   if (shop.open_days && shop.open_days.length > 0) {
-    // Convert Sunday (0) to 7 for consistency with your schema (1-7 = Mon-Sun)
     const adjustedDay = currentDay === 0 ? 7 : currentDay
     if (!shop.open_days.includes(adjustedDay)) {
       return false
     }
   }
-  // Check opening hours
+  
   if (shop.open_time && shop.close_time) {
     const openTime = convertTimeToNumber(shop.open_time)
     const closeTime = convertTimeToNumber(shop.close_time)
-
     return currentTime >= openTime && currentTime <= closeTime
   }
 
-  return true // If no hours specified, assume open
+  return true
 }
 
 /* -------------------- SEARCH FUNCTIONALITY -------------------- */
-let searchResultMarkers: L.Marker[] = []
-
-const clearSearchMarkers = () => {
-  searchResultMarkers.forEach((marker) => {
-    if (map.value && map.value.hasLayer(marker)) {
-      map.value.removeLayer(marker)
-    }
-  })
-  searchResultMarkers = []
-}
-
-// Enhanced search function
 const smartSearch = async () => {
   const query = search.value.trim().toLowerCase()
   if (!query || !map.value) return
@@ -1169,7 +1406,6 @@ const smartSearch = async () => {
   isSearchMode.value = true
 
   try {
-    // Enhanced search that matches shop name, location, AND products
     const searchResults = shops.value.filter((shop) => {
       const searchTerms = [
         shop.business_name?.toLowerCase(),
@@ -1180,20 +1416,16 @@ const smartSearch = async () => {
         ...(shop.products || []).map((p: any) => p.prod_name?.toLowerCase()),
       ].filter(Boolean)
 
-      // Check if any search term matches the query
       return searchTerms.some((term) => term && term.includes(query))
     })
 
-    // Sort by relevance and distance
     const sortedResults = searchResults.sort((a, b) => {
-      // Priority 1: Exact matches in business name
       const aNameMatch = a.business_name?.toLowerCase().includes(query)
       const bNameMatch = b.business_name?.toLowerCase().includes(query)
 
       if (aNameMatch && !bNameMatch) return -1
       if (!aNameMatch && bNameMatch) return 1
 
-      // Priority 2: Number of matching products
       const aProductMatches = getMatchingProducts(a).length
       const bProductMatches = getMatchingProducts(b).length
 
@@ -1201,7 +1433,6 @@ const smartSearch = async () => {
         return bProductMatches - aProductMatches
       }
 
-      // Priority 3: Distance
       return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
     })
 
@@ -1209,7 +1440,6 @@ const smartSearch = async () => {
       errorMsg.value = `No shops or products found for "${query}"`
       filteredShops.value = []
       showShopMenu.value = true
-      clearSearchMarkers()
     } else {
       const matchTypes = {
         shops: sortedResults.filter(
@@ -1225,7 +1455,6 @@ const smartSearch = async () => {
       showShopMenu.value = true
       plotShops()
 
-      // Auto-focus on first result if only one
       if (sortedResults.length === 1) {
         await focusOnShopMarker(sortedResults[0].id)
       }
@@ -1238,35 +1467,30 @@ const smartSearch = async () => {
   }
 }
 
-// Enhanced clear search
 const clearSearch = () => {
   search.value = ''
   isSearchMode.value = false
   applyShopFilters()
   showShopMenu.value = false
-  clearSearchMarkers()
-
-  shopMarkers.forEach((marker) => {
-    if (map.value) map.value.addLayer(marker)
-  })
 
   if (latitude.value && longitude.value) {
-    map.value?.setView([Number(latitude.value), Number(longitude.value)], 13, { animate: true })
+    map.value?.flyTo({
+      center: [Number(longitude.value), Number(latitude.value)],
+      zoom: 13,
+      essential: true,
+      duration: 1000,
+    })
   }
 }
 
-// Get products that match search query
 const getMatchingProducts = (shop: any): any[] => {
   const query = search.value.trim().toLowerCase()
   if (!query || !shop.products) return []
-
   return shop.products.filter((product: any) => product.prod_name?.toLowerCase().includes(query))
 }
 
-// Check if shop has search matches
 const hasSearchMatch = (shop: any): boolean => {
   if (!isSearchMode.value || !search.value) return false
-
   const query = search.value.toLowerCase()
   return (
     shop.business_name?.toLowerCase().includes(query) ||
@@ -1287,41 +1511,27 @@ const toggleShopMenu = () => {
   }
 }
 
-/* -------------------- ENHANCED SHOP SELECTION -------------------- */
-
-// Enhanced shop click handler
+/* -------------------- SHOP SELECTION -------------------- */
 const handleShopClick = async (shopId: string, index: number) => {
   selectedShopId.value = shopId
   await focusOnShopFromList(shopId)
 }
 
-// Focus on shop and close drawer
 const focusOnShopFromList = async (shopId: string) => {
   console.log('Focusing on shop from list:', shopId)
-
-  // Close the drawer first
   showShopMenu.value = false
-
-  // Small delay to allow drawer animation to complete
   await new Promise((resolve) => setTimeout(resolve, 300))
-
-  // Then focus on the shop marker
   await focusOnShopMarker(shopId)
-
-  // Clear selection after a delay
   setTimeout(() => {
     selectedShopId.value = null
   }, 2000)
 }
 
-// Open shop details page
 const openShopDetails = async (shopId: string) => {
   const shop = shops.value.find((s) => s.id === shopId)
   if (!shop) return
-
   showShopMenu.value = false
   await new Promise((resolve) => setTimeout(resolve, 300))
-
   router.push(`/shop/${shopId}`)
 }
 
@@ -1368,21 +1578,16 @@ onMounted(async () => {
     console.log('Got location:', quickLat, quickLng)
 
     if (map.value) {
-      if (!userMarker) {
-        userMarker = L.marker([quickLat, quickLng], { icon: userIcon })
-          .addTo(map.value)
-          .bindPopup('You are here')
-          .openPopup()
-      } else {
-        userMarker.setLatLng([quickLat, quickLng])
-        userMarker.setPopupContent('You are here')
-      }
+      createUserMarker(quickLat, quickLng)
+
+      map.value.flyTo({
+        center: [quickLng, quickLat],
+        zoom: 14,
+        essential: true,
+        duration: 1000,
+      })
 
       await highlightUserCityBoundary(quickLat, quickLng)
-
-      if (!cityBoundaryLayer.value) {
-        map.value.setView([quickLat, quickLng], 14, { animate: true })
-      }
     }
 
     saveCachedLocation(quickLat, quickLng)
@@ -1397,7 +1602,6 @@ onMounted(async () => {
   }
 })
 
-// Location watcher
 watch(
   [latitude, longitude],
   async ([lat, lng]) => {
@@ -1418,13 +1622,9 @@ watch(
     hasValidLocation.value = true
 
     if (userMarker) {
-      userMarker.setLatLng([userLat, userLng])
-      userMarker.setPopupContent('You are here')
+      userMarker.setLngLat([userLng, userLat])
     } else {
-      userMarker = L.marker([userLat, userLng], { icon: userIcon })
-        .addTo(map.value)
-        .bindPopup('You are here')
-        .openPopup()
+      createUserMarker(userLat, userLng)
     }
 
     saveCachedLocation(userLat, userLng)
@@ -1493,8 +1693,73 @@ onUnmounted(() => {
         <span>Calculating routes...</span>
       </div>
 
+      <!-- Route Selection Panel -->
+      <v-card
+        v-if="showRoutePanel"
+        class="route-selection-panel"
+        elevation="4"
+      >
+        <v-card-title class="d-flex align-center justify-space-between py-2">
+          <div class="d-flex align-center">
+            <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
+            <span class="text-subtitle-1 font-weight-bold">Route Options</span>
+          </div>
+          <v-btn
+            icon
+            size="small"
+            @click="clearAllRoutes"
+            variant="text"
+            title="Close route panel"
+          >
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        
+        <v-card-text class="py-3">
+          <div class="route-buttons-grid">
+            <v-btn
+              v-for="type in ['driving', 'walking', 'cycling'] as RouteType[]"
+              :key="type"
+              :color="selectedRouteType === type ? routeConfig[type].activeColor : routeConfig[type].color"
+              variant="flat"
+              class="route-type-btn"
+              @click="selectRouteType(type)"
+              :disabled="!routeOptions.find(r => r.type === type)"
+            >
+              <v-icon start>{{ routeConfig[type].icon }}</v-icon>
+              {{ routeConfig[type].label }}
+              <template v-if="routeOptions.find(r => r.type === type)">
+                <v-spacer></v-spacer>
+                <span class="ml-2 text-caption">
+                  {{ Math.round(routeOptions.find(r => r.type === type)!.duration / 60) }} min
+                </span>
+              </template>
+            </v-btn>
+          </div>
+          
+          <!-- Route Info -->
+          <div v-if="routeOptions.find(r => r.type === selectedRouteType)" class="route-info mt-3">
+            <v-divider class="my-2"></v-divider>
+            <div class="d-flex justify-space-between align-center">
+              <div>
+                <div class="text-caption text-medium-emphasis">Distance</div>
+                <div class="text-body-1 font-weight-medium">
+                  {{ (routeOptions.find(r => r.type === selectedRouteType)!.distance / 1000).toFixed(1) }} km
+                </div>
+              </div>
+              <div>
+                <div class="text-caption text-medium-emphasis">Duration</div>
+                <div class="text-body-1 font-weight-medium">
+                  {{ Math.round(routeOptions.find(r => r.type === selectedRouteType)!.duration / 60) }} minutes
+                </div>
+              </div>
+            </div>
+          </div>
+        </v-card-text>
+      </v-card>
+
       <!-- Map Controls Container -->
-      <div class="map-controls-container" v-if="!showShopMenu">
+      <div class="map-controls-container" v-if="!showShopMenu && !showRoutePanel">
         <!-- Display Mode Chip -->
         <v-chip
           v-if="userCity"
@@ -1541,10 +1806,12 @@ onUnmounted(() => {
                 >
               </v-list-item>
               <v-divider></v-divider>
-              <v-list-item @click="clearCityBoundary" :disabled="!cityBoundaryPolygon">
+              <v-list-item @click="toggleBoundaryVisibility">
                 <v-list-item-title>
-                  <v-icon color="grey" class="mr-2">mdi-eye-off</v-icon>
-                  Hide City Boundary
+                  <v-icon :color="showBoundary ? 'green' : 'grey'" class="mr-2">
+                    {{ showBoundary ? 'mdi-eye' : 'mdi-eye-off' }}
+                  </v-icon>
+                  {{ showBoundary ? 'Hide' : 'Show' }} City Boundary
                 </v-list-item-title>
               </v-list-item>
             </v-list>
@@ -1805,19 +2072,7 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* Enhanced boundary styles */
-:deep(.city-boundary) {
-  stroke-dasharray: 10, 10;
-  animation: dash 30s linear infinite;
-}
-
-@keyframes dash {
-  to {
-    stroke-dashoffset: -1000;
-  }
-}
-
-/* FIXED: Main layout structure */
+/* Main layout */
 .v-application {
   height: 100vh;
   overflow: hidden;
@@ -1825,7 +2080,7 @@ onUnmounted(() => {
 
 .main-content {
   position: relative;
-  height: calc(100vh - 120px) !important; /* Account for hero + bottom nav */
+  height: calc(100vh - 120px) !important;
   margin: 0 !important;
   padding: 0 !important;
 }
@@ -1839,14 +2094,14 @@ onUnmounted(() => {
   z-index: 1;
 }
 
-/* FIXED: Hero section positioning */
+/* Hero section */
 .hero {
   background: #3f83c7;
   border-radius: 0;
   padding: 12px 16px;
   margin: 0;
   width: 100%;
-  position: relative; /* Changed from sticky to relative */
+  position: relative;
   z-index: 10;
   min-height: 64px;
   box-sizing: border-box;
@@ -1868,10 +2123,6 @@ onUnmounted(() => {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
 }
 
-.search-field :deep(input) {
-  font-size: 14px;
-}
-
 .search-btn {
   background: #1d4ed8 !important;
   color: white !important;
@@ -1887,20 +2138,71 @@ onUnmounted(() => {
 .search-btn:hover:not(.v-btn--disabled) {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
-  border-radius: 50% !important;
 }
 
-/* FIXED: Map Controls Positioning */
+/* Route Selection Panel */
+.route-selection-panel {
+  position: absolute;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  width: 90%;
+  max-width: 400px;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+  animation: slideDown 0.3s ease-out;
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -20px);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+
+.route-buttons-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.route-type-btn {
+  height: 44px !important;
+  text-transform: none;
+  font-weight: 600;
+  transition: all 0.2s ease;
+}
+
+.route-type-btn:hover:not(.v-btn--disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.route-info {
+  background: #f8fafc;
+  border-radius: 8px;
+  padding: 12px;
+}
+
+/* Map Controls */
 .map-controls-container {
   position: absolute;
-  bottom: 100px; /* Position above bottom nav */
+  bottom: 100px;
   right: 20px;
   display: flex;
   flex-direction: column;
   align-items: flex-end;
   gap: 8px;
   z-index: 2000;
-  pointer-events: none; /* Allow clicks to pass through container */
+  pointer-events: none;
 }
 
 .map-controls-group {
@@ -1913,7 +2215,7 @@ onUnmounted(() => {
   padding: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.9);
-  pointer-events: auto; /* Re-enable clicks for controls */
+  pointer-events: auto;
 }
 
 .mode-chip {
@@ -1987,7 +2289,7 @@ onUnmounted(() => {
 /* Error Message Alert */
 .route-info-alert {
   position: absolute;
-  top: 20px;
+  top: 60px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -2025,16 +2327,128 @@ onUnmounted(() => {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* Matching products section */
-.matching-products {
-  border-left: 3px solid #3b82f6;
-  padding-left: 8px;
-  background-color: #f8fafc;
-  border-radius: 4px;
-  padding: 4px 8px;
+/* Custom Marker Styles */
+:deep(.user-marker) {
+  position: relative;
+  width: 50px;
+  height: 50px;
 }
 
-/* Enhanced list item hover effects */
+.user-marker-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  background: #3B82F6;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: pulse 2s infinite;
+}
+
+.user-marker-inner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+:deep(.shop-marker) {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.shop-marker-inner {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.3));
+  transition: all 0.3s ease;
+}
+
+.shop-marker:hover .shop-marker-inner,
+.shop-marker-highlighted .shop-marker-inner {
+  transform: scale(1.2);
+  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.4));
+}
+
+/* Popup Button Styles */
+:deep(.popup-btn) {
+  transition: all 0.2s ease !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+}
+
+:deep(.popup-btn:hover:not(:disabled)) {
+  transform: translateY(-2px) !important;
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2) !important;
+}
+
+:deep(.popup-btn:disabled) {
+  opacity: 0.5 !important;
+  cursor: not-allowed !important;
+}
+
+:deep(.view-btn:hover) {
+  background: #2c7ac2 !important;
+}
+
+:deep(.route-btn:hover:not(:disabled)) {
+  background: #0da271 !important;
+}
+
+/* Mapbox Popup Customization */
+:deep(.mapboxgl-popup-content) {
+  padding: 12px !important;
+  border-radius: 12px !important;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2) !important;
+}
+
+:deep(.mapboxgl-popup-close-button) {
+  font-size: 20px !important;
+  padding: 4px 8px !important;
+}
+
+/* Animation for search matches */
+.bg-blue-lighten-5 {
+  transition: all 0.3s ease;
+  animation: highlight-pulse 2s ease-in-out;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.6;
+  }
+  70% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
+}
+
+@keyframes highlight-pulse {
+  0% {
+    background-color: #f1f5f9;
+  }
+  50% {
+    background-color: #dbeafe;
+  }
+  100% {
+    background-color: #f1f5f9;
+  }
+}
+
+/* Shop List Item */
 .shop-list-item {
   transition: all 0.3s ease;
   border-radius: 8px;
@@ -2050,7 +2464,6 @@ onUnmounted(() => {
   border-color: #e2e8f0;
 }
 
-/* Selected shop style */
 .selected-shop {
   background-color: #dbeafe !important;
   border-color: #3b82f6 !important;
@@ -2058,37 +2471,12 @@ onUnmounted(() => {
   box-shadow: 0 6px 20px rgba(59, 130, 246, 0.3) !important;
 }
 
-/* Button animations */
-.v-btn {
-  transition: all 0.3s ease !important;
-}
-
-.v-btn:hover {
-  transform: scale(1.1);
-}
-
-/* Animation for search matches */
-.bg-blue-lighten-5 {
-  transition: all 0.3s ease;
-  animation: highlight-pulse 2s ease-in-out;
-}
-
-@keyframes highlight-pulse {
-  0% {
-    background-color: #f1f5f9;
-  }
-  50% {
-    background-color: #dbeafe;
-  }
-  100% {
-    background-color: #f1f5f9;
-  }
-}
-
-/* FIXED: Responsive adjustments */
+/* Mobile Optimizations */
 @media (max-width: 768px) {
   .hero {
     padding: 12px;
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-bottom: 12px;
   }
 
   .hero-row {
@@ -2096,12 +2484,27 @@ onUnmounted(() => {
   }
 
   .main-content {
-    height: calc(100vh - 120px) !important; /* Consistent height calculation */
+    height: calc(100vh - 120px - env(safe-area-inset-top)) !important;
+  }
+
+  .route-selection-panel {
+    top: 15px;
+    width: 95%;
+  }
+
+  .route-buttons-grid {
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .route-type-btn {
+    height: 40px !important;
+    font-size: 14px;
   }
 
   .map-controls-container {
-    bottom: 100px; /* Fixed position above bottom nav */
-    right: 12px;
+    bottom: calc(100px + env(safe-area-inset-bottom));
+    right: max(12px, env(safe-area-inset-right));
   }
 
   .control-btn {
@@ -2110,20 +2513,9 @@ onUnmounted(() => {
   }
 
   .route-info-alert {
-    top: 15px;
+    top: 50px;
     width: 95%;
     padding: 6px 12px;
-  }
-
-  .route-info-alert .v-alert__content {
-    padding: 0 !important;
-  }
-
-  .route-info-alert .d-flex {
-    min-height: 28px;
-  }
-  
-  .alert-text {
     font-size: 14px;
   }
 
@@ -2137,44 +2529,46 @@ onUnmounted(() => {
   }
 }
 
-/* FIXED: Safe area support */
-@supports (padding: max(0px)) {
+/* Extra small devices */
+@media (max-width: 480px) {
+  .search-field {
+    font-size: 14px;
+  }
+
+  .search-btn {
+    min-width: 50px !important;
+    width: 50px !important;
+    height: 50px !important;
+  }
+
+  .mode-chip {
+    font-size: 12px;
+    padding: 6px 10px;
+  }
+
+  .route-info-alert {
+    font-size: 13px;
+    padding: 4px 8px;
+  }
+}
+
+/* Landscape orientation adjustments */
+@media (max-height: 600px) and (orientation: landscape) {
   .hero {
-    padding-top: max(12px, env(safe-area-inset-top));
-    padding-bottom: 12px;
-    padding-left: max(16px, env(safe-area-inset-left));
-    padding-right: max(16px, env(safe-area-inset-right));
+    padding: 8px 12px;
+    min-height: 56px;
   }
-  
+
   .main-content {
-    height: calc(100vh - 120px - env(safe-area-inset-top)) !important;
+    height: calc(100vh - 100px) !important;
   }
-  
+
+  .route-selection-panel {
+    top: 10px;
+  }
+
   .map-controls-container {
-    bottom: calc(100px + env(safe-area-inset-bottom));
-    right: max(20px, env(safe-area-inset-right));
+    bottom: 80px;
   }
-}
-
-/* Ensure Leaflet map tiles display properly */
-:deep(.leaflet-container) {
-  background: #f8f9fa;
-  font-family: inherit;
-}
-
-:deep(.leaflet-control-zoom a) {
-  background: white !important;
-  color: #333 !important;
-  border: 1px solid #ccc !important;
-}
-
-:deep(.leaflet-popup-content-wrapper) {
-  border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-}
-
-:deep(.leaflet-popup-content) {
-  margin: 16px;
-  font-family: inherit;
 }
 </style>
