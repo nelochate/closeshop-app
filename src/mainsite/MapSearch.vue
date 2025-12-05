@@ -11,7 +11,8 @@ import { Geolocation } from '@capacitor/geolocation'
 let mapboxgl: any = null
 
 /* -------------------- MAPBOX CONFIG -------------------- */
-const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+const MAPBOX_ACCESS_TOKEN =
+  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 /* -------------------- ROUTE OPTIONS INTERFACE -------------------- */
 interface RouteOption {
@@ -59,20 +60,20 @@ const routeConfig = {
     label: 'Car',
     icon: 'mdi-car',
     color: '#3b82f6',
-    activeColor: '#1d4ed8'
+    activeColor: '#1d4ed8',
   },
   walking: {
     label: 'Walking',
     icon: 'mdi-walk',
     color: '#10b981',
-    activeColor: '#059669'
+    activeColor: '#059669',
   },
   cycling: {
     label: 'Cycling',
     icon: 'mdi-bike',
     color: '#f59e0b',
-    activeColor: '#d97706'
-  }
+    activeColor: '#d97706',
+  },
 }
 
 /* -------------------- GEOLOCATION -------------------- */
@@ -109,7 +110,7 @@ const initializeMap = async (): Promise<void> => {
       console.error('Map container not found')
       return
     }
-    
+
     // Clear container
     mapContainer.innerHTML = ''
 
@@ -139,7 +140,7 @@ const initializeMap = async (): Promise<void> => {
         showZoom: true,
         visualizePitch: false,
       }),
-      'top-right'
+      'top-right',
     )
 
     // Add geolocate control
@@ -160,15 +161,15 @@ const initializeMap = async (): Promise<void> => {
     map.value.on('load', async () => {
       console.log('Mapbox map loaded successfully')
       mapInitialized.value = true
-      
+
       // Add user marker
       createUserMarker(initialCenter[0], initialCenter[1])
-      
+
       // Force map resize
       setTimeout(() => {
         map.value?.resize()
       }, 100)
-      
+
       // Load city boundary if we have location
       if (lastKnown.value) {
         await highlightUserCityBoundary(lastKnown.value[0], lastKnown.value[1])
@@ -277,10 +278,11 @@ const fetchCityBoundaryData = async (cityName: string): Promise<any> => {
 
     if (data && data.length > 0) {
       // Try to find a result with polygon data
-      const cityData = data.find((item: any) => 
-        item.geojson && 
-        (item.geojson.type === 'Polygon' || item.geojson.type === 'MultiPolygon') &&
-        (item.type === 'administrative' || item.class === 'boundary')
+      const cityData = data.find(
+        (item: any) =>
+          item.geojson &&
+          (item.geojson.type === 'Polygon' || item.geojson.type === 'MultiPolygon') &&
+          (item.type === 'administrative' || item.class === 'boundary'),
       )
 
       if (cityData && cityData.geojson) {
@@ -428,7 +430,7 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
     // Fit map to boundary
     try {
       const bounds = new mapboxgl.LngLatBounds()
-      
+
       if (boundaryData.geometry.type === 'Polygon') {
         boundaryData.geometry.coordinates[0].forEach((coord: [number, number]) => {
           bounds.extend(coord)
@@ -440,10 +442,10 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
       } else if (boundaryData.geometry.type === 'Point') {
         bounds.extend(boundaryData.geometry.coordinates as [number, number])
       }
-      
+
       // Include user location
       bounds.extend([lng, lat])
-      
+
       // Only fit bounds if we have valid bounds
       if (bounds.getNorth() !== bounds.getSouth() && bounds.getEast() !== bounds.getWest()) {
         map.value.fitBounds(bounds, {
@@ -479,7 +481,7 @@ const clearCityBoundary = () => {
 
   // Remove layers
   const layers = ['city-boundary-fill', 'city-boundary-line']
-  layers.forEach(layerId => {
+  layers.forEach((layerId) => {
     if (map.value.getLayer(layerId)) {
       map.value.removeLayer(layerId)
     }
@@ -497,7 +499,7 @@ const clearCityBoundary = () => {
 
 const toggleBoundaryVisibility = () => {
   showBoundary.value = !showBoundary.value
-  
+
   if (showBoundary.value && latitude.value && longitude.value) {
     // Redraw boundary if turned on
     highlightUserCityBoundary(latitude.value, longitude.value)
@@ -505,7 +507,7 @@ const toggleBoundaryVisibility = () => {
     // Clear boundary if turned off
     clearCityBoundary()
   }
-  
+
   setErrorMessage(showBoundary.value ? 'City boundary enabled' : 'City boundary disabled', 2000)
 }
 
@@ -610,10 +612,13 @@ const recenterToUser = async () => {
       userMarker.setLngLat([targetLng, targetLat])
     }
 
+    // ALWAYS zoom to level 16 (zoom in)
+    const targetZoom = 16
+
     // Center map
     map.value.flyTo({
       center: [targetLng, targetLat],
-      zoom: 16,
+      zoom: targetZoom,
       essential: true,
       duration: 1000,
     })
@@ -621,14 +626,16 @@ const recenterToUser = async () => {
     // Save and refresh boundary
     saveCachedLocation(targetLat, targetLng)
     await highlightUserCityBoundary(targetLat, targetLng)
+    
+    // Show success message
+    setErrorMessage('Location updated', 2000)
   } catch (error) {
     console.error('Error recentering:', error)
-    errorMsg.value = 'Failed to recenter map'
+    setErrorMessage('Failed to update location', 3000)
   } finally {
     locating.value = false
   }
 }
-
 /* -------------------- ROUTE MANAGEMENT -------------------- */
 let currentRouteLayers: string[] = []
 let currentRouteMarkers: any[] = []
@@ -760,7 +767,7 @@ const drawRoute = (route: RouteOption) => {
       type: 'Feature',
       geometry: {
         type: 'LineString',
-        coordinates: route.coords.map(coord => [coord[1], coord[0]]), // Convert to [lng, lat]
+        coordinates: route.coords.map((coord) => [coord[1], coord[0]]), // Convert to [lng, lat]
       },
       properties: {
         type: route.type,
@@ -794,7 +801,7 @@ const drawRoute = (route: RouteOption) => {
 
     // Fit bounds to route
     const bounds = new mapboxgl.LngLatBounds()
-    route.coords.forEach(coord => {
+    route.coords.forEach((coord) => {
       bounds.extend([coord[1], coord[0]])
     })
 
@@ -811,7 +818,7 @@ const drawRoute = (route: RouteOption) => {
     const durationMin = Math.round(route.duration / 60)
     setErrorMessage(
       `${routeConfig[route.type].label} Route: ${distanceKm} km • ${durationMin} min`,
-      5000
+      5000,
     )
   } catch (error) {
     console.error('Error drawing route:', error)
@@ -823,7 +830,7 @@ const clearRoutes = () => {
   if (!map.value || !mapboxgl) return
 
   // Remove layers
-  currentRouteLayers.forEach(layerId => {
+  currentRouteLayers.forEach((layerId) => {
     if (map.value.getLayer(layerId)) {
       map.value.removeLayer(layerId)
     }
@@ -833,7 +840,7 @@ const clearRoutes = () => {
   })
 
   // Remove markers
-  currentRouteMarkers.forEach(marker => {
+  currentRouteMarkers.forEach((marker) => {
     marker.remove()
   })
 
@@ -853,9 +860,9 @@ const clearAllRoutes = () => {
 /* -------------------- SELECT ROUTE TYPE -------------------- */
 const selectRouteType = async (type: RouteType) => {
   selectedRouteType.value = type
-  
+
   // Find the route for the selected type
-  const route = routeOptions.value.find(r => r.type === type)
+  const route = routeOptions.value.find((r) => r.type === type)
   if (route) {
     drawRoute(route)
   } else {
@@ -867,10 +874,10 @@ const selectRouteType = async (type: RouteType) => {
 /* -------------------- CALCULATE AND DISPLAY SPECIFIC ROUTE -------------------- */
 const calculateAndDisplayRoute = async (type: RouteType) => {
   routeLoading.value = true
-  
+
   try {
     // Find the shop that's currently selected
-    const shop = shops.value.find(s => s.id === selectedShopId.value)
+    const shop = shops.value.find((s) => s.id === selectedShopId.value)
     if (!shop || !shop.latitude || !shop.longitude) {
       setErrorMessage('Shop location not available')
       return
@@ -889,16 +896,16 @@ const calculateAndDisplayRoute = async (type: RouteType) => {
 
     // Calculate specific route type
     const route = await getSingleRoute(start, end, type)
-    
+
     if (route) {
       // Add to route options if not already there
-      const existingIndex = routeOptions.value.findIndex(r => r.type === type)
+      const existingIndex = routeOptions.value.findIndex((r) => r.type === type)
       if (existingIndex >= 0) {
         routeOptions.value[existingIndex] = route
       } else {
         routeOptions.value.push(route)
       }
-      
+
       // Draw the route
       drawRoute(route)
     } else {
@@ -916,7 +923,7 @@ const calculateAndDisplayRoute = async (type: RouteType) => {
 const getSingleRoute = async (
   start: [number, number],
   end: [number, number],
-  type: 'driving' | 'walking' | 'cycling'
+  type: 'driving' | 'walking' | 'cycling',
 ): Promise<RouteOption | null> => {
   try {
     const coordinates = `${start[1]},${start[0]};${end[1]},${end[0]}`
@@ -963,7 +970,7 @@ const getSingleRoute = async (
   } catch (err) {
     console.warn(`Failed to get ${type} route:`, err)
   }
-  
+
   return null
 }
 
@@ -1095,7 +1102,7 @@ const createShopPopup = (shop: any): string => {
     .join('')
 
   const statusDisplay = getShopStatusDisplay(shop)
-  
+
   return `
     <div style="text-align:center; min-width: 240px; max-width: 300px;" class="shop-popup-content">
       <div style="position: relative;">
@@ -1141,14 +1148,14 @@ const attachPopupEventHandlers = (popup: any, shopId: string) => {
   setTimeout(() => {
     const viewBtn = document.getElementById(`view-${shopId}`)
     const routeBtn = document.getElementById(`route-${shopId}`)
-    
+
     if (viewBtn) {
       viewBtn.addEventListener('click', (e) => {
         e.stopPropagation()
         openShopDetails(shopId)
       })
     }
-    
+
     if (routeBtn) {
       routeBtn.addEventListener('click', (e) => {
         e.stopPropagation()
@@ -1277,16 +1284,16 @@ const focusOnShopMarker = async (shopId: string) => {
 
     // Store all routes
     routeOptions.value = routes
-    
+
     // Show route panel
     showRoutePanel.value = true
-    
+
     // Set default route type to driving if available, otherwise first available
-    const defaultType = routes.find(r => r.type === 'driving') ? 'driving' : routes[0].type
+    const defaultType = routes.find((r) => r.type === 'driving') ? 'driving' : routes[0].type
     selectedRouteType.value = defaultType
-    
+
     // Draw the default route
-    const defaultRoute = routes.find(r => r.type === defaultType) || routes[0]
+    const defaultRoute = routes.find((r) => r.type === defaultType) || routes[0]
     if (defaultRoute) {
       drawRoute(defaultRoute)
     }
@@ -1386,7 +1393,7 @@ const isShopOpenByHours = (shop: any): boolean => {
       return false
     }
   }
-  
+
   if (shop.open_time && shop.close_time) {
     const openTime = convertTimeToNumber(shop.open_time)
     const closeTime = convertTimeToNumber(shop.close_time)
@@ -1694,63 +1701,68 @@ onUnmounted(() => {
       </div>
 
       <!-- Route Selection Panel -->
-      <v-card
-        v-if="showRoutePanel"
-        class="route-selection-panel"
-        elevation="4"
-      >
+      <v-card v-if="showRoutePanel" class="route-selection-panel" elevation="4">
         <v-card-title class="d-flex align-center justify-space-between py-2">
           <div class="d-flex align-center">
             <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
             <span class="text-subtitle-1 font-weight-bold">Route Options</span>
           </div>
-          <v-btn
-            icon
-            size="small"
-            @click="clearAllRoutes"
-            variant="text"
-            title="Close route panel"
-          >
+          <v-btn icon size="small" @click="clearAllRoutes" variant="text" title="Close route panel">
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-card-title>
-        
+
         <v-card-text class="py-3">
           <div class="route-buttons-grid">
             <v-btn
               v-for="type in ['driving', 'walking', 'cycling'] as RouteType[]"
               :key="type"
-              :color="selectedRouteType === type ? routeConfig[type].activeColor : routeConfig[type].color"
+              :color="
+                selectedRouteType === type ? routeConfig[type].activeColor : routeConfig[type].color
+              "
               variant="flat"
               class="route-type-btn"
               @click="selectRouteType(type)"
-              :disabled="!routeOptions.find(r => r.type === type)"
+              :disabled="!routeOptions.find((r) => r.type === type)"
             >
               <v-icon start>{{ routeConfig[type].icon }}</v-icon>
               {{ routeConfig[type].label }}
-              <template v-if="routeOptions.find(r => r.type === type)">
+              <template v-if="routeOptions.find((r) => r.type === type)">
                 <v-spacer></v-spacer>
                 <span class="ml-2 text-caption">
-                  {{ Math.round(routeOptions.find(r => r.type === type)!.duration / 60) }} min
+                  {{ Math.round(routeOptions.find((r) => r.type === type)!.duration / 60) }} min
                 </span>
               </template>
             </v-btn>
           </div>
-          
+
           <!-- Route Info -->
-          <div v-if="routeOptions.find(r => r.type === selectedRouteType)" class="route-info mt-3">
+          <div
+            v-if="routeOptions.find((r) => r.type === selectedRouteType)"
+            class="route-info mt-3"
+          >
             <v-divider class="my-2"></v-divider>
             <div class="d-flex justify-space-between align-center">
               <div>
                 <div class="text-caption text-medium-emphasis">Distance</div>
                 <div class="text-body-1 font-weight-medium">
-                  {{ (routeOptions.find(r => r.type === selectedRouteType)!.distance / 1000).toFixed(1) }} km
+                  {{
+                    (
+                      routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000
+                    ).toFixed(1)
+                  }}
+                  km
                 </div>
               </div>
               <div>
                 <div class="text-caption text-medium-emphasis">Duration</div>
                 <div class="text-body-1 font-weight-medium">
-                  {{ Math.round(routeOptions.find(r => r.type === selectedRouteType)!.duration / 60) }} minutes
+                  {{
+                    Math.round(
+                      routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60,
+                    )
+                  }}
+                  minutes
                 </div>
               </div>
             </div>
@@ -2341,7 +2353,7 @@ onUnmounted(() => {
   transform: translate(-50%, -50%);
   width: 30px;
   height: 30px;
-  background: #3B82F6;
+  background: #3b82f6;
   border-radius: 50%;
   opacity: 0.6;
   animation: pulse 2s infinite;
