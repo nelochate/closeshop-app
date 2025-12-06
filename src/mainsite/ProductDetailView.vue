@@ -24,7 +24,6 @@ const selectedVariety = ref(null)
 const openImageDialog = ref(false)
 const previewIndex = ref(0)
 
-
 // DOM refs
 const productImgRef = ref(null)
 const cartIconRef = ref(null)
@@ -66,7 +65,9 @@ const likingInProgress = ref(false)
 // Fetch user and their profile picture
 const fetchUserProfile = async () => {
   try {
-    const { data: { user: authUser } } = await supabase.auth.getUser()
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser()
 
     if (!authUser) {
       userProfile.value = '/default-avatar.png'
@@ -87,23 +88,21 @@ const fetchUserProfile = async () => {
       userProfile.value = profile.avatar_url
     } else {
       // Fallback to auth metadata
-      const profilePic = authUser.user_metadata?.avatar_url ||
-                        authUser.user_metadata?.picture ||
-                        '/default-avatar.png'
+      const profilePic =
+        authUser.user_metadata?.avatar_url ||
+        authUser.user_metadata?.picture ||
+        '/default-avatar.png'
       userProfile.value = profilePic
 
       // Optional: Update profiles table with the avatar URL
       if (profilePic && profilePic !== '/default-avatar.png') {
-        await supabase
-          .from('profiles')
-          .upsert({
-            id: authUser.id,
-            avatar_url: profilePic,
-            updated_at: new Date().toISOString()
-          })
+        await supabase.from('profiles').upsert({
+          id: authUser.id,
+          avatar_url: profilePic,
+          updated_at: new Date().toISOString(),
+        })
       }
     }
-
   } catch (err) {
     console.error('Error fetching user profile:', err)
     userProfile.value = '/default-avatar.png'
@@ -147,7 +146,8 @@ onMounted(async () => {
     // Fetch product + shop details
     const { data, error: err } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         prod_description,
@@ -165,7 +165,8 @@ onMounted(async () => {
           logo_url,
           owner_id
         )
-      `)
+      `,
+      )
       .eq('id', productId)
       .single()
 
@@ -222,7 +223,8 @@ const loadReviews = async () => {
   try {
     const { data, error: err } = await supabase
       .from('reviews')
-      .select(`
+      .select(
+        `
         *,
         user:profiles!reviews_user_id_fkey (
           id,
@@ -230,65 +232,71 @@ const loadReviews = async () => {
           last_name,
           avatar_url
         )
-      `)
+      `,
+      )
       .eq('product_id', productId)
       .order('created_at', { ascending: false })
 
     if (err) throw err
 
     // Process reviews data
-reviews.value = (data || []).map(review => {
-  // Ensure photos is always an array
-  let photos = review.photos || []
+    reviews.value = (data || []).map((review) => {
+      // Ensure photos is always an array
+      let photos = review.photos || []
 
-  // If photos is a string, try to parse it as JSON
-  if (typeof photos === 'string') {
-    try {
-      photos = JSON.parse(photos)
-    } catch (e) {
-      console.warn('⚠️ Could not parse photos as JSON:', photos)
-      photos = []
-    }
-  }
-
-  // Filter out invalid photo entries
-  photos = photos.filter(photo =>
-    photo &&
-    typeof photo === 'string' &&
-    photo.length > 0 &&
-    (photo.startsWith('http') || photo.startsWith('data:') || photo.startsWith('/') || photo.startsWith('blob:'))
-  )
-
-  // Parse liked_by_users if it's a string
-  let likedByUsers = []
-  if (review.liked_by_users) {
-    if (Array.isArray(review.liked_by_users)) {
-      likedByUsers = review.liked_by_users
-    } else if (typeof review.liked_by_users === 'string') {
-      try {
-        likedByUsers = JSON.parse(review.liked_by_users)
-      } catch {
-        likedByUsers = []
+      // If photos is a string, try to parse it as JSON
+      if (typeof photos === 'string') {
+        try {
+          photos = JSON.parse(photos)
+        } catch (e) {
+          console.warn('⚠️ Could not parse photos as JSON:', photos)
+          photos = []
+        }
       }
-    }
-  }
 
-  // Get user data
-  const reviewUser = review.user || {}
-  const userAvatar = reviewUser.avatar_url || '/default-avatar.png'
-  const userName = review.user_name ||
-    `${reviewUser.first_name || ''} ${reviewUser.last_name || ''}`.trim() ||
-    'Anonymous User'
+      // Filter out invalid photo entries
+      photos = photos.filter(
+        (photo) =>
+          photo &&
+          typeof photo === 'string' &&
+          photo.length > 0 &&
+          (photo.startsWith('http') ||
+            photo.startsWith('data:') ||
+            photo.startsWith('/') ||
+            photo.startsWith('blob:')),
+      )
 
-  return {
-    ...review,
-    photos: photos,
-    liked_by_users: likedByUsers, // ADD THIS LINE - store parsed array
-    user_name: userName,
-    user_avatar: userAvatar,
-    is_verified: review.is_verified || false
-  }
-})
+      // Parse liked_by_users if it's a string
+      let likedByUsers = []
+      if (review.liked_by_users) {
+        if (Array.isArray(review.liked_by_users)) {
+          likedByUsers = review.liked_by_users
+        } else if (typeof review.liked_by_users === 'string') {
+          try {
+            likedByUsers = JSON.parse(review.liked_by_users)
+          } catch {
+            likedByUsers = []
+          }
+        }
+      }
+
+      // Get user data
+      const reviewUser = review.user || {}
+      const userAvatar = reviewUser.avatar_url || '/default-avatar.png'
+      const userName =
+        review.user_name ||
+        `${reviewUser.first_name || ''} ${reviewUser.last_name || ''}`.trim() ||
+        'Anonymous User'
+
+      return {
+        ...review,
+        photos: photos,
+        liked_by_users: likedByUsers, // ADD THIS LINE - store parsed array
+        user_name: userName,
+        user_avatar: userAvatar,
+        is_verified: review.is_verified || false,
+      }
+    })
 
     console.log('📝 Reviews loaded:', reviews.value.length)
     console.log('👥 Sample review user data:', reviews.value[0]?.user)
@@ -306,7 +314,7 @@ const reviewStats = computed(() => {
     return {
       average_rating: 0,
       total_reviews: 0,
-      rating_distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+      rating_distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
     }
   }
 
@@ -314,14 +322,14 @@ const reviewStats = computed(() => {
   const average = reviews.value.reduce((sum, review) => sum + review.rating, 0) / total
 
   const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
-  reviews.value.forEach(review => {
+  reviews.value.forEach((review) => {
     distribution[review.rating]++
   })
 
   return {
     average_rating: Math.round(average * 10) / 10,
     total_reviews: total,
-    rating_distribution: distribution
+    rating_distribution: distribution,
   }
 })
 
@@ -332,7 +340,7 @@ const filteredReviews = computed(() => {
   // Apply rating filter
   if (reviewFilter.value !== 'all') {
     const rating = parseInt(reviewFilter.value)
-    filtered = filtered.filter(review => review.rating === rating)
+    filtered = filtered.filter((review) => review.rating === rating)
   }
 
   // Apply sort
@@ -354,7 +362,7 @@ const formatDate = (dateString) => {
   return new Date(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
-    day: 'numeric'
+    day: 'numeric',
   })
 }
 
@@ -373,7 +381,11 @@ const viewReviewImage = (imageUrl) => {
 const displayPrice = computed(() => {
   if (!product.value) return 0
 
-  if (selectedVariety.value && selectedVariety.value.price !== undefined && selectedVariety.value.price !== null) {
+  if (
+    selectedVariety.value &&
+    selectedVariety.value.price !== undefined &&
+    selectedVariety.value.price !== null
+  ) {
     return selectedVariety.value.price
   }
 
@@ -384,7 +396,11 @@ const displayPrice = computed(() => {
 const displayStock = computed(() => {
   if (!product.value) return 0
 
-  if (selectedVariety.value && selectedVariety.value.stock !== undefined && selectedVariety.value.stock !== null) {
+  if (
+    selectedVariety.value &&
+    selectedVariety.value.stock !== undefined &&
+    selectedVariety.value.stock !== null
+  ) {
     return selectedVariety.value.stock
   }
 
@@ -395,7 +411,11 @@ const displayStock = computed(() => {
 const dialogDisplayStock = computed(() => {
   if (!product.value) return 0
 
-  if (dialogSelectedVariety.value && dialogSelectedVariety.value.stock !== undefined && dialogSelectedVariety.value.stock !== null) {
+  if (
+    dialogSelectedVariety.value &&
+    dialogSelectedVariety.value.stock !== undefined &&
+    dialogSelectedVariety.value.stock !== null
+  ) {
     return dialogSelectedVariety.value.stock
   }
 
@@ -406,7 +426,11 @@ const dialogDisplayStock = computed(() => {
 const buyNowDisplayStock = computed(() => {
   if (!product.value) return 0
 
-  if (buyNowSelectedVariety.value && buyNowSelectedVariety.value.stock !== undefined && buyNowSelectedVariety.value.stock !== null) {
+  if (
+    buyNowSelectedVariety.value &&
+    buyNowSelectedVariety.value.stock !== undefined &&
+    buyNowSelectedVariety.value.stock !== null
+  ) {
     return buyNowSelectedVariety.value.stock
   }
 
@@ -585,21 +609,21 @@ const proceedToCheckout = () => {
 
   console.log('🛒 Navigating to checkout with item:', item)
 
-router.push({
-  name: 'purchaseview',
-  query: {
-    productId: product.value.id,
-    fromProduct: 'true',
-    variety: finalVariety ? finalVariety.name : null,
-    size: finalSize,
-    quantity: buyNowQuantity.value
-  },
-  state: {
-    items: [item],
-    shopId: product.value.shop.id,
-    fromCart: false
-  }
-})
+  router.push({
+    name: 'purchaseview',
+    query: {
+      productId: product.value.id,
+      fromProduct: 'true',
+      variety: finalVariety ? finalVariety.name : null,
+      size: finalSize,
+      quantity: buyNowQuantity.value,
+    },
+    state: {
+      items: [item],
+      shopId: product.value.shop.id,
+      fromCart: false,
+    },
+  })
 }
 
 // CONFIRM ADD TO CART (from dialog)
@@ -636,12 +660,14 @@ const confirmAddToCart = async () => {
 
   try {
     // Prepare variety data
-    const varietyData = finalVariety ? {
-      name: finalVariety.name,
-      price: finalVariety.price,
-      stock: finalVariety.stock,
-      images: finalVariety.images || []
-    } : null
+    const varietyData = finalVariety
+      ? {
+          name: finalVariety.name,
+          price: finalVariety.price,
+          stock: finalVariety.stock,
+          images: finalVariety.images || [],
+        }
+      : null
 
     // Use cart store to add item
     const result = await cartStore.addToCart(
@@ -649,7 +675,7 @@ const confirmAddToCart = async () => {
       finalQuantity,
       finalSize,
       finalVariety ? finalVariety.name : null,
-      varietyData
+      varietyData,
     )
 
     // Check if result exists and has success property
@@ -669,7 +695,6 @@ const confirmAddToCart = async () => {
       const errorMessage = result?.error || 'Failed to add to cart'
       throw new Error(errorMessage)
     }
-
   } catch (err) {
     console.error('❌ confirmAddToCart error:', err)
 
@@ -806,16 +831,14 @@ const toggleHelpful = async (review) => {
 
   try {
     // Get current liked_by_users array (ensure it's an array)
-    let likedByUsers = Array.isArray(review.liked_by_users)
-      ? review.liked_by_users
-      : []
+    let likedByUsers = Array.isArray(review.liked_by_users) ? review.liked_by_users : []
 
     const userId = user.value.id
     const hasLiked = likedByUsers.includes(userId)
 
     if (hasLiked) {
       // User already liked - remove their like
-      likedByUsers = likedByUsers.filter(id => id !== userId)
+      likedByUsers = likedByUsers.filter((id) => id !== userId)
       showSnackbar('Removed helpful vote', 'info')
     } else {
       // User hasn't liked - add their like
@@ -832,7 +855,7 @@ const toggleHelpful = async (review) => {
       .update({
         liked_by_users: likedByUsers,
         likes: newLikes,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
       })
       .eq('id', review.id)
 
@@ -841,7 +864,6 @@ const toggleHelpful = async (review) => {
     // Update local state
     review.liked_by_users = likedByUsers
     review.likes = newLikes
-
   } catch (err) {
     console.error('❌ Error toggling review like:', err)
     showSnackbar('Failed to update. Please try again.', 'error')
@@ -884,7 +906,13 @@ const getLikesCount = (review) => {
       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn icon ref="cartIconRef" @click="router.push('/cartview')" :disabled="isAnimating">
-        <v-badge v-if="cartStore.count" :content="cartStore.count" color="red" offset-x="-7" offset-y="-3">
+        <v-badge
+          v-if="cartStore.count"
+          :content="cartStore.count"
+          color="red"
+          offset-x="-7"
+          offset-y="-3"
+        >
           <v-icon size="28">mdi-cart-outline</v-icon>
         </v-badge>
         <template v-else>
@@ -910,29 +938,58 @@ const getLikesCount = (review) => {
       <v-sheet v-else class="product-sheet pa-4">
         <!-- Product Images -->
         <div class="product-images mb-4">
-          <v-carousel v-if="product.main_img_urls && product.main_img_urls.length > 1" hide-delimiter-background
-            height="300">
+          <v-carousel
+            v-if="product.main_img_urls && product.main_img_urls.length > 1"
+            hide-delimiter-background
+            height="300"
+          >
             <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
-              <v-img :src="img" height="300" class="rounded-lg" style="cursor: zoom-in"
-                @click="((previewIndex = index), (openImageDialog = true))" />
+              <v-img
+                :src="img"
+                height="300"
+                class="rounded-lg"
+                style="cursor: zoom-in"
+                @click="((previewIndex = index), (openImageDialog = true))"
+              />
             </v-carousel-item>
           </v-carousel>
 
           <!-- Fallback: Single Image -->
-          <v-img v-else ref="productImgRef" :src="mainImage(product.main_img_urls)" class="product-img mb-4" contain
-            style="cursor: zoom-in" @click="openImageDialog = true" />
+          <v-img
+            v-else
+            ref="productImgRef"
+            :src="mainImage(product.main_img_urls)"
+            class="product-img mb-4"
+            contain
+            style="cursor: zoom-in"
+            @click="openImageDialog = true"
+          />
         </div>
 
         <!-- Image Lightbox for Product Images -->
-        <VueEasyLightbox v-if="openImageDialog" :visible="openImageDialog" :imgs="product.main_img_urls"
-          :index="previewIndex" @hide="openImageDialog = false" />
+        <VueEasyLightbox
+          v-if="openImageDialog"
+          :visible="openImageDialog"
+          :imgs="product.main_img_urls"
+          :index="previewIndex"
+          @hide="openImageDialog = false"
+        />
 
         <!-- Variety Image Lightbox -->
-        <VueEasyLightbox v-if="openVarietyDialog" :visible="openVarietyDialog" :imgs="varietyImages"
-          :index="varietyPreviewIndex" @hide="openVarietyDialog = false" />
+        <VueEasyLightbox
+          v-if="openVarietyDialog"
+          :visible="openVarietyDialog"
+          :imgs="varietyImages"
+          :index="varietyPreviewIndex"
+          @hide="openVarietyDialog = false"
+        />
 
         <!-- Review Image Lightbox -->
-        <v-dialog v-model="openImageDialog" max-width="800px" @click:outside="openImageDialog = false">
+        <v-dialog
+          v-model="openImageDialog"
+          max-width="800px"
+          @click:outside="openImageDialog = false"
+        >
           <v-card>
             <v-card-actions class="d-flex justify-end pa-2">
               <v-btn icon @click="openImageDialog = false">
@@ -950,7 +1007,11 @@ const getLikesCount = (review) => {
         </v-dialog>
 
         <!-- Add to Cart Dialog -->
-        <v-dialog v-model="showAddToCartDialog" max-width="500px" @click:outside="closeAddToCartDialog">
+        <v-dialog
+          v-model="showAddToCartDialog"
+          max-width="500px"
+          @click:outside="closeAddToCartDialog"
+        >
           <v-card class="pa-4">
             <v-card-title class="d-flex justify-space-between align-center">
               <h3>Add to Cart</h3>
@@ -979,9 +1040,21 @@ const getLikesCount = (review) => {
               <!-- Size Selection -->
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Size:</p>
-                <v-btn-toggle v-model="dialogSelectedSize" mandatory class="flex-wrap" style="gap: 6px">
-                  <v-btn v-for="size in product.sizes" :key="size" :value="size" variant="outlined"
-                    class="ma-1 rounded-pill text-capitalize" color="primary" size="small">
+                <v-btn-toggle
+                  v-model="dialogSelectedSize"
+                  mandatory
+                  class="flex-wrap"
+                  style="gap: 6px"
+                >
+                  <v-btn
+                    v-for="size in product.sizes"
+                    :key="size"
+                    :value="size"
+                    variant="outlined"
+                    class="ma-1 rounded-pill text-capitalize"
+                    color="primary"
+                    size="small"
+                  >
                     {{ size }}
                   </v-btn>
                 </v-btn-toggle>
@@ -992,8 +1065,12 @@ const getLikesCount = (review) => {
                 <p class="font-weight-medium mb-2">Select Variety:</p>
                 <div class="varieties-list">
                   <!-- Main Product Option -->
-                  <v-card class="mb-2" :class="{ 'option-selected': !dialogSelectedVariety }"
-                    @click="dialogSelectedVariety = null" variant="outlined">
+                  <v-card
+                    class="mb-2"
+                    :class="{ 'option-selected': !dialogSelectedVariety }"
+                    @click="dialogSelectedVariety = null"
+                    variant="outlined"
+                  >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
                         <v-img :src="mainImage(product.main_img_urls)" />
@@ -1009,16 +1086,24 @@ const getLikesCount = (review) => {
                   </v-card>
 
                   <!-- Varieties -->
-                  <v-card v-for="variety in product.varieties" :key="variety.name" class="mb-2"
+                  <v-card
+                    v-for="variety in product.varieties"
+                    :key="variety.name"
+                    class="mb-2"
                     :class="{ 'option-selected': dialogSelectedVariety?.name === variety.name }"
-                    @click="dialogSelectedVariety = variety" variant="outlined" :disabled="variety.stock === 0">
+                    @click="dialogSelectedVariety = variety"
+                    variant="outlined"
+                    :disabled="variety.stock === 0"
+                  >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
                         <v-img :src="getVarietyImage(variety)" />
                       </v-avatar>
                       <div class="flex-grow-1">
                         <div class="font-weight-medium">{{ variety.name }}</div>
-                        <div class="text-caption text-grey">₱{{ variety.price || product.price }}</div>
+                        <div class="text-caption text-grey">
+                          ₱{{ variety.price || product.price }}
+                        </div>
                         <div class="text-caption">
                           <v-chip v-if="variety.stock === 0" size="x-small" color="red">
                             Out of stock
@@ -1044,7 +1129,11 @@ const getLikesCount = (review) => {
                     <v-icon>mdi-minus</v-icon>
                   </v-btn>
                   <span class="mx-4 font-weight-bold">{{ dialogQuantity }}</span>
-                  <v-btn icon @click="incrementQuantity" :disabled="dialogQuantity >= dialogDisplayStock">
+                  <v-btn
+                    icon
+                    @click="incrementQuantity"
+                    :disabled="dialogQuantity >= dialogDisplayStock"
+                  >
                     <v-icon>mdi-plus</v-icon>
                   </v-btn>
                   <span class="ml-4 text-caption text-grey">
@@ -1054,11 +1143,13 @@ const getLikesCount = (review) => {
               </div>
 
               <!-- Total Price -->
-              <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa;">
+              <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa">
                 <div class="d-flex justify-space-between">
                   <span>Total:</span>
                   <span class="font-weight-bold text-primary">
-                    ₱{{ ((dialogSelectedVariety?.price || product.price) * dialogQuantity).toFixed(2) }}
+                    ₱{{
+                      ((dialogSelectedVariety?.price || product.price) * dialogQuantity).toFixed(2)
+                    }}
                   </span>
                 </div>
               </div>
@@ -1066,12 +1157,13 @@ const getLikesCount = (review) => {
 
             <v-card-actions>
               <v-spacer />
-              <v-btn @click="closeAddToCartDialog" variant="outlined" class="mr-2">
-                Cancel
-              </v-btn>
-              <v-btn color="primary" @click="confirmAddToCart"
+              <v-btn @click="closeAddToCartDialog" variant="outlined" class="mr-2"> Cancel </v-btn>
+              <v-btn
+                color="primary"
+                @click="confirmAddToCart"
                 :disabled="dialogDisplayStock === 0 || (product.has_sizes && !dialogSelectedSize)"
-                :loading="isAnimating">
+                :loading="isAnimating"
+              >
                 Add to Cart
               </v-btn>
             </v-card-actions>
@@ -1108,9 +1200,21 @@ const getLikesCount = (review) => {
               <!-- Size Selection -->
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Size:</p>
-                <v-btn-toggle v-model="buyNowSelectedSize" mandatory class="flex-wrap" style="gap: 6px">
-                  <v-btn v-for="size in product.sizes" :key="size" :value="size" variant="outlined"
-                    class="ma-1 rounded-pill text-capitalize" color="primary" size="small">
+                <v-btn-toggle
+                  v-model="buyNowSelectedSize"
+                  mandatory
+                  class="flex-wrap"
+                  style="gap: 6px"
+                >
+                  <v-btn
+                    v-for="size in product.sizes"
+                    :key="size"
+                    :value="size"
+                    variant="outlined"
+                    class="ma-1 rounded-pill text-capitalize"
+                    color="primary"
+                    size="small"
+                  >
                     {{ size }}
                   </v-btn>
                 </v-btn-toggle>
@@ -1121,8 +1225,12 @@ const getLikesCount = (review) => {
                 <p class="font-weight-medium mb-2">Select Variety:</p>
                 <div class="varieties-list">
                   <!-- Main Product Option -->
-                  <v-card class="mb-2" :class="{ 'option-selected': !buyNowSelectedVariety }"
-                    @click="buyNowSelectedVariety = null" variant="outlined">
+                  <v-card
+                    class="mb-2"
+                    :class="{ 'option-selected': !buyNowSelectedVariety }"
+                    @click="buyNowSelectedVariety = null"
+                    variant="outlined"
+                  >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
                         <v-img :src="mainImage(product.main_img_urls)" />
@@ -1138,16 +1246,24 @@ const getLikesCount = (review) => {
                   </v-card>
 
                   <!-- Varieties -->
-                  <v-card v-for="variety in product.varieties" :key="variety.name" class="mb-2"
+                  <v-card
+                    v-for="variety in product.varieties"
+                    :key="variety.name"
+                    class="mb-2"
                     :class="{ 'option-selected': buyNowSelectedVariety?.name === variety.name }"
-                    @click="buyNowSelectedVariety = variety" variant="outlined" :disabled="variety.stock === 0">
+                    @click="buyNowSelectedVariety = variety"
+                    variant="outlined"
+                    :disabled="variety.stock === 0"
+                  >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
                         <v-img :src="getVarietyImage(variety)" />
                       </v-avatar>
                       <div class="flex-grow-1">
                         <div class="font-weight-medium">{{ variety.name }}</div>
-                        <div class="text-caption text-grey">₱{{ variety.price || product.price }}</div>
+                        <div class="text-caption text-grey">
+                          ₱{{ variety.price || product.price }}
+                        </div>
                         <div class="text-caption">
                           <v-chip v-if="variety.stock === 0" size="x-small" color="red">
                             Out of stock
@@ -1173,7 +1289,11 @@ const getLikesCount = (review) => {
                     <v-icon>mdi-minus</v-icon>
                   </v-btn>
                   <span class="mx-4 font-weight-bold">{{ buyNowQuantity }}</span>
-                  <v-btn icon @click="incrementBuyNowQuantity" :disabled="buyNowQuantity >= buyNowDisplayStock">
+                  <v-btn
+                    icon
+                    @click="incrementBuyNowQuantity"
+                    :disabled="buyNowQuantity >= buyNowDisplayStock"
+                  >
                     <v-icon>mdi-plus</v-icon>
                   </v-btn>
                   <span class="ml-4 text-caption text-grey">
@@ -1183,11 +1303,13 @@ const getLikesCount = (review) => {
               </div>
 
               <!-- Total Price -->
-              <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa;">
+              <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa">
                 <div class="d-flex justify-space-between">
                   <span>Total:</span>
                   <span class="font-weight-bold text-primary">
-                    ₱{{ ((buyNowSelectedVariety?.price || product.price) * buyNowQuantity).toFixed(2) }}
+                    ₱{{
+                      ((buyNowSelectedVariety?.price || product.price) * buyNowQuantity).toFixed(2)
+                    }}
                   </span>
                 </div>
               </div>
@@ -1195,12 +1317,13 @@ const getLikesCount = (review) => {
 
             <v-card-actions>
               <v-spacer />
-              <v-btn @click="closeBuyNowDialog" variant="outlined" class="mr-2">
-                Cancel
-              </v-btn>
-              <v-btn color="primary" @click="proceedToCheckout"
+              <v-btn @click="closeBuyNowDialog" variant="outlined" class="mr-2"> Cancel </v-btn>
+              <v-btn
+                color="primary"
+                @click="proceedToCheckout"
                 :disabled="buyNowDisplayStock === 0 || (product.has_sizes && !buyNowSelectedSize)"
-                :loading="isAnimating">
+                :loading="isAnimating"
+              >
                 Proceed to Checkout
               </v-btn>
             </v-card-actions>
@@ -1219,8 +1342,13 @@ const getLikesCount = (review) => {
               <p class="font-weight-medium mb-2">Choose your option:</p>
 
               <!-- Main Product Card -->
-              <v-card class="option-card mb-2" :class="{ 'option-card--selected': isMainProductSelected }"
-                @click="selectMainProduct" variant="outlined" :disabled="product.stock === 0">
+              <v-card
+                class="option-card mb-2"
+                :class="{ 'option-card--selected': isMainProductSelected }"
+                @click="selectMainProduct"
+                variant="outlined"
+                :disabled="product.stock === 0"
+              >
                 <v-card-text class="pa-3 d-flex align-center">
                   <v-avatar size="48" class="mr-3">
                     <v-img :src="mainImage(product.main_img_urls)" />
@@ -1259,14 +1387,23 @@ const getLikesCount = (review) => {
               <p class="font-weight-medium mb-2">Available Varieties:</p>
 
               <div class="varieties-grid">
-                <v-card v-for="variety in product.varieties" :key="variety.name" class="variety-card"
-                  :class="{ 'variety-card--selected': isVarietySelected(variety) }" @click="selectedVariety = variety"
-                  variant="outlined" :disabled="variety.stock === 0">
+                <v-card
+                  v-for="variety in product.varieties"
+                  :key="variety.name"
+                  class="variety-card"
+                  :class="{ 'variety-card--selected': isVarietySelected(variety) }"
+                  @click="selectedVariety = variety"
+                  variant="outlined"
+                  :disabled="variety.stock === 0"
+                >
                   <v-card-text class="pa-3">
                     <div class="d-flex align-center mb-2">
                       <v-avatar size="48" class="mr-3">
-                        <v-img :src="getVarietyImage(variety)" @click.stop="previewVarietyImages(variety.images)"
-                          style="cursor: zoom-in" />
+                        <v-img
+                          :src="getVarietyImage(variety)"
+                          @click.stop="previewVarietyImages(variety.images)"
+                          style="cursor: zoom-in"
+                        />
                       </v-avatar>
                       <div class="flex-grow-1">
                         <div class="d-flex justify-space-between align-center">
@@ -1292,9 +1429,7 @@ const getLikesCount = (review) => {
                       <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
                         {{ variety.stock }} left
                       </v-chip>
-                      <v-chip v-else size="x-small" color="green">
-                        In stock
-                      </v-chip>
+                      <v-chip v-else size="x-small" color="green"> In stock </v-chip>
                     </div>
                   </v-card-text>
                 </v-card>
@@ -1306,23 +1441,30 @@ const getLikesCount = (review) => {
           <div v-if="product.sizes && product.sizes.length" class="mb-3">
             <p class="font-weight-medium mb-1">Size:</p>
             <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap" style="gap: 6px">
-              <v-btn v-for="size in product.sizes" :key="size" :value="size" variant="outlined"
-                class="ma-1 rounded-pill text-capitalize" color="primary" size="small">
+              <v-btn
+                v-for="size in product.sizes"
+                :key="size"
+                :value="size"
+                variant="outlined"
+                class="ma-1 rounded-pill text-capitalize"
+                color="primary"
+                size="small"
+              >
                 {{ size }}
               </v-btn>
             </v-btn-toggle>
           </div>
 
           <!-- Selection Summary -->
-          <div class="selection-summary mb-3 pa-3 rounded-lg" style="background: #f8f9fa;">
+          <div class="selection-summary mb-3 pa-3 rounded-lg" style="background: #f8f9fa">
             <p class="text-caption text-grey mb-1">Your selection:</p>
             <p class="font-weight-medium mb-1">
               {{ selectedVariety ? selectedVariety.name : 'Standard Product' }}
               <span v-if="selectedSize"> • {{ selectedSize }}</span>
             </p>
             <p class="text-caption text-grey">
-              Price: <span class="font-weight-medium text-primary">₱{{ displayPrice }}</span>
-              • Stock: <span class="font-weight-medium">{{ displayStock }} available</span>
+              Price: <span class="font-weight-medium text-primary">₱{{ displayPrice }}</span> •
+              Stock: <span class="font-weight-medium">{{ displayStock }} available</span>
             </p>
           </div>
 
@@ -1331,8 +1473,13 @@ const getLikesCount = (review) => {
         </div>
 
         <!-- Shop Info -->
-        <v-card v-if="product.shop" flat class="shop-card pa-2 d-flex align-center mb-4"
-          @click="goToShop(product.shop.id)" style="cursor: pointer">
+        <v-card
+          v-if="product.shop"
+          flat
+          class="shop-card pa-2 d-flex align-center mb-4"
+          @click="goToShop(product.shop.id)"
+          style="cursor: pointer"
+        >
           <v-avatar size="48">
             <v-img :src="product.shop.logo_url || '/placeholder.png'" />
           </v-avatar>
@@ -1360,22 +1507,40 @@ const getLikesCount = (review) => {
                     <div class="text-h3 text-primary font-weight-bold">
                       {{ reviewStats.average_rating.toFixed(1) }}
                     </div>
-                    <v-rating :model-value="reviewStats.average_rating" readonly size="small" color="amber"
-                      class="my-2" />
+                    <v-rating
+                      :model-value="reviewStats.average_rating"
+                      readonly
+                      size="small"
+                      color="amber"
+                      class="my-2"
+                    />
                     <div class="text-caption text-grey">
-                      {{ reviewStats.total_reviews }} review{{ reviewStats.total_reviews !== 1 ? 's' : '' }}
+                      {{ reviewStats.total_reviews }} review{{
+                        reviewStats.total_reviews !== 1 ? 's' : ''
+                      }}
                     </div>
                   </div>
                 </v-col>
 
                 <v-col cols="12" md="8">
                   <div class="rating-distribution">
-                    <div v-for="rating in [5,4,3,2,1]" :key="rating" class="d-flex align-center mb-2">
+                    <div
+                      v-for="rating in [5, 4, 3, 2, 1]"
+                      :key="rating"
+                      class="d-flex align-center mb-2"
+                    >
                       <span class="text-caption mr-2" style="min-width: 20px">{{ rating }}</span>
                       <v-icon color="amber" size="small">mdi-star</v-icon>
                       <v-progress-linear
-                        :model-value="(reviewStats.rating_distribution[rating] / reviewStats.total_reviews) * 100"
-                        color="amber" height="8" class="mx-2" rounded />
+                        :model-value="
+                          (reviewStats.rating_distribution[rating] / reviewStats.total_reviews) *
+                          100
+                        "
+                        color="amber"
+                        height="8"
+                        class="mx-2"
+                        rounded
+                      />
                       <span class="text-caption text-grey" style="min-width: 40px">
                         {{ reviewStats.rating_distribution[rating] }}
                       </span>
@@ -1389,24 +1554,40 @@ const getLikesCount = (review) => {
             <div class="review-filters mb-4">
               <v-row class="align-center">
                 <v-col cols="12" sm="6">
-                  <v-select v-model="reviewFilter" :items="[
+                  <v-select
+                    v-model="reviewFilter"
+                    :items="[
                       { title: 'All Ratings', value: 'all' },
                       { title: '5 Stars', value: '5' },
                       { title: '4 Stars', value: '4' },
                       { title: '3 Stars', value: '3' },
                       { title: '2 Stars', value: '2' },
-                      { title: '1 Star', value: '1' }
-                    ]" item-title="title" item-value="value" density="compact" variant="outlined" hide-details
-                    label="Filter by rating" />
+                      { title: '1 Star', value: '1' },
+                    ]"
+                    item-title="title"
+                    item-value="value"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    label="Filter by rating"
+                  />
                 </v-col>
                 <v-col cols="12" sm="6">
-                  <v-select v-model="reviewSort" :items="[
+                  <v-select
+                    v-model="reviewSort"
+                    :items="[
                       { title: 'Latest', value: 'latest' },
                       { title: 'Highest Rating', value: 'highest' },
                       { title: 'Lowest Rating', value: 'lowest' },
-                      { title: 'Most Liked', value: 'most_liked' }
-                    ]" item-title="title" item-value="value" density="compact" variant="outlined" hide-details
-                    label="Sort by" />
+                      { title: 'Most Liked', value: 'most_liked' },
+                    ]"
+                    item-title="title"
+                    item-value="value"
+                    density="compact"
+                    variant="outlined"
+                    hide-details
+                    label="Sort by"
+                  />
                 </v-col>
               </v-row>
             </div>
@@ -1424,13 +1605,22 @@ const getLikesCount = (review) => {
             </div>
 
             <div v-else class="reviews-list">
-              <v-card v-for="review in filteredReviews" :key="review.id" class="review-card mb-4" variant="outlined">
+              <v-card
+                v-for="review in filteredReviews"
+                :key="review.id"
+                class="review-card mb-4"
+                variant="outlined"
+              >
                 <v-card-text class="pa-4">
                   <div class="d-flex align-start">
                     <!-- User Avatar with Fallback -->
                     <v-avatar size="48" class="mr-4" color="primary">
-                      <v-img v-if="review.user_avatar && review.user_avatar !== '/default-avatar.png'"
-                        :src="review.user_avatar" :alt="review.user_name" cover />
+                      <v-img
+                        v-if="review.user_avatar && review.user_avatar !== '/default-avatar.png'"
+                        :src="review.user_avatar"
+                        :alt="review.user_name"
+                        cover
+                      />
                       <div v-else class="d-flex align-center justify-center text-white">
                         <v-icon size="24" color="white">mdi-account</v-icon>
                       </div>
@@ -1451,8 +1641,14 @@ const getLikesCount = (review) => {
                         </v-chip>
 
                         <!-- Rating Stars -->
-                        <v-rating :model-value="review.rating" readonly size="small" color="amber" density="compact"
-                          class="ml-2" />
+                        <v-rating
+                          :model-value="review.rating"
+                          readonly
+                          size="small"
+                          color="amber"
+                          density="compact"
+                          class="ml-2"
+                        />
 
                         <v-spacer></v-spacer>
 
@@ -1463,53 +1659,67 @@ const getLikesCount = (review) => {
                       </div>
 
                       <!-- Comment -->
-                      <div class="text-body-1 mb-3" style="white-space: pre-line;">
+                      <div class="text-body-1 mb-3" style="white-space: pre-line">
                         {{ review.comment }}
                       </div>
 
                       <!-- Photos -->
                       <div v-if="review.photos && review.photos.length > 0" class="mb-3">
                         <div class="text-caption text-grey mb-2">
-                          {{ review.photos.length }} photo{{ review.photos.length !== 1 ? 's' : '' }}
+                          {{ review.photos.length }} photo{{
+                            review.photos.length !== 1 ? 's' : ''
+                          }}
                         </div>
                         <v-row dense>
-                          <v-col v-for="(photo, index) in review.photos" :key="index" cols="4" sm="3" md="2">
-                            <v-img :src="photo" :alt="`Review photo ${index + 1}`" aspect-ratio="1" cover
-                              class="rounded-lg cursor-pointer" @click="viewReviewImage(photo)" />
+                          <v-col
+                            v-for="(photo, index) in review.photos"
+                            :key="index"
+                            cols="4"
+                            sm="3"
+                            md="2"
+                          >
+                            <v-img
+                              :src="photo"
+                              :alt="`Review photo ${index + 1}`"
+                              aspect-ratio="1"
+                              cover
+                              class="rounded-lg cursor-pointer"
+                              @click="viewReviewImage(photo)"
+                            />
                           </v-col>
                         </v-row>
                       </div>
 
-<!-- Review Helpful/Like Button -->
-<div class="d-flex align-center mt-3">
-  <v-btn
-    size="x-small"
-    variant="text"
-    :color="hasUserLiked(review) ? 'primary' : 'grey-darken-1'"
-    class="text-caption helpful-btn"
-    @click="toggleHelpful(review)"
-    :disabled="!user || likingInProgress"
-    :loading="likingInProgress"
-  >
-    <template v-slot:loader>
-      <v-progress-circular
-        indeterminate
-        size="16"
-        width="2"
-      ></v-progress-circular>
-    </template>
-    
-    <v-icon left size="16">
-      {{ hasUserLiked(review) ? 'mdi-thumb-up' : 'mdi-thumb-up-outline' }}
-    </v-icon>
-    {{ hasUserLiked(review) ? 'Liked' : 'Helpful' }}
-    <span class="ml-1 font-weight-medium">({{ review.likes || 0 }})</span>
-  </v-btn>
+                      <!-- Review Helpful/Like Button -->
+                      <div class="d-flex align-center mt-3">
+                        <v-btn
+                          size="x-small"
+                          variant="text"
+                          :color="hasUserLiked(review) ? 'primary' : 'grey-darken-1'"
+                          class="text-caption helpful-btn"
+                          @click="toggleHelpful(review)"
+                          :disabled="!user || likingInProgress"
+                          :loading="likingInProgress"
+                        >
+                          <template v-slot:loader>
+                            <v-progress-circular
+                              indeterminate
+                              size="16"
+                              width="2"
+                            ></v-progress-circular>
+                          </template>
 
-  <v-tooltip v-if="!user" activator="parent" location="top">
-    <span class="text-caption">Login to mark as helpful</span>
-  </v-tooltip>
-</div>
+                          <v-icon left size="16">
+                            {{ hasUserLiked(review) ? 'mdi-thumb-up' : 'mdi-thumb-up-outline' }}
+                          </v-icon>
+                          {{ hasUserLiked(review) ? 'Liked' : 'Helpful' }}
+                          <span class="ml-1 font-weight-medium">({{ review.likes || 0 }})</span>
+                        </v-btn>
+
+                        <v-tooltip v-if="!user" activator="parent" location="top">
+                          <span class="text-caption">Login to mark as helpful</span>
+                        </v-tooltip>
+                      </div>
                     </div>
                   </div>
                 </v-card-text>
@@ -1543,8 +1753,13 @@ const getLikesCount = (review) => {
 
           <!-- Add to Cart - Opens Dialog -->
           <v-col cols="4" class="pa-0">
-            <v-btn block class="bottom-btn cart-btn" color="#4caf50" @click="openAddToCartDialog()"
-              :disabled="displayStock === 0">
+            <v-btn
+              block
+              class="bottom-btn cart-btn"
+              color="#4caf50"
+              @click="openAddToCartDialog()"
+              :disabled="displayStock === 0"
+            >
               <v-icon left size="20">mdi-cart-outline</v-icon>
               {{ displayStock === 0 ? 'Out of Stock' : 'Add to Cart' }}
             </v-btn>
@@ -1552,8 +1767,13 @@ const getLikesCount = (review) => {
 
           <!-- Buy Now - Opens Dialog -->
           <v-col cols="4" class="pa-0">
-            <v-btn block class="bottom-btn buy-now-btn" color="#438fda" @click="openBuyNowDialog()"
-              :disabled="isActionDisabled">
+            <v-btn
+              block
+              class="bottom-btn buy-now-btn"
+              color="#438fda"
+              @click="openBuyNowDialog()"
+              :disabled="isActionDisabled"
+            >
               Buy Now
             </v-btn>
           </v-col>
@@ -1680,10 +1900,18 @@ const getLikesCount = (review) => {
 }
 
 @keyframes cartBounce {
-  0% { transform: scale(1); }
-  30% { transform: scale(1.3); }
-  60% { transform: scale(0.9); }
-  100% { transform: scale(1); }
+  0% {
+    transform: scale(1);
+  }
+  30% {
+    transform: scale(1.3);
+  }
+  60% {
+    transform: scale(0.9);
+  }
+  100% {
+    transform: scale(1);
+  }
 }
 
 /* Rest of your existing CSS */
@@ -1791,11 +2019,23 @@ const getLikesCount = (review) => {
 }
 
 @media (max-width: 600px) {
-  .product-title { font-size: 1rem; }
-  .product-price { font-size: 0.95rem; }
-  .product-description { font-size: 0.8rem; }
-  .product-meta { font-size: 0.7rem; }
-  .shop-name { font-size: 0.9rem; }
-  .bottom-btn { font-size: 0.8rem; }
+  .product-title {
+    font-size: 1rem;
+  }
+  .product-price {
+    font-size: 0.95rem;
+  }
+  .product-description {
+    font-size: 0.8rem;
+  }
+  .product-meta {
+    font-size: 0.7rem;
+  }
+  .shop-name {
+    font-size: 0.9rem;
+  }
+  .bottom-btn {
+    font-size: 0.8rem;
+  }
 }
 </style>

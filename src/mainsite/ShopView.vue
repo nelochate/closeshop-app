@@ -1,18 +1,13 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick, watch } from 'vue'
+import { ref, onMounted, computed, nextTick, watch, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
-import * as L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
 
-// Fix for default markers in Leaflet
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.7.1/images/marker-shadow.png',
-})
+// Initialize Mapbox with your token
+mapboxgl.accessToken = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 // route + router
 const route = useRoute()
@@ -20,7 +15,7 @@ const router = useRouter()
 const shopId = route.params.id as string
 const activeTab = ref(null)
 
-//for chat feature
+// for chat feature
 const user = ref<any>(null)
 const userLoaded = ref(false)
 
@@ -212,15 +207,15 @@ const shareProduct = () => {
 }
 
 // map setup
-let map: L.Map | null = null
-let shopMarker: L.Marker | null = null
+let map: mapboxgl.Map | null = null
+let marker: mapboxgl.Marker | null = null
 
 const initMap = () => {
   // Clean up existing map
   if (map) {
     map.remove()
     map = null
-    shopMarker = null
+    marker = null
   }
 
   // Check if shop has valid coordinates
@@ -251,36 +246,77 @@ const initMap = () => {
 
     try {
       // Initialize map with validated coordinates
-      map = L.map('shop-map').setView([lat, lng], 16)
+      map = new mapboxgl.Map({
+        container: 'shop-map',
+        style: 'mapbox://styles/mapbox/streets-v11',
+        center: [lng, lat],
+        zoom: 15,
+        attributionControl: true
+      })
 
-      // Add tile layer
-      L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-        attribution: '© OpenStreetMap contributors',
-        maxZoom: 19,
-      }).addTo(map)
+      // Add navigation controls
+      map.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
-      // Add marker with proper icon and validated coordinates
-      shopMarker = L.marker([lat, lng])
+      // Create popup content
+      const popupContent = `
+        <div style="padding: 12px;">
+          <strong style="font-size: 14px;">${shop.value.business_name || 'Shop'}</strong><br/>
+          <small style="font-size: 12px; color: #666;">${shop.value.description || ''}</small>
+        </div>
+      `
+
+      // Create a popup
+      const popup = new mapboxgl.Popup({ offset: 25 })
+        .setHTML(popupContent)
+
+      // Create custom marker element
+      const markerEl = document.createElement('div')
+      markerEl.className = 'custom-marker'
+      markerEl.innerHTML = `
+        <div style="
+          width: 40px;
+          height: 40px;
+          background-color: #438fda;
+          border-radius: 50%;
+          border: 3px solid white;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        ">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="white">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+        </div>
+      `
+
+      // Add marker with popup
+      marker = new mapboxgl.Marker({
+        element: markerEl,
+        anchor: 'bottom'
+      })
+        .setLngLat([lng, lat])
+        .setPopup(popup)
         .addTo(map)
-        .bindPopup(`
-          <div style="text-align: center;">
-            <strong>${shop.value.business_name || 'Shop'}</strong><br/>
-            <small>${shop.value.description || ''}</small>
-          </div>
-        `)
-        .openPopup()
 
-      console.log('Map initialized with coordinates:', { lat, lng })
+      // Open popup by default
+      marker.togglePopup()
 
-      // Force map resize to ensure proper rendering on mobile
-      setTimeout(() => {
-        map?.invalidateSize()
-      }, 100)
+      console.log('Mapbox map initialized with coordinates:', { lat, lng })
 
-      mapInitialized.value = true
+      // Handle map load event
+      map.on('load', () => {
+        console.log('Mapbox map loaded')
+        mapInitialized.value = true
+      })
+
+      // Handle map errors
+      map.on('error', (e) => {
+        console.error('Mapbox error:', e)
+      })
 
     } catch (error) {
-      console.error('Error initializing map:', error)
+      console.error('Error initializing Mapbox:', error)
     }
   })
 }
@@ -314,8 +350,17 @@ import { onActivated } from 'vue'
 onActivated(() => {
   if (map && shop.value?.latitude && shop.value?.longitude) {
     setTimeout(() => {
-      map?.invalidateSize()
+      map?.resize()
     }, 100)
+  }
+})
+
+// Clean up map on component unmount
+onUnmounted(() => {
+  if (map) {
+    map.remove()
+    map = null
+    marker = null
   }
 })
 
@@ -532,6 +577,7 @@ const hasValidCoordinates = computed(() => {
   border-radius: 12px;
   margin-bottom: 16px;
   background: #f5f5f5;
+  position: relative;
 }
 .product-grid {
   display: grid;
@@ -582,13 +628,42 @@ const hasValidCoordinates = computed(() => {
   color: #6b7280;
 }
 
-/* Ensure Leaflet markers display correctly */
-:deep(.leaflet-marker-icon) {
-  margin-left: -12px !important;
-  margin-top: -41px !important;
+/* Mapbox custom marker */
+.custom-marker {
+  cursor: pointer;
 }
 
-:deep(.leaflet-marker-shadow) {
-  margin-left: -12px !important;
+/* Mapbox controls styling */
+:deep(.mapboxgl-ctrl-group) {
+  border-radius: 8px !important;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+}
+
+:deep(.mapboxgl-ctrl-group button) {
+  width: 36px !important;
+  height: 36px !important;
+}
+
+:deep(.mapboxgl-ctrl-zoom-in) {
+  border-radius: 8px 8px 0 0 !important;
+}
+
+:deep(.mapboxgl-ctrl-zoom-out) {
+  border-radius: 0 0 8px 8px !important;
+}
+
+:deep(.mapboxgl-popup) {
+  max-width: 200px !important;
+}
+
+:deep(.mapboxgl-popup-content) {
+  border-radius: 8px !important;
+  padding: 0 !important;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+}
+
+:deep(.mapboxgl-popup-close-button) {
+  font-size: 20px !important;
+  padding: 8px !important;
 }
 </style>

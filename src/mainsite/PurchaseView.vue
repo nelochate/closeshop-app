@@ -134,7 +134,7 @@ const loadShopData = async () => {
         openHour: 9,
         closeHour: 19,
         meetupDetails: 'Main Entrance',
-        manualStatus: 'auto'
+        manualStatus: 'auto',
       }
       return
     }
@@ -155,7 +155,7 @@ const loadShopData = async () => {
         openHour: 9,
         closeHour: 19,
         meetupDetails: 'Main Entrance',
-        manualStatus: 'auto'
+        manualStatus: 'auto',
       }
       return
     }
@@ -195,12 +195,11 @@ const loadShopData = async () => {
       openHour,
       closeHour,
       meetupDetails: shop.meetup_details || shop.physical_store || 'Main Entrance',
-      manualStatus: shop.manual_status || 'auto'
+      manualStatus: shop.manual_status || 'auto',
     }
 
     console.log('✅ Final shop schedule:', shopSchedule.value)
     console.log('🔍 Open days include Sunday (0):', shopSchedule.value.openDays.includes(0))
-
   } catch (err) {
     console.error('❌ Error loading shop data:', err)
     // Always include Sunday in fallback
@@ -209,19 +208,19 @@ const loadShopData = async () => {
       openHour: 9,
       closeHour: 19,
       meetupDetails: 'Main Entrance',
-      manualStatus: 'auto'
+      manualStatus: 'auto',
     }
   }
 }
 // 🛒 FETCH CART ITEMS BY IDS (DIRECT)
 const fetchCartItemsDirect = async (itemIds: string[]) => {
   console.log('🔍 fetchCartItemsDirect called with IDs:', itemIds)
-  
+
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser()
-    
+
     if (!user) {
       console.log('❌ No user logged in')
       items.value = []
@@ -231,7 +230,7 @@ const fetchCartItemsDirect = async (itemIds: string[]) => {
     // Convert to plain array
     const ids = [...itemIds]
     console.log('🔍 Filtering with IDs:', ids)
-    
+
     if (ids.length === 0) {
       console.log('⚠️ No IDs to filter')
       items.value = []
@@ -241,13 +240,15 @@ const fetchCartItemsDirect = async (itemIds: string[]) => {
     // Fetch with filter
     const { data, error } = await supabase
       .from('cart_items')
-      .select(`
+      .select(
+        `
         *,
         product:products (
           *,
           shop:shops (*)
         )
-      `)
+      `,
+      )
       .eq('user_id', user.id)
       .in('id', ids)
       .order('created_at', { ascending: false })
@@ -304,13 +305,11 @@ const fetchCartItemsDirect = async (itemIds: string[]) => {
 
     fromCart.value = true
     console.log(`🎯 FINAL: Loaded ${items.value.length} selected items`)
-    
   } catch (err) {
     console.error('❌ Error in fetchCartItemsDirect:', err)
     items.value = []
   }
 }
-
 
 // 🛍️ FETCH SINGLE PRODUCT
 const fetchProductFromId = async (productId: string) => {
@@ -397,7 +396,7 @@ const fetchProductFromId = async (productId: string) => {
 // 🛒 FETCH CART ITEMS - SIMPLE VERSION
 const fetchCartItems = async () => {
   console.log('🛒 fetchCartItems called (legacy)')
-  
+
   // If we have cartItemIds, use direct method
   if (cartItemIds.value && cartItemIds.value.length > 0) {
     await fetchCartItemsDirect(cartItemIds.value)
@@ -473,7 +472,7 @@ const loadContactInfo = async () => {
 // 🎯 INITIALIZATION - FIXED VERSION
 onMounted(async () => {
   console.log('🚀 Purchase View Mounted')
-  
+
   // Generate transaction number
   if (!transactionNumber.value) {
     transactionNumber.value = await generateUniqueTransactionNumber()
@@ -496,7 +495,7 @@ onMounted(async () => {
 // 📦 LOAD ITEMS - FIXED VERSION
 const loadItems = async () => {
   console.log('🛒 LOAD ITEMS')
-  
+
   // Check localStorage first (for debugging)
   const savedIds = localStorage.getItem('selectedCartItemIds')
   if (savedIds) {
@@ -524,9 +523,9 @@ const loadItems = async () => {
   // METHOD 3: Check if items are in history state
   if (history.state?.items) {
     console.log('📦 Items in history state')
-    
+
     // Use items directly from state
-    items.value = history.state.items.map(item => ({
+    items.value = history.state.items.map((item) => ({
       ...item,
       product_id: item.product_id || item.id,
       quantity: item.quantity || 1,
@@ -537,16 +536,14 @@ const loadItems = async () => {
       cart_item_id: item.cart_item_id || item.id,
       shop_id: item.shop_id || item.product?.shop_id,
     }))
-    
+
     fromCart.value = history.state.fromCart || true
-    
+
     // Extract cartItemIds from items
-    if (items.value.some(item => item.cart_item_id)) {
-      cartItemIds.value = items.value
-        .map(item => item.cart_item_id)
-        .filter(Boolean)
+    if (items.value.some((item) => item.cart_item_id)) {
+      cartItemIds.value = items.value.map((item) => item.cart_item_id).filter(Boolean)
     }
-    
+
     console.log('✅ Loaded items from history state:', items.value.length)
     return
   }
@@ -574,12 +571,12 @@ const loadItems = async () => {
 // 🛒 FETCH CART ITEMS BY IDs - SIMPLIFIED
 const fetchCartItemsByIDs = async (ids: string[]) => {
   console.log('🔍 fetchCartItemsByIDs called with:', ids)
-  
+
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser()
-    
+
     if (!user) {
       console.log('❌ No user')
       items.value = []
@@ -598,13 +595,15 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
 
     const { data, error } = await supabase
       .from('cart_items')
-      .select(`
+      .select(
+        `
         *,
         product:products (
           *,
           shop:shops (*)
         )
-      `)
+      `,
+      )
       .eq('user_id', user.id)
       .in('id', idArray)
 
@@ -619,7 +618,7 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
     }
 
     // Transform items
-    items.value = data.map(cartItem => {
+    items.value = data.map((cartItem) => {
       const product = cartItem.product || {}
       const shop = product.shop || {}
       const mainImage = getMainImage(product.main_img_urls)
@@ -653,7 +652,6 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
 
     fromCart.value = true
     console.log(`🎯 Loaded ${items.value.length} items`)
-    
   } catch (err) {
     console.error('❌ Error:', err)
     items.value = []
@@ -663,12 +661,12 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
 // 🛒 FETCH ALL CART ITEMS
 const fetchAllCartItems = async () => {
   console.log('🔍 fetchAllCartItems called')
-  
+
   try {
     const {
       data: { user },
     } = await supabase.auth.getUser()
-    
+
     if (!user) {
       console.log('❌ No user')
       items.value = []
@@ -677,52 +675,54 @@ const fetchAllCartItems = async () => {
 
     const { data, error } = await supabase
       .from('cart_items')
-      .select(`
+      .select(
+        `
         *,
         product:products (
           *,
           shop:shops (*)
         )
-      `)
+      `,
+      )
       .eq('user_id', user.id)
 
     if (error) throw error
 
-    items.value = data?.map(cartItem => {
-      const product = cartItem.product || {}
-      const shop = product.shop || {}
-      const mainImage = getMainImage(product.main_img_urls)
+    items.value =
+      data?.map((cartItem) => {
+        const product = cartItem.product || {}
+        const shop = product.shop || {}
+        const mainImage = getMainImage(product.main_img_urls)
 
-      let finalPrice = product.price || 0
-      let itemName = product.prod_name || 'Unnamed Product'
-      let varietyData = cartItem.variety_data
+        let finalPrice = product.price || 0
+        let itemName = product.prod_name || 'Unnamed Product'
+        let varietyData = cartItem.variety_data
 
-      if (cartItem.variety_data && typeof cartItem.variety_data === 'object') {
-        finalPrice = cartItem.variety_data.price || product.price || 0
-        itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
-        varietyData = cartItem.variety_data
-      }
+        if (cartItem.variety_data && typeof cartItem.variety_data === 'object') {
+          finalPrice = cartItem.variety_data.price || product.price || 0
+          itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
+          varietyData = cartItem.variety_data
+        }
 
-      return {
-        id: cartItem.product_id,
-        product_id: cartItem.product_id,
-        name: itemName,
-        price: finalPrice,
-        varietyPrice: finalPrice,
-        quantity: cartItem.quantity || 1,
-        selectedSize: cartItem.selected_size,
-        selectedVariety: cartItem.selected_variety,
-        varietyData: varietyData,
-        image: mainImage,
-        cart_item_id: cartItem.id,
-        shop_id: shop.id || product.shop_id,
-        product: product,
-      }
-    }) || []
+        return {
+          id: cartItem.product_id,
+          product_id: cartItem.product_id,
+          name: itemName,
+          price: finalPrice,
+          varietyPrice: finalPrice,
+          quantity: cartItem.quantity || 1,
+          selectedSize: cartItem.selected_size,
+          selectedVariety: cartItem.selected_variety,
+          varietyData: varietyData,
+          image: mainImage,
+          cart_item_id: cartItem.id,
+          shop_id: shop.id || product.shop_id,
+          product: product,
+        }
+      }) || []
 
     fromCart.value = true
     console.log(`✅ Loaded ${items.value.length} items`)
-    
   } catch (err) {
     console.error('❌ Error:', err)
     items.value = []
@@ -1934,7 +1934,6 @@ watch(
     console.log('📍 Route params updated:', newParams)
   },
 )
-
 </script>
 <template>
   <v-app>
@@ -2464,7 +2463,7 @@ watch(
 </template>
 
 <style scoped>
-.app-bar{
+.app-bar {
   padding-top: 19px;
 }
 
