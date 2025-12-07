@@ -3,9 +3,16 @@ import { ref, watch, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-import * as L from 'leaflet'
-import 'leaflet.fullscreen'
-import 'leaflet.fullscreen/Control.FullScreen.css'
+
+// -------------------- MAPBOX --------------------
+import mapboxgl from 'mapbox-gl'
+import 'mapbox-gl/dist/mapbox-gl.css'
+
+// Mapbox access token
+const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+
+// Set Mapbox access token globally
+mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN
 
 // -------------------- ROUTER --------------------
 const router = useRouter()
@@ -107,8 +114,8 @@ const loadingBarangays = ref(false)
 // -------------------- MAP --------------------
 const latitude = ref<number | null>(8.9489)
 const longitude = ref<number | null>(125.5406)
-const map = ref<L.Map | null>(null)
-let shopMarker: L.Marker | null = null
+const map = ref<mapboxgl.Map | null>(null)
+let shopMarker: mapboxgl.Marker | null = null
 const mapInitialized = ref(false)
 
 // -------------------- OPEN DAYS --------------------
@@ -151,7 +158,7 @@ const findBarangayCodeByName = (name: string) => {
 }
 
 // -------------------- REVERSE GEOCODE --------------------
-const reverseGeocode = async (lat: number, lng: number) => {
+const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
@@ -159,14 +166,72 @@ const reverseGeocode = async (lat: number, lng: number) => {
     const data = await res.json()
 
     if (data?.display_name) {
-      fullAddress.value = data.display_name
-      showSnackbar(`📍 ${data.display_name}`, 'success')
+      const address = data.display_name
+      fullAddress.value = address
+      showSnackbar(`📍 Address detected: ${address}`, 'success')
+      return address
     } else {
       showSnackbar('Address not found for this location', 'error')
+      return ''
     }
   } catch (err) {
     console.error('Reverse geocoding failed:', err)
     showSnackbar('Failed to fetch address', 'error')
+    return ''
+  }
+}
+
+// -------------------- AUTOFILL ADDRESS FROM GEOCODE --------------------
+const autofillAddressFromGeocode = async (addressString: string) => {
+  if (!addressString) return
+
+  try {
+    // Parse the address string to extract components
+    const addressParts = addressString.split(', ')
+
+    // Extract basic components - this is a simplified parsing
+    // In a real application, you might want to use a more sophisticated geocoding service
+    // that returns structured address components
+
+    // For now, we'll set the full address and let the user refine it
+    // The reverse geocoding API doesn't return structured PSGC data,
+    // so we can't automatically populate the PSGC dropdowns
+
+    // However, we can try to extract the city/province/region from the address string
+    const lowerAddress = addressString.toLowerCase()
+
+    // Try to find region
+    if (lowerAddress.includes('caraga')) {
+      const caragaRegion = regions.value.find(r => r.name.toLowerCase().includes('caraga'))
+      if (caragaRegion) {
+        selectedRegion.value = caragaRegion.code
+        address.region.value = caragaRegion.name
+      }
+    }
+
+    // Try to find province (Agusan del Norte)
+    if (lowerAddress.includes('agusan del norte')) {
+      const agusanProvince = provinces.value.find(p => p.name.toLowerCase().includes('agusan del norte'))
+      if (agusanProvince) {
+        selectedProvince.value = agusanProvince.code
+        address.province.value = agusanProvince.name
+      }
+    }
+
+    // Try to find city (Butuan)
+    if (lowerAddress.includes('butuan')) {
+      const butuanCity = cities.value.find(c => c.name.toLowerCase().includes('butuan'))
+      if (butuanCity) {
+        selectedCity.value = butuanCity.code
+        address.city.value = butuanCity.name
+      }
+    }
+
+    // Set the full detected address
+    fullAddress.value = addressString
+
+  } catch (err) {
+    console.error('Error autofilling address:', err)
   }
 }
 
@@ -181,49 +246,94 @@ const initMap = (lat: number, lng: number) => {
 
   // Check if map is already initialized
   if (map.value) {
-    map.value.setView([lat, lng], 15)
-    shopMarker?.setLatLng([lat, lng])
+    map.value.setCenter([lng, lat])
+    shopMarker?.setLngLat([lng, lat])
     return
   }
 
   try {
-    map.value = L.map('map', {
-      center: [lat, lng],
+    map.value = new mapboxgl.Map({
+      container: 'map',
+      style: 'mapbox://styles/mapbox/streets-v11',
+      center: [lng, lat],
       zoom: 15,
-      fullscreenControl: true,
-      fullscreenControlOptions: { position: 'topleft' },
+      attributionControl: false
     })
 
-    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      attribution: '© OpenStreetMap contributors',
-    }).addTo(map.value)
+    // Add navigation controls
+    map.value.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
-    shopMarker = L.marker([lat, lng], { draggable: true }).addTo(map.value)
+    // Add attribution
+    map.value.addControl(new mapboxgl.AttributionControl({
+      compact: true
+    }), 'bottom-right')
 
-    shopMarker.on('dragend', async (e) => {
-      const pos = (e.target as L.Marker).getLatLng()
-      latitude.value = pos.lat
-      longitude.value = pos.lng
-      await saveCoordinates(pos.lat, pos.lng)
-      await reverseGeocode(pos.lat, pos.lng)
+    // Add geolocate control
+    const geolocate = new mapboxgl.GeolocateControl({
+      positionOptions: {
+        enableHighAccuracy: true
+      },
+      trackUserLocation: true,
+      showUserLocation: true
+    })
+    map.value.addControl(geolocate, 'top-right')
+
+    // Create custom marker element
+    const markerEl = document.createElement('div')
+    markerEl.className = 'shop-marker'
+    markerEl.innerHTML = `
+      <svg width="30" height="40" viewBox="0 0 30 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M15 0C6.72 0 0 6.72 0 15C0 26.25 15 40 15 40C15 40 30 26.25 30 15C30 6.72 23.28 0 15 0Z" fill="#3f83c7"/>
+        <circle cx="15" cy="15" r="6" fill="white"/>
+      </svg>
+    `
+
+    // Create marker
+    shopMarker = new mapboxgl.Marker({
+      element: markerEl,
+      draggable: true
+    })
+      .setLngLat([lng, lat])
+      .addTo(map.value)
+
+    // Handle marker drag end
+    shopMarker.on('dragend', async () => {
+      if (!shopMarker) return
+      const lngLat = shopMarker.getLngLat()
+      latitude.value = lngLat.lat
+      longitude.value = lngLat.lng
+      await saveCoordinates(lngLat.lat, lngLat.lng)
+      await reverseGeocode(lngLat.lat, lngLat.lng)
     })
 
-    map.value.on('click', async (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng
+    // Handle map click
+    map.value.on('click', async (e) => {
+      const { lng, lat } = e.lngLat
       latitude.value = lat
       longitude.value = lng
-      shopMarker?.setLatLng([lat, lng])
+      shopMarker?.setLngLat([lng, lat])
       await saveCoordinates(lat, lng)
       await reverseGeocode(lat, lng)
     })
 
-    mapInitialized.value = true
+    // Handle map load
+    map.value.on('load', () => {
+      mapInitialized.value = true
+      console.log('Mapbox map loaded successfully')
+    })
+
+    // Handle map errors
+    map.value.on('error', (e) => {
+      console.error('Mapbox error:', e.error)
+    })
+
   } catch (error) {
-    console.error('Error initializing map:', error)
+    console.error('Error initializing Mapbox map:', error)
   }
 }
 
-const toggleFullscreen = () => map.value?.toggleFullscreen()
+// Remove the toggleFullscreen function since Mapbox doesn't have built-in fullscreen
+// We'll keep the button but remove its functionality or replace it with something else
 
 // -------------------- SNACKBAR --------------------
 const showSnackbar = (message: string, color: 'success' | 'error' = 'success') => {
@@ -311,17 +421,27 @@ const saveCoordinates = async (lat: number, lng: number) => {
   try {
     if (!currentShopId.value) return
 
+    // Save both coordinates and detected address
+    // Note: manual_status will be 'auto' when using detect address
     const { error } = await supabase
       .from('shops')
       .update({
         latitude: lat,
         longitude: lng,
-        detected_address: fullAddress.value,
+        detected_address: fullAddress.value, // This is the key line - saving to detected_address column
+        manual_status: 'auto', // Set to auto when using detect address
+        updated_at: new Date().toISOString() // Update timestamp
       })
       .eq('id', currentShopId.value)
 
     if (error) throw error
-    showSnackbar(`📍 Location updated: ${fullAddress.value || 'Coordinates saved'}`, 'success')
+
+    // Show success message with the detected address
+    if (fullAddress.value) {
+      showSnackbar(`📍 Address detected and saved: ${fullAddress.value}`, 'success')
+    } else {
+      showSnackbar('📍 Coordinates saved successfully', 'success')
+    }
   } catch (err) {
     console.error(err)
     showSnackbar('Failed to update location', 'error')
@@ -369,8 +489,10 @@ const searchPlace = async () => {
 const selectSearchResult = (result: any) => {
   latitude.value = parseFloat(result.lat)
   longitude.value = parseFloat(result.lon)
-  map.value?.setView([latitude.value, longitude.value], 15)
-  shopMarker?.setLatLng([latitude.value, longitude.value])
+  if (map.value) {
+    map.value.setCenter([longitude.value, latitude.value])
+    shopMarker?.setLngLat([longitude.value, latitude.value])
+  }
   fullAddress.value = result.display_name
   showSearchResults.value = false
 }
@@ -619,8 +741,8 @@ watch(selectedBarangay, async (barangayCode) => {
       longitude.value = coords.lon
       // Only update map if it's initialized and we're on the location step
       if (mapInitialized.value && currentStep.value === 5) {
-        map.value?.setView([coords.lat, coords.lon], 15)
-        shopMarker?.setLatLng([coords.lat, coords.lon])
+        map.value?.setCenter([coords.lon, coords.lat])
+        shopMarker?.setLngLat([coords.lon, coords.lat])
       }
     }
   }
@@ -634,8 +756,8 @@ watch(fullAddress, async (newVal) => {
   if (coords) {
     latitude.value = coords.lat
     longitude.value = coords.lon
-    map.value?.setView([coords.lat, coords.lon], 15)
-    shopMarker?.setLatLng([coords.lat, coords.lon])
+    map.value?.setCenter([coords.lon, coords.lat])
+    shopMarker?.setLngLat([coords.lon, coords.lat])
     await saveCoordinates(coords.lat, coords.lon)
   }
 })
@@ -646,18 +768,29 @@ const getLocation = () => {
     showSnackbar('Geolocation not supported', 'error')
     return
   }
+
+  // Set addressOption to 'map' when using detect address
+  addressOption.value = 'map'
+
   navigator.geolocation.getCurrentPosition(
     async (pos) => {
       latitude.value = pos.coords.latitude
       longitude.value = pos.coords.longitude
 
-      // Only update map if it's initialized and we're on the location step
+      // Update map if it's initialized and we're on the location step
       if (mapInitialized.value && currentStep.value === 5) {
-        map.value?.setView([latitude.value, longitude.value], 17)
-        shopMarker?.setLatLng([latitude.value, longitude.value])
+        map.value?.setCenter([longitude.value, latitude.value])
+        map.value?.setZoom(17)
+        shopMarker?.setLngLat([longitude.value, latitude.value])
       }
 
-      await reverseGeocode(latitude.value, longitude.value)
+      // Get reverse geocoded address
+      const detectedAddress = await reverseGeocode(latitude.value, longitude.value)
+
+      // Autofill form fields based on detected address
+      await autofillAddressFromGeocode(detectedAddress)
+
+      // Save coordinates and detected address
       await saveCoordinates(latitude.value, longitude.value)
     },
     (err) => {
@@ -686,17 +819,32 @@ const saveShop = async () => {
 
     // For existing shops, fetch current status first
     let currentStatus = 'pending' // Default for new shops
-    
+
     if (currentShopId.value) {
       const { data: existingShop } = await supabase
         .from('shops')
         .select('status')
         .eq('id', currentShopId.value)
         .single()
-      
+
       if (existingShop) {
         currentStatus = existingShop.status
       }
+    }
+
+    // Determine address source based on how the address was set
+    // We'll use the 'address_source' field instead of 'manual_status'
+    let addressSource = 'detected' // Default to detected address
+
+    // Check if manual address fields are filled (user manually edited the address)
+    const hasManualAddressFields = address.barangay.value ||
+      address.building.value ||
+      address.street.value ||
+      address.house_no.value ||
+      (selectedBarangay.value && selectedCity.value && selectedProvince.value && selectedRegion.value)
+
+    if (addressOption.value === 'manual' || hasManualAddressFields) {
+      addressSource = 'manual'
     }
 
     // Prepare shop data according to schema
@@ -721,11 +869,12 @@ const saveShop = async () => {
       delivery_options: deliveryOptions.value,
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
+      address_source: addressSource,
       status: currentStatus, // Use existing status for updates, 'pending' for new shops
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
       open_days: openDays.value,
-      updated_at: new Date().toISOString() // Add updated timestamp
+      updated_at: new Date().toISOString() // This timestamp determines which address to display
     }
 
     if (!currentShopId.value) {
@@ -745,7 +894,7 @@ const saveShop = async () => {
       router.push('/usershop')
     }
   } catch (err) {
-    console.error(err)
+    console.error('Save shop error:', err)
     showSnackbar('Failed to save shop', 'error')
   } finally {
     saving.value = false
@@ -966,7 +1115,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           <v-card-text>
             <v-radio-group v-model="addressOption" inline class="mb-4">
               <v-radio label="Enter address manually" value="manual" />
-              <v-radio label="Set current location as shop address" value="map" />
+              <v-radio label="Use current location (Detect Address)" value="map" />
             </v-radio-group>
 
             <div v-if="addressOption === 'manual'">
@@ -1011,9 +1160,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
               <h4 class="text-center mb-2 mt-4">Please drag/tap your location in the map</h4>
 
-              <v-btn color="secondary" @click="toggleFullscreen" class="mb-2">
-                Toggle Map Fullscreen
-              </v-btn>
+              <!-- Removed fullscreen button as Mapbox doesn't support built-in fullscreen -->
 
               <!-- Search Section -->
               <div class="search-section">
@@ -1041,18 +1188,42 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             </div>
           </v-card-text>
 
-          <!-- Map -->
-          <div id="map" class="map">
-            <v-btn icon @click="getLocation" class="locate-btn">
+          <!-- Map Container -->
+          <div class="map-container">
+            <div id="map" class="map"></div>
+            <v-btn icon @click="getLocation" class="locate-btn" title="Detect Address">
               <v-icon>mdi-crosshairs-gps</v-icon>
             </v-btn>
           </div>
 
           <div v-if="addressOption === 'map'" class="pa-4">
-            <v-btn block color="primary" @click="getLocation" class="mt-2 mb-4">
-              Set my location as shop address
+            <v-btn block color="primary" @click="getLocation" class="mt-2 mb-4" size="large">
+              <v-icon left>mdi-crosshairs-gps</v-icon>
+              Detect Address from Current Location
             </v-btn>
-            <v-text-field v-if="fullAddress" v-model="fullAddress" label="Detected Address" outlined readonly />
+
+            <!-- Display detected address -->
+            <v-alert v-if="fullAddress" type="info" variant="tonal" class="mb-3">
+              <template #title>
+                <strong>Detected Address</strong>
+              </template>
+              {{ fullAddress }}
+              <div class="text-caption mt-1">
+                This address will be saved to the "detected_address" field in your shop profile.
+              </div>
+            </v-alert>
+
+            <v-text-field v-model="fullAddress" label="Detected Address" outlined readonly
+              hint="This is the address detected from your current location" />
+
+            <div class="mt-3">
+              <v-alert type="warning" variant="tonal" density="compact">
+                <div class="text-caption">
+                  <strong>Note:</strong> After detecting your address, you can refine it using the manual address fields above if needed.
+                  The detected address will be saved to the "detected_address" column.
+                </div>
+              </v-alert>
+            </div>
           </div>
 
           <v-card-actions class="step-actions">
@@ -1240,6 +1411,54 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 </template>
 
 <style scoped>
+/* Add these Mapbox-specific styles */
+.map-container {
+  position: relative;
+  width: 100%;
+  height: 400px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+
+.map {
+  width: 100%;
+  height: 100%;
+  border-radius: 12px;
+}
+
+.mapboxgl-map {
+  border-radius: 12px;
+}
+
+.shop-marker {
+  cursor: move;
+}
+
+.locate-btn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  z-index: 1000;
+}
+
+.mapboxgl-ctrl-top-right {
+  top: 10px;
+  right: 10px;
+}
+
+.mapboxgl-ctrl-bottom-right {
+  bottom: 10px;
+  right: 10px;
+}
+
+.mapboxgl-ctrl-group {
+  border-radius: 8px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
 .app-bar {
   padding-top: 22px;
 }
@@ -1484,25 +1703,6 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   border-bottom: none;
 }
 
-.map {
-  height: 400px;
-  width: 100%;
-  border-radius: 12px;
-  margin-bottom: 16px;
-  position: relative;
-  overflow: hidden;
-  padding-bottom: 40px;
-}
-
-.locate-btn {
-  position: absolute;
-  top: 10px;
-  right: 10px;
-  background: white;
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-  z-index: 1000;
-}
-
 .placeholder-image {
   width: 150px;
   height: 100px;
@@ -1571,6 +1771,10 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   .prev-btn, .next-btn, .save-btn {
     width: 100%;
   }
+
+  .map-container {
+    height: 350px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1602,6 +1806,10 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
   .cover-photo {
     height: 180px;
+  }
+
+  .map-container {
+    height: 300px;
   }
 }
 
