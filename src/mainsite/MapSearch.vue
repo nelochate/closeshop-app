@@ -626,7 +626,7 @@ const recenterToUser = async () => {
     // Save and refresh boundary
     saveCachedLocation(targetLat, targetLng)
     await highlightUserCityBoundary(targetLat, targetLng)
-    
+
     // Show success message
     setErrorMessage('Location updated', 2000)
   } catch (error) {
@@ -2092,7 +2092,7 @@ onUnmounted(() => {
 
 .main-content {
   position: relative;
-  height: calc(100vh - 120px) !important;
+  height: calc(100vh - 140px) !important; /* Increased from 120px to 140px */
   margin: 0 !important;
   padding: 0 !important;
 }
@@ -2106,28 +2106,30 @@ onUnmounted(() => {
   z-index: 1;
 }
 
-/* Hero section */
+/* Hero section - UPDATED for Android spacing */
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding: 12px 16px;
+  padding: calc(20px + env(safe-area-inset-top)) 16px 16px 16px; /* Increased top padding */
   margin: 0;
   width: 100%;
   position: relative;
-  z-index: 10;
-  min-height: 64px;
+  z-index: 1000; /* Increased z-index */
+  min-height: calc(80px + env(safe-area-inset-top)); /* Increased minimum height */
   box-sizing: border-box;
 }
 
 .hero-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px; /* Increased gap */
   width: 100%;
+  padding-top: 4px; /* Added padding at top */
 }
 
 .search-field {
   flex: 1;
+  margin-top: 2px; /* Added spacing above field */
 }
 
 .search-field :deep(.v-field) {
@@ -2145,6 +2147,7 @@ onUnmounted(() => {
   border: none;
   transition: all 0.3s ease !important;
   border-radius: 50% !important;
+  margin-top: 2px; /* Added spacing above button */
 }
 
 .search-btn:hover:not(.v-btn--disabled) {
@@ -2155,7 +2158,7 @@ onUnmounted(() => {
 /* Route Selection Panel */
 .route-selection-panel {
   position: absolute;
-  top: 20px;
+  top: 30px; /* Increased from 20px */
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -2301,7 +2304,7 @@ onUnmounted(() => {
 /* Error Message Alert */
 .route-info-alert {
   position: absolute;
-  top: 60px;
+  top: 80px; /* Increased from 60px */
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -2483,24 +2486,35 @@ onUnmounted(() => {
   box-shadow: 0 6px 20px rgba(59, 130, 246, 0.3) !important;
 }
 
-/* Mobile Optimizations */
+/* Mobile Optimizations - UPDATED for better Android spacing */
 @media (max-width: 768px) {
   .hero {
-    padding: 12px;
-    padding-top: max(12px, env(safe-area-inset-top));
-    padding-bottom: 12px;
+    padding: calc(20px + env(safe-area-inset-top)) 12px 16px 12px; /* Increased top padding */
+    min-height: calc(90px + env(safe-area-inset-top)); /* Taller on mobile */
   }
 
   .hero-row {
-    gap: 8px;
+    gap: 10px;
+    padding-top: 6px; /* Increased padding */
   }
 
   .main-content {
-    height: calc(100vh - 120px - env(safe-area-inset-top)) !important;
+    height: calc(100vh - 150px - env(safe-area-inset-top)) !important; /* Adjusted for taller header */
+  }
+
+  .search-field {
+    margin-top: 4px; /* More spacing on mobile */
+  }
+
+  .search-btn {
+    margin-top: 4px; /* More spacing on mobile */
+    min-width: 56px !important;
+    width: 56px !important;
+    height: 56px !important;
   }
 
   .route-selection-panel {
-    top: 15px;
+    top: 25px; /* Increased from 15px */
     width: 95%;
   }
 
@@ -2525,9 +2539,9 @@ onUnmounted(() => {
   }
 
   .route-info-alert {
-    top: 50px;
+    top: 70px; /* Increased from 50px */
     width: 95%;
-    padding: 6px 12px;
+    padding: 8px 12px;
     font-size: 14px;
   }
 
@@ -2543,14 +2557,26 @@ onUnmounted(() => {
 
 /* Extra small devices */
 @media (max-width: 480px) {
+  .hero {
+    padding: calc(18px + env(safe-area-inset-top)) 10px 14px 10px;
+    min-height: calc(85px + env(safe-area-inset-top));
+  }
+  
+  .hero-row {
+    gap: 8px;
+    padding-top: 4px;
+  }
+
   .search-field {
     font-size: 14px;
+    margin-top: 3px;
   }
 
   .search-btn {
-    min-width: 50px !important;
-    width: 50px !important;
-    height: 50px !important;
+    min-width: 52px !important;
+    width: 52px !important;
+    height: 52px !important;
+    margin-top: 3px;
   }
 
   .mode-chip {
@@ -2559,28 +2585,47 @@ onUnmounted(() => {
   }
 
   .route-info-alert {
+    top: 65px;
     font-size: 13px;
-    padding: 4px 8px;
+    padding: 6px 10px;
   }
 }
 
 /* Landscape orientation adjustments */
 @media (max-height: 600px) and (orientation: landscape) {
   .hero {
-    padding: 8px 12px;
-    min-height: 56px;
+    padding: calc(12px + env(safe-area-inset-top)) 12px 8px 12px;
+    min-height: calc(65px + env(safe-area-inset-top));
+  }
+
+  .hero-row {
+    padding-top: 2px;
   }
 
   .main-content {
-    height: calc(100vh - 100px) !important;
+    height: calc(100vh - 110px - env(safe-area-inset-top)) !important;
   }
 
   .route-selection-panel {
-    top: 10px;
+    top: 15px;
+  }
+
+  .route-info-alert {
+    top: 60px;
   }
 
   .map-controls-container {
     bottom: 80px;
+  }
+}
+
+/* iOS-specific adjustments */
+@supports (-webkit-touch-callout: none) {
+  .hero {
+    padding-top: calc(20px + constant(safe-area-inset-top)) !important;
+    padding-top: calc(20px + env(safe-area-inset-top)) !important;
+    min-height: calc(80px + constant(safe-area-inset-top)) !important;
+    min-height: calc(80px + env(safe-area-inset-top)) !important;
   }
 }
 </style>
