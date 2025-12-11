@@ -459,6 +459,11 @@ onMounted(async () => {
 
     // Load shops and products in parallel
     await Promise.all([fetchShops(), fetchProducts()])
+
+    // Show survey bubble after a delay (3 seconds)
+    setTimeout(() => {
+      showSurveyBubble.value = true
+    }, 3000)
   } catch (err) {
     console.error('❌ Error in onMounted:', err)
     errorMsg.value = 'Failed to load app data'
@@ -483,16 +488,18 @@ const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 //for embedded survey
 const showSurvey = ref(false)
 const hasAnsweredSurvey = ref(false)
-const showSurveyHint = ref(false)
+const showSurveyBubble = ref(false)
 
 function openSurvey() {
   showSurvey.value = true
+  showSurveyBubble.value = false // Hide bubble when user opens the survey
 }
 
 function markSurveyAnswered() {
   hasAnsweredSurvey.value = true
   localStorage.setItem('surveyAnswered', 'true')
   showSurvey.value = false
+  showSurveyBubble.value = false
 }
 
 // Add these helper functions
@@ -523,6 +530,13 @@ const getLocationStatusText = (accuracy) => {
       return 'No Location'
   }
 }
+
+// Auto-hide bubble after 15 seconds
+onMounted(() => {
+  setTimeout(() => {
+    showSurveyBubble.value = false
+  }, 15000)
+})
 </script>
 
 <template>
@@ -655,14 +669,19 @@ const getLocationStatusText = (accuracy) => {
       </v-container>
     </v-main>
 
-    <!-- ... survey and bottom nav remain the same ... -->
-    <div v-if="!hasAnsweredSurvey" class="floating-survey-wrapper">
-      <transition name="fade">
-        <div v-if="showSurveyHint" class="survey-hint">
-          💭 Please answer this survey once done exploring the app!
+    <!-- Survey Bubble Message -->
+    <div v-if="showSurveyBubble && !hasAnsweredSurvey" class="survey-bubble-wrapper">
+      <div class="survey-bubble">
+        <div class="survey-bubble-content">
+          <span>📝 Help us improve!</span>
+          <p>Please answer our quick survey when you're done exploring the app.</p>
         </div>
-      </transition>
+        <div class="survey-bubble-arrow"></div>
+      </div>
+    </div>
 
+    <!-- Google Form Floating Button -->
+    <div class="floating-survey-wrapper">
       <v-btn
         class="floating-survey-btn"
         icon
@@ -671,7 +690,7 @@ const getLocationStatusText = (accuracy) => {
         elevation="8"
         @click="openSurvey"
       >
-        <v-icon>mdi-comment-question-outline</v-icon>
+        <v-icon>mdi-google</v-icon>
       </v-btn>
     </div>
 
@@ -685,7 +704,7 @@ const getLocationStatusText = (accuracy) => {
       <v-card class="survey-fullscreen-card">
         <v-toolbar style="background: #3f83c7; color: white" class="survey-toolbar">
           <v-toolbar-title class="text-h6">Customer Feedback Survey</v-toolbar-title>
-          <v-btn icon variant="text" color="white" @click="showSurvey = false">
+          <v-btn icon variant="text" color="white" @click="markSurveyAnswered">
             <v-icon>mdi-close</v-icon>
           </v-btn>
         </v-toolbar>
@@ -803,6 +822,77 @@ const getLocationStatusText = (accuracy) => {
   100% {
     transform: scale(1);
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* Survey Bubble Styles */
+.survey-bubble-wrapper {
+  position: fixed;
+  bottom: 100px;
+  right: 80px;
+  z-index: 1000;
+  animation: floatBubble 3s ease-in-out infinite;
+}
+
+.survey-bubble {
+  position: relative;
+  background: linear-gradient(135deg, #4285f4, #34a853);
+  color: white;
+  padding: 12px 16px;
+  border-radius: 16px;
+  box-shadow: 0 8px 25px rgba(66, 133, 244, 0.4);
+  max-width: 240px;
+  animation: bubbleAppear 0.5s ease-out;
+}
+
+.survey-bubble::before {
+  content: '';
+  position: absolute;
+  bottom: -8px;
+  right: 30px;
+  width: 16px;
+  height: 16px;
+  background: #4285f4;
+  transform: rotate(45deg);
+  border-radius: 0 0 4px 0;
+}
+
+.survey-bubble-content {
+  position: relative;
+  z-index: 2;
+}
+
+.survey-bubble-content span {
+  font-weight: 700;
+  font-size: 14px;
+  display: block;
+  margin-bottom: 4px;
+}
+
+.survey-bubble-content p {
+  font-size: 12px;
+  margin: 0;
+  opacity: 0.9;
+  line-height: 1.3;
+}
+
+@keyframes floatBubble {
+  0%, 100% {
+    transform: translateY(0) translateX(0);
+  }
+  50% {
+    transform: translateY(-5px) translateX(2px);
+  }
+}
+
+@keyframes bubbleAppear {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.9);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }
 
@@ -983,53 +1073,33 @@ const getLocationStatusText = (accuracy) => {
   position: fixed;
   bottom: 96px;
   right: 20px;
-  z-index: 200;
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  flex-direction: column;
-  gap: 6px;
+  z-index: 999;
 }
 
 .floating-survey-btn {
   position: relative;
   border-radius: 50%;
-  background-color: #3f83c7 !important;
+  background: linear-gradient(135deg, #4285f4, #34a853) !important;
   color: white !important;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 6px 20px rgba(66, 133, 244, 0.4);
   transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease;
+    transform 0.3s ease,
+    box-shadow 0.3s ease;
+  animation: pulseGoogle 2s infinite;
 }
 
 .floating-survey-btn:hover {
-  transform: scale(1.05);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.25);
+  transform: scale(1.1);
+  box-shadow: 0 8px 25px rgba(66, 133, 244, 0.6);
 }
 
-.survey-hint {
-  background: white;
-  color: #333;
-  font-size: 13px;
-  font-weight: 500;
-  padding: 8px 12px;
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-  max-width: 220px;
-  text-align: center;
-  animation: floatUp 0.4s ease-out;
-  position: relative;
-}
-
-.survey-hint::after {
-  content: '';
-  position: absolute;
-  bottom: -6px;
-  right: 26px;
-  border-width: 6px 6px 0 6px;
-  border-style: solid;
-  border-color: white transparent transparent transparent;
-  filter: drop-shadow(0 2px 2px rgba(0, 0, 0, 0.1));
+@keyframes pulseGoogle {
+  0%, 100% {
+    box-shadow: 0 6px 20px rgba(66, 133, 244, 0.4);
+  }
+  50% {
+    box-shadow: 0 6px 25px rgba(66, 133, 244, 0.7);
+  }
 }
 
 .survey-fullscreen-card {
@@ -1060,27 +1130,6 @@ const getLocationStatusText = (accuracy) => {
   flex: 1;
 }
 
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.4s;
-}
-
-.fade-enter-from,
-.fade-leave-to {
-  opacity: 0;
-}
-
-@keyframes floatUp {
-  from {
-    transform: translateY(10px);
-    opacity: 0;
-  }
-  to {
-    transform: translateY(0);
-    opacity: 1;
-  }
-}
-
 @media (max-width: 480px) {
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -1101,6 +1150,15 @@ const getLocationStatusText = (accuracy) => {
 
   .product-sold {
     font-size: 11px;
+  }
+
+  .survey-bubble-wrapper {
+    bottom: 150px;
+    right: 60px;
+  }
+  
+  .survey-bubble {
+    max-width: 200px;
   }
 }
 
