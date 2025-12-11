@@ -1,523 +1,5 @@
 
 
-<template>
-  <v-app>
-    <!-- App Bar -->
-    <v-app-bar flat color="primary" elevation="1">
-      <template v-slot:prepend>
-        <v-btn icon @click="router.back()" variant="text" color="white">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </template>
-      <v-toolbar-title class="text-white font-weight-bold">
-        {{ isEdit ? 'Edit Address' : 'Add New Address' }}
-      </v-toolbar-title>
-    </v-app-bar>
-
-    <v-main style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)">
-      <!-- Success Toast -->
-      <v-snackbar
-        v-model="showSuccess"
-        :timeout="3000"
-        color="success"
-        location="top"
-        elevation="3"
-      >
-        <v-icon class="me-2">mdi-check-circle</v-icon>
-        {{ successMessage }}
-      </v-snackbar>
-
-      <!-- Info Toast -->
-      <v-snackbar v-model="showSnackbar" :timeout="4000" color="info" location="top" elevation="3">
-        <v-icon class="me-2">mdi-information</v-icon>
-        {{ snackbarMessage }}
-      </v-snackbar>
-
-      <v-container class="py-8">
-        <!-- Mode Selection Card -->
-        <v-card class="mb-6" elevation="2" rounded="lg">
-          <v-card-title class="d-flex align-center">
-            <v-icon color="primary" class="me-2">mdi-map-marker</v-icon>
-            <span class="text-h6">Choose Address Method</span>
-          </v-card-title>
-          <v-card-text>
-            <v-radio-group v-model="addressMode" hide-details class="mt-2" @change="onModeChange">
-              <v-row>
-                <v-col cols="12" md="6">
-                  <v-radio value="manual" color="primary">
-                    <template v-slot:label>
-                      <div class="d-flex flex-column ml-2">
-                        <span class="font-weight-medium">Manual Entry</span>
-                        <span class="text-caption text-medium-emphasis">
-                          Select from PSGC dropdowns
-                        </span>
-                      </div>
-                    </template>
-                  </v-radio>
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-radio value="location" color="primary">
-                    <template v-slot:label>
-                      <div class="d-flex flex-column ml-2">
-                        <span class="font-weight-medium">Auto-detect</span>
-                        <span class="text-caption text-medium-emphasis">
-                          Use my current location
-                        </span>
-                      </div>
-                    </template>
-                  </v-radio>
-                </v-col>
-              </v-row>
-            </v-radio-group>
-          </v-card-text>
-        </v-card>
-
-        <!-- Manual Mode Form -->
-        <v-card v-if="addressMode === 'manual'" class="mb-6" elevation="2" rounded="lg">
-          <v-card-title class="d-flex align-center">
-            <v-icon color="primary" class="me-2">mdi-pencil</v-icon>
-            <span class="text-h6">Enter Address</span>
-          </v-card-title>
-
-          <v-card-text>
-            <v-form @submit.prevent="saveAddress">
-              <v-row>
-                <!-- Contact Info with validation -->
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="address.recipient_name"
-                    label="Recipient Name *"
-                    variant="outlined"
-                    maxlength="100"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-account"
-                    :rules="[
-                      (v) => !!v || 'Name is required',
-                      (v) => (v && v.trim().length >= 2) || 'Name must be at least 2 characters',
-                      (v) => (v && v.length <= 100) || 'Name is too long',
-                    ]"
-                    required
-                    counter="100"
-                  />
-                </v-col>
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="address.phone"
-                    label="Phone Number *"
-                    variant="outlined"
-                    maxlength="20"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-phone"
-                    :rules="[
-                      (v) => !!v || 'Phone number is required',
-                      (v) =>
-                        (v && /^[0-9+\-\s()]{7,20}$/.test(v)) ||
-                        'Please enter a valid phone number',
-                    ]"
-                    required
-                    counter="20"
-                  />
-                </v-col>
-
-                <!-- PSGC Address Fields (Restricted to dropdowns only) -->
-                <v-col cols="12" md="6">
-                  <v-select
-                    v-model="address.region"
-                    :items="regions"
-                    item-title="name"
-                    item-value="code"
-                    label="Region *"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-map"
-                    :rules="[(v) => !!v || 'Region is required']"
-                    required
-                    clearable
-                  />
-                </v-col>
-
-                <v-col cols="12" md="6">
-                  <v-select
-                    v-model="address.province"
-                    :items="provinces"
-                    item-title="name"
-                    item-value="code"
-                    label="Province *"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-map-marker"
-                    :rules="[(v) => !!v || 'Province is required']"
-                    required
-                    :disabled="!address.region"
-                    clearable
-                  />
-                </v-col>
-
-                <v-col cols="12" md="6">
-                  <v-select
-                    v-model="address.city"
-                    :items="citiesMunicipalities"
-                    item-title="name"
-                    item-value="code"
-                    label="City/Municipality *"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-city"
-                    :rules="[(v) => !!v || 'City/Municipality is required']"
-                    required
-                    :disabled="!address.province"
-                    clearable
-                  />
-                </v-col>
-
-                <v-col cols="12" md="6">
-                  <v-select
-                    v-model="address.barangay"
-                    :items="barangays"
-                    item-title="name"
-                    item-value="code"
-                    label="Barangay *"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-home-city"
-                    :rules="[(v) => !!v || 'Barangay is required']"
-                    required
-                    :disabled="!address.city"
-                    clearable
-                  />
-                </v-col>
-
-                <!-- Address Details (Optional, no validation) -->
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="address.street"
-                    label="Street (Optional)"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-road"
-                    hide-details
-                  />
-                </v-col>
-
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="address.house_no"
-                    label="House/Lot No. (Optional)"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-home"
-                    hide-details
-                  />
-                </v-col>
-
-                <!-- Optional Fields (No validation) -->
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="address.purok"
-                    label="Purok/Subdivision (Optional)"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-home-group"
-                    hide-details
-                  />
-                </v-col>
-
-                <v-col cols="12" md="6">
-                  <v-text-field
-                    v-model="address.building"
-                    label="Building/Apartment (Optional)"
-                    variant="outlined"
-                    density="comfortable"
-                    prepend-inner-icon="mdi-office-building"
-                    hide-details
-                  />
-                </v-col>
-
-                <!-- Map Section - ALWAYS VISIBLE -->
-                <v-col cols="12">
-                  <div class="mb-2 d-flex align-center justify-space-between">
-                    <div>
-                      <span class="text-subtitle-1 font-weight-medium">Map Preview</span>
-                      <span class="text-caption text-medium-emphasis ml-2">
-                        📍 Map updates as you select address
-                      </span>
-                    </div>
-                    <v-btn
-                      @click="refreshManualMap"
-                      size="small"
-                      variant="tonal"
-                      color="primary"
-                      :loading="isRefreshingMap"
-                    >
-                      <v-icon size="small" class="me-1">mdi-refresh</v-icon>
-                      Refresh Map
-                    </v-btn>
-                  </div>
-                  <div id="manual-map" class="map-wrapper rounded-lg elevation-1"></div>
-                  <p class="text-caption text-medium-emphasis mt-2">
-                    <v-icon size="small" color="primary" class="me-1">mdi-information</v-icon>
-                    Click on the map or drag the marker to adjust the location
-                  </p>
-                </v-col>
-
-                <!-- Submit Button -->
-                <v-col cols="12">
-                  <v-btn
-                    type="submit"
-                    color="primary"
-                    size="large"
-                    :loading="isLoading"
-                    :disabled="
-                      !address.region ||
-                      !address.province ||
-                      !address.city ||
-                      !address.barangay ||
-                      !address.recipient_name.trim() ||
-                      !address.phone.trim()
-                    "
-                    block
-                    rounded="lg"
-                    class="mt-4"
-                    elevation="2"
-                  >
-                    <v-icon class="me-2">mdi-check</v-icon>
-                    {{ isLoading ? 'Saving...' : isEdit ? 'Update Address' : 'Save Address' }}
-                  </v-btn>
-                </v-col>
-              </v-row>
-            </v-form>
-          </v-card-text>
-        </v-card>
-
-        <!-- Location Mode Form -->
-        <v-card v-else class="mb-6" elevation="2" rounded="lg">
-          <v-card-title class="d-flex align-center">
-            <v-icon color="primary" class="me-2">mdi-crosshairs-gps</v-icon>
-            <span class="text-h6">Auto-detect Location</span>
-          </v-card-title>
-
-          <v-card-text>
-            <!-- Location Detection Card -->
-            <v-card class="mb-6" variant="outlined" color="primary" rounded="lg">
-              <v-card-text class="text-center pa-6">
-                <v-icon size="64" color="primary" class="mb-4">mdi-crosshairs-gps</v-icon>
-                <p class="text-h6 font-weight-bold mb-2">Detect Your Location</p>
-                <p class="text-body-2 text-medium-emphasis mb-4">
-                  We'll automatically fill your address details using your device's GPS. Make sure
-                  location services are enabled.
-                </p>
-                <div class="d-flex gap-2">
-                  <v-btn
-                    color="primary"
-                    @click="useCurrentLocation"
-                    :loading="isLoadingLocation"
-                    variant="tonal"
-                    size="large"
-                    rounded="lg"
-                    class="mb-2"
-                    elevation="2"
-                  >
-                    <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
-                    {{ isLoadingLocation ? 'Detecting...' : 'Detect My Location' }}
-                  </v-btn>
-                  <v-btn
-                    @click="refreshLocationMap"
-                    size="large"
-                    variant="tonal"
-                    color="secondary"
-                    rounded="lg"
-                    class="mb-2"
-                    elevation="2"
-                    :loading="isRefreshingMap"
-                  >
-                    <v-icon class="me-2">mdi-refresh</v-icon>
-                    Refresh Map
-                  </v-btn>
-                </div>
-                <p v-if="isLoadingLocation" class="text-caption text-medium-emphasis mt-2">
-                  <v-progress-circular
-                    indeterminate
-                    size="16"
-                    width="2"
-                    class="me-2"
-                  ></v-progress-circular>
-                  Please wait while we detect your location...
-                </p>
-              </v-card-text>
-            </v-card>
-
-            <!-- Map Container (ALWAYS SHOWN) -->
-            <div class="mb-4">
-              <div class="d-flex align-center mb-2">
-                <v-icon color="success" class="me-2">mdi-map</v-icon>
-                <span class="text-subtitle-1 font-weight-medium">Your Location</span>
-              </div>
-              <div id="location-map" class="map-wrapper rounded-lg elevation-1"></div>
-              <p class="text-caption text-medium-emphasis mt-2">
-                <v-icon size="small" color="success" class="me-1">mdi-information</v-icon>
-                Drag the marker to fine-tune your location
-              </p>
-            </div>
-
-            <!-- Auto-filled Address Preview -->
-            <div class="mb-6">
-              <div class="d-flex align-center mb-4">
-                <v-icon color="success" class="me-2">mdi-check-circle</v-icon>
-                <span class="text-subtitle-1 font-weight-medium">Detected Address</span>
-              </div>
-
-              <v-card variant="outlined" class="pa-4 mb-4">
-                <div class="d-flex align-start mb-2">
-                  <v-icon color="primary" size="small" class="me-2 mt-1">mdi-account</v-icon>
-                  <v-text-field
-                    v-model="address.recipient_name"
-                    label="Recipient Name *"
-                    variant="underlined"
-                    density="compact"
-                    :rules="[
-                      (v) => !!v || 'Name is required',
-                      (v) => (v && v.trim().length >= 2) || 'Name must be at least 2 characters',
-                    ]"
-                    required
-                  />
-                </div>
-
-                <div class="d-flex align-start mb-2">
-                  <v-icon color="primary" size="small" class="me-2 mt-1">mdi-phone</v-icon>
-                  <v-text-field
-                    v-model="address.phone"
-                    label="Phone Number *"
-                    variant="underlined"
-                    density="compact"
-                    :rules="[
-                      (v) => !!v || 'Phone number is required',
-                      (v) =>
-                        (v && /^[0-9+\-\s()]{7,20}$/.test(v)) ||
-                        'Please enter a valid phone number',
-                    ]"
-                    required
-                  />
-                </div>
-
-                <v-divider class="my-3"></v-divider>
-
-                <div class="text-body-2">
-                  <div class="d-flex align-center mb-1">
-                    <v-icon size="small" class="me-2">mdi-map-marker</v-icon>
-                    <span class="font-weight-medium">Full Address:</span>
-                  </div>
-                  <p class="pl-6 mb-1">{{ address.house_no }} {{ address.street }}</p>
-                  <p class="pl-6 mb-1">{{ address.purok }}</p>
-                  <p class="pl-6 mb-1">{{ address.barangay_name }}</p>
-                  <p class="pl-6 mb-1">{{ address.city_name }}</p>
-                  <p class="pl-6 mb-1">{{ address.province_name }}</p>
-                  <p class="pl-6 mb-1">{{ address.region_name }}</p>
-                  <p v-if="address.postal_code" class="pl-6">
-                    Postal Code: {{ address.postal_code }}
-                  </p>
-                </div>
-
-                <div class="mt-3">
-                  <v-btn
-                    @click="showEditFields = !showEditFields"
-                    variant="text"
-                    color="primary"
-                    size="small"
-                  >
-                    <v-icon class="me-1">mdi-pencil</v-icon>
-                    {{ showEditFields ? 'Hide Edit Fields' : 'Edit Address Details' }}
-                  </v-btn>
-                </div>
-              </v-card>
-
-              <!-- Editable Fields (Collapsible) -->
-              <v-expand-transition>
-                <div v-if="showEditFields">
-                  <v-row>
-                    <v-col cols="12" md="6">
-                      <v-text-field
-                        v-model="address.street"
-                        label="Street (Optional)"
-                        variant="outlined"
-                        density="comfortable"
-                        prepend-inner-icon="mdi-road"
-                        hide-details
-                      />
-                    </v-col>
-                    <v-col cols="12" md="6">
-                      <v-text-field
-                        v-model="address.house_no"
-                        label="House/Lot No. (Optional)"
-                        variant="outlined"
-                        density="comfortable"
-                        prepend-inner-icon="mdi-home"
-                        hide-details
-                      />
-                    </v-col>
-                    <v-col cols="12" md="6">
-                      <v-text-field
-                        v-model="address.purok"
-                        label="Purok/Subdivision (Optional)"
-                        variant="outlined"
-                        density="comfortable"
-                        prepend-inner-icon="mdi-home-group"
-                        hide-details
-                      />
-                    </v-col>
-                    <v-col cols="12" md="6">
-                      <v-text-field
-                        v-model="address.building"
-                        label="Building/Apartment (Optional)"
-                        variant="outlined"
-                        density="comfortable"
-                        prepend-inner-icon="mdi-office-building"
-                        hide-details
-                      />
-                    </v-col>
-                  </v-row>
-                </div>
-              </v-expand-transition>
-
-              <!-- Default Address Toggle -->
-              <v-checkbox
-                v-model="address.is_default"
-                label="Set as default address"
-                color="primary"
-                density="comfortable"
-                hide-details
-                class="mb-4"
-              />
-
-              <!-- Submit Button - FIXED CONDITION -->
-              <v-btn
-                color="success"
-                @click="saveAddress"
-                :loading="isLoading"
-                :disabled="
-                  !address.recipient_name.trim() ||
-                  !address.phone.trim() ||
-                  (!address.region_name &&
-                    !address.province_name &&
-                    !address.city_name &&
-                    !address.barangay_name)
-                "
-                block
-                size="large"
-                rounded="lg"
-                elevation="2"
-              >
-                <v-icon class="me-2">mdi-check</v-icon>
-                {{ isLoading ? 'Saving...' : 'Confirm & Save Address' }}
-              </v-btn>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-container>
-    </v-main>
-  </v-app>
-</template>
-
-
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -1548,6 +1030,524 @@ watch(
   },
 )
 </script>
+<template>
+  <v-app>
+    <!-- App Bar -->
+    <v-app-bar flat color="primary" elevation="1">
+      <template v-slot:prepend>
+        <v-btn icon @click="router.back()" variant="text" color="white">
+          <v-icon>mdi-arrow-left</v-icon>
+        </v-btn>
+      </template>
+      <v-toolbar-title class="text-white font-weight-bold">
+        {{ isEdit ? 'Edit Address' : 'Add New Address' }}
+      </v-toolbar-title>
+    </v-app-bar>
+
+    <v-main style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)">
+      <!-- Success Toast -->
+      <v-snackbar
+        v-model="showSuccess"
+        :timeout="3000"
+        color="success"
+        location="top"
+        elevation="3"
+      >
+        <v-icon class="me-2">mdi-check-circle</v-icon>
+        {{ successMessage }}
+      </v-snackbar>
+
+      <!-- Info Toast -->
+      <v-snackbar v-model="showSnackbar" :timeout="4000" color="info" location="top" elevation="3">
+        <v-icon class="me-2">mdi-information</v-icon>
+        {{ snackbarMessage }}
+      </v-snackbar>
+
+      <v-container class="py-8">
+        <!-- Mode Selection Card -->
+        <v-card class="mb-6" elevation="2" rounded="lg">
+          <v-card-title class="d-flex align-center">
+            <v-icon color="primary" class="me-2">mdi-map-marker</v-icon>
+            <span class="text-h6">Choose Address Method</span>
+          </v-card-title>
+          <v-card-text>
+            <v-radio-group v-model="addressMode" hide-details class="mt-2" @change="onModeChange">
+              <v-row>
+                <v-col cols="12" md="6">
+                  <v-radio value="manual" color="primary">
+                    <template v-slot:label>
+                      <div class="d-flex flex-column ml-2">
+                        <span class="font-weight-medium">Manual Entry</span>
+                        <span class="text-caption text-medium-emphasis">
+                          Select from PSGC dropdowns
+                        </span>
+                      </div>
+                    </template>
+                  </v-radio>
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-radio value="location" color="primary">
+                    <template v-slot:label>
+                      <div class="d-flex flex-column ml-2">
+                        <span class="font-weight-medium">Auto-detect</span>
+                        <span class="text-caption text-medium-emphasis">
+                          Use my current location
+                        </span>
+                      </div>
+                    </template>
+                  </v-radio>
+                </v-col>
+              </v-row>
+            </v-radio-group>
+          </v-card-text>
+        </v-card>
+
+        <!-- Manual Mode Form -->
+        <v-card v-if="addressMode === 'manual'" class="mb-6" elevation="2" rounded="lg">
+          <v-card-title class="d-flex align-center">
+            <v-icon color="primary" class="me-2">mdi-pencil</v-icon>
+            <span class="text-h6">Enter Address</span>
+          </v-card-title>
+
+          <v-card-text>
+            <v-form @submit.prevent="saveAddress">
+              <v-row>
+                <!-- Contact Info with validation -->
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="address.recipient_name"
+                    label="Recipient Name *"
+                    variant="outlined"
+                    maxlength="100"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-account"
+                    :rules="[
+                      (v) => !!v || 'Name is required',
+                      (v) => (v && v.trim().length >= 2) || 'Name must be at least 2 characters',
+                      (v) => (v && v.length <= 100) || 'Name is too long',
+                    ]"
+                    required
+                    counter="100"
+                  />
+                </v-col>
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="address.phone"
+                    label="Phone Number *"
+                    variant="outlined"
+                    maxlength="20"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-phone"
+                    :rules="[
+                      (v) => !!v || 'Phone number is required',
+                      (v) =>
+                        (v && /^[0-9+\-\s()]{7,20}$/.test(v)) ||
+                        'Please enter a valid phone number',
+                    ]"
+                    required
+                    counter="20"
+                  />
+                </v-col>
+
+                <!-- PSGC Address Fields (Restricted to dropdowns only) -->
+                <v-col cols="12" md="6">
+                  <v-select
+                    v-model="address.region"
+                    :items="regions"
+                    item-title="name"
+                    item-value="code"
+                    label="Region *"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-map"
+                    :rules="[(v) => !!v || 'Region is required']"
+                    required
+                    clearable
+                  />
+                </v-col>
+
+                <v-col cols="12" md="6">
+                  <v-select
+                    v-model="address.province"
+                    :items="provinces"
+                    item-title="name"
+                    item-value="code"
+                    label="Province *"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-map-marker"
+                    :rules="[(v) => !!v || 'Province is required']"
+                    required
+                    :disabled="!address.region"
+                    clearable
+                  />
+                </v-col>
+
+                <v-col cols="12" md="6">
+                  <v-select
+                    v-model="address.city"
+                    :items="citiesMunicipalities"
+                    item-title="name"
+                    item-value="code"
+                    label="City/Municipality *"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-city"
+                    :rules="[(v) => !!v || 'City/Municipality is required']"
+                    required
+                    :disabled="!address.province"
+                    clearable
+                  />
+                </v-col>
+
+                <v-col cols="12" md="6">
+                  <v-select
+                    v-model="address.barangay"
+                    :items="barangays"
+                    item-title="name"
+                    item-value="code"
+                    label="Barangay *"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-home-city"
+                    :rules="[(v) => !!v || 'Barangay is required']"
+                    required
+                    :disabled="!address.city"
+                    clearable
+                  />
+                </v-col>
+
+                <!-- Address Details (Optional, no validation) -->
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="address.street"
+                    label="Street (Optional)"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-road"
+                    hide-details
+                  />
+                </v-col>
+
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="address.house_no"
+                    label="House/Lot No. (Optional)"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-home"
+                    hide-details
+                  />
+                </v-col>
+
+                <!-- Optional Fields (No validation) -->
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="address.purok"
+                    label="Purok/Subdivision (Optional)"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-home-group"
+                    hide-details
+                  />
+                </v-col>
+
+                <v-col cols="12" md="6">
+                  <v-text-field
+                    v-model="address.building"
+                    label="Building/Apartment (Optional)"
+                    variant="outlined"
+                    density="comfortable"
+                    prepend-inner-icon="mdi-office-building"
+                    hide-details
+                  />
+                </v-col>
+
+                <!-- Map Section - ALWAYS VISIBLE -->
+                <v-col cols="12">
+                  <div class="mb-2 d-flex align-center justify-space-between">
+                    <div>
+                      <span class="text-subtitle-1 font-weight-medium">Map Preview</span>
+                      <span class="text-caption text-medium-emphasis ml-2">
+                        📍 Map updates as you select address
+                      </span>
+                    </div>
+                    <v-btn
+                      @click="refreshManualMap"
+                      size="small"
+                      variant="tonal"
+                      color="primary"
+                      :loading="isRefreshingMap"
+                    >
+                      <v-icon size="small" class="me-1">mdi-refresh</v-icon>
+                      Refresh Map
+                    </v-btn>
+                  </div>
+                  <div id="manual-map" class="map-wrapper rounded-lg elevation-1"></div>
+                  <p class="text-caption text-medium-emphasis mt-2">
+                    <v-icon size="small" color="primary" class="me-1">mdi-information</v-icon>
+                    Click on the map or drag the marker to adjust the location
+                  </p>
+                </v-col>
+
+                <!-- Submit Button -->
+                <v-col cols="12">
+                  <v-btn
+                    type="submit"
+                    color="primary"
+                    size="large"
+                    :loading="isLoading"
+                    :disabled="
+                      !address.region ||
+                      !address.province ||
+                      !address.city ||
+                      !address.barangay ||
+                      !address.recipient_name.trim() ||
+                      !address.phone.trim()
+                    "
+                    block
+                    rounded="lg"
+                    class="mt-4"
+                    elevation="2"
+                  >
+                    <v-icon class="me-2">mdi-check</v-icon>
+                    {{ isLoading ? 'Saving...' : isEdit ? 'Update Address' : 'Save Address' }}
+                  </v-btn>
+                </v-col>
+              </v-row>
+            </v-form>
+          </v-card-text>
+        </v-card>
+
+        <!-- Location Mode Form -->
+        <v-card v-else class="mb-6" elevation="2" rounded="lg">
+          <v-card-title class="d-flex align-center">
+            <v-icon color="primary" class="me-2">mdi-crosshairs-gps</v-icon>
+            <span class="text-h6">Auto-detect Location</span>
+          </v-card-title>
+
+          <v-card-text>
+            <!-- Location Detection Card -->
+            <v-card class="mb-6" variant="outlined" color="primary" rounded="lg">
+              <v-card-text class="text-center pa-6">
+                <v-icon size="64" color="primary" class="mb-4">mdi-crosshairs-gps</v-icon>
+                <p class="text-h6 font-weight-bold mb-2">Detect Your Location</p>
+                <p class="text-body-2 text-medium-emphasis mb-4">
+                  We'll automatically fill your address details using your device's GPS. Make sure
+                  location services are enabled.
+                </p>
+                <div class="d-flex gap-2">
+                  <v-btn
+                    color="primary"
+                    @click="useCurrentLocation"
+                    :loading="isLoadingLocation"
+                    variant="tonal"
+                    size="large"
+                    rounded="lg"
+                    class="mb-2"
+                    elevation="2"
+                  >
+                    <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
+                    {{ isLoadingLocation ? 'Detecting...' : 'Detect My Location' }}
+                  </v-btn>
+                  <v-btn
+                    @click="refreshLocationMap"
+                    size="large"
+                    variant="tonal"
+                    color="secondary"
+                    rounded="lg"
+                    class="mb-2"
+                    elevation="2"
+                    :loading="isRefreshingMap"
+                  >
+                    <v-icon class="me-2">mdi-refresh</v-icon>
+                    Refresh Map
+                  </v-btn>
+                </div>
+                <p v-if="isLoadingLocation" class="text-caption text-medium-emphasis mt-2">
+                  <v-progress-circular
+                    indeterminate
+                    size="16"
+                    width="2"
+                    class="me-2"
+                  ></v-progress-circular>
+                  Please wait while we detect your location...
+                </p>
+              </v-card-text>
+            </v-card>
+
+            <!-- Map Container (ALWAYS SHOWN) -->
+            <div class="mb-4">
+              <div class="d-flex align-center mb-2">
+                <v-icon color="success" class="me-2">mdi-map</v-icon>
+                <span class="text-subtitle-1 font-weight-medium">Your Location</span>
+              </div>
+              <div id="location-map" class="map-wrapper rounded-lg elevation-1"></div>
+              <p class="text-caption text-medium-emphasis mt-2">
+                <v-icon size="small" color="success" class="me-1">mdi-information</v-icon>
+                Drag the marker to fine-tune your location
+              </p>
+            </div>
+
+            <!-- Auto-filled Address Preview -->
+            <div class="mb-6">
+              <div class="d-flex align-center mb-4">
+                <v-icon color="success" class="me-2">mdi-check-circle</v-icon>
+                <span class="text-subtitle-1 font-weight-medium">Detected Address</span>
+              </div>
+
+              <v-card variant="outlined" class="pa-4 mb-4">
+                <div class="d-flex align-start mb-2">
+                  <v-icon color="primary" size="small" class="me-2 mt-1">mdi-account</v-icon>
+                  <v-text-field
+                    v-model="address.recipient_name"
+                    label="Recipient Name *"
+                    variant="underlined"
+                    density="compact"
+                    :rules="[
+                      (v) => !!v || 'Name is required',
+                      (v) => (v && v.trim().length >= 2) || 'Name must be at least 2 characters',
+                    ]"
+                    required
+                  />
+                </div>
+
+                <div class="d-flex align-start mb-2">
+                  <v-icon color="primary" size="small" class="me-2 mt-1">mdi-phone</v-icon>
+                  <v-text-field
+                    v-model="address.phone"
+                    label="Phone Number *"
+                    variant="underlined"
+                    density="compact"
+                    :rules="[
+                      (v) => !!v || 'Phone number is required',
+                      (v) =>
+                        (v && /^[0-9+\-\s()]{7,20}$/.test(v)) ||
+                        'Please enter a valid phone number',
+                    ]"
+                    required
+                  />
+                </div>
+
+                <v-divider class="my-3"></v-divider>
+
+                <div class="text-body-2">
+                  <div class="d-flex align-center mb-1">
+                    <v-icon size="small" class="me-2">mdi-map-marker</v-icon>
+                    <span class="font-weight-medium">Full Address:</span>
+                  </div>
+                  <p class="pl-6 mb-1">{{ address.house_no }} {{ address.street }}</p>
+                  <p class="pl-6 mb-1">{{ address.purok }}</p>
+                  <p class="pl-6 mb-1">{{ address.barangay_name }}</p>
+                  <p class="pl-6 mb-1">{{ address.city_name }}</p>
+                  <p class="pl-6 mb-1">{{ address.province_name }}</p>
+                  <p class="pl-6 mb-1">{{ address.region_name }}</p>
+                  <p v-if="address.postal_code" class="pl-6">
+                    Postal Code: {{ address.postal_code }}
+                  </p>
+                </div>
+
+                <div class="mt-3">
+                  <v-btn
+                    @click="showEditFields = !showEditFields"
+                    variant="text"
+                    color="primary"
+                    size="small"
+                  >
+                    <v-icon class="me-1">mdi-pencil</v-icon>
+                    {{ showEditFields ? 'Hide Edit Fields' : 'Edit Address Details' }}
+                  </v-btn>
+                </div>
+              </v-card>
+
+              <!-- Editable Fields (Collapsible) -->
+              <v-expand-transition>
+                <div v-if="showEditFields">
+                  <v-row>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="address.street"
+                        label="Street (Optional)"
+                        variant="outlined"
+                        density="comfortable"
+                        prepend-inner-icon="mdi-road"
+                        hide-details
+                      />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="address.house_no"
+                        label="House/Lot No. (Optional)"
+                        variant="outlined"
+                        density="comfortable"
+                        prepend-inner-icon="mdi-home"
+                        hide-details
+                      />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="address.purok"
+                        label="Purok/Subdivision (Optional)"
+                        variant="outlined"
+                        density="comfortable"
+                        prepend-inner-icon="mdi-home-group"
+                        hide-details
+                      />
+                    </v-col>
+                    <v-col cols="12" md="6">
+                      <v-text-field
+                        v-model="address.building"
+                        label="Building/Apartment (Optional)"
+                        variant="outlined"
+                        density="comfortable"
+                        prepend-inner-icon="mdi-office-building"
+                        hide-details
+                      />
+                    </v-col>
+                  </v-row>
+                </div>
+              </v-expand-transition>
+
+              <!-- Default Address Toggle -->
+              <v-checkbox
+                v-model="address.is_default"
+                label="Set as default address"
+                color="primary"
+                density="comfortable"
+                hide-details
+                class="mb-4"
+              />
+
+              <!-- Submit Button - FIXED CONDITION -->
+              <v-btn
+                color="success"
+                @click="saveAddress"
+                :loading="isLoading"
+                :disabled="
+                  !address.recipient_name.trim() ||
+                  !address.phone.trim() ||
+                  (!address.region_name &&
+                    !address.province_name &&
+                    !address.city_name &&
+                    !address.barangay_name)
+                "
+                block
+                size="large"
+                rounded="lg"
+                elevation="2"
+              >
+                <v-icon class="me-2">mdi-check</v-icon>
+                {{ isLoading ? 'Saving...' : 'Confirm & Save Address' }}
+              </v-btn>
+            </div>
+          </v-card-text>
+        </v-card>
+      </v-container>
+    </v-main>
+  </v-app>
+</template>
+
+
 
 <style scoped>
 .map-wrapper {
