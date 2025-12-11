@@ -1,3 +1,5 @@
+
+
 <template>
   <v-app>
     <!-- App Bar -->
@@ -14,7 +16,13 @@
 
     <v-main style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)">
       <!-- Success Toast -->
-      <v-snackbar v-model="showSuccess" :timeout="3000" color="success" location="top" elevation="3">
+      <v-snackbar
+        v-model="showSuccess"
+        :timeout="3000"
+        color="success"
+        location="top"
+        elevation="3"
+      >
         <v-icon class="me-2">mdi-check-circle</v-icon>
         {{ successMessage }}
       </v-snackbar>
@@ -74,7 +82,7 @@
           <v-card-text>
             <v-form @submit.prevent="saveAddress">
               <v-row>
-                <!-- Contact Info -->
+                <!-- Contact Info with validation -->
                 <v-col cols="12" md="6">
                   <v-text-field
                     v-model="address.recipient_name"
@@ -83,7 +91,13 @@
                     maxlength="100"
                     density="comfortable"
                     prepend-inner-icon="mdi-account"
+                    :rules="[
+                      (v) => !!v || 'Name is required',
+                      (v) => (v && v.trim().length >= 2) || 'Name must be at least 2 characters',
+                      (v) => (v && v.length <= 100) || 'Name is too long',
+                    ]"
                     required
+                    counter="100"
                   />
                 </v-col>
                 <v-col cols="12" md="6">
@@ -94,11 +108,18 @@
                     maxlength="20"
                     density="comfortable"
                     prepend-inner-icon="mdi-phone"
+                    :rules="[
+                      (v) => !!v || 'Phone number is required',
+                      (v) =>
+                        (v && /^[0-9+\-\s()]{7,20}$/.test(v)) ||
+                        'Please enter a valid phone number',
+                    ]"
                     required
+                    counter="20"
                   />
                 </v-col>
 
-                <!-- PSGC Address Fields -->
+                <!-- PSGC Address Fields (Restricted to dropdowns only) -->
                 <v-col cols="12" md="6">
                   <v-select
                     v-model="address.region"
@@ -109,6 +130,7 @@
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-map"
+                    :rules="[(v) => !!v || 'Region is required']"
                     required
                     clearable
                   />
@@ -124,6 +146,7 @@
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-map-marker"
+                    :rules="[(v) => !!v || 'Province is required']"
                     required
                     :disabled="!address.region"
                     clearable
@@ -140,6 +163,7 @@
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-city"
+                    :rules="[(v) => !!v || 'City/Municipality is required']"
                     required
                     :disabled="!address.province"
                     clearable
@@ -156,34 +180,37 @@
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-home-city"
+                    :rules="[(v) => !!v || 'Barangay is required']"
                     required
                     :disabled="!address.city"
                     clearable
                   />
                 </v-col>
 
-                <!-- Address Details -->
+                <!-- Address Details (Optional, no validation) -->
                 <v-col cols="12" md="6">
                   <v-text-field
                     v-model="address.street"
-                    label="Street"
+                    label="Street (Optional)"
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-road"
+                    hide-details
                   />
                 </v-col>
 
                 <v-col cols="12" md="6">
                   <v-text-field
                     v-model="address.house_no"
-                    label="House/Lot No."
+                    label="House/Lot No. (Optional)"
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-home"
+                    hide-details
                   />
                 </v-col>
 
-                <!-- Optional Fields -->
+                <!-- Optional Fields (No validation) -->
                 <v-col cols="12" md="6">
                   <v-text-field
                     v-model="address.purok"
@@ -191,6 +218,7 @@
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-home-group"
+                    hide-details
                   />
                 </v-col>
 
@@ -201,10 +229,11 @@
                     variant="outlined"
                     density="comfortable"
                     prepend-inner-icon="mdi-office-building"
+                    hide-details
                   />
                 </v-col>
 
-                <!-- Map Section -->
+                <!-- Map Section - ALWAYS VISIBLE -->
                 <v-col cols="12">
                   <div class="mb-2 d-flex align-center justify-space-between">
                     <div>
@@ -243,8 +272,8 @@
                       !address.province ||
                       !address.city ||
                       !address.barangay ||
-                      !address.recipient_name ||
-                      !address.phone
+                      !address.recipient_name.trim() ||
+                      !address.phone.trim()
                     "
                     block
                     rounded="lg"
@@ -277,22 +306,41 @@
                   We'll automatically fill your address details using your device's GPS. Make sure
                   location services are enabled.
                 </p>
-                <v-btn
-                  color="primary"
-                  @click="useCurrentLocation"
-                  :loading="isLoadingLocation"
-                  variant="tonal"
-                  size="large"
-                  rounded="lg"
-                  class="mb-2"
-                  elevation="2"
-                  block
-                >
-                  <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
-                  {{ isLoadingLocation ? 'Detecting Location...' : 'Detect My Location Now' }}
-                </v-btn>
+                <div class="d-flex gap-2">
+                  <v-btn
+                    color="primary"
+                    @click="useCurrentLocation"
+                    :loading="isLoadingLocation"
+                    variant="tonal"
+                    size="large"
+                    rounded="lg"
+                    class="mb-2"
+                    elevation="2"
+                  >
+                    <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
+                    {{ isLoadingLocation ? 'Detecting...' : 'Detect My Location' }}
+                  </v-btn>
+                  <v-btn
+                    @click="refreshLocationMap"
+                    size="large"
+                    variant="tonal"
+                    color="secondary"
+                    rounded="lg"
+                    class="mb-2"
+                    elevation="2"
+                    :loading="isRefreshingMap"
+                  >
+                    <v-icon class="me-2">mdi-refresh</v-icon>
+                    Refresh Map
+                  </v-btn>
+                </div>
                 <p v-if="isLoadingLocation" class="text-caption text-medium-emphasis mt-2">
-                  <v-progress-circular indeterminate size="16" width="2" class="me-2"></v-progress-circular>
+                  <v-progress-circular
+                    indeterminate
+                    size="16"
+                    width="2"
+                    class="me-2"
+                  ></v-progress-circular>
                   Please wait while we detect your location...
                 </p>
               </v-card-text>
@@ -304,20 +352,15 @@
                 <v-icon color="success" class="me-2">mdi-map</v-icon>
                 <span class="text-subtitle-1 font-weight-medium">Your Location</span>
               </div>
-              <!-- Map container should ALWAYS be in the DOM, even if hidden -->
-              <div 
-                id="location-map" 
-                class="map-wrapper rounded-lg elevation-1" 
-                :style="{ display: hasDetectedLocation ? 'block' : 'none' }"
-              ></div>
-              <p v-if="hasDetectedLocation" class="text-caption text-medium-emphasis mt-2">
+              <div id="location-map" class="map-wrapper rounded-lg elevation-1"></div>
+              <p class="text-caption text-medium-emphasis mt-2">
                 <v-icon size="small" color="success" class="me-1">mdi-information</v-icon>
                 Drag the marker to fine-tune your location
               </p>
             </div>
 
             <!-- Auto-filled Address Preview -->
-            <div v-if="hasDetectedLocation" class="mb-6">
+            <div class="mb-6">
               <div class="d-flex align-center mb-4">
                 <v-icon color="success" class="me-2">mdi-check-circle</v-icon>
                 <span class="text-subtitle-1 font-weight-medium">Detected Address</span>
@@ -331,7 +374,10 @@
                     label="Recipient Name *"
                     variant="underlined"
                     density="compact"
-                    hide-details
+                    :rules="[
+                      (v) => !!v || 'Name is required',
+                      (v) => (v && v.trim().length >= 2) || 'Name must be at least 2 characters',
+                    ]"
                     required
                   />
                 </div>
@@ -343,7 +389,12 @@
                     label="Phone Number *"
                     variant="underlined"
                     density="compact"
-                    hide-details
+                    :rules="[
+                      (v) => !!v || 'Phone number is required',
+                      (v) =>
+                        (v && /^[0-9+\-\s()]{7,20}$/.test(v)) ||
+                        'Please enter a valid phone number',
+                    ]"
                     required
                   />
                 </div>
@@ -386,37 +437,41 @@
                     <v-col cols="12" md="6">
                       <v-text-field
                         v-model="address.street"
-                        label="Street"
+                        label="Street (Optional)"
                         variant="outlined"
                         density="comfortable"
                         prepend-inner-icon="mdi-road"
+                        hide-details
                       />
                     </v-col>
                     <v-col cols="12" md="6">
                       <v-text-field
                         v-model="address.house_no"
-                        label="House/Lot No."
+                        label="House/Lot No. (Optional)"
                         variant="outlined"
                         density="comfortable"
                         prepend-inner-icon="mdi-home"
+                        hide-details
                       />
                     </v-col>
                     <v-col cols="12" md="6">
                       <v-text-field
                         v-model="address.purok"
-                        label="Purok/Subdivision"
+                        label="Purok/Subdivision (Optional)"
                         variant="outlined"
                         density="comfortable"
                         prepend-inner-icon="mdi-home-group"
+                        hide-details
                       />
                     </v-col>
                     <v-col cols="12" md="6">
                       <v-text-field
                         v-model="address.building"
-                        label="Building/Apartment"
+                        label="Building/Apartment (Optional)"
                         variant="outlined"
                         density="comfortable"
                         prepend-inner-icon="mdi-office-building"
+                        hide-details
                       />
                     </v-col>
                   </v-row>
@@ -433,18 +488,18 @@
                 class="mb-4"
               />
 
-              <!-- Submit Button -->
+              <!-- Submit Button - FIXED CONDITION -->
               <v-btn
                 color="success"
                 @click="saveAddress"
                 :loading="isLoading"
                 :disabled="
-                  !address.region_name ||
-                  !address.province_name ||
-                  !address.city_name ||
-                  !address.barangay_name ||
-                  !address.recipient_name ||
-                  !address.phone
+                  !address.recipient_name.trim() ||
+                  !address.phone.trim() ||
+                  (!address.region_name &&
+                    !address.province_name &&
+                    !address.city_name &&
+                    !address.barangay_name)
                 "
                 block
                 size="large"
@@ -455,21 +510,13 @@
                 {{ isLoading ? 'Saving...' : 'Confirm & Save Address' }}
               </v-btn>
             </div>
-
-            <!-- Instructions if no location detected -->
-            <div v-else class="text-center py-8">
-              <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-map-marker-radius</v-icon>
-              <p class="text-h6 font-weight-bold mb-2">No Location Detected Yet</p>
-              <p class="text-body-2 text-medium-emphasis">
-                Click the "Detect My Location Now" button above to automatically fill your address.
-              </p>
-            </div>
           </v-card-text>
         </v-card>
       </v-container>
     </v-main>
   </v-app>
 </template>
+
 
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick, onUnmounted } from 'vue'
@@ -497,8 +544,13 @@ const snackbarMessage = ref('')
 const addressMode = ref('manual')
 const isEdit = ref(false)
 const addressId = ref(route.params.id || null)
-const hasDetectedLocation = ref(false)
 const showEditFields = ref(false)
+
+// Loading states for PSGC dropdowns
+const loadingRegions = ref(false)
+const loadingProvinces = ref(false)
+const loadingCities = ref(false)
+const loadingBarangays = ref(false)
 
 // Separate map instances with proper lifecycle management
 const manualMap = ref<mapboxgl.Map | null>(null)
@@ -558,8 +610,8 @@ const cleanupMaps = () => {
 
 // --- Mode Change Handler ---
 const onModeChange = async (mode: string) => {
-  // Clean up the map that's not needed
   if (mode === 'manual') {
+    // Destroy location map and initialize manual map
     if (locationMap.value) {
       locationMap.value.remove()
       locationMap.value = null
@@ -570,30 +622,32 @@ const onModeChange = async (mode: string) => {
       initializeManualMap()
     }, 100)
   } else {
+    // Destroy manual map and initialize location map
     if (manualMap.value) {
       manualMap.value.remove()
       manualMap.value = null
       manualMapInitialized.value = false
     }
     await nextTick()
-    // When switching to location mode, immediately initialize the map
     setTimeout(() => {
       initializeLocationMap()
     }, 100)
   }
 }
 
-// --- PSGC API Functions ---
+// -------------------- PSGC API Functions --------------------
 const fetchRegions = async () => {
+  loadingRegions.value = true
   try {
     const res = await fetch('https://psgc.cloud/api/regions')
-    if (!res.ok) throw new Error('Failed to fetch regions')
     const data = await res.json()
-    regions.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
-  } catch (err) {
-    console.error(err)
-    snackbarMessage.value = 'Error loading regions'
+    regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Failed to fetch regions:', error)
+    snackbarMessage.value = 'Error loading regions. Please try again.'
     showSnackbar.value = true
+  } finally {
+    loadingRegions.value = false
   }
 }
 
@@ -602,15 +656,18 @@ const fetchProvinces = async (regionCode: string) => {
     provinces.value = []
     return
   }
+
+  loadingProvinces.value = true
   try {
     const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
-    if (!res.ok) throw new Error('Failed to fetch provinces')
     const data = await res.json()
-    provinces.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
-  } catch (err) {
-    console.error(err)
+    provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Failed to fetch provinces:', error)
     snackbarMessage.value = 'Error loading provinces'
     showSnackbar.value = true
+  } finally {
+    loadingProvinces.value = false
   }
 }
 
@@ -619,17 +676,18 @@ const fetchCitiesMunicipalities = async (provinceCode: string) => {
     citiesMunicipalities.value = []
     return
   }
+
+  loadingCities.value = true
   try {
-    const res = await fetch(
-      `https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`,
-    )
-    if (!res.ok) throw new Error('Failed to fetch cities/municipalities')
+    const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
     const data = await res.json()
-    citiesMunicipalities.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
-  } catch (err) {
-    console.error(err)
+    citiesMunicipalities.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Failed to fetch cities:', error)
     snackbarMessage.value = 'Error loading cities/municipalities'
     showSnackbar.value = true
+  } finally {
+    loadingCities.value = false
   }
 }
 
@@ -638,15 +696,18 @@ const fetchBarangays = async (cityCode: string) => {
     barangays.value = []
     return
   }
+
+  loadingBarangays.value = true
   try {
-    const res = await fetch(`https://psgc.cloud/api/cities/${cityCode}/barangays`)
-    if (!res.ok) throw new Error('Failed to fetch barangays')
+    const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
     const data = await res.json()
-    barangays.value = data.sort((a: any, b: any) => a.name.localeCompare(b.name))
-  } catch (err) {
-    console.error(err)
+    barangays.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Failed to fetch barangays:', error)
     snackbarMessage.value = 'Error loading barangays'
     showSnackbar.value = true
+  } finally {
+    loadingBarangays.value = false
   }
 }
 
@@ -677,6 +738,10 @@ watch(
     address.value.barangay = ''
     address.value.postal_code = ''
     if (newRegion) {
+      const selectedRegion = regions.value.find((r) => r.code === newRegion)
+      if (selectedRegion) {
+        address.value.region_name = selectedRegion.name
+      }
       await fetchProvinces(newRegion)
       await updateManualMap()
     }
@@ -692,6 +757,10 @@ watch(
     address.value.barangay = ''
     address.value.postal_code = ''
     if (newProvince) {
+      const selectedProvince = provinces.value.find((p) => p.code === newProvince)
+      if (selectedProvince) {
+        address.value.province_name = selectedProvince.name
+      }
       await fetchCitiesMunicipalities(newProvince)
       await updateManualMap()
     }
@@ -705,12 +774,30 @@ watch(
 
     address.value.barangay = ''
     const selectedCity = citiesMunicipalities.value.find((c) => c.code === newCity)
-    if (selectedCity?.zip_code) address.value.postal_code = selectedCity.zip_code
+    if (selectedCity) {
+      address.value.city_name = selectedCity.name
+      address.value.postal_code = selectedCity.zip_code || selectedCity.zipCode || selectedCity.postalCode || ''
+    }
     if (newCity) {
       await fetchBarangays(newCity)
       await updateManualMap()
     }
   },
+)
+
+watch(
+  () => address.value.barangay,
+  (newBarangay) => {
+    if (addressMode.value !== 'manual') return
+    
+    if (newBarangay) {
+      const selectedBarangay = barangays.value.find((b) => b.code === newBarangay)
+      if (selectedBarangay) {
+        address.value.barangay_name = selectedBarangay.name
+      }
+      updateManualMap()
+    }
+  }
 )
 
 // --- Get User Profile ID ---
@@ -764,23 +851,52 @@ const loadAddress = async () => {
       return
     }
 
-    Object.assign(address.value, data)
-    isEdit.value = true
-    hasDetectedLocation.value = true
+    // Only assign the data we care about
+    address.value.recipient_name = data.recipient_name || ''
+    address.value.phone = data.phone || ''
+    address.value.street = data.street || ''
+    address.value.purok = data.purok || ''
+    address.value.building = data.building || ''
+    address.value.house_no = data.house_no || ''
+    address.value.postal_code = data.postal_code || ''
+    address.value.is_default = data.is_default || false
+    address.value.region_name = data.region_name || ''
+    address.value.province_name = data.province_name || ''
+    address.value.city_name = data.city_name || ''
+    address.value.barangay_name = data.barangay_name || ''
 
+    isEdit.value = true
+
+    // Only try to match PSGC if we have the names
     if (data.region_name) {
       const selectedRegion = regions.value.find((r) => r.name === data.region_name)
-      if (selectedRegion) await fetchProvinces(selectedRegion.code)
+      if (selectedRegion) {
+        address.value.region = selectedRegion.code
+        await fetchProvinces(selectedRegion.code)
+      }
     }
 
     if (data.province_name) {
       const selectedProvince = provinces.value.find((p) => p.name === data.province_name)
-      if (selectedProvince) await fetchCitiesMunicipalities(selectedProvince.code)
+      if (selectedProvince) {
+        address.value.province = selectedProvince.code
+        await fetchCitiesMunicipalities(selectedProvince.code)
+      }
     }
 
     if (data.city_name) {
       const selectedCity = citiesMunicipalities.value.find((c) => c.name === data.city_name)
-      if (selectedCity) await fetchBarangays(selectedCity.code)
+      if (selectedCity) {
+        address.value.city = selectedCity.code
+        await fetchBarangays(selectedCity.code)
+      }
+    }
+
+    if (data.barangay_name) {
+      const selectedBarangay = barangays.value.find((b) => b.name === data.barangay_name)
+      if (selectedBarangay) {
+        address.value.barangay = selectedBarangay.code
+      }
     }
 
     setTimeout(() => {
@@ -797,25 +913,53 @@ const loadAddress = async () => {
   }
 }
 
-// --- Save Address ---
+// --- Save Address (Only restrict PSGC and name/phone) ---
 const saveAddress = async () => {
   try {
     isLoading.value = true
 
-    // Validation
-    const requiredFields =
-      addressMode.value === 'manual'
-        ? ['region', 'province', 'city', 'barangay']
-        : ['region_name', 'province_name', 'city_name', 'barangay_name']
-
-    for (const field of requiredFields) {
-      if (!address.value[field as keyof typeof address.value]) {
-        throw new Error('Complete all required address fields')
+    // ONLY VALIDATE: PSGC data, name, and phone
+    if (addressMode.value === 'manual') {
+      // Validate PSGC selections (dropdowns only)
+      if (
+        !address.value.region ||
+        !address.value.province ||
+        !address.value.city ||
+        !address.value.barangay
+      ) {
+        throw new Error('Please select complete address from PSGC dropdowns')
+      }
+    } else {
+      // Location mode - validate address components
+      // FIXED: Don't require all fields, just require at least one address component
+      if (
+        !address.value.region_name &&
+        !address.value.province_name &&
+        !address.value.city_name &&
+        !address.value.barangay_name
+      ) {
+        throw new Error('Address is required. Please detect location or enter address details.')
       }
     }
 
-    if (!address.value.recipient_name || !address.value.phone) {
-      throw new Error('Recipient name and phone number are required')
+    // Validate name and phone (required fields)
+    if (!address.value.recipient_name.trim()) {
+      throw new Error('Recipient name is required')
+    }
+
+    if (!address.value.phone.trim()) {
+      throw new Error('Phone number is required')
+    }
+
+    // Optional: Add phone format validation
+    const phoneRegex = /^[0-9+\-\s()]{7,20}$/
+    if (!phoneRegex.test(address.value.phone)) {
+      throw new Error('Please enter a valid phone number (7-20 digits)')
+    }
+
+    // Optional: Add name length validation
+    if (address.value.recipient_name.trim().length < 2) {
+      throw new Error('Recipient name must be at least 2 characters')
     }
 
     const profileId = await getUserProfileId()
@@ -823,23 +967,21 @@ const saveAddress = async () => {
     let addressData: any
 
     if (addressMode.value === 'manual') {
-      const regionName = regions.value.find((r) => r.code === address.value.region)?.name || ''
-      const provinceName =
-        provinces.value.find((p) => p.code === address.value.province)?.name || ''
-      const cityName =
-        citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || ''
-      const barangayName =
-        barangays.value.find((b) => b.code === address.value.barangay)?.name || ''
+      // Get names from selected codes
+      const regionName = regions.value.find((r) => r.code === address.value.region)?.name || address.value.region_name
+      const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || address.value.province_name
+      const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || address.value.city_name
+      const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || address.value.barangay_name
 
       addressData = {
         user_id: profileId,
-        recipient_name: address.value.recipient_name,
-        phone: address.value.phone,
-        street: address.value.street,
-        purok: address.value.purok,
-        building: address.value.building,
-        house_no: address.value.house_no,
-        postal_code: address.value.postal_code,
+        recipient_name: address.value.recipient_name.trim(),
+        phone: address.value.phone.trim(),
+        street: address.value.street || '',
+        purok: address.value.purok || '',
+        building: address.value.building || '',
+        house_no: address.value.house_no || '',
+        postal_code: address.value.postal_code || '',
         is_default: address.value.is_default,
         region_name: regionName,
         province_name: provinceName,
@@ -850,22 +992,23 @@ const saveAddress = async () => {
     } else {
       addressData = {
         user_id: profileId,
-        recipient_name: address.value.recipient_name,
-        phone: address.value.phone,
-        street: address.value.street,
-        purok: address.value.purok,
-        building: address.value.building,
-        house_no: address.value.house_no,
-        postal_code: address.value.postal_code,
+        recipient_name: address.value.recipient_name.trim(),
+        phone: address.value.phone.trim(),
+        street: address.value.street || '',
+        purok: address.value.purok || '',
+        building: address.value.building || '',
+        house_no: address.value.house_no || '',
+        postal_code: address.value.postal_code || '',
         is_default: address.value.is_default,
-        region_name: address.value.region_name,
-        province_name: address.value.province_name,
-        city_name: address.value.city_name,
-        barangay_name: address.value.barangay_name,
+        region_name: address.value.region_name || '',
+        province_name: address.value.province_name || '',
+        city_name: address.value.city_name || '',
+        barangay_name: address.value.barangay_name || '',
         updated_at: new Date().toISOString(),
       }
     }
 
+    // Handle default address setting
     if (address.value.is_default) {
       await supabase
         .from('addresses')
@@ -925,9 +1068,9 @@ const updateManualMap = async () => {
   const house = address.value.house_no || ''
   const street = address.value.street || ''
   const purok = address.value.purok || ''
-  const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || ''
-  const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || ''
-  const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || ''
+  const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || address.value.barangay_name || ''
+  const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || address.value.city_name || ''
+  const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || address.value.province_name || ''
 
   if (!barangayName && !street && !cityName) {
     manualMap.value.flyTo({
@@ -1022,13 +1165,6 @@ const useCurrentLocation = async () => {
     showSnackbar.value = true
     isLoadingLocation.value = true
 
-    // Initialize the location map if not already done
-    if (!locationMapInitialized.value && addressMode.value === 'location') {
-      initializeLocationMap()
-      // Wait for map to initialize
-      await new Promise((resolve) => setTimeout(resolve, 300))
-    }
-
     // Ensure map container is visible
     const mapElement = document.getElementById('location-map')
     if (mapElement) {
@@ -1037,7 +1173,7 @@ const useCurrentLocation = async () => {
       mapElement.style.height = '300px'
     }
 
-    // Request permissions with timeout handling
+    // Request permissions
     const permissions = await Geolocation.checkPermissions()
     if (permissions.location !== 'granted') {
       const request = await Geolocation.requestPermissions()
@@ -1062,17 +1198,14 @@ const useCurrentLocation = async () => {
 
     // Initialize or update the map
     if (locationMap.value) {
-      // Resize map first
       locationMap.value.resize()
-      
-      // Fly to detected location
+
       locationMap.value.flyTo({
         center: [lng, lat],
         zoom: 18,
         duration: 1500,
       })
 
-      // Add or update marker
       if (locationMarker.value) {
         locationMarker.value.setLngLat([lng, lat])
       } else {
@@ -1093,8 +1226,7 @@ const useCurrentLocation = async () => {
           reverseGeocodeLocationMode(lngLat.lat, lngLat.lng)
         })
       }
-      
-      // Force a redraw
+
       setTimeout(() => {
         if (locationMap.value) {
           locationMap.value.resize()
@@ -1104,14 +1236,12 @@ const useCurrentLocation = async () => {
 
     await reverseGeocodeLocationMode(lat, lng)
 
-    hasDetectedLocation.value = true
     snackbarMessage.value = '📍 Location detected! Address fields filled automatically.'
     showSnackbar.value = true
   } catch (err: any) {
     console.error('Location error:', err)
     snackbarMessage.value = '📍 ' + (err.message || 'Unable to detect location.')
     showSnackbar.value = true
-    hasDetectedLocation.value = false
   } finally {
     isLoadingLocation.value = false
   }
@@ -1148,11 +1278,12 @@ const reverseGeocodeLocationMode = async (lat: number, lng: number) => {
 // --- Initialize Manual Map ---
 const initializeManualMap = () => {
   const mapElement = document.getElementById('manual-map')
-  if (mapElement && !manualMapInitialized.value) {
-    // Clear any existing instance
+  if (mapElement) {
+    // Always reinitialize if container exists
     if (manualMap.value) {
       manualMap.value.remove()
       manualMap.value = null
+      manualMapInitialized.value = false
     }
 
     manualMap.value = new mapboxgl.Map({
@@ -1202,6 +1333,13 @@ const initializeManualMap = () => {
     manualMap.value.on('load', () => {
       manualMapInitialized.value = true
       console.log('Manual map loaded')
+      // Force resize and redraw
+      setTimeout(() => {
+        if (manualMap.value) {
+          manualMap.value.resize()
+          manualMap.value.triggerRepaint()
+        }
+      }, 100)
     })
 
     manualMap.value.on('error', (e) => {
@@ -1209,23 +1347,27 @@ const initializeManualMap = () => {
       snackbarMessage.value = 'Map loading error. Please refresh the page.'
       showSnackbar.value = true
     })
+
+    // Ensure map is properly sized
+    setTimeout(() => {
+      if (manualMap.value) {
+        manualMap.value.resize()
+        manualMap.value.triggerRepaint()
+      }
+    }, 300)
   }
 }
 
 // --- Initialize Location Map ---
 const initializeLocationMap = () => {
   const mapElement = document.getElementById('location-map')
-  if (mapElement && !locationMapInitialized.value) {
-    // Clear any existing instance
+  if (mapElement) {
+    // Always reinitialize if container exists
     if (locationMap.value) {
       locationMap.value.remove()
       locationMap.value = null
+      locationMapInitialized.value = false
     }
-
-    // Ensure the map container is visible
-    mapElement.style.display = 'block'
-    mapElement.style.visibility = 'visible'
-    mapElement.style.height = '300px'
 
     locationMap.value = new mapboxgl.Map({
       container: 'location-map',
@@ -1275,13 +1417,13 @@ const initializeLocationMap = () => {
     locationMap.value.on('load', () => {
       locationMapInitialized.value = true
       console.log('Location map loaded')
-
-      // Force resize after load
+      // Force resize and redraw
       setTimeout(() => {
         if (locationMap.value) {
           locationMap.value.resize()
+          locationMap.value.triggerRepaint()
         }
-      }, 200)
+      }, 100)
     })
 
     locationMap.value.on('error', (e) => {
@@ -1289,31 +1431,91 @@ const initializeLocationMap = () => {
       snackbarMessage.value = 'Map loading error. Please refresh the page.'
       showSnackbar.value = true
     })
+
+    // Ensure map is properly sized
+    setTimeout(() => {
+      if (locationMap.value) {
+        locationMap.value.resize()
+        locationMap.value.triggerRepaint()
+      }
+    }, 300)
   }
 }
 
-// --- Refresh Map Function ---
+// --- Refresh Map Functions ---
 const refreshManualMap = async () => {
   isRefreshingMap.value = true
-  await updateManualMap()
-  isRefreshingMap.value = false
+  try {
+    // Force reinitialize the map
+    if (manualMap.value) {
+      manualMap.value.remove()
+      manualMap.value = null
+      manualMapInitialized.value = false
+    }
+
+    await nextTick()
+
+    // Reinitialize map
+    initializeManualMap()
+
+    // Wait for map to load
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    // Update map with current address
+    await updateManualMap()
+
+    snackbarMessage.value = 'Manual map refreshed successfully'
+    showSnackbar.value = true
+  } catch (err) {
+    console.error('Error refreshing manual map:', err)
+    snackbarMessage.value = 'Error refreshing map'
+    showSnackbar.value = true
+  } finally {
+    isRefreshingMap.value = false
+  }
+}
+
+const refreshLocationMap = async () => {
+  isRefreshingMap.value = true
+  try {
+    // Force reinitialize the map
+    if (locationMap.value) {
+      locationMap.value.remove()
+      locationMap.value = null
+      locationMapInitialized.value = false
+    }
+
+    await nextTick()
+
+    // Reinitialize map
+    initializeLocationMap()
+
+    // Wait for map to load
+    await new Promise((resolve) => setTimeout(resolve, 500))
+
+    snackbarMessage.value = 'Location map refreshed successfully'
+    showSnackbar.value = true
+  } catch (err) {
+    console.error('Error refreshing location map:', err)
+    snackbarMessage.value = 'Error refreshing map'
+    showSnackbar.value = true
+  } finally {
+    isRefreshingMap.value = false
+  }
 }
 
 // --- Update Location Map ---
 const updateLocationMap = () => {
   if (!locationMap.value || !locationMarker.value) return
 
-  // If we have location data, center the map
   if (address.value.region_name && address.value.city_name) {
-    // This would need proper geocoding implementation
-    // For now, just ensure the map is ready
+    // Map ready for location mode
   }
 }
 
 // --- Lifecycle ---
 onMounted(() => {
   loadAddress()
-  // Initialize the map for the current mode
   setTimeout(() => {
     if (addressMode.value === 'manual') {
       initializeManualMap()
@@ -1435,11 +1637,20 @@ watch(
   .map-wrapper {
     height: 250px;
   }
+
+  .gap-2 {
+    gap: 8px;
+  }
 }
 
 @media (max-width: 600px) {
   .map-wrapper {
     height: 200px;
+  }
+
+  .gap-2 {
+    flex-direction: column;
+    gap: 12px;
   }
 }
 
@@ -1463,6 +1674,11 @@ watch(
   100% {
     background-position: 200% 0;
   }
+}
+
+.gap-2 {
+  display: flex;
+  gap: 16px;
 }
 </style>
 
