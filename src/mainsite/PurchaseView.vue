@@ -20,7 +20,9 @@ const showAddressDialog = ref(false)
 const deliveryOption = ref('meetup')
 const paymentMethod = ref('cash')
 const note = ref('')
-
+// 📋 CLIPBOARD STATE
+const showCopySuccess = ref(false)
+const copyButtonText = ref('Copy')
 // 📅 DATE & TIME STATE - FLEXIBLE DATE SELECTION
 const showDateTimePicker = ref(false)
 const deliveryDate = ref('')
@@ -212,6 +214,42 @@ const loadShopData = async () => {
     }
   }
 }
+
+// 🐛 DEBUG STATE
+const debugState = () => {
+  console.log('🔍 DEBUG STATE:')
+  console.log('Route params:', route.params)
+  console.log('Route query:', route.query)
+  console.log('History state:', history.state)
+  console.log('Current items:', items.value)
+
+  // Check localStorage
+  const savedIds = localStorage.getItem('selectedCartItemIds')
+  console.log('LocalStorage IDs:', savedIds)
+
+  // Check cartItemIds
+  console.log('cartItemIds:', cartItemIds.value)
+}
+
+// 🔍 DEBUG ITEMS FUNCTION
+const debugItems = () => {
+  console.log('🔍 DEBUG ITEMS:')
+  items.value.forEach((item, index) => {
+    console.log(`Item ${index + 1}:`, {
+      name: item.name,
+      hasProduct: !!item.product,
+      main_img_urls: item.product?.main_img_urls,
+      varietyData: item.varietyData,
+      image: item.image, // Check if this is populated
+      directImage: item.image, // Check direct image property
+    })
+    
+    // Test the getMainImage function
+    const testImage = getMainImage(item.image || item.product?.main_img_urls, item.varietyData)
+    console.log(`Test getMainImage result:`, testImage)
+  })
+}
+
 // 🛒 FETCH CART ITEMS BY IDS (DIRECT)
 const fetchCartItemsDirect = async (itemIds: string[]) => {
   console.log('🔍 fetchCartItemsDirect called with IDs:', itemIds)
@@ -276,11 +314,17 @@ const fetchCartItemsDirect = async (itemIds: string[]) => {
       let finalPrice = product.price || 0
       let itemName = product.prod_name || 'Unnamed Product'
       let varietyData = cartItem.variety_data
+      let itemImage = mainImage
 
       if (cartItem.variety_data && typeof cartItem.variety_data === 'object') {
         finalPrice = cartItem.variety_data.price || product.price || 0
         itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
         varietyData = cartItem.variety_data
+        
+        // Try to get variety image
+        if (varietyData?.images && varietyData.images.length > 0) {
+          itemImage = varietyData.images[0]
+        }
       }
 
       const transformedItem = {
@@ -293,13 +337,13 @@ const fetchCartItemsDirect = async (itemIds: string[]) => {
         selectedSize: cartItem.selected_size,
         selectedVariety: cartItem.selected_variety,
         varietyData: varietyData,
-        image: mainImage,
+        image: itemImage, // Use the image we determined
         cart_item_id: cartItem.id,
         shop_id: shop.id || product.shop_id,
         product: product,
       }
 
-      console.log(`✅ Loaded: ${transformedItem.name} (Qty: ${transformedItem.quantity})`)
+      console.log(`✅ Loaded: ${transformedItem.name} (Qty: ${transformedItem.quantity})`, transformedItem.image)
       return transformedItem
     })
 
@@ -347,6 +391,7 @@ const fetchProductFromId = async (productId: string) => {
     let finalPrice = product.price
     let itemName = product.prod_name
     let varietyData = null
+    let itemImage = getMainImage(product.main_img_urls)
 
     // If variety is selected, find it in the varieties JSONB
     if (selectedVariety && product.varieties) {
@@ -360,6 +405,11 @@ const fetchProductFromId = async (productId: string) => {
           finalPrice = variety.price || product.price
           itemName = `${product.prod_name} - ${variety.name}`
           varietyData = variety
+          
+          // Try to get variety image
+          if (variety.images && variety.images.length > 0) {
+            itemImage = variety.images[0]
+          }
         }
       } catch (parseError) {
         console.warn('⚠️ Error parsing varieties:', parseError)
@@ -367,7 +417,6 @@ const fetchProductFromId = async (productId: string) => {
     }
 
     // Transform product to item format
-    const mainImage = getMainImage(product.main_img_urls)
     items.value = [
       {
         id: product.id,
@@ -379,7 +428,7 @@ const fetchProductFromId = async (productId: string) => {
         selectedSize: selectedSize,
         selectedVariety: selectedVariety,
         varietyData: varietyData,
-        image: mainImage,
+        image: itemImage, // Make sure image is set
         shop_id: product.shop?.id,
         product: product,
       },
@@ -402,39 +451,6 @@ const fetchCartItems = async () => {
     await fetchCartItemsDirect(cartItemIds.value)
   } else {
     await fetchAllCartItems()
-  }
-}
-
-// Helper function to transform cart item
-const transformCartItem = (cartItem) => {
-  const product = cartItem.product || {}
-  const shop = product.shop || {}
-  const mainImage = getMainImage(product.main_img_urls)
-
-  let finalPrice = product.price || 0
-  let itemName = product.prod_name || 'Unnamed Product'
-  let varietyData = cartItem.variety_data
-
-  if (cartItem.variety_data && typeof cartItem.variety_data === 'object') {
-    finalPrice = cartItem.variety_data.price || product.price || 0
-    itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
-    varietyData = cartItem.variety_data
-  }
-
-  return {
-    id: cartItem.product_id,
-    product_id: cartItem.product_id,
-    name: itemName,
-    price: finalPrice,
-    varietyPrice: finalPrice,
-    quantity: cartItem.quantity || 1,
-    selectedSize: cartItem.selected_size,
-    selectedVariety: cartItem.selected_variety,
-    varietyData: varietyData,
-    image: mainImage,
-    cart_item_id: cartItem.id, // cart_items.id
-    shop_id: shop.id || product.shop_id,
-    product: product,
   }
 }
 
@@ -473,6 +489,9 @@ const loadContactInfo = async () => {
 onMounted(async () => {
   console.log('🚀 Purchase View Mounted')
 
+  // Debug first
+  debugState()
+  
   // Generate transaction number
   if (!transactionNumber.value) {
     transactionNumber.value = await generateUniqueTransactionNumber()
@@ -480,6 +499,9 @@ onMounted(async () => {
 
   // Load items FIRST (this sets cartItemIds if needed)
   await loadItems()
+  
+  // Debug items
+  debugItems() // Add this line
 
   // Load other data
   if (items.value.length > 0) {
@@ -492,39 +514,39 @@ onMounted(async () => {
   console.log('✅ Page initialized')
 })
 
-// 📦 LOAD ITEMS - FIXED VERSION
+// In purchaseview.vue, update the loadItems function:
 const loadItems = async () => {
-  console.log('🛒 LOAD ITEMS')
+  console.log('🛒 LOAD ITEMS - Starting item loading process')
 
-  // Check localStorage first (for debugging)
-  const savedIds = localStorage.getItem('selectedCartItemIds')
-  if (savedIds) {
-    console.log('📋 Found IDs in localStorage:', savedIds)
-    cartItemIds.value = JSON.parse(savedIds)
-  }
+  // Clear previous items
+  items.value = []
 
-  // METHOD 1: Check query parameters (most reliable)
-  if (route.query.cartItemIds) {
-    console.log('📍 IDs from query params:', route.query.cartItemIds)
-    try {
-      cartItemIds.value = JSON.parse(route.query.cartItemIds as string)
-      console.log('✅ Parsed cartItemIds:', cartItemIds.value)
-    } catch (error) {
-      console.error('❌ Error parsing cartItemIds:', error)
+  // METHOD 1: Check if items are in history state (most reliable for direct purchase)
+  if (history.state?.items && Array.isArray(history.state.items)) {
+    console.log('📦 Items found in history state:', history.state.items)
+
+    // Check if it's a direct product purchase
+    if (history.state.directProduct || route.query.fromProduct === 'true') {
+      console.log('🛍️ Direct product purchase detected')
+
+      // Use items directly from state
+      items.value = history.state.items.map((item) => ({
+        ...item,
+        product_id: item.product_id || item.id,
+        quantity: item.quantity || parseInt(route.query.quantity) || 1,
+        selectedSize: item.selectedSize || item.size || route.query.size || null,
+        selectedVariety: item.selectedVariety || item.variety || route.query.variety || null,
+        varietyData: item.varietyData || null,
+        price: item.price || item.varietyPrice || 0,
+        shop_id: item.shop_id || item.product?.shop_id,
+      }))
+
+      fromCart.value = false
+      console.log('✅ Loaded direct purchase items:', items.value)
+      return
     }
-  }
 
-  // METHOD 2: Check history state (less reliable)
-  if (history.state?.selectedCartItemIds) {
-    console.log('📍 IDs from history state:', history.state.selectedCartItemIds)
-    cartItemIds.value = history.state.selectedCartItemIds
-  }
-
-  // METHOD 3: Check if items are in history state
-  if (history.state?.items) {
-    console.log('📦 Items in history state')
-
-    // Use items directly from state
+    // Handle cart items from state
     items.value = history.state.items.map((item) => ({
       ...item,
       product_id: item.product_id || item.id,
@@ -538,32 +560,45 @@ const loadItems = async () => {
     }))
 
     fromCart.value = history.state.fromCart || true
-
-    // Extract cartItemIds from items
-    if (items.value.some((item) => item.cart_item_id)) {
-      cartItemIds.value = items.value.map((item) => item.cart_item_id).filter(Boolean)
-    }
-
     console.log('✅ Loaded items from history state:', items.value.length)
     return
   }
 
-  // METHOD 4: If we have cartItemIds, fetch from DB
-  if (cartItemIds.value && cartItemIds.value.length > 0) {
-    console.log('🔍 Fetching items by IDs:', cartItemIds.value)
-    await fetchCartItemsByIDs(cartItemIds.value)
-    return
-  }
-
-  // METHOD 5: Direct product purchase
-  if (route.params.id || route.params.productId) {
-    const productId = route.params.id || route.params.productId
-    console.log('🛍️ Direct product:', productId)
+  // METHOD 2: Direct product purchase from query parameters
+  if (route.query.productId || route.params.id || route.params.productId) {
+    const productId = route.query.productId || route.params.id || route.params.productId
+    console.log('🛍️ Direct product purchase via query:', productId)
     await fetchProductFromId(productId as string)
     return
   }
 
-  // METHOD 6: Fallback - load all cart items
+  // METHOD 3: Check query parameters for cart items
+  if (route.query.cartItemIds) {
+    console.log('📍 IDs from query params:', route.query.cartItemIds)
+    try {
+      cartItemIds.value = JSON.parse(route.query.cartItemIds as string)
+      console.log('✅ Parsed cartItemIds:', cartItemIds.value)
+      await fetchCartItemsByIDs(cartItemIds.value)
+      return
+    } catch (error) {
+      console.error('❌ Error parsing cartItemIds:', error)
+    }
+  }
+
+  // METHOD 4: Check localStorage
+  const savedIds = localStorage.getItem('selectedCartItemIds')
+  if (savedIds) {
+    console.log('📋 Found IDs in localStorage:', savedIds)
+    try {
+      cartItemIds.value = JSON.parse(savedIds)
+      await fetchCartItemsByIDs(cartItemIds.value)
+      return
+    } catch (error) {
+      console.error('❌ Error parsing localStorage IDs:', error)
+    }
+  }
+
+  // METHOD 5: Fallback - load all cart items
   console.log('⚠️ Fallback: Loading all cart items')
   await fetchAllCartItems()
 }
@@ -626,11 +661,17 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
       let finalPrice = product.price || 0
       let itemName = product.prod_name || 'Unnamed Product'
       let varietyData = cartItem.variety_data
+      let itemImage = mainImage
 
       if (cartItem.variety_data && typeof cartItem.variety_data === 'object') {
         finalPrice = cartItem.variety_data.price || product.price || 0
         itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
         varietyData = cartItem.variety_data
+        
+        // Try to get variety image
+        if (varietyData?.images && varietyData.images.length > 0) {
+          itemImage = varietyData.images[0]
+        }
       }
 
       return {
@@ -643,7 +684,7 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
         selectedSize: cartItem.selected_size,
         selectedVariety: cartItem.selected_variety,
         varietyData: varietyData,
-        image: mainImage,
+        image: itemImage, // Use determined image
         cart_item_id: cartItem.id,
         shop_id: shop.id || product.shop_id,
         product: product,
@@ -697,11 +738,17 @@ const fetchAllCartItems = async () => {
         let finalPrice = product.price || 0
         let itemName = product.prod_name || 'Unnamed Product'
         let varietyData = cartItem.variety_data
+        let itemImage = mainImage
 
         if (cartItem.variety_data && typeof cartItem.variety_data === 'object') {
           finalPrice = cartItem.variety_data.price || product.price || 0
           itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
           varietyData = cartItem.variety_data
+          
+          // Try to get variety image
+          if (varietyData?.images && varietyData.images.length > 0) {
+            itemImage = varietyData.images[0]
+          }
         }
 
         return {
@@ -714,7 +761,7 @@ const fetchAllCartItems = async () => {
           selectedSize: cartItem.selected_size,
           selectedVariety: cartItem.selected_variety,
           varietyData: varietyData,
-          image: mainImage,
+          image: itemImage, // Use determined image
           cart_item_id: cartItem.id,
           shop_id: shop.id || product.shop_id,
           product: product,
@@ -878,7 +925,6 @@ const loadUserData = async () => {
   }
 }
 
-// 🏠 LOAD USER ADDRESSES
 // 🏠 LOAD USER ADDRESSES - IMPROVED
 const loadUserAddresses = async () => {
   try {
@@ -982,6 +1028,7 @@ const formatAddress = (addr: any): string => {
   // Join with comma separator
   return addressParts.join(', ')
 }
+
 // 🏠 SET DEFAULT ADDRESS FUNCTION
 const setDefaultAddress = async (addressId: string) => {
   try {
@@ -1435,6 +1482,58 @@ const convertTo12Hour = (time24: string) => {
   }
 }
 
+// 📋 COPY TO CLIPBOARD FUNCTION
+const copyToClipboard = async () => {
+  try {
+    await navigator.clipboard.writeText(transactionNumber.value)
+    copyButtonText.value = 'Copied!'
+    showCopySuccess.value = true
+    
+    // Reset button text after 2 seconds
+    setTimeout(() => {
+      copyButtonText.value = 'Copy'
+      showCopySuccess.value = false
+    }, 2000)
+    
+    console.log('✅ Transaction number copied to clipboard')
+  } catch (err) {
+    console.error('❌ Failed to copy:', err)
+    copyButtonText.value = 'Copy Failed'
+    
+    // Fallback for older browsers
+    const textArea = document.createElement('textarea')
+    textArea.value = transactionNumber.value
+    document.body.appendChild(textArea)
+    textArea.select()
+    
+    try {
+      document.execCommand('copy')
+      copyButtonText.value = 'Copied!'
+      showCopySuccess.value = true
+      
+      setTimeout(() => {
+        copyButtonText.value = 'Copy'
+        showCopySuccess.value = false
+      }, 2000)
+    } catch (fallbackErr) {
+      console.error('❌ Fallback copy failed:', fallbackErr)
+      copyButtonText.value = 'Failed'
+    }
+    
+    document.body.removeChild(textArea)
+  }
+}
+// 📋 FORMAT TRANSACTION NUMBER FOR DISPLAY
+const formattedTransactionNumber = computed(() => {
+  if (!transactionNumber.value) return 'Loading...'
+  
+  // Format as: TX-ABCDEF-12345-67890
+  const parts = transactionNumber.value.split('-')
+  if (parts.length >= 4) {
+    return `${parts[0]}-${parts[1]?.toUpperCase()}-${parts[2]?.toUpperCase()}-${parts[3]?.toUpperCase()}`
+  }
+  return transactionNumber.value.toUpperCase()
+})
 // 📅 FORMATTED DATE DISPLAY
 const formattedDate = computed(() => {
   if (!deliveryDate.value) return 'Not set'
@@ -1484,33 +1583,72 @@ const validateTimeComponents = (): boolean => {
   return true
 }
 
-// 🖼️ IMAGE HELPER
+// 🖼️ IMPROVED IMAGE HELPER FUNCTION
 const getMainImage = (imgUrls: any, varietyData: any = null): string => {
-  // First priority: Use variety image if available
-  if (varietyData?.images && varietyData.images.length > 0) {
+  console.log('🖼️ Getting main image:', { imgUrls, varietyData })
+
+  // First priority: Use the image property directly from the item
+  if (imgUrls && typeof imgUrls === 'string' && imgUrls !== '/placeholder.png') {
+    console.log('📷 Using direct image URL:', imgUrls)
+    return imgUrls
+  }
+
+  // Second priority: Use variety image if available and valid
+  if (varietyData?.images && Array.isArray(varietyData.images) && varietyData.images.length > 0) {
     const varietyImg = varietyData.images[0]
-    if (varietyImg && varietyImg !== '/placeholder.png') {
+    console.log('📦 Variety image found:', varietyImg)
+    if (varietyImg && varietyImg !== '/placeholder.png' && varietyImg.trim() !== '') {
       return varietyImg
     }
   }
 
-  // Second priority: Use product main image
-  if (!imgUrls) return '/placeholder.png'
-
-  if (Array.isArray(imgUrls)) {
-    return imgUrls[0] || '/placeholder.png'
-  }
-
-  if (typeof imgUrls === 'string') {
-    try {
-      const parsed = JSON.parse(imgUrls)
-      return Array.isArray(parsed) ? parsed[0] : parsed
-    } catch {
-      return imgUrls
+  // Third priority: Use product main image URLs
+  if (imgUrls) {
+    let imageArray = imgUrls
+    
+    // If it's a string, try to parse it as JSON
+    if (typeof imgUrls === 'string') {
+      try {
+        const parsed = JSON.parse(imgUrls)
+        if (Array.isArray(parsed)) {
+          imageArray = parsed
+        } else if (typeof parsed === 'string') {
+          return parsed
+        }
+      } catch {
+        // If parsing fails, use the string as is
+        if (imgUrls !== '/placeholder.png') {
+          return imgUrls
+        }
+      }
+    }
+    
+    // If it's an array, get the first valid image
+    if (Array.isArray(imageArray) && imageArray.length > 0) {
+      const validImage = imageArray.find(img => 
+        img && 
+        img !== '/placeholder.png' && 
+        img.trim() !== '' &&
+        (img.startsWith('http') || img.startsWith('/') || img.startsWith('data:'))
+      )
+      if (validImage) {
+        console.log('🏞️ Using array image:', validImage)
+        return validImage
+      }
     }
   }
 
+  // Fallback to placeholder
+  console.log('⚠️ No valid image found, using placeholder')
   return '/placeholder.png'
+}
+
+// 🖼️ HANDLE IMAGE LOADING ERRORS
+const handleImageError = (event: Event) => {
+  const img = event.target as HTMLImageElement
+  console.warn('🖼️ Image failed to load:', img.src)
+  img.src = '/placeholder.png'
+  img.onerror = null // Prevent infinite loop
 }
 
 // 💰 COMPUTED: TOTAL PRICE
@@ -1546,7 +1684,6 @@ const deliveryOptionsDisplay = computed(() =>
   ),
 )
 
-// ✅ COMPLETE CHECKOUT FUNCTION - SIMPLIFIED
 // ✅ COMPLETE CHECKOUT FUNCTION
 const handleCheckout = async () => {
   console.log('🛒 Starting checkout process...')
@@ -1711,6 +1848,7 @@ const handleCheckout = async () => {
     isProcessing.value = false
   }
 }
+
 // 💬 SEND ORDER MESSAGE TO SELLER
 const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopItems: any[]) => {
   try {
@@ -1935,462 +2073,776 @@ watch(
   },
 )
 </script>
+
 <template>
   <v-app>
-    <v-main>
-      <!-- Validation Error Alert -->
+    <v-main class="main-app">
+      <!-- Validation Banner -->
       <v-alert
         v-if="validationErrors.length > 0"
         type="warning"
-        class="mx-3 mt-3 mb-2"
+        class="validation-banner mx-3 mt-3"
         density="compact"
+        elevation="2"
+        border="start"
+        border-color="warning"
       >
         <div class="d-flex align-center">
-          <v-icon class="mr-2">mdi-alert-circle</v-icon>
-          <div>
-            <strong>Complete the following to proceed:</strong>
-            <ul class="mb-0 mt-1">
-              <li v-for="error in validationErrors" :key="error" style="font-size: 0.9rem">
+          <v-icon size="20" class="mr-2">mdi-alert-circle-outline</v-icon>
+          <div class="flex-grow-1">
+            <strong class="text-subtitle-2">Complete required fields:</strong>
+            <div class="d-flex flex-wrap gap-1 mt-1">
+              <v-chip
+                v-for="error in validationErrors"
+                :key="error"
+                size="x-small"
+                color="warning"
+                variant="flat"
+                class="mr-1 mb-1"
+              >
                 {{ error }}
-              </li>
-            </ul>
+              </v-chip>
+            </div>
           </div>
+          <v-btn
+            icon
+            size="x-small"
+            @click="validationErrors = []"
+            class="ml-2"
+          >
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
         </div>
       </v-alert>
+
       <!-- App Bar -->
-      <v-app-bar class="app-bar" color="#438fda" dark flat>
-        <v-btn icon @click="router.back()">
+      <v-app-bar class="app-bar" color="#438fda" flat>
+        <v-btn icon @click="router.back()" variant="text" color="white">
           <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
-        <v-toolbar-title class="app-bar-title">
-          <strong>Transaction Process</strong>
+        <v-toolbar-title class="app-bar-title text-white">
+          <strong>Checkout</strong>
         </v-toolbar-title>
+        <v-spacer></v-spacer>
+      
       </v-app-bar>
 
-      <v-container fluid class="py-4 px-3 main-content">
-        <!-- Debug Info -->
-        <v-alert v-if="items.length === 0" type="warning" class="mb-4">
-          No items loaded. Please go back and try again.
-          <br />Transaction #: {{ transactionNumber }}
-        </v-alert>
+      <v-container fluid class="px-3 py-4 main-container">
+        <!-- Updated Summary Card with Transaction Number -->
+        <v-card class="mb-4 summary-card" elevation="2" rounded="lg">
+          <v-card-text class="pa-4">
+            <div class="d-flex justify-space-between align-center mb-3">
+              <div>
+                <div class="text-subtitle-2 text-white">Order Summary</div>
+                <div class="text-h5 font-weight-bold text-white">
+                  ₱{{ totalPrice.toLocaleString() }}
+                </div>
+              </div>
+              <v-chip color="white" variant="flat" class="text-primary">
+                {{ items.length }} item{{ items.length !== 1 ? 's' : '' }}
+              </v-chip>
+            </div>
+            
+            <!-- Transaction Number Section -->
+            <div class="transaction-section mb-4">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <div class="text-subtitle-2 text-white">Transaction Number</div>
+                <v-tooltip location="top">
+                  <template #activator="{ props }">
+                    <v-btn
+                      v-bind="props"
+                      size="x-small"
+                      :color="showCopySuccess ? 'success' : 'white'"
+                      variant="flat"
+                      @click="copyToClipboard"
+                      class="copy-btn"
+                      :disabled="!transactionNumber"
+                    >
+                      <v-icon size="small" class="mr-1">
+                        {{ showCopySuccess ? 'mdi-check' : 'mdi-content-copy' }}
+                      </v-icon>
+                      {{ copyButtonText }}
+                    </v-btn>
+                  </template>
+                  <span>{{ showCopySuccess ? 'Copied!' : 'Copy to clipboard' }}</span>
+                </v-tooltip>
+              </div>
+              
+              <div class="transaction-number-display pa-3 rounded-lg" @click="copyToClipboard">
+                <div class="d-flex align-center justify-center">
+                  <v-icon color="primary" size="small" class="mr-2">mdi-receipt-text</v-icon>
+                  <div class="text-h6 font-weight-bold text-primary text-center mono-font">
+                    {{ formattedTransactionNumber }}
+                  </div>
+                </div>
+                
+                <!-- Success Message -->
+                <v-slide-y-transition>
+                  <div v-if="showCopySuccess" class="copy-success-message mt-2">
+                    <v-alert
+                      type="success"
+                      density="compact"
+                      variant="tonal"
+                      class="mb-0 text-center"
+                    >
+                      <v-icon size="small" class="mr-1">mdi-check-circle</v-icon>
+                      Transaction number copied to clipboard
+                    </v-alert>
+                  </div>
+                </v-slide-y-transition>
+              </div>
+            </div>
+            
+            <!-- Progress Steps -->
+            <div class="progress-steps">
+              <div class="d-flex justify-space-between align-center">
+                <div class="step active">
+                  <v-icon color="white" size="small" class="step-icon">mdi-cart</v-icon>
+                  <div class="step-label text-caption text-white">Cart</div>
+                </div>
+                <v-divider class="step-divider" :color="buyer ? 'white' : 'rgba(255,255,255,0.3)'"></v-divider>
+                <div class="step" :class="{ active: buyer }">
+                  <v-icon :color="buyer ? 'white' : 'rgba(255,255,255,0.3)'" size="small" class="step-icon">
+                    mdi-account
+                  </v-icon>
+                  <div class="step-label text-caption" :class="{ 'text-white': buyer, 'text-white-50': !buyer }">
+                    Details
+                  </div>
+                </div>
+                <v-divider class="step-divider" :color="address ? 'white' : 'rgba(255,255,255,0.3)'"></v-divider>
+                <div class="step" :class="{ active: address }">
+                  <v-icon :color="address ? 'white' : 'rgba(255,255,255,0.3)'" size="small" class="step-icon">
+                    mdi-map-marker
+                  </v-icon>
+                  <div class="step-label text-caption" :class="{ 'text-white': address, 'text-white-50': !address }">
+                    Address
+                  </div>
+                </div>
+                <v-divider class="step-divider" :color="deliveryTime ? 'white' : 'rgba(255,255,255,0.3)'"></v-divider>
+                <div class="step" :class="{ active: deliveryTime }">
+                  <v-icon :color="deliveryTime ? 'white' : 'rgba(255,255,255,0.3)'" size="small" class="step-icon">
+                    mdi-clock
+                  </v-icon>
+                  <div class="step-label text-caption" :class="{ 'text-white': deliveryTime, 'text-white-50': !deliveryTime }">
+                    Schedule
+                  </div>
+                </div>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
 
-        <!-- Delivery Details -->
-        <v-card outlined class="mb-4 card-elevated">
+        <!-- Delivery Details Card -->
+        <v-card class="mb-4 delivery-card" elevation="1" rounded="lg">
           <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2">mdi-truck-delivery</v-icon>
+            <v-icon color="primary" class="mr-2" size="small">mdi-truck-fast</v-icon>
             Delivery Details
           </v-card-title>
-          <v-card-text class="card-content">
-            <div class="buyer-info">
-              <p>
-                <strong>Name:</strong> {{ buyer?.first_name || 'Loading...' }}
-                {{ buyer?.last_name }}
-              </p>
-              <p class="contact-section">
-                <strong>Contact:</strong>
-                <span :class="{ 'text-red': !contactPhone }">
-                  {{ contactPhone || 'Contact number not set' }}
-                </span>
+          
+          <v-card-text>
+            <!-- Buyer Info Section -->
+            <div class="info-section mb-4">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <div class="text-subtitle-2 text-grey-darken-2">Buyer Information</div>
                 <v-btn
                   size="x-small"
                   variant="text"
                   color="primary"
                   @click="showContactDialog = true"
-                  class="ml-2 contact-edit-btn"
-                  style="min-width: auto"
-                  :title="contactPhone ? 'Edit contact' : 'Add contact'"
+                  class="edit-btn"
                 >
-                  <v-icon size="small">{{ contactPhone ? 'mdi-pencil' : 'mdi-plus' }}</v-icon>
+                  <v-icon size="small">mdi-pencil</v-icon>
                 </v-btn>
-              </p>
-              <!-- Optional: Add this badge next to the contact if you want visual feedback -->
-              <span v-if="!contactPhone" class="ml-1" style="font-size: 0.7rem">
-                <v-chip color="warning" size="x-small" density="compact"> Required </v-chip>
-              </span>
-              <span v-else class="ml-1" style="font-size: 0.7rem">
-                <v-chip color="success" size="x-small" density="compact"> ✓ </v-chip>
-              </span>
-              <p class="address-line">
-                <strong>Address:</strong>
-                {{ address ? formatAddress(address) : 'No address set' }}
-              </p>
-              <p><strong>Transaction No.:</strong> {{ transactionNumber }}</p>
-              <p>
-                <strong>Delivery Schedule:</strong> {{ formattedDate }}
-                {{ deliveryTime ? `at ${convertTo12Hour(deliveryTime)}` : '' }}
-              </p>
-              <p v-if="scheduleError" class="text-red mt-1">{{ scheduleError }}</p>
-              <!-- Replace the button-group with just two buttons: -->
-              <div class="button-group mt-2">
+              </div>
+              
+              <v-list density="compact" class="info-list">
+                <v-list-item class="px-0">
+                  <template #prepend>
+                    <v-icon size="small" color="grey-darken-1">mdi-account</v-icon>
+                  </template>
+                  <v-list-item-title class="text-body-2">
+                    {{ buyer?.first_name || 'Loading...' }} {{ buyer?.last_name }}
+                  </v-list-item-title>
+                </v-list-item>
+                
+                <v-list-item class="px-0">
+                  <template #prepend>
+                    <v-icon size="small" color="grey-darken-1">mdi-phone</v-icon>
+                  </template>
+                  <v-list-item-title 
+                    class="text-body-2"
+                    :class="{ 'text-warning': !contactPhone }"
+                  >
+                    {{ contactPhone || 'Contact number required' }}
+                  </v-list-item-title>
+                </v-list-item>
+              </v-list>
+            </div>
+
+            <!-- Address Section -->
+            <div class="info-section mb-4">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <div class="text-subtitle-2 text-grey-darken-2">Delivery Address</div>
                 <v-btn
-                  size="small"
+                  size="x-small"
+                  variant="text"
                   color="primary"
-                  variant="tonal"
                   @click="showAddressDialog = true"
-                  class="action-btn"
+                  class="edit-btn"
                 >
-                  Change Address
+                  <v-icon size="small">mdi-pencil</v-icon>
                 </v-btn>
+              </div>
+              
+              <div 
+                class="address-box pa-3 rounded-lg"
+                :class="{ 'border-warning': !address }"
+                @click="showAddressDialog = true"
+              >
+                <div class="d-flex align-start">
+                  <v-icon 
+                    size="small" 
+                    :color="address ? 'success' : 'warning'"
+                    class="mr-2 mt-1"
+                  >
+                    {{ address ? 'mdi-map-marker-check' : 'mdi-map-marker-alert' }}
+                  </v-icon>
+                  <div class="flex-grow-1">
+                    <div class="text-body-2 font-weight-medium">
+                      {{ address ? formatAddress(address) : 'Select delivery address' }}
+                    </div>
+                    <div v-if="address?.phone" class="text-caption text-grey mt-1">
+                      <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
+                      {{ address.phone }}
+                    </div>
+                  </div>
+                  <v-icon size="small" color="grey">mdi-chevron-right</v-icon>
+                </div>
+              </div>
+            </div>
+
+            <!-- Schedule Section -->
+            <div class="info-section">
+              <div class="d-flex align-center justify-space-between mb-2">
+                <div class="text-subtitle-2 text-grey-darken-2">Delivery Schedule</div>
                 <v-btn
-                  size="small"
+                  size="x-small"
+                  variant="text"
                   color="primary"
-                  variant="tonal"
                   @click="showDateTimePicker = true"
-                  class="action-btn"
+                  class="edit-btn"
                 >
-                  Change Schedule
+                  <v-icon size="small">mdi-pencil</v-icon>
                 </v-btn>
+              </div>
+              
+              <div 
+                class="schedule-box pa-3 rounded-lg"
+                :class="{ 'border-warning': !deliveryTime }"
+                @click="showDateTimePicker = true"
+              >
+                <div class="d-flex align-center">
+                  <v-icon 
+                    size="small" 
+                    :color="deliveryTime ? 'success' : 'warning'"
+                    class="mr-2"
+                  >
+                    {{ deliveryTime ? 'mdi-clock-check' : 'mdi-clock-alert' }}
+                  </v-icon>
+                  <div class="flex-grow-1">
+                    <div class="text-body-2 font-weight-medium">
+                      {{ deliveryTime ? `${formattedDate} at ${convertTo12Hour(deliveryTime)}` : 'Select delivery time' }}
+                    </div>
+                    <div v-if="scheduleError" class="text-caption text-error mt-1">
+                      <v-icon size="x-small" class="mr-1">mdi-alert</v-icon>
+                      {{ scheduleError }}
+                    </div>
+                  </div>
+                  <v-icon size="small" color="grey">mdi-chevron-right</v-icon>
+                </div>
               </div>
             </div>
           </v-card-text>
         </v-card>
 
-        <!-- Items to Purchase -->
-        <v-card variant="outlined" class="mb-4 card-elevated">
+        <!-- Items List Card -->
+        <v-card class="mb-4 items-card" elevation="1" rounded="lg">
           <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2">mdi-shopping</v-icon>
-            Items to Purchase ({{ items.length }})
+            <v-icon color="primary" class="mr-2" size="small">mdi-package-variant</v-icon>
+            Order Items ({{ items.length }})
           </v-card-title>
-
-          <v-list class="item-list" v-if="items.length > 0">
-            <v-list-item v-for="item in items" :key="item.id" class="list-item">
+          
+          <v-list class="items-list">
+            <v-list-item
+              v-for="(item, index) in items"
+              :key="item.id"
+              class="item-row"
+              :class="{ 'border-bottom': index < items.length - 1 }"
+            >
               <template #prepend>
-                <v-avatar class="item-avatar" rounded>
+                <v-avatar rounded size="56" class="item-image">
                   <v-img
-                    :src="getMainImage(item.product?.main_img_urls, item.varietyData)"
+                    :src="item.image || getMainImage(item.product?.main_img_urls, item.varietyData)"
                     :alt="item.name"
                     cover
-                    class="product-image"
-                  />
+                    @error="handleImageError"
+                  >
+                    <template #placeholder>
+                      <div class="d-flex align-center justify-center fill-height">
+                        <v-icon color="grey-lighten-1">mdi-package</v-icon>
+                      </div>
+                    </template>
+                  </v-img>
                 </v-avatar>
               </template>
 
               <v-list-item-title class="item-name">
-                {{ item.name }}
-                <div v-if="item.selectedVariety || item.selectedSize" class="item-variety-info">
-                  <span v-if="item.selectedVariety" class="variety-tag">
+                <div class="d-flex align-center mb-1">
+                  <span class="text-body-1 font-weight-medium">{{ item.name }}</span>
+                  <v-chip
+                    v-if="item.selectedVariety"
+                    size="x-small"
+                    color="primary"
+                    variant="outlined"
+                    class="ml-2"
+                  >
                     {{ item.selectedVariety }}
-                  </span>
-                  <span v-if="item.selectedSize" class="size-tag">
-                    Size: {{ item.selectedSize }}
-                  </span>
+                  </v-chip>
+                </div>
+                
+                <div class="d-flex align-center flex-wrap gap-1 mb-1">
+                  <div class="text-body-2 text-primary font-weight-bold">
+                    ₱{{ (item.price * item.quantity).toLocaleString() }}
+                  </div>
+                  <div class="text-caption text-grey">
+                    (₱{{ item.price.toLocaleString() }} × {{ item.quantity }})
+                  </div>
+                </div>
+                
+                <div v-if="item.selectedSize" class="text-caption text-grey">
+                  <v-icon size="x-small" class="mr-1">mdi-ruler</v-icon>
+                  Size: {{ item.selectedSize }}
                 </div>
               </v-list-item-title>
-              <v-list-item-subtitle class="item-price">
-                ₱{{ item.price.toLocaleString() }} × {{ item.quantity }}
-              </v-list-item-subtitle>
-              <v-list-item-subtitle class="item-subtotal">
-                Subtotal: ₱{{ (item.price * item.quantity).toLocaleString() }}
-              </v-list-item-subtitle>
 
               <template #append>
-                <div class="item-actions">
-                  <div class="quantity-controls">
-                    <v-btn
-                      size="x-small"
-                      color="error"
-                      variant="tonal"
-                      @click="decreaseQty(item)"
-                      class="qty-btn"
-                      :disabled="item.quantity <= 1"
-                    >
-                      −
-                    </v-btn>
-                    <span class="quantity-display">{{ item.quantity }}</span>
-                    <v-btn
-                      size="x-small"
-                      color="primary"
-                      variant="tonal"
-                      @click="increaseQty(item)"
-                      class="qty-btn"
-                    >
-                      +
-                    </v-btn>
+                <div class="quantity-control">
+                  <v-btn
+                    size="x-small"
+                    icon
+                    variant="text"
+                    color="error"
+                    @click="decreaseQty(item)"
+                    :disabled="item.quantity <= 1"
+                    class="qty-btn"
+                  >
+                    <v-icon>mdi-minus</v-icon>
+                  </v-btn>
+                  
+                  <div class="quantity-value">
+                    {{ item.quantity }}
                   </div>
+                  
+                  <v-btn
+                    size="x-small"
+                    icon
+                    variant="text"
+                    color="primary"
+                    @click="increaseQty(item)"
+                    class="qty-btn"
+                  >
+                    <v-icon>mdi-plus</v-icon>
+                  </v-btn>
                 </div>
               </template>
             </v-list-item>
           </v-list>
-
-          <v-card-text v-else class="text-center text-grey py-8">
-            <v-icon size="48" color="grey-lighten-1" class="mb-2">mdi-cart-off</v-icon>
-            <div>No items to display</div>
-          </v-card-text>
-
+          
           <v-divider></v-divider>
-          <v-card-text class="total-price">
-            Total: <strong>₱{{ totalPrice.toLocaleString() }}</strong>
+          
+          <v-card-text class="total-section">
+            <div class="d-flex justify-space-between align-center">
+              <div class="text-subtitle-1 font-weight-medium">Total Amount</div>
+              <div class="text-h5 font-weight-bold text-primary">
+                ₱{{ totalPrice.toLocaleString() }}
+              </div>
+            </div>
           </v-card-text>
         </v-card>
 
-        <!-- Message to Seller -->
-        <v-card outlined class="mb-4 card-elevated">
+        <!-- Options Cards -->
+        <div class="options-grid">
+          <!-- Delivery Option -->
+          <v-card class="option-card" elevation="1" rounded="lg">
+            <v-card-text class="pa-3">
+              <div class="d-flex align-center mb-2">
+                <v-icon color="primary" size="small" class="mr-2">mdi-map-marker-path</v-icon>
+                <div class="text-subtitle-2 font-weight-medium">Delivery Method</div>
+              </div>
+              <v-select
+                v-model="deliveryOption"
+                :items="deliveryOptionsDisplay"
+                item-title="label"
+                item-value="value"
+                density="compact"
+                variant="outlined"
+                hide-details
+                class="option-select"
+              ></v-select>
+            </v-card-text>
+          </v-card>
+
+          <!-- Payment Method -->
+          <v-card class="option-card" elevation="1" rounded="lg">
+            <v-card-text class="pa-3">
+              <div class="d-flex align-center mb-2">
+                <v-icon color="primary" size="small" class="mr-2">mdi-credit-card-outline</v-icon>
+                <div class="text-subtitle-2 font-weight-medium">Payment</div>
+              </div>
+              <v-radio-group v-model="paymentMethod" hide-details class="option-radio">
+                <v-radio
+                  label="Cash on Delivery"
+                  value="cash"
+                  color="primary"
+                  density="compact"
+                >
+                  <template #label>
+                    <div class="d-flex align-center">
+                      <v-icon size="small" class="mr-1">mdi-cash</v-icon>
+                      Cash on Delivery
+                    </div>
+                  </template>
+                </v-radio>
+              </v-radio-group>
+            </v-card-text>
+          </v-card>
+        </div>
+
+        <!-- Note to Seller -->
+        <v-card class="mb-4 note-card" elevation="1" rounded="lg">
           <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2">mdi-message-text</v-icon>
-            Message to Seller
+            <v-icon color="primary" class="mr-2" size="small">mdi-message-text-outline</v-icon>
+            Note to Seller
           </v-card-title>
           <v-card-text>
             <v-textarea
               v-model="note"
-              label="Write something to the seller..."
-              auto-grow
+              label="Add special instructions or requests..."
               rows="2"
-              outlined
-              dense
-              placeholder="Any special instructions or requests..."
-              class="note-textarea"
+              auto-grow
+              variant="outlined"
+              density="compact"
+              hide-details
+              class="note-field"
             ></v-textarea>
-          </v-card-text>
-        </v-card>
-
-        <!-- Delivery Option -->
-        <v-card outlined class="mb-4 card-elevated">
-          <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2">mdi-map-marker</v-icon>
-            Delivery Option
-          </v-card-title>
-          <v-card-text>
-            <v-select
-              v-model="deliveryOption"
-              :items="deliveryOptionsDisplay"
-              item-title="label"
-              item-value="value"
-              label="Select delivery option"
-              outlined
-              dense
-              class="delivery-select"
-            ></v-select>
-          </v-card-text>
-        </v-card>
-
-        <!-- Payment Method -->
-        <v-card outlined class="mb-4 card-elevated">
-          <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2">mdi-credit-card</v-icon>
-            Payment Method
-          </v-card-title>
-          <v-card-text>
-            <v-radio-group v-model="paymentMethod" class="payment-radio-group">
-              <v-radio label="Cash on Delivery" value="cash" color="primary" />
-            </v-radio-group>
           </v-card-text>
         </v-card>
       </v-container>
 
-      <!-- Fixed Bottom Navigation -->
-      <div class="bottom-nav-fixed">
-        <div class="bottom-nav-content">
-          <div class="total-section">
-            <div class="total-label">Total Amount:</div>
-            <div class="total-amount">₱{{ totalPrice.toLocaleString() }}</div>
+      <!-- Bottom Action Bar -->
+      <div class="bottom-action-bar">
+        <v-container class="px-3">
+          <div class="d-flex align-center justify-space-between">
+            <div class="order-summary">
+              <div class="text-caption text-grey">Total Amount</div>
+              <div class="text-h5 font-weight-bold text-white">
+                ₱{{ totalPrice.toLocaleString() }}
+              </div>
+            </div>
+            <v-btn
+              color="white"
+              size="large"
+              @click="handleCheckout"
+              :disabled="!items.length || !buyer || !address || isProcessing"
+              :loading="isProcessing"
+              class="checkout-btn"
+              rounded="lg"
+              elevation="2"
+            >
+              <template #prepend>
+                <v-icon>mdi-lock-check</v-icon>
+              </template>
+              {{ isProcessing ? 'Processing...' : 'Complete Order' }}
+            </v-btn>
           </div>
-          <v-btn
-            color="primary"
-            size="large"
-            @click="handleCheckout"
-            class="place-order-btn"
-            :disabled="!items.length || !buyer || !address || isProcessing"
-            :loading="isProcessing"
-            block
-          >
-            <template v-slot:loader>
-              <v-progress-circular indeterminate size="20" width="2"></v-progress-circular>
-            </template>
-            <v-icon left>mdi-check</v-icon>
-            {{ isProcessing ? 'Processing...' : 'Place Order' }}
-          </v-btn>
-        </div>
+        </v-container>
       </div>
 
-      <!-- Address Selection Dialog - Complete Version -->
-      <v-dialog v-model="showAddressDialog" max-width="500" persistent>
-        <v-card class="address-dialog">
-          <v-card-title class="address-title">
-            <v-icon color="primary" class="mr-2">mdi-map-marker</v-icon>
-            Select Delivery Address
+      <!-- Toast Notification for Copy Success -->
+      <v-snackbar
+        v-model="showCopySuccess"
+        :timeout="2000"
+        color="success"
+        location="top"
+        class="copy-toast"
+      >
+        <div class="d-flex align-center">
+          <v-icon class="mr-2">mdi-check-circle</v-icon>
+          <span>Transaction number copied to clipboard!</span>
+        </div>
+      </v-snackbar>
+
+      <!-- Address Selection Dialog -->
+      <v-dialog v-model="showAddressDialog" max-width="500" scrollable>
+        <v-card class="modern-dialog" rounded="lg">
+          <v-card-title class="dialog-header">
+            <div class="d-flex align-center">
+              <v-icon color="primary" class="mr-2">mdi-map-marker</v-icon>
+              <div>Select Delivery Address</div>
+            </div>
           </v-card-title>
-          <v-card-text class="address-content">
-            <!-- No Addresses State -->
-            <div v-if="addresses.length === 0" class="no-addresses">
-              <v-icon size="64" color="grey-lighten-2" class="mb-3">mdi-map-marker-off</v-icon>
-              <h3 class="text-h6 mb-2">No Addresses Saved</h3>
-              <p class="text-body-2 text-medium-emphasis mb-4">
-                Add a complete address including house number, street, and barangay to continue.
+          
+          <v-card-text class="dialog-content">
+            <!-- Empty State -->
+            <div v-if="addresses.length === 0" class="empty-state text-center py-8">
+              <v-icon size="64" color="grey-lighten-2" class="mb-3">mdi-home-outline</v-icon>
+              <h3 class="text-h6 mb-2">No Addresses</h3>
+              <p class="text-body-2 text-grey mb-4">
+                Add a delivery address to continue with your order
               </p>
-              <v-btn color="primary" @click="addNewAddress" block>
-                <v-icon left>mdi-plus</v-icon>
+              <v-btn color="primary" @click="addNewAddress" prepend-icon="mdi-plus">
                 Add New Address
               </v-btn>
             </div>
 
             <!-- Address List -->
-            <div v-else class="address-list">
-              <div class="address-list-title">Select a Delivery Address</div>
-              <v-alert type="info" density="compact" class="mb-3">
-                <small>Choose from your saved addresses. Make sure addresses are complete.</small>
-              </v-alert>
+            <div v-else>
+              <div class="address-list">
+                <v-list class="px-0">
+                  <v-list-item
+                    v-for="addr in addresses"
+                    :key="addr.id"
+                    class="address-item mb-2"
+                    :class="{ 'address-item-selected': address?.id === addr.id }"
+                    @click="selectAddress(addr)"
+                    rounded="lg"
+                  >
+                    <template #prepend>
+                      <v-avatar
+                        :color="address?.id === addr.id ? 'primary' : 'grey-lighten-3'"
+                        size="40"
+                        class="address-icon"
+                      >
+                        <v-icon :color="address?.id === addr.id ? 'white' : 'grey'">
+                          mdi-home
+                        </v-icon>
+                      </v-avatar>
+                    </template>
 
-              <v-list class="address-list-items">
-                <v-list-item
-                  v-for="addr in addresses"
-                  :key="addr.id"
-                  class="address-item"
-                  :class="{ 'address-item-selected': address?.id === addr.id }"
-                  @click="selectAddress(addr)"
-                >
-                  <template #prepend>
-                    <v-avatar color="primary" size="40" class="address-avatar">
-                      <v-icon color="white" size="20">mdi-home</v-icon>
-                    </v-avatar>
-                  </template>
+                    <v-list-item-title class="mb-1">
+                      <div class="d-flex align-center">
+                        <span class="font-weight-medium">{{ addr.recipient_name || 'No name' }}</span>
+                        <v-chip
+                          v-if="addr.is_default"
+                          size="x-small"
+                          color="primary"
+                          class="ml-2"
+                          density="compact"
+                        >
+                          Default
+                        </v-chip>
+                      </div>
+                    </v-list-item-title>
+                    
+                    <v-list-item-subtitle>
+                      <div class="text-body-2 mb-1">{{ formatAddress(addr) }}</div>
+                      <div v-if="addr.phone" class="text-caption text-grey">
+                        <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
+                        {{ addr.phone }}
+                      </div>
+                    </v-list-item-subtitle>
 
-                  <v-list-item-title class="address-recipient">
-                    {{ addr.recipient_name || 'No name' }}
-                    <v-chip v-if="addr.is_default" color="primary" size="x-small" class="ms-2">
-                      Default
-                    </v-chip>
-                  </v-list-item-title>
-                  <v-list-item-subtitle class="address-details">
-                    <div class="address-line">{{ formatAddress(addr) }}</div>
-                    <div v-if="addr.phone" class="address-phone">
-                      <v-icon size="14" class="mr-1">mdi-phone</v-icon>
-                      {{ addr.phone }}
-                    </div>
-                  </v-list-item-subtitle>
-
-                  <template #append>
-                    <v-icon v-if="address?.id === addr.id" color="primary">mdi-check-circle</v-icon>
-                  </template>
-                </v-list-item>
-              </v-list>
+                    <template #append>
+                      <v-icon
+                        v-if="address?.id === addr.id"
+                        color="primary"
+                        size="small"
+                      >
+                        mdi-check-circle
+                      </v-icon>
+                    </template>
+                  </v-list-item>
+                </v-list>
+              </div>
 
               <v-divider class="my-4"></v-divider>
-
-              <v-btn color="primary" variant="outlined" @click="addNewAddress" block>
-                <v-icon left>mdi-plus</v-icon>
+              
+              <v-btn
+                color="primary"
+                variant="outlined"
+                block
+                @click="addNewAddress"
+                prepend-icon="mdi-plus"
+              >
                 Add New Address
               </v-btn>
             </div>
           </v-card-text>
-          <v-card-actions class="address-actions">
-            <v-btn text @click="showAddressDialog = false" class="cancel-address-btn">
+          
+          <v-card-actions class="dialog-actions">
+            <v-btn
+              variant="text"
+              @click="showAddressDialog = false"
+              class="flex-grow-1"
+            >
               Cancel
             </v-btn>
             <v-btn
-              v-if="addresses.length > 0"
               color="primary"
               variant="flat"
               @click="showAddressDialog = false"
-              class="confirm-address-btn"
+              class="flex-grow-1"
+              :disabled="!address"
             >
-              Confirm Selection
+              Confirm
             </v-btn>
           </v-card-actions>
         </v-card>
       </v-dialog>
-      <!-- Date & Time Picker Dialog -->
-      <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
-        <v-card class="datetime-card">
-          <v-card-title class="datetime-title">
-            Select Delivery Schedule
-            <v-chip color="info" size="small" class="ms-2"> Butuan City Only </v-chip>
-          </v-card-title>
-          <v-card-text class="datetime-content">
-            <!-- Use the formatted date string for the date picker -->
-            <v-date-picker
-              v-model="deliveryDate"
-              color="primary"
-              elevation="0"
-              show-adjacent-months
-              :min="minDate"
-              :max="maxDate"
-              class="date-picker"
-              @update:model-value="handleDateChange"
-            ></v-date-picker>
 
-            <!-- Rest of your time picker code remains the same -->
+      <!-- DateTime Picker Dialog -->
+      <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
+        <v-card class="modern-dialog" rounded="lg">
+          <v-card-title class="dialog-header">
+            <div class="d-flex align-center">
+              <v-icon color="primary" class="mr-2">mdi-clock-outline</v-icon>
+              <div>Select Delivery Schedule</div>
+            </div>
+            <v-chip color="info" size="small" density="compact" class="ml-2">
+              Butuan City
+            </v-chip>
+          </v-card-title>
+          
+          <v-card-text class="dialog-content">
+            <!-- Date Picker -->
+            <div class="date-section mb-4">
+              <div class="text-subtitle-2 font-weight-medium mb-2">Select Date</div>
+              <v-date-picker
+                v-model="deliveryDate"
+                color="primary"
+                elevation="0"
+                :min="minDate"
+                :max="maxDate"
+                class="date-picker"
+                @update:model-value="handleDateChange"
+              ></v-date-picker>
+            </div>
+
             <v-divider class="my-4"></v-divider>
 
+            <!-- Time Picker -->
             <div class="time-section">
-              <div class="time-label">Select Time</div>
-              <div class="time-wheels">
-                <div class="time-wheel">
-                  <div class="time-wheel-label">Hour</div>
-                  <v-virtual-scroll :items="hours12" height="160" item-height="40">
-                    <template #default="{ item }">
-                      <div
-                        class="time-item"
-                        :class="{ active: item === selectedHour }"
-                        @click="selectHour(item)"
-                      >
-                        {{ item }}
+              <div class="text-subtitle-2 font-weight-medium mb-3">Select Time</div>
+              
+              <div class="time-picker">
+                <div class="time-wheel-container">
+                  <div class="time-wheel">
+                    <div class="wheel-label">Hour</div>
+                    <v-virtual-scroll :items="hours12" height="160" item-height="48">
+                      <template #default="{ item }">
+                        <div
+                          class="time-option"
+                          :class="{ 'time-option-active': item === selectedHour }"
+                          @click="selectHour(item)"
+                        >
+                          {{ item }}
+                        </div>
+                      </template>
+                    </v-virtual-scroll>
+                  </div>
+                  
+                  <div class="time-separator">
+                    <v-icon>mdi-clock</v-icon>
+                  </div>
+                  
+                  <div class="time-wheel">
+                    <div class="wheel-label">Minute</div>
+                    <v-virtual-scroll :items="minutes" height="160" item-height="48">
+                      <template #default="{ item }">
+                        <div
+                          class="time-option"
+                          :class="{ 'time-option-active': item === selectedMinute }"
+                          @click="selectMinute(item)"
+                        >
+                          {{ item }}
+                        </div>
+                      </template>
+                    </v-virtual-scroll>
+                  </div>
+                </div>
+
+                <!-- AM/PM Toggle -->
+                <div class="period-toggle mt-4">
+                  <v-btn-toggle
+                    v-model="selectedPeriod"
+                    color="primary"
+                    rounded="pill"
+                    mandatory
+                    class="period-buttons"
+                  >
+                    <v-btn value="AM" class="period-btn" rounded="pill">
+                      AM
+                    </v-btn>
+                    <v-btn value="PM" class="period-btn" rounded="pill">
+                      PM
+                    </v-btn>
+                  </v-btn-toggle>
+                </div>
+
+                <!-- Selected Schedule Display -->
+                <div class="selected-schedule mt-6 pa-3 rounded-lg bg-grey-lighten-4">
+                  <div class="text-caption text-grey mb-1">Selected Schedule</div>
+                  <div class="d-flex align-center">
+                    <v-icon color="primary" size="small" class="mr-2">mdi-calendar-check</v-icon>
+                    <div>
+                      <div class="text-body-1 font-weight-bold">
+                        {{ selectedHour || '--' }}:{{ selectedMinute || '--' }} {{ selectedPeriod }}
                       </div>
-                    </template>
-                  </v-virtual-scroll>
-                </div>
-                <div class="time-separator">:</div>
-                <div class="time-wheel">
-                  <div class="time-wheel-label">Minute</div>
-                  <v-virtual-scroll :items="minutes" height="160" item-height="40">
-                    <template #default="{ item }">
-                      <div
-                        class="time-item"
-                        :class="{ active: item === selectedMinute }"
-                        @click="selectMinute(item)"
-                      >
-                        {{ item }}
-                      </div>
-                    </template>
-                  </v-virtual-scroll>
-                </div>
-              </div>
-
-              <div class="period-toggle">
-                <v-btn-toggle
-                  v-model="selectedPeriod"
-                  color="primary"
-                  rounded="pill"
-                  divided
-                  class="period-buttons"
-                >
-                  <v-btn value="AM" class="period-btn">AM</v-btn>
-                  <v-btn value="PM" class="period-btn">PM</v-btn>
-                </v-btn-toggle>
-              </div>
-
-              <div class="selected-schedule">
-                <div class="schedule-label">Selected Schedule</div>
-                <div class="schedule-display">
-                  {{ formattedDate }} — {{ selectedHour || '--' }}:{{ selectedMinute || '--' }}
-                  {{ selectedPeriod }}
-                </div>
-
-                <!-- Real-time validation feedback -->
-                <div v-if="deliveryDate && deliveryTime" class="validation-feedback mt-2">
-                  <v-alert v-if="scheduleError" type="error" density="compact" class="mb-0">
-                    {{ scheduleError }}
-                  </v-alert>
-                  <v-alert v-else type="success" density="compact" class="mb-0">
-                    ✅ This time slot is available!
-                  </v-alert>
-                </div>
-
-                <div v-else class="text-caption text-medium-emphasis mt-2">
-                  Please select both date and time
+                      <div class="text-caption text-grey">{{ formattedDate }}</div>
+                    </div>
+                  </div>
+                  
+                  <!-- Validation Feedback -->
+                  <div v-if="deliveryDate && deliveryTime" class="mt-3">
+                    <v-alert
+                      v-if="scheduleError"
+                      type="error"
+                      density="compact"
+                      variant="tonal"
+                      class="mb-0"
+                    >
+                      <v-icon size="small" class="mr-1">mdi-alert</v-icon>
+                      {{ scheduleError }}
+                    </v-alert>
+                    <v-alert
+                      v-else
+                      type="success"
+                      density="compact"
+                      variant="tonal"
+                      class="mb-0"
+                    >
+                      <v-icon size="small" class="mr-1">mdi-check-circle</v-icon>
+                      Time slot available
+                    </v-alert>
+                  </div>
                 </div>
               </div>
             </div>
           </v-card-text>
-
-          <v-card-actions class="datetime-actions">
-            <v-btn text @click="showDateTimePicker = false" class="cancel-datetime-btn">
+          
+          <v-card-actions class="dialog-actions">
+            <v-btn
+              variant="text"
+              @click="showDateTimePicker = false"
+              class="flex-grow-1"
+            >
               Cancel
             </v-btn>
             <v-btn
               color="primary"
               variant="flat"
               @click="confirmDateTime"
-              class="confirm-datetime-btn"
+              class="flex-grow-1"
               :disabled="!!scheduleError || !deliveryDate || !deliveryTime"
             >
               Confirm Schedule
@@ -2398,33 +2850,33 @@ watch(
           </v-card-actions>
         </v-card>
       </v-dialog>
-      <!-- Contact Information Dialog - Keep the dialog but update the title -->
-      <v-dialog v-model="showContactDialog" max-width="500" persistent>
-        <v-card class="contact-dialog">
-          <v-card-title class="contact-title">
-            <v-icon color="primary" class="mr-2">
-              {{ contactPhone ? 'mdi-phone-edit' : 'mdi-phone-plus' }}
-            </v-icon>
-            {{ contactPhone ? 'Update Contact' : 'Add Contact Information' }}
+
+      <!-- Contact Dialog -->
+      <v-dialog v-model="showContactDialog" max-width="500">
+        <v-card class="modern-dialog" rounded="lg">
+          <v-card-title class="dialog-header">
+            <div class="d-flex align-center">
+              <v-icon color="primary" class="mr-2">mdi-phone</v-icon>
+              <div>Contact Information</div>
+            </div>
           </v-card-title>
-          <v-card-text class="contact-content">
+          
+          <v-card-text class="dialog-content">
             <div class="contact-form">
-              <v-alert :type="contactPhone ? 'info' : 'warning'" density="compact" class="mb-4">
-                <small>
-                  {{
-                    contactPhone
-                      ? 'Update your phone number for delivery coordination.'
-                      : 'Phone number is required for delivery coordination.'
-                  }}
-                </small>
+              <v-alert
+                :type="contactPhone ? 'info' : 'warning'"
+                density="compact"
+                variant="tonal"
+                class="mb-4"
+              >
+                Phone number is required for delivery coordination
               </v-alert>
 
               <v-text-field
                 v-model="contactPhone"
-                :label="contactPhone ? 'Phone Number *' : 'Enter Phone Number *'"
+                label="Phone Number *"
                 placeholder="09123456789 or +639123456789"
-                outlined
-                dense
+                variant="outlined"
                 type="tel"
                 :rules="[
                   (v) => !!v || 'Phone number is required',
@@ -2433,27 +2885,31 @@ watch(
                     'Valid format: 09123456789 or +639123456789',
                 ]"
                 class="mb-3"
-                autofocus
+                hide-details="auto"
               ></v-text-field>
 
-              <div class="text-caption text-medium-emphasis mt-2">
-                * Required for delivery coordination
+              <div class="text-caption text-grey">
+                We'll use this number to contact you about your delivery
               </div>
             </div>
           </v-card-text>
-          <v-card-actions class="contact-actions">
-            <v-btn text @click="showContactDialog = false" class="cancel-contact-btn">
+          
+          <v-card-actions class="dialog-actions">
+            <v-btn
+              variant="text"
+              @click="showContactDialog = false"
+              class="flex-grow-1"
+            >
               Cancel
             </v-btn>
             <v-btn
               color="primary"
               variant="flat"
               @click="updateContactInfo"
-              class="confirm-contact-btn"
+              class="flex-grow-1"
               :disabled="!contactPhone"
             >
-              <v-icon left>{{ contactPhone ? 'mdi-content-save' : 'mdi-check' }}</v-icon>
-              {{ contactPhone ? 'Save Changes' : 'Add Contact' }}
+              Save
             </v-btn>
           </v-card-actions>
         </v-card>
@@ -2461,821 +2917,689 @@ watch(
     </v-main>
   </v-app>
 </template>
-
 <style scoped>
+/* Main Layout */
+.main-app {
+  background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+}
+
+.main-container {
+  max-width: 800px;
+  margin: 0 auto;
+  padding-bottom: 100px !important;
+}
+
+/* App Bar */
 .app-bar {
-  padding-top: 19px;
+  box-shadow: 0 2px 12px rgba(67, 143, 218, 0.15);
 }
 
-/* Global Styles */
-:root {
-  --primary-color: #438fda;
-  --error-color: #dc2626;
-  --success-color: #10b981;
-  --text-primary: #333;
-  --text-secondary: #666;
-  --border-color: #e0e0e0;
-  --card-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+.app-bar-title {
+  font-size: 1.1rem;
+  letter-spacing: 0.5px;
 }
 
-/* Main Content */
-.main-content {
-  padding-bottom: 120px !important;
-  background-color: #f8fafc;
+/* Cards */
+.summary-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
 }
 
-/* Container & Layout */
-.px-3 {
-  padding-left: 12px;
-  padding-right: 12px;
+.summary-card .text-primary {
+  color: white !important;
 }
 
-.card-elevated {
-  box-shadow: var(--card-shadow) !important;
-  border-radius: 12px !important;
-  border: 1px solid var(--border-color);
+.delivery-card,
+.items-card,
+.option-card,
+.note-card {
+  border: 1px solid #e5e7eb;
+  transition: all 0.3s ease;
+}
+
+.delivery-card:hover,
+.items-card:hover,
+.option-card:hover,
+.note-card:hover {
+  border-color: #438fda;
+  box-shadow: 0 4px 12px rgba(67, 143, 218, 0.1);
 }
 
 .card-title {
-  font-size: 1.1rem !important;
-  font-weight: 600 !important;
-  padding: 16px 20px 8px !important;
-  color: var(--text-primary);
-  display: flex;
-  align-items: center;
-}
-
-.card-content {
-  padding: 8px 20px 16px !important;
-}
-
-/* Buyer Info */
-.buyer-info p {
-  margin: 6px 0;
-  font-size: 0.9rem;
-  line-height: 1.4;
-}
-
-.address-line {
-  word-break: break-word;
-}
-
-.text-red {
-  color: var(--error-color);
-  font-size: 0.85rem;
-}
-
-.button-group {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.action-btn {
-  font-size: 0.8rem !important;
-  min-width: auto !important;
-}
-
-/* Items List */
-.item-list {
-  padding: 0 !important;
-}
-
-.list-item {
-  padding: 16px !important;
-  border-bottom: 1px solid var(--border-color);
-  align-items: start;
-}
-
-.list-item:last-child {
-  border-bottom: none;
-}
-
-.item-avatar {
-  min-width: 60px !important;
-  width: 60px !important;
-  height: 60px !important;
-}
-
-.product-image {
-  border-radius: 8px;
-  object-fit: cover;
-}
-
-.item-name {
-  font-size: 1rem !important;
-  font-weight: 600 !important;
-  line-height: 1.3;
-  margin-bottom: 4px;
-  color: var(--text-primary);
-}
-
-.item-price {
-  font-size: 0.9rem !important;
-  color: var(--primary-color) !important;
-  font-weight: 600 !important;
-}
-
-.item-subtotal {
-  font-size: 0.85rem !important;
-  color: var(--text-secondary) !important;
-  font-weight: 500 !important;
-}
-
-.item-actions {
-  margin: 0 !important;
-  min-width: auto;
-}
-
-.quantity-controls {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.qty-btn {
-  min-width: 32px !important;
-  width: 32px !important;
-  height: 32px !important;
-  font-size: 0.9rem !important;
-  font-weight: bold;
-}
-
-.quantity-display {
-  min-width: 30px;
-  text-align: center;
+  font-size: 1rem;
   font-weight: 600;
-  font-size: 0.95rem;
-  background: #f5f5f5;
-  padding: 4px 8px;
-  border-radius: 4px;
-}
-
-.total-price {
-  text-align: right;
-  font-weight: 700 !important;
-  font-size: 1.2rem !important;
-  color: var(--primary-color);
-  padding: 16px 20px !important;
-  background: #f8fafc;
-  border-radius: 0 0 12px 12px;
-}
-
-/* Note Textarea */
-.note-textarea {
-  font-size: 0.9rem;
-}
-
-/* Delivery Select */
-.delivery-select {
-  margin-bottom: 0;
-}
-
-/* Payment Method */
-.payment-radio-group {
-  margin-top: 0;
-}
-
-/* Fixed Bottom Navigation */
-.bottom-nav-fixed {
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: white;
-  border-top: 1px solid var(--border-color);
-  box-shadow: 0 -2px 12px rgba(0, 0, 0, 0.1);
-  z-index: 1000;
-  padding: 16px;
-}
-
-.bottom-nav-content {
+  padding: 16px 20px 8px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  max-width: 800px;
-  margin: 0 auto;
 }
 
-.total-section {
+/* Progress Steps */
+.progress-steps {
+  padding: 8px 0;
+}
+
+.step {
   display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  flex: 1;
-}
-
-.total-label {
-  font-size: 0.85rem;
-  color: var(--text-secondary);
-  font-weight: 500;
-  margin-bottom: 2px;
-}
-
-.total-amount {
-  font-size: 1.5rem;
-  font-weight: 700;
-  color: var(--primary-color);
-  line-height: 1.2;
-}
-
-.place-order-btn {
-  min-width: 160px;
-  font-weight: 600;
-  text-transform: none;
-  border-radius: 8px;
-  height: 52px;
-  font-size: 1rem;
-  flex-shrink: 0;
-}
-
-/* Address Dialog Styles */
-.address-dialog {
-  border-radius: 16px !important;
-  overflow: hidden;
-}
-
-.address-title {
-  text-align: center;
-  font-weight: 700 !important;
-  font-size: 1.1rem !important;
-  color: var(--primary-color);
-  padding: 20px 20px 0 !important;
-  display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 4px;
 }
 
-.address-content {
-  padding: 16px 20px;
+.step-icon {
+  background: #f1f5f9;
+  border-radius: 50%;
+  padding: 8px;
+  transition: all 0.3s ease;
 }
 
-.no-addresses {
-  text-align: center;
-  padding: 20px 0;
+.step.active .step-icon {
+  background: #438fda;
+  color: white;
 }
 
-.address-list-title {
+.step-divider {
+  flex: 1;
+  margin: 0 8px;
+  height: 2px;
+}
+
+.step-label {
+  font-weight: 500;
+  transition: all 0.3s ease;
+}
+
+.step.active .step-label {
+  color: #438fda;
   font-weight: 600;
-  font-size: 1rem;
-  margin-bottom: 12px;
-  color: var(--text-primary);
 }
 
-.address-list-items {
-  padding: 0 !important;
-  max-height: 300px;
-  overflow-y: auto;
+/* Info Sections */
+.info-section {
+  position: relative;
 }
 
-.address-item {
-  border: 1px solid var(--border-color);
+.info-list {
+  background: #f8fafc;
   border-radius: 8px;
-  margin-bottom: 8px;
-  padding: 12px !important;
+  padding: 8px 0;
+}
+
+.address-box,
+.schedule-box {
+  background: #f8fafc;
+  border: 2px solid #e5e7eb;
   cursor: pointer;
   transition: all 0.3s ease;
 }
 
-.address-item:hover {
-  border-color: var(--primary-color);
-  background-color: #f0f7ff;
+.address-box:hover,
+.schedule-box:hover {
+  border-color: #438fda;
+  background: #f0f7ff;
 }
 
-.address-item-selected {
-  border-color: var(--primary-color);
-  background-color: #e3f2fd;
+.border-warning {
+  border-color: #f59e0b !important;
+  background: #fffbeb !important;
 }
 
-.address-avatar {
-  margin-right: 12px;
+/* Items List */
+.items-list {
+  padding: 0;
 }
 
-.address-recipient {
-  font-weight: 600 !important;
-  font-size: 0.95rem !important;
-  color: var(--text-primary);
+.item-row {
+  padding: 16px 20px;
+  transition: background-color 0.2s ease;
+}
+
+.item-row:hover {
+  background-color: #f8fafc;
+}
+
+.item-image {
+  border: 2px solid #e5e7eb;
+}
+
+.item-name {
+  padding-right: 16px;
+}
+
+.quantity-control {
   display: flex;
   align-items: center;
-  margin-bottom: 4px;
-}
-
-.address-details {
-  font-size: 0.85rem !important;
-  color: var(--text-secondary) !important;
-}
-
-.address-line {
-  line-height: 1.4;
-  margin-bottom: 4px;
-}
-
-.address-phone {
-  display: flex;
-  align-items: center;
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-}
-
-.address-actions {
-  justify-content: flex-end;
   gap: 8px;
-  padding: 16px 20px 20px;
+  background: #f8fafc;
+  border-radius: 24px;
+  padding: 4px;
 }
 
-.cancel-address-btn,
-.confirm-address-btn {
-  min-width: 80px;
+.qty-btn {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
 }
 
-/* Date Time Picker */
-.datetime-dialog {
-  max-width: 95vw !important;
+.quantity-value {
+  min-width: 24px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 0.95rem;
 }
 
-.datetime-card {
-  border-radius: 16px !important;
+.total-section {
+  background: linear-gradient(to right, #f8fafc, #ffffff);
+  border-radius: 0 0 12px 12px;
+}
+
+/* Options Grid */
+.options-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.option-card {
+  height: 100%;
+}
+
+.option-select,
+.option-radio {
+  margin-top: 8px;
+}
+
+/* Note Card */
+.note-field :deep(.v-field) {
+  background: #f8fafc;
+}
+
+/* Bottom Action Bar */
+.bottom-action-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: linear-gradient(135deg, #438fda 0%, #3b82f6 100%);
+  padding: 12px 0;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  z-index: 1000;
+}
+
+.order-summary {
+  color: white;
+}
+
+.checkout-btn {
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  text-transform: none;
+  min-width: 160px;
+}
+
+.checkout-btn:not(:disabled) {
+  background: white;
+  color: #438fda;
+}
+
+.checkout-btn:disabled {
+  opacity: 0.5;
+}
+
+/* Dialogs */
+.modern-dialog {
   overflow: hidden;
 }
 
-.datetime-title {
-  text-align: center;
-  font-weight: 700 !important;
-  font-size: 1.1rem !important;
-  color: var(--primary-color);
-  padding: 20px 20px 0 !important;
+.dialog-header {
+  background: #f8fafc;
+  padding: 20px 24px;
+  font-weight: 600;
+  border-bottom: 1px solid #e5e7eb;
 }
 
-.datetime-content {
-  padding: 16px 20px;
+.dialog-content {
+  padding: 24px;
+  max-height: 70vh;
+  overflow-y: auto;
 }
 
+.dialog-actions {
+  padding: 16px 24px;
+  border-top: 1px solid #e5e7eb;
+  gap: 12px;
+}
+
+.empty-state {
+  padding: 40px 20px;
+}
+
+/* Address Items */
+.address-item {
+  border: 2px solid #e5e7eb;
+  transition: all 0.3s ease;
+  cursor: pointer;
+}
+
+.address-item:hover {
+  border-color: #438fda;
+  background: #f0f7ff;
+}
+
+.address-item-selected {
+  border-color: #438fda;
+  background: #f0f7ff;
+}
+
+.address-icon {
+  transition: all 0.3s ease;
+}
+
+/* Date Time Picker */
 .date-picker {
   width: 100%;
 }
 
-.time-section {
+.time-picker {
   text-align: center;
 }
 
-.time-label {
-  font-weight: 600;
-  font-size: 1rem;
-  margin-bottom: 12px;
-  color: var(--text-primary);
-}
-
-.time-wheels {
+.time-wheel-container {
   display: flex;
   justify-content: center;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 16px;
   margin-bottom: 16px;
 }
 
 .time-wheel {
-  width: 60px;
+  width: 80px;
   background: #f8fafc;
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
+  border-radius: 16px;
+  border: 2px solid #e5e7eb;
   overflow: hidden;
-  text-align: center;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
+  padding: 12px 0;
 }
 
-.time-separator {
-  font-size: 1.2rem;
-  font-weight: 700;
-  color: var(--text-secondary);
+.wheel-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
 }
 
-.time-item {
-  height: 40px;
-  line-height: 40px;
+.time-option {
+  height: 48px;
+  line-height: 48px;
   cursor: pointer;
   font-weight: 500;
-  color: var(--text-secondary);
-  transition: all 0.25s ease;
-  border-radius: 6px;
-  margin: 2px;
-  font-size: 0.95rem;
+  color: #4b5563;
+  transition: all 0.2s ease;
+  margin: 0 8px;
+  border-radius: 12px;
 }
 
-.time-item:hover {
-  background-color: #e3f2fd;
-  color: var(--primary-color);
+.time-option:hover {
+  background: #e5e7eb;
+  color: #1f2937;
 }
 
-.time-item.active {
-  background-color: var(--primary-color);
+.time-option-active {
+  background: #438fda;
   color: white;
   font-weight: 600;
   transform: scale(1.05);
 }
 
-.period-toggle {
-  margin: 16px 0;
+.time-separator {
+  padding-top: 48px;
+  color: #9ca3af;
 }
 
 .period-buttons {
-  border: 1px solid var(--border-color);
-  background: #f9fafb;
+  background: #f8fafc;
+  border: 2px solid #e5e7eb;
+  padding: 2px;
 }
 
 .period-btn {
+  min-width: 64px;
   font-weight: 600;
-  text-transform: none;
-  font-size: 0.9rem;
+  letter-spacing: 0.5px;
 }
 
 .selected-schedule {
-  margin-top: 16px;
-  padding: 12px;
-  background: #f0f7ff;
+  border: 2px solid #e5e7eb;
+}
+
+/* Validation */
+.validation-banner {
   border-radius: 8px;
-  border: 1px solid var(--primary-color);
+  animation: slideDown 0.3s ease;
 }
 
-.schedule-label {
-  font-weight: 600;
-  font-size: 0.95rem;
-  color: var(--text-primary);
-  margin-bottom: 8px;
+@keyframes slideDown {
+  from {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
 }
 
-.schedule-display {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: var(--primary-color);
-  line-height: 1.3;
-}
-
-.schedule-error {
-  font-size: 0.85rem;
-  font-weight: 500;
-}
-
-.datetime-actions {
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 16px 20px 20px;
-}
-
-.cancel-datetime-btn,
-.confirm-datetime-btn {
-  min-width: 80px;
-}
-
-/* App Bar */
-.app-bar-title {
-  font-size: 1.1rem !important;
-  font-weight: 600;
-}
-
-.time-wheel-label {
-  font-size: 0.75rem;
-  font-weight: 600;
-  color: var(--text-secondary);
-  text-align: center;
-  margin-bottom: 8px;
-  text-transform: uppercase;
-}
-
-.validation-feedback {
-  font-size: 0.8rem;
-}
-
-.time-wheels {
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.time-wheel {
-  width: 70px;
-  background: #f8fafc;
-  border-radius: 12px;
-  border: 1px solid var(--border-color);
-  overflow: hidden;
-  text-align: center;
-  box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.06);
-  padding: 8px 0;
+.text-error {
+  color: #dc2626 !important;
 }
 
 /* Responsive Design */
 @media (max-width: 600px) {
-  .px-3 {
-    padding-left: 8px;
-    padding-right: 8px;
+  .main-container {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
   }
-
-  .card-title {
-    font-size: 1rem !important;
-    padding: 14px 16px 6px !important;
+  
+  .options-grid {
+    grid-template-columns: 1fr;
   }
-
-  .card-content {
-    padding: 6px 16px 14px !important;
-  }
-
-  .item-avatar {
-    min-width: 50px !important;
-    width: 50px !important;
-    height: 50px !important;
-  }
-
-  .item-name {
-    font-size: 0.9rem !important;
-  }
-
-  .item-price {
-    font-size: 0.85rem !important;
-  }
-
-  .qty-btn {
-    min-width: 28px !important;
-    width: 28px !important;
-    height: 28px !important;
-  }
-
-  .quantity-display {
-    font-size: 0.9rem;
-  }
-
-  .total-price {
-    font-size: 1.1rem !important;
-    padding: 14px 16px !important;
-  }
-
-  /* Bottom Nav Mobile */
-  .bottom-nav-fixed {
-    padding: 12px;
-  }
-
-  .bottom-nav-content {
+  
+  .time-wheel-container {
     gap: 12px;
   }
-
-  .total-label {
-    font-size: 0.8rem;
-  }
-
-  .total-amount {
-    font-size: 1.3rem;
-  }
-
-  .place-order-btn {
-    min-width: 140px;
-    height: 48px;
-    font-size: 0.95rem;
-  }
-
-  .datetime-dialog {
-    margin: 8px !important;
-  }
-
-  .datetime-title {
-    font-size: 1rem !important;
-    padding: 16px 16px 0 !important;
-  }
-
-  .datetime-content {
-    padding: 12px 16px;
-  }
-
+  
   .time-wheel {
-    width: 55px;
+    width: 70px;
   }
-
-  .time-item {
-    height: 36px;
-    line-height: 36px;
-    font-size: 0.9rem;
+  
+  .step-label {
+    font-size: 0.7rem;
   }
-
-  .schedule-display {
-    font-size: 1rem;
-  }
-
-  .button-group {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .action-btn {
-    width: 100%;
-    justify-content: center;
-  }
-
-  /* Address Dialog Mobile */
-  .address-dialog {
-    margin: 8px !important;
-  }
-
-  .address-title {
-    font-size: 1rem !important;
-    padding: 16px 16px 0 !important;
-  }
-
-  .address-content {
-    padding: 12px 16px;
-  }
-
-  .address-item {
-    padding: 10px !important;
-  }
-
-  .address-avatar {
-    margin-right: 8px;
+  
+  .checkout-btn {
+    min-width: 140px;
+    padding: 8px 16px;
   }
 }
 
 @media (max-width: 400px) {
-  .list-item {
-    padding: 12px !important;
+  .card-title {
+    font-size: 0.9rem;
+    padding: 12px 16px 6px;
   }
-
-  .item-avatar {
-    min-width: 45px !important;
-    width: 45px !important;
-    height: 45px !important;
+  
+  .item-row {
+    padding: 12px 16px;
   }
-
-  .time-wheels {
-    gap: 8px;
+  
+  .item-image {
+    width: 48px !important;
+    height: 48px !important;
+    min-width: 48px !important;
   }
-
+  
+  .quantity-control {
+    gap: 4px;
+  }
+  
+  .qty-btn {
+    width: 24px;
+    height: 24px;
+    min-width: 24px;
+  }
+  
   .time-wheel {
-    width: 50px;
+    width: 60px;
   }
-
+  
+  .time-option {
+    height: 40px;
+    line-height: 40px;
+  }
+  
   .time-separator {
-    font-size: 1.1rem;
-  }
-
-  .datetime-actions {
-    padding: 12px 16px 16px;
-  }
-
-  .address-actions {
-    padding: 12px 16px 16px;
-  }
-
-  .bottom-nav-content {
-    flex-direction: column;
-    gap: 8px;
-    align-items: stretch;
-  }
-
-  .total-section {
-    align-items: center;
-    text-align: center;
-  }
-
-  .place-order-btn {
-    min-width: 100%;
+    padding-top: 40px;
   }
 }
 
-/* Animation for buttons and interactive elements */
-.qty-btn,
-.action-btn,
-.place-order-btn,
-.time-item,
-.period-btn,
-.cancel-datetime-btn,
-.confirm-datetime-btn,
-.address-item {
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+/* Animations */
+.fade-enter-active,
+.fade-leave-active {
+  transition: opacity 0.3s ease;
 }
 
-/* Ensure proper spacing and alignment */
-.v-main {
-  background-color: #f8fafc;
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+}
+
+/* Utility Classes */
+.border-bottom {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.text-primary {
+  color: #438fda !important;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #f1f5f9;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+
+/* Summary Card Enhancements */
+.summary-card {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
   position: relative;
-}
-
-.v-container {
-  max-width: 800px;
-  margin: 0 auto;
-}
-
-.item-variety-info {
-  margin-top: 4px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.variety-tag {
-  background: #e3f2fd;
-  color: #1976d2;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border: 1px solid #bbdefb;
-}
-
-.size-tag {
-  background: #f3e5f5;
-  color: #7b1fa2;
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 0.75rem;
-  font-weight: 500;
-  border: 1px solid #e1bee7;
-}
-/* Contact Dialog Styles */
-.contact-dialog {
-  border-radius: 16px !important;
   overflow: hidden;
 }
 
-.contact-title {
-  text-align: center;
-  font-weight: 700 !important;
-  font-size: 1.1rem !important;
-  color: var(--primary-color);
-  padding: 20px 20px 0 !important;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.summary-card::before {
+  content: '';
+  position: absolute;
+  top: -50%;
+  right: -50%;
+  width: 200%;
+  height: 200%;
+  background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
+  background-size: 20px 20px;
+  opacity: 0.3;
+  pointer-events: none;
 }
 
-.contact-content {
-  padding: 16px 20px;
+.summary-card .text-primary {
+  color: white !important;
 }
 
-.contact-form {
-  max-width: 400px;
-  margin: 0 auto;
+/* Transaction Section */
+.transaction-section {
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(10px);
+  border-radius: 12px;
+  padding: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  margin-bottom: 16px;
 }
 
-.contact-actions {
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 16px 20px 20px;
+.copy-btn {
+  transition: all 0.3s ease;
+  font-size: 0.75rem;
+  letter-spacing: 0.5px;
+  border-radius: 20px;
+  padding: 4px 12px;
+  height: auto;
+  min-width: auto;
+  text-transform: none;
 }
 
-.cancel-contact-btn,
-.confirm-contact-btn {
-  min-width: 80px;
+.copy-btn:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
-/* Validation Styles */
-.text-red {
-  color: #dc2626 !important;
-  font-weight: 500;
+.copy-btn:active {
+  transform: scale(0.95);
 }
 
-/* Responsive adjustments for contact button */
+.transaction-number-display {
+  background: white;
+  border: 2px solid #e5e7eb;
+  transition: all 0.3s ease;
+  cursor: pointer;
+  position: relative;
+  overflow: hidden;
+}
+
+.transaction-number-display:hover {
+  border-color: #438fda;
+  box-shadow: 0 4px 12px rgba(67, 143, 218, 0.15);
+  transform: translateY(-1px);
+}
+
+.transaction-number-display:active {
+  transform: scale(0.99);
+}
+
+.transaction-number-display .text-primary {
+  color: #438fda !important;
+  font-family: 'Courier New', 'Roboto Mono', monospace;
+  letter-spacing: 1px;
+  word-break: break-all;
+}
+
+.copy-success-message {
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Progress Steps in Summary Card */
+.step-icon {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 50%;
+  padding: 8px;
+  transition: all 0.3s ease;
+}
+
+.step.active .step-icon {
+  background: white;
+  color: #667eea;
+}
+
+.step-divider {
+  flex: 1;
+  margin: 0 4px;
+  height: 2px;
+}
+
+.text-white-50 {
+  color: rgba(255, 255, 255, 0.5) !important;
+}
+
+/* Toast Notification */
+.copy-toast {
+  margin-top: 60px;
+}
+
+/* Monospace font for transaction number */
+.mono-font {
+  font-family: 'Courier New', 'Roboto Mono', 'Consolas', monospace;
+}
+
+/* Transaction chip in app bar */
+.transaction-chip {
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+.transaction-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* Success animation for copy button */
+.copy-btn.success-pulse {
+  animation: pulse 0.5s ease;
+}
+
+@keyframes pulse {
+  0% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+  100% { transform: scale(1); }
+}
+
+/* Mobile Responsiveness for Transaction Section */
 @media (max-width: 600px) {
-  .contact-dialog {
-    margin: 8px !important;
+  .transaction-number-display .text-h6 {
+    font-size: 1rem;
   }
-
-  .contact-title {
-    font-size: 1rem !important;
-    padding: 16px 16px 0 !important;
+  
+  .copy-btn {
+    font-size: 0.7rem;
+    padding: 3px 8px;
   }
-
-  .contact-content {
-    padding: 12px 16px;
+  
+  .transaction-section {
+    padding: 8px;
   }
-
-  .contact-actions {
-    padding: 12px 16px 16px;
+  
+  .step-label {
+    font-size: 0.65rem;
+  }
+  
+  .copy-toast {
+    margin-top: 56px;
   }
 }
-/* Add these styles to your existing CSS */
-.contact-section {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin: 6px 0;
+
+@media (max-width: 400px) {
+  .transaction-number-display .text-h6 {
+    font-size: 0.9rem;
+    letter-spacing: 0.5px;
+  }
+  
+  .step-label {
+    font-size: 0.6rem;
+  }
+  
+  .step-icon {
+    padding: 6px;
+  }
+  
+  .transaction-chip .v-chip__content {
+    font-size: 0.7rem;
+  }
 }
 
-.contact-edit-btn {
-  transition: transform 0.2s ease;
-}
-
-.contact-edit-btn:hover {
-  transform: scale(1.1);
-}
-
-/* Optional: Add a tooltip-like effect */
-.contact-section strong {
-  min-width: 65px;
-}
-
-/* If you want to make the contact section more prominent when missing */
-.contact-section .text-red {
-  font-weight: 500;
-  font-style: italic;
+/* Ensure text alignment */
+.text-center {
+  text-align: center;
 }
 </style>
