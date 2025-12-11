@@ -2138,9 +2138,7 @@ watch(
                   ₱{{ totalPrice.toLocaleString() }}
                 </div>
               </div>
-              <v-chip color="white" variant="flat" class="text-primary">
-                {{ items.length }} item{{ items.length !== 1 ? 's' : '' }}
-              </v-chip>
+             
             </div>
             
             <!-- Transaction Number Section -->
