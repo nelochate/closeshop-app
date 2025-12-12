@@ -1096,48 +1096,76 @@ const toggleDisplayMode = (mode: 'within' | 'outside') => {
 }
 
 /* -------------------- SHOP POPUP -------------------- */
+/* -------------------- SHOP POPUP -------------------- */
 const createShopPopup = (shop: any): string => {
-  const productList = (shop.products || [])
-    .map((p: any) => `<li>${p.prod_name} - ₱${p.price}</li>`)
-    .join('')
-
   const statusDisplay = getShopStatusDisplay(shop)
-
+  const isOpen = isShopCurrentlyOpen(shop)
+  
   return `
-    <div style="text-align:center; min-width: 240px; max-width: 300px;" class="shop-popup-content">
-      <div style="position: relative;">
-        <img src="${shop.physical_store || shop.logo_url || 'https://placehold.co/80x80'}" 
-             width="80" height="80" 
-             style="border-radius:8px;object-fit:cover;margin-bottom:6px;" />
-        <div style="position: absolute; top: -5px; right: -5px; 
-                    background: ${statusDisplay.color}; color: white; 
-                    padding: 2px 8px; border-radius: 12px; font-size: 10px; 
-                    font-weight: bold; cursor: help;"
-             title="${statusDisplay.tooltip}">
-          ${statusDisplay.text}
-          ${shop.manual_status !== 'auto' ? ' ⚡' : ''}
+    <div style="min-width: 240px; max-width: 280px; padding: 12px;" class="shop-popup-content">
+      <!-- Shop Header -->
+      <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
+        <img src="${shop.logo_url || shop.physical_store || 'https://placehold.co/50x50?text=Shop'}" 
+             width="50" height="50" 
+             style="border-radius:8px;object-fit:cover;border: 2px solid ${statusDisplay.color};" />
+        <div>
+          <p style="margin:0;font-weight:bold;font-size:15px;color:#1f2937;">${shop.business_name}</p>
+          <div style="display: flex; align-items: center; gap: 6px; margin-top: 4px;">
+            <div style="background:${statusDisplay.color};color:white;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:bold;">
+              ${statusDisplay.text}
+            </div>
+            ${shop.manual_status !== 'auto' ? 
+              '<span style="font-size:10px;color:#f59e0b;" title="Manual override">⚡</span>' : ''}
+          </div>
         </div>
       </div>
-      <p><strong>${shop.business_name}</strong></p>
-      <p style="margin:2px 0; font-size:14px;">${getFullAddress(shop)}</p>
-      <p style="margin:2px 0; font-size:14px;">
-        ${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(2) + ' km away' : 'Distance unknown'}
-      </p>
-      ${productList ? `<ul style="font-size:12px;text-align:left;padding-left:15px;margin:8px 0;">${productList}</ul>` : ''}
-      <div style="display: flex; gap: 8px; justify-content: center; margin-top: 8px;">
+      
+      <!-- Essential Info -->
+      <div style="font-size:13px;color:#4b5563;">
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
+            <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+          </svg>
+          <span>${getFullAddress(shop).split(',').slice(0, 2).join(',')}</span>
+        </div>
+        
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
+            <path d="M12 8v4l3 3m6-3c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2s10 4.48 10 10z"/>
+          </svg>
+          <span>
+            ${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(1) + ' km away' : 'Distance unavailable'}
+          </span>
+        </div>
+        
+        ${shop.open_time && shop.close_time ? `
+        <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 12px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
+            <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
+          </svg>
+          <span>${shop.open_time} - ${shop.close_time}</span>
+        </div>
+        ` : ''}
+      </div>
+      
+      <!-- Action Buttons -->
+      <div style="display: flex; gap: 8px; margin-top: 16px; margin-right: 20px">
         <button id="view-${shop.id}" 
                 class="popup-btn view-btn"
-                style="padding:6px 12px;background:#438fda;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">
-          View Shop
+                style="padding:8px 12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;flex:1;font-size:13px;font-weight:600;">
+          View Details
         </button>
         <button id="route-${shop.id}" 
                 class="popup-btn route-btn"
-                style="padding:6px 12px;background:#10b981;color:#fff;border:none;border-radius:6px;cursor:pointer;flex:1;">
-          Show Route
+                style="padding:8px 12px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;flex:1;font-size:13px;font-weight:600;">
+          Get Directions
         </button>
       </div>
-      ${!isShopCurrentlyOpen(shop) ? '<p style="color: #ef4444; font-size: 12px; margin-top: 4px;">Shop is currently closed</p>' : ''}
-      ${shop.manual_status !== 'auto' ? '<p style="color: #f59e0b; font-size: 11px; margin-top: 2px;">⚡ Manual override</p>' : ''}
+      
+      ${!isOpen ? 
+        `<p style="color: #ef4444; font-size: 12px; margin-top: 8px; padding: 4px; background: #fee; border-radius: 4px;">
+          Currently closed • Opens at ${shop.open_time || 'unknown'}
+        </p>` : ''}
     </div>
   `
 }
@@ -1701,7 +1729,7 @@ onUnmounted(() => {
       </div>
 
       <!-- Route Selection Panel -->
-      <v-card v-if="showRoutePanel" class="route-selection-panel" elevation="4">
+      <v-card v-if="showRoutePanel" class="route-selection-panel bottom-panel" elevation="4">
         <v-card-title class="d-flex align-center justify-space-between py-2">
           <div class="d-flex align-center">
             <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
@@ -2155,10 +2183,10 @@ onUnmounted(() => {
   box-shadow: 0 6px 20px rgba(16, 185, 129, 0.5) !important;
 }
 
-/* Route Selection Panel */
-.route-selection-panel {
+/* Route Selection Panel - Bottom Position */
+.route-selection-panel.bottom-panel {
   position: absolute;
-  top: 30px; /* Increased from 20px */
+  bottom: 90px; /* Position above bottom nav */
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -2166,16 +2194,17 @@ onUnmounted(() => {
   max-width: 400px;
   background: white;
   border-radius: 12px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.9);
-  animation: slideDown 0.3s ease-out;
+  animation: slideUp 0.3s ease-out;
 }
 
-@keyframes slideDown {
+/* Animation for bottom panel */
+@keyframes slideUp {
   from {
     opacity: 0;
-    transform: translate(-50%, -20px);
+    transform: translate(-50%, 20px);
   }
   to {
     opacity: 1;
@@ -2210,7 +2239,7 @@ onUnmounted(() => {
 /* Map Controls */
 .map-controls-container {
   position: absolute;
-  bottom: 100px;
+  bottom: 160px; /* Increased from 100px to make room for route panel */
   right: 20px;
   display: flex;
   flex-direction: column;
@@ -2304,7 +2333,7 @@ onUnmounted(() => {
 /* Error Message Alert */
 .route-info-alert {
   position: absolute;
-  top: 80px; /* Increased from 60px */
+  top: 100px; /* Increased from 80px to be below hero section */
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
@@ -2513,9 +2542,10 @@ onUnmounted(() => {
     height: 56px !important;
   }
 
-  .route-selection-panel {
-    top: 25px; /* Increased from 15px */
+  .route-selection-panel.bottom-panel {
+    bottom: calc(80px + env(safe-area-inset-bottom)); /* Account for safe area */
     width: 95%;
+    max-width: 380px;
   }
 
   .route-buttons-grid {
@@ -2529,8 +2559,13 @@ onUnmounted(() => {
   }
 
   .map-controls-container {
-    bottom: calc(100px + env(safe-area-inset-bottom));
+    bottom: 140px; /* Adjusted for mobile */
     right: max(12px, env(safe-area-inset-right));
+  }
+
+  /* When route panel is open, move controls higher */
+  .map-controls-container:has(~ .bottom-panel) {
+    bottom: 180px;
   }
 
   .control-btn {
@@ -2584,6 +2619,11 @@ onUnmounted(() => {
     padding: 6px 10px;
   }
 
+  .route-selection-panel.bottom-panel {
+    bottom: calc(70px + env(safe-area-inset-bottom));
+    max-width: 340px;
+  }
+
   .route-info-alert {
     top: 65px;
     font-size: 13px;
@@ -2606,8 +2646,9 @@ onUnmounted(() => {
     height: calc(100vh - 110px - env(safe-area-inset-top)) !important;
   }
 
-  .route-selection-panel {
-    top: 15px;
+  .route-selection-panel.bottom-panel {
+    bottom: 70px;
+    max-width: 350px;
   }
 
   .route-info-alert {
@@ -2615,7 +2656,7 @@ onUnmounted(() => {
   }
 
   .map-controls-container {
-    bottom: 80px;
+    bottom: 120px;
   }
 }
 
