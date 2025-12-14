@@ -187,20 +187,25 @@ const routes = [
     props: true, // This will pass the id as a prop to your component
   },
   {
-  path: '/orderdetails/:id',
-  name: 'orderdetails',
-  component: () => import('@/mainsite/OrderDetails.vue'),
-  props: true,
-},
-{
-  path: '/ordermap/:id',
-  name: 'order-map',
-  component: () => import('@/mainsite/OrderMapView.vue'),
-  meta: { 
-    requiresAuth: true,
-    requiresSeller: true // Optional: Add if you have seller-only routes
-  }
-}
+    path: '/orderdetails/:id',
+    name: 'orderdetails',
+    component: () => import('@/mainsite/OrderDetails.vue'),
+    props: true,
+  },
+  {
+    path: '/ordermap/:id',
+    name: 'order-map',
+    component: () => import('@/mainsite/OrderMapView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresSeller: true, // Optional: Add if you have seller-only routes
+    },
+  },
+  {
+    path: '/statusshopcreation',
+    name: 'statusshopcreation',
+    component:() => import('@/mainsite/StatusShopCreation.vue'),
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode

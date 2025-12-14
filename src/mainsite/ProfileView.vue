@@ -21,6 +21,10 @@ const hasShop = ref(false)
 const sectionItems = ref([]) // Holds items for the selected section
 const isLoadingSection = ref(false)
 
+// Method to navigate
+const navigateToStatusPage = () => {
+  router.push('/statusshopcreation')
+}
 // Shopee-style navigation items - UPDATED with correct status mapping
 const navItems = ref([
   {
@@ -412,6 +416,10 @@ const goShopOrBuild = () => {
           <v-icon start size="25">mdi-storefront-outline</v-icon>
           {{ hasShop ? 'My Shop' : 'Create Shop' }}
         </v-btn>
+
+        
+          <v-btn @click="navigateToStatusPage"> Check Status </v-btn>
+        
       </div>
 
       <!-- Settings Icon - Top Right -->
