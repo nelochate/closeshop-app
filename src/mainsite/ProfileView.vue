@@ -16,15 +16,14 @@ const avatarUrl = ref(null)
 const user = ref(null)
 const fullName = ref('')
 const hasShop = ref(false)
+const shopCreationStatus = ref(null)
+const showStatusInfo = ref(false)
+const statusLoading = ref(false)
 
 //for navigation items
 const sectionItems = ref([]) // Holds items for the selected section
 const isLoadingSection = ref(false)
 
-// Method to navigate
-const navigateToStatusPage = () => {
-  router.push('/statusshopcreation')
-}
 // Shopee-style navigation items - UPDATED with correct status mapping
 const navItems = ref([
   {
@@ -105,7 +104,7 @@ const checkUserShop = async () => {
   try {
     const { data, error } = await supabase
       .from('shops')
-      .select('id')
+      .select('id, status, created_at')
       .eq('owner_id', user.value.id)
       .maybeSingle()
 
@@ -114,6 +113,8 @@ const checkUserShop = async () => {
     }
 
     hasShop.value = !!data
+    shopCreationStatus.value = data?.status || null
+    
     console.log('Shop lookup:', data, 'hasShop:', hasShop.value)
   } catch (err) {
     console.error('Error checking shop:', err)
@@ -345,10 +346,101 @@ const viewOrder = (orderId) => {
   }
 }
 
+// IMPROVED: Check shop status with loading
+const checkShopStatus = async () => {
+  statusLoading.value = true
+  try {
+    if (!user.value?.id) {
+      showStatusInfo.value = false
+      return
+    }
+
+    const { data, error } = await supabase
+      .from('shops')
+      .select('id, status, business_name, created_at')
+      .eq('owner_id', user.value.id)
+      .maybeSingle()
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error checking shop status:', error)
+      return
+    }
+
+    if (data) {
+      shopCreationStatus.value = data.status
+      hasShop.value = data.status === 'approved'
+      
+      // Show status info card if shop exists but not approved
+      if (data.status !== 'approved') {
+        showStatusInfo.value = true
+      }
+    } else {
+      shopCreationStatus.value = null
+      hasShop.value = false
+      showStatusInfo.value = false
+    }
+  } catch (err) {
+    console.error('Error checking shop status:', err)
+  } finally {
+    statusLoading.value = false
+  }
+}
+
+// IMPROVED: Get status icon and color
+const getStatusIcon = (status) => {
+  switch (status) {
+    case 'approved':
+      return { icon: 'mdi-check-circle', color: 'success' }
+    case 'pending':
+      return { icon: 'mdi-clock-outline', color: 'warning' }
+    case 'rejected':
+      return { icon: 'mdi-alert-circle', color: 'error' }
+    case 'under_review':
+      return { icon: 'mdi-magnify', color: 'info' }
+    default:
+      return { icon: 'mdi-help-circle', color: 'grey' }
+  }
+}
+
+// IMPROVED: Get status message
+const getStatusMessage = (status) => {
+  switch (status) {
+    case 'approved':
+      return 'Your shop has been approved!'
+    case 'pending':
+      return 'Your shop application is pending review.'
+    case 'rejected':
+      return 'Your shop application was rejected.'
+    case 'under_review':
+      return 'Your shop is currently under review.'
+    default:
+      return 'No shop application found.'
+  }
+}
+
+// IMPROVED: Shop button logic
+const goShopOrBuild = () => {
+  if (hasShop.value && shopCreationStatus.value === 'approved') {
+    router.push('/usershop')
+  } else {
+    router.push('/shop-build')
+  }
+}
+
+// IMPROVED: Navigate to status page
+const navigateToStatusPage = () => {
+  router.push('/statusshopcreation')
+}
+
+// IMPROVED: Close status info
+const closeStatusInfo = () => {
+  showStatusInfo.value = false
+}
+
 // Run when component mounts
 onMounted(async () => {
   await loadUser()
-  await checkUserShop()
+  await checkShopStatus()
   await loadOrderCounts()
   await loadSectionItems(selectedSection.value)
 })
@@ -358,7 +450,7 @@ watch(
   () => user.value?.id,
   async (newId) => {
     if (newId) {
-      await checkUserShop()
+      await checkShopStatus()
       await loadOrderCounts()
       await loadSectionItems(selectedSection.value)
     }
@@ -395,34 +487,21 @@ onBeforeRouteUpdate((to, from, next) => {
   loadUser()
   next()
 })
-
-// Shop button logic
-const goShopOrBuild = () => {
-  if (hasShop.value) {
-    router.push('/usershop')
-  } else {
-    router.push('/shop-build')
-  }
-}
 </script>
 
 <template>
   <v-app>
     <!-- Main Profile Content -->
     <v-main class="profile-main">
-      <!-- Shop Button - Top Left -->
+      <!-- Shop Button - Top Left (ORIGINAL POSITION) -->
       <div class="shop-btn-container">
         <v-btn @click="goShopOrBuild" class="shop-btn" size="large" elevation="2">
           <v-icon start size="25">mdi-storefront-outline</v-icon>
           {{ hasShop ? 'My Shop' : 'Create Shop' }}
         </v-btn>
-
-        
-          <v-btn @click="navigateToStatusPage"> Check Status </v-btn>
-        
       </div>
 
-      <!-- Settings Icon - Top Right -->
+      <!-- Settings Icon - Top Right (ORIGINAL POSITION) -->
       <v-btn
         variant="text"
         icon
@@ -432,6 +511,65 @@ const goShopOrBuild = () => {
       >
         <v-icon size="29">mdi-cog-outline</v-icon>
       </v-btn>
+
+      <!-- Check Status Button - Top Center (NEW POSITION) -->
+      <v-btn
+        @click="navigateToStatusPage"
+        class="status-btn"
+        size="small"
+        :loading="statusLoading"
+        variant="outlined"
+        :color="shopCreationStatus === 'approved' ? 'success' : 'primary'"
+      >
+        <v-icon start size="18">{{ 
+          shopCreationStatus === 'approved' ? 'mdi-check-circle' :
+          shopCreationStatus === 'pending' ? 'mdi-clock-outline' :
+          shopCreationStatus === 'rejected' ? 'mdi-alert-circle' :
+          'mdi-information'
+        }}</v-icon>
+        Check Status
+      </v-btn>
+
+      <!-- IMPROVED: Status Info Card (Shows when shop is not approved) -->
+      <v-card
+        v-if="showStatusInfo && shopCreationStatus && shopCreationStatus !== 'approved'"
+        class="status-info-card"
+        elevation="3"
+      >
+        <v-card-title class="status-card-header">
+          <div class="status-header-content">
+            <v-icon :color="getStatusIcon(shopCreationStatus).color" size="24">
+              {{ getStatusIcon(shopCreationStatus).icon }}
+            </v-icon>
+            <span class="status-title">Shop Application Status</span>
+          </div>
+          <v-btn icon size="small" @click="closeStatusInfo" variant="text">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="status-card-content">
+          <div class="status-message">
+            {{ getStatusMessage(shopCreationStatus) }}
+          </div>
+          <div v-if="shopCreationStatus === 'pending'" class="status-hint">
+            Please wait 1-2 business days for review.
+          </div>
+          <div v-if="shopCreationStatus === 'rejected'" class="status-hint">
+            Check email for details or re-apply with corrections.
+          </div>
+        </v-card-text>
+        <v-card-actions class="status-card-actions">
+          <v-btn
+            color="primary"
+            variant="flat"
+            @click="navigateToStatusPage"
+            block
+            size="small"
+          >
+            View Details
+          </v-btn>
+        </v-card-actions>
+      </v-card>
 
       <!-- Profile Header -->
       <div class="profile-header">
@@ -634,7 +772,7 @@ const goShopOrBuild = () => {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
 }
 
-/* Shop Button Container - Top Left */
+/* Shop Button Container - Top Left (ORIGINAL) */
 .shop-btn-container {
   padding-top: 15px;
   position: absolute;
@@ -657,9 +795,16 @@ const goShopOrBuild = () => {
   margin-left: -14px;
   max-width: 200px;
   margin-top: 12px !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
 
-/* Settings Button - Top Right */
+.shop-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
+  background: linear-gradient(135deg, #ffffff, #ffffff) !important;
+}
+
+/* Settings Button - Top Right (ORIGINAL) */
 .settings-btn {
   margin-top: 23px;
   position: absolute;
@@ -671,9 +816,98 @@ const goShopOrBuild = () => {
   height: 40px;
 }
 
+/* Check Status Button - Top Center (NEW POSITION) */
+.status-btn {
+  position: absolute;
+  top: 27px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1200;
+  text-transform: none;
+  border-radius: 20px !important;
+  font-weight: 600;
+  font-size: 0.85rem;
+  padding: 4px 16px;
+  height: 30px !important;
+  border-width: 2px !important;
+  transition: all 0.3s ease;
+  backdrop-filter: blur(10px);
+  background: rgba(255, 255, 255, 0.9) !important;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1) !important;
+  white-space: nowrap;
+}
+
+.status-btn:hover {
+  transform: translateX(-50%) translateY(-2px);
+  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* IMPROVED: Status Info Card */
+.status-info-card {
+  margin: 90px 16px 16px;
+  border-radius: 16px;
+  overflow: hidden;
+  animation: slideDown 0.4s ease-out;
+  border: 2px solid #e3f2fd;
+  background: linear-gradient(135deg, #ffffff, #f8fafc);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.status-card-header {
+  padding: 16px;
+  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.status-header-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.status-title {
+  font-weight: 700;
+  color: #354d7c;
+  font-size: 1rem;
+}
+
+.status-card-content {
+  padding: 20px 16px;
+}
+
+.status-message {
+  font-weight: 600;
+  color: #333;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.status-hint {
+  font-size: 0.85rem;
+  color: #666;
+  font-style: italic;
+}
+
+.status-card-actions {
+  padding: 12px 16px;
+  background: #f5f7fa;
+}
+
 /* Profile Header */
 .profile-header {
-  padding: 100px 24px 30px !important;
+  padding: 120px 24px 30px !important;
   display: flex;
   align-items: flex-start;
   gap: 20px;
@@ -683,6 +917,7 @@ const goShopOrBuild = () => {
   color: #fff;
   margin-top: 0px !important;
   border-bottom-left-radius: 24px;
+  border-bottom-right-radius: 24px;
 }
 
 .profile-inline {
@@ -723,13 +958,6 @@ const goShopOrBuild = () => {
 
 .edit-icon {
   font-size: 16px;
-}
-
-.profile-inline {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  flex-wrap: nowrap;
 }
 
 .info-block {
@@ -1037,7 +1265,11 @@ const goShopOrBuild = () => {
 
 @media (max-width: 768px) {
   .profile-header {
-    padding: 90px 20px 24px !important;
+    padding: 140px 20px 24px !important;
+  }
+
+  .status-info-card {
+    margin: 120px 12px 12px;
   }
 
   .nav-grid {
@@ -1062,13 +1294,27 @@ const goShopOrBuild = () => {
     left: 12px;
   }
 
+  .shop-btn {
+    padding: 8px 16px;
+    font-size: 0.9rem;
+    max-width: 180px;
+  }
+
+  .status-btn {
+    top: 24px;
+    font-size: 0.8rem;
+    padding: 4px 12px;
+  }
+
   .settings-btn {
     top: 16px;
     right: 12px;
+    width: 36px;
+    height: 36px;
   }
 
   .profile-header {
-    padding: 80px 16px 20px !important;
+    padding: 140px 16px 20px !important;
     border-bottom-left-radius: 20px;
     border-bottom-right-radius: 20px;
   }
@@ -1120,13 +1366,36 @@ const goShopOrBuild = () => {
   }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 480px) {
+  .shop-btn {
+    max-width: 160px;
+    font-size: 0.85rem;
+    padding: 6px 14px;
+  }
+
+  .status-btn {
+    font-size: 0.75rem;
+    padding: 3px 10px;
+  }
+
   .nav-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
   .nav-title {
     font-size: 0.65rem;
+  }
+}
+
+@media (max-width: 380px) {
+  .shop-btn {
+    max-width: 140px;
+    font-size: 0.8rem;
+  }
+
+  .status-btn {
+    font-size: 0.7rem;
+    padding: 2px 8px;
   }
 }
 
