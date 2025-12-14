@@ -9,7 +9,8 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 // Mapbox access token
-const MAPBOX_ACCESS_TOKEN = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+const MAPBOX_ACCESS_TOKEN =
+  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 // Set Mapbox access token globally
 mapboxgl.accessToken = MAPBOX_ACCESS_TOKEN
@@ -20,12 +21,15 @@ const route = useRoute()
 const goBack = () => router.back()
 const shopId = ref<string | null>((route.params.id as string) || null)
 
-watch(() => route.params.id, (newId) => {
-  shopId.value = (newId as string) || null
-  if (shopId.value) {
-    loadShopData()
-  }
-})
+watch(
+  () => route.params.id,
+  (newId) => {
+    shopId.value = (newId as string) || null
+    if (shopId.value) {
+      loadShopData()
+    }
+  },
+)
 
 // -------------------- STATES --------------------
 const currentShopId = ref<string | null>(null)
@@ -46,7 +50,7 @@ const steps = [
   { number: 3, title: 'Operating Hours', icon: 'mdi-clock' },
   { number: 4, title: 'Delivery Options', icon: 'mdi-truck' },
   { number: 5, title: 'Location', icon: 'mdi-map-marker' },
-  { number: 6, title: 'Valid ID', icon: 'mdi-card-account-details' }
+  { number: 6, title: 'Valid ID', icon: 'mdi-card-account-details' },
 ]
 
 const nextStep = () => {
@@ -81,6 +85,27 @@ const validIdFrontUrl = ref<string | null>(null)
 const validIdBackUrl = ref<string | null>(null)
 const pickerTarget = ref<'logo' | 'physical' | 'valid_id_front' | 'valid_id_back' | null>(null)
 
+// -------------------- IMAGE UPLOAD HANDLERS --------------------
+const handlePhysicalUpload = () => {
+  pickerTarget.value = 'physical'
+  showPicker.value = true
+}
+
+const handleLogoUpload = () => {
+  pickerTarget.value = 'logo'
+  showPicker.value = true
+}
+
+const handleValidIdFrontUpload = () => {
+  pickerTarget.value = 'valid_id_front'
+  showPicker.value = true
+}
+
+const handleValidIdBackUpload = () => {
+  pickerTarget.value = 'valid_id_back'
+  showPicker.value = true
+}
+
 // -------------------- ADDRESS --------------------
 const addressOption = ref<'manual' | 'map'>('manual')
 const address = {
@@ -91,7 +116,7 @@ const address = {
   house_no: ref(''),
   city: ref(''),
   province: ref(''),
-  region: ref('')
+  region: ref(''),
 }
 
 // -------------------- PSGC --------------------
@@ -127,7 +152,7 @@ const daysOfWeek = [
   { id: 4, label: 'Thu' },
   { id: 5, label: 'Fri' },
   { id: 6, label: 'Sat' },
-  { id: 7, label: 'Sun' }
+  { id: 7, label: 'Sun' },
 ]
 
 const toggleDay = (dayId: number) => {
@@ -142,19 +167,19 @@ const toggleDay = (dayId: number) => {
 
 // -------------------- PSGC MAPPING FUNCTIONS --------------------
 const findRegionCodeByName = (name: string) => {
-  return regions.value.find(region => region.name.includes(name))?.code || null
+  return regions.value.find((region) => region.name.includes(name))?.code || null
 }
 
 const findProvinceCodeByName = (name: string) => {
-  return provinces.value.find(province => province.name === name)?.code || null
+  return provinces.value.find((province) => province.name === name)?.code || null
 }
 
 const findCityCodeByName = (name: string) => {
-  return cities.value.find(city => city.name === name)?.code || null
+  return cities.value.find((city) => city.name === name)?.code || null
 }
 
 const findBarangayCodeByName = (name: string) => {
-  return barangaysList.value.find(barangay => barangay.name === name)?.code || null
+  return barangaysList.value.find((barangay) => barangay.name === name)?.code || null
 }
 
 // -------------------- REVERSE GEOCODE --------------------
@@ -202,7 +227,7 @@ const autofillAddressFromGeocode = async (addressString: string) => {
 
     // Try to find region
     if (lowerAddress.includes('caraga')) {
-      const caragaRegion = regions.value.find(r => r.name.toLowerCase().includes('caraga'))
+      const caragaRegion = regions.value.find((r) => r.name.toLowerCase().includes('caraga'))
       if (caragaRegion) {
         selectedRegion.value = caragaRegion.code
         address.region.value = caragaRegion.name
@@ -211,7 +236,9 @@ const autofillAddressFromGeocode = async (addressString: string) => {
 
     // Try to find province (Agusan del Norte)
     if (lowerAddress.includes('agusan del norte')) {
-      const agusanProvince = provinces.value.find(p => p.name.toLowerCase().includes('agusan del norte'))
+      const agusanProvince = provinces.value.find((p) =>
+        p.name.toLowerCase().includes('agusan del norte'),
+      )
       if (agusanProvince) {
         selectedProvince.value = agusanProvince.code
         address.province.value = agusanProvince.name
@@ -220,7 +247,7 @@ const autofillAddressFromGeocode = async (addressString: string) => {
 
     // Try to find city (Butuan)
     if (lowerAddress.includes('butuan')) {
-      const butuanCity = cities.value.find(c => c.name.toLowerCase().includes('butuan'))
+      const butuanCity = cities.value.find((c) => c.name.toLowerCase().includes('butuan'))
       if (butuanCity) {
         selectedCity.value = butuanCity.code
         address.city.value = butuanCity.name
@@ -229,7 +256,6 @@ const autofillAddressFromGeocode = async (addressString: string) => {
 
     // Set the full detected address
     fullAddress.value = addressString
-
   } catch (err) {
     console.error('Error autofilling address:', err)
   }
@@ -257,24 +283,27 @@ const initMap = (lat: number, lng: number) => {
       style: 'mapbox://styles/mapbox/streets-v11',
       center: [lng, lat],
       zoom: 15,
-      attributionControl: false
+      attributionControl: false,
     })
 
     // Add navigation controls
     map.value.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
     // Add attribution
-    map.value.addControl(new mapboxgl.AttributionControl({
-      compact: true
-    }), 'bottom-right')
+    map.value.addControl(
+      new mapboxgl.AttributionControl({
+        compact: true,
+      }),
+      'bottom-right',
+    )
 
     // Add geolocate control
     const geolocate = new mapboxgl.GeolocateControl({
       positionOptions: {
-        enableHighAccuracy: true
+        enableHighAccuracy: true,
       },
       trackUserLocation: true,
-      showUserLocation: true
+      showUserLocation: true,
     })
     map.value.addControl(geolocate, 'top-right')
 
@@ -291,7 +320,7 @@ const initMap = (lat: number, lng: number) => {
     // Create marker
     shopMarker = new mapboxgl.Marker({
       element: markerEl,
-      draggable: true
+      draggable: true,
     })
       .setLngLat([lng, lat])
       .addTo(map.value)
@@ -326,14 +355,10 @@ const initMap = (lat: number, lng: number) => {
     map.value.on('error', (e) => {
       console.error('Mapbox error:', e.error)
     })
-
   } catch (error) {
     console.error('Error initializing Mapbox map:', error)
   }
 }
-
-// Remove the toggleFullscreen function since Mapbox doesn't have built-in fullscreen
-// We'll keep the button but remove its functionality or replace it with something else
 
 // -------------------- SNACKBAR --------------------
 const showSnackbar = (message: string, color: 'success' | 'error' = 'success') => {
@@ -430,7 +455,7 @@ const saveCoordinates = async (lat: number, lng: number) => {
         longitude: lng,
         detected_address: fullAddress.value, // This is the key line - saving to detected_address column
         manual_status: 'auto', // Set to auto when using detect address
-        updated_at: new Date().toISOString() // Update timestamp
+        updated_at: new Date().toISOString(), // Update timestamp
       })
       .eq('id', currentShopId.value)
 
@@ -553,7 +578,9 @@ const fetchCities = async (provinceCode: string) => {
 
   loadingCities.value = true
   try {
-    const res = await fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`)
+    const res = await fetch(
+      `https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`,
+    )
     const data = await res.json()
     cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
 
@@ -627,7 +654,7 @@ const loadShopData = async () => {
       region: data.region,
       province: data.province,
       city: data.city,
-      barangay: data.barangay
+      barangay: data.barangay,
     })
 
     // Map PSGC values after a short delay to ensure regions are loaded
@@ -676,7 +703,6 @@ const loadShopData = async () => {
         }
       }
     }, 1000)
-
   } catch (err) {
     console.error('Error loading shop:', err)
   } finally {
@@ -801,7 +827,6 @@ const getLocation = () => {
   )
 }
 
-// -------------------- SAVE SHOP --------------------
 const saveShop = async () => {
   if (saving.value) return
   if (!latitude.value || !longitude.value) {
@@ -833,7 +858,6 @@ const saveShop = async () => {
     }
 
     // Determine address source based on how the address was set
-    // We'll use the 'address_source' field instead of 'manual_status'
     let addressSource = 'detected' // Default to detected address
 
     // Check if manual address fields are filled (user manually edited the address)
@@ -874,7 +898,7 @@ const saveShop = async () => {
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
       open_days: openDays.value,
-      updated_at: new Date().toISOString() // This timestamp determines which address to display
+      updated_at: new Date().toISOString()
     }
 
     if (!currentShopId.value) {
@@ -883,15 +907,39 @@ const saveShop = async () => {
       const { data, error } = await supabase.from('shops').insert(shopData).select().single()
       if (error) throw error
       currentShopId.value = data.id
+      
+      // UPDATED: Redirect to status shop creation page with shop ID
       showSnackbar('Shop created successfully! Waiting for admin approval.', 'success')
-      router.push(`/shop/${data.id}`)
+      
+      // Add a delay to ensure the user sees the success message
+      setTimeout(() => {
+        // Store shop ID in localStorage (your status page reads from this)
+        localStorage.setItem('lastCreatedShopId', currentShopId.value)
+        
+        // Also pass as query parameter for direct access
+        router.push({
+          path: '/statusshopcreation',
+          query: { shopId: currentShopId.value }
+        })
+      }, 1500)
+      
     } else {
       // Existing shop - preserve status and update
       const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
       if (error) throw error
+      
+      // UPDATED: For updates, also redirect to status page with shop ID
       showSnackbar('Shop updated successfully!', 'success')
-      // Redirect back to user shop after update
-      router.push('/usershop')
+      
+      setTimeout(() => {
+        // Ensure shop ID is in localStorage
+        localStorage.setItem('lastCreatedShopId', currentShopId.value)
+        
+        router.push({
+          path: '/statusshopcreation',
+          query: { shopId: currentShopId.value }
+        })
+      }, 1500)
     }
   } catch (err) {
     console.error('Save shop error:', err)
@@ -917,9 +965,9 @@ onMounted(async () => {
 // Add a watcher to debug the selection process
 watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city]) => {
   console.log('Current selections:', {
-    region: region ? regions.value.find(r => r.code === region)?.name : 'None',
-    province: province ? provinces.value.find(p => p.code === province)?.name : 'None',
-    city: city ? cities.value.find(c => c.code === city)?.name : 'None'
+    region: region ? regions.value.find((r) => r.code === region)?.name : 'None',
+    province: province ? provinces.value.find((p) => p.code === province)?.name : 'None',
+    city: city ? cities.value.find((c) => c.code === city)?.name : 'None',
   })
 })
 </script>
@@ -931,7 +979,9 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title><strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong></v-toolbar-title>
+      <v-toolbar-title
+        ><strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong></v-toolbar-title
+      >
     </v-app-bar>
 
     <v-main class="pb-16">
@@ -939,10 +989,15 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       <v-card class="steps-card" flat>
         <v-card-text class="steps-container">
           <div class="steps">
-            <div v-for="step in steps" :key="step.number" class="step" :class="{
-                'active': currentStep === step.number,
-                'completed': currentStep > step.number
-              }">
+            <div
+              v-for="step in steps"
+              :key="step.number"
+              class="step"
+              :class="{
+                active: currentStep === step.number,
+                completed: currentStep > step.number,
+              }"
+            >
               <div class="step-icon">
                 <v-icon size="20">{{ step.icon }}</v-icon>
               </div>
@@ -950,18 +1005,30 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             </div>
           </div>
           <div class="step-progress">
-            <v-progress-linear :model-value="(currentStep / totalSteps) * 100" color="#3f83c7" height="6"
-              rounded></v-progress-linear>
+            <v-progress-linear
+              :model-value="(currentStep / totalSteps) * 100"
+              color="#3f83c7"
+              height="6"
+              rounded
+            ></v-progress-linear>
           </div>
         </v-card-text>
       </v-card>
 
       <!-- Cover & Logo Section -->
       <div class="cover-section">
-        <v-img :src="physicalUrl || 'https://via.placeholder.com/1200x400?text=Store+Cover+Photo'" class="cover-photo"
-          cover>
+        <v-img
+          :src="physicalUrl || 'https://via.placeholder.com/1200x400?text=Store+Cover+Photo'"
+          class="cover-photo"
+          cover
+        >
           <div class="cover-overlay"></div>
-          <v-btn icon color="white" class="cover-upload" @click="pickerTarget = 'physical'; showPicker = true">
+          <v-btn
+            icon
+            color="white"
+            class="cover-upload"
+            @click="handlePhysicalUpload"
+          >
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
           <h2 class="text-center text-blue">Upload Physical Store Photo</h2>
@@ -973,7 +1040,11 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             <v-img v-if="avatarUrl" :src="avatarUrl" cover />
             <v-icon v-else size="70" color="grey">mdi-store</v-icon>
           </v-avatar>
-          <v-btn icon class="logo-upload-btn" @click="pickerTarget = 'logo'; showPicker = true">
+          <v-btn
+            icon
+            class="logo-upload-btn"
+            @click="handleLogoUpload"
+          >
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
         </div>
@@ -1000,10 +1071,22 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             </v-chip>
           </v-card-title>
           <v-card-text>
-            <v-text-field v-model="shopName" label="Business Name *" outlined required class="mb-3"
-              :rules="[v => !!v || 'Business name is required']" />
-            <v-textarea v-model="description" label="About Us" outlined auto-grow rows="3"
-              hint="Tell customers about your business" />
+            <v-text-field
+              v-model="shopName"
+              label="Business Name *"
+              outlined
+              required
+              class="mb-3"
+              :rules="[(v) => !!v || 'Business name is required']"
+            />
+            <v-textarea
+              v-model="description"
+              label="About Us"
+              outlined
+              auto-grow
+              rows="3"
+              hint="Tell customers about your business"
+            />
           </v-card-text>
           <v-card-actions class="step-actions">
             <v-btn color="primary" @click="nextStep" :disabled="!shopName" class="next-btn">
@@ -1024,10 +1107,14 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           </v-card-title>
           <v-card-text>
             <div class="open-days">
-              <v-chip v-for="day in daysOfWeek" :key="day.id"
+              <v-chip
+                v-for="day in daysOfWeek"
+                :key="day.id"
                 :color="openDays.includes(day.id) ? 'primary' : 'grey-lighten-2'"
-                :variant="openDays.includes(day.id) ? 'flat' : 'outlined'" class="ma-1 day-chip"
-                @click="toggleDay(day.id)">
+                :variant="openDays.includes(day.id) ? 'flat' : 'outlined'"
+                class="ma-1 day-chip"
+                @click="toggleDay(day.id)"
+              >
                 {{ day.label }}
               </v-chip>
             </div>
@@ -1088,8 +1175,13 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
             <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
             <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
-            <v-text-field v-if="deliveryOptions.includes('meetup')" v-model="meetUpDetails" label="Meet-up details"
-              outlined class="mt-2" />
+            <v-text-field
+              v-if="deliveryOptions.includes('meetup')"
+              v-model="meetUpDetails"
+              label="Meet-up details"
+              outlined
+              class="mt-2"
+            />
           </v-card-text>
           <v-card-actions class="step-actions">
             <v-btn variant="outlined" @click="prevStep" class="prev-btn">
@@ -1122,20 +1214,51 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               <!-- PSGC Address Fields -->
               <v-row>
                 <v-col cols="12">
-                  <v-select v-model="selectedRegion" :items="regions" item-title="name" item-value="code"
-                    label="Region *" outlined :loading="loadingRegions" />
+                  <v-select
+                    v-model="selectedRegion"
+                    :items="regions"
+                    item-title="name"
+                    item-value="code"
+                    label="Region *"
+                    outlined
+                    :loading="loadingRegions"
+                  />
                 </v-col>
                 <v-col cols="12">
-                  <v-select v-model="selectedProvince" :items="provinces" item-title="name" item-value="code"
-                    label="Province *" outlined :disabled="!selectedRegion" :loading="loadingProvinces" />
+                  <v-select
+                    v-model="selectedProvince"
+                    :items="provinces"
+                    item-title="name"
+                    item-value="code"
+                    label="Province *"
+                    outlined
+                    :disabled="!selectedRegion"
+                    :loading="loadingProvinces"
+                  />
                 </v-col>
                 <v-col cols="12">
-                  <v-select v-model="selectedCity" :items="cities" item-title="name" item-value="code"
-                    label="City / Municipality *" outlined :disabled="!selectedProvince" :loading="loadingCities" />
+                  <v-select
+                    v-model="selectedCity"
+                    :items="cities"
+                    item-title="name"
+                    item-value="code"
+                    label="City / Municipality *"
+                    outlined
+                    :disabled="!selectedProvince"
+                    :loading="loadingCities"
+                  />
                 </v-col>
                 <v-col cols="12">
-                  <v-select v-model="selectedBarangay" :items="barangaysList" item-title="name" item-value="code"
-                    label="Barangay *" outlined :disabled="!selectedCity" :loading="loadingBarangays" />
+                  <v-select
+                    v-model="selectedBarangay"
+                    :items="barangaysList"
+                    item-title="name"
+                    item-value="code"
+                    label="Barangay *"
+                    outlined
+                    :disabled="!selectedCity"
+                    :loading="loadingBarangays"
+                  />
                 </v-col>
               </v-row>
 
@@ -1155,8 +1278,14 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
                 </v-col>
               </v-row>
 
-              <v-text-field v-if="fullAddress" v-model="fullAddress" label="Full Address" readonly outlined
-                class="mt-2" />
+              <v-text-field
+                v-if="fullAddress"
+                v-model="fullAddress"
+                label="Full Address"
+                readonly
+                outlined
+                class="mt-2"
+              />
 
               <h4 class="text-center mb-2 mt-4">Please drag/tap your location in the map</h4>
 
@@ -1164,20 +1293,42 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
               <!-- Search Section -->
               <div class="search-section">
-                <v-text-field v-model="searchQuery" label="Search place" outlined append-inner-icon="mdi-magnify"
-                  @keyup.enter="searchPlace" @click:clear="clearSearch" clearable class="mb-2" />
+                <v-text-field
+                  v-model="searchQuery"
+                  label="Search place"
+                  outlined
+                  append-inner-icon="mdi-magnify"
+                  @keyup.enter="searchPlace"
+                  @click:clear="clearSearch"
+                  clearable
+                  class="mb-2"
+                />
 
-                <v-btn color="primary" @click="searchPlace" class="mb-3 search-btn" :loading="searchLoading"
-                  :disabled="!searchQuery.trim()" block>
+                <v-btn
+                  color="primary"
+                  @click="searchPlace"
+                  class="mb-3 search-btn"
+                  :loading="searchLoading"
+                  :disabled="!searchQuery.trim()"
+                  block
+                >
                   <v-icon left>mdi-magnify</v-icon>
                   Search
                 </v-btn>
 
-                <v-card v-if="showSearchResults && searchResults.length > 0" class="search-results" elevation="4">
+                <v-card
+                  v-if="showSearchResults && searchResults.length > 0"
+                  class="search-results"
+                  elevation="4"
+                >
                   <v-list density="compact">
                     <v-list-subheader>Search Results</v-list-subheader>
-                    <v-list-item v-for="(result, index) in searchResults" :key="index"
-                      @click="selectSearchResult(result)" class="search-result-item">
+                    <v-list-item
+                      v-for="(result, index) in searchResults"
+                      :key="index"
+                      @click="selectSearchResult(result)"
+                      class="search-result-item"
+                    >
                       <v-list-item-title class="text-body-2">
                         {{ result.display_name }}
                       </v-list-item-title>
@@ -1213,14 +1364,20 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               </div>
             </v-alert>
 
-            <v-text-field v-model="fullAddress" label="Detected Address" outlined readonly
-              hint="This is the address detected from your current location" />
+            <v-text-field
+              v-model="fullAddress"
+              label="Detected Address"
+              outlined
+              readonly
+              hint="This is the address detected from your current location"
+            />
 
             <div class="mt-3">
               <v-alert type="warning" variant="tonal" density="compact">
                 <div class="text-caption">
-                  <strong>Note:</strong> After detecting your address, you can refine it using the manual address fields above if needed.
-                  The detected address will be saved to the "detected_address" column.
+                  <strong>Note:</strong> After detecting your address, you can refine it using the
+                  manual address fields above if needed. The detected address will be saved to the
+                  "detected_address" column.
                 </div>
               </v-alert>
             </div>
@@ -1255,9 +1412,9 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
                 <strong>Upload Requirements</strong>
               </template>
               <div class="text-caption">
-                • Upload clear images of both front and back of your valid ID<br>
-                • Ensure all details are readable<br>
-                • Accepted formats: JPG, PNG<br>
+                • Upload clear images of both front and back of your valid ID<br />
+                • Ensure all details are readable<br />
+                • Accepted formats: JPG, PNG<br />
                 • Maximum file size: 5MB
               </div>
             </v-alert>
@@ -1266,7 +1423,11 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             <v-row class="mb-4">
               <!-- Front ID Card -->
               <v-col cols="12" md="6">
-                <v-card variant="outlined" class="id-upload-card" :class="{ 'has-image': validIdFrontUrl }">
+                <v-card
+                  variant="outlined"
+                  class="id-upload-card"
+                  :class="{ 'has-image': validIdFrontUrl }"
+                >
                   <v-card-title class="text-subtitle-1 d-flex align-center">
                     <v-icon color="primary" class="mr-2">mdi-card-bulleted-outline</v-icon>
                     Valid ID Front
@@ -1278,8 +1439,14 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
                   <v-card-text class="text-center pa-4">
                     <!-- Image Preview -->
                     <div class="image-preview-container mb-4">
-                      <v-img v-if="validIdFrontUrl" :src="validIdFrontUrl" :max-height="200"
-                        class="id-preview-image mx-auto" cover style="border-radius: 8px;">
+                      <v-img
+                        v-if="validIdFrontUrl"
+                        :src="validIdFrontUrl"
+                        :max-height="200"
+                        class="id-preview-image mx-auto"
+                        cover
+                        style="border-radius: 8px"
+                      >
                         <template #placeholder>
                           <v-skeleton-loader type="image" />
                         </template>
@@ -1287,14 +1454,21 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
                       <!-- Placeholder when no image -->
                       <div v-else class="placeholder-container">
-                        <v-icon size="64" color="grey-lighten-1" class="mb-2">mdi-account-card-details</v-icon>
+                        <v-icon size="64" color="grey-lighten-1" class="mb-2"
+                          >mdi-account-card-details</v-icon
+                        >
                         <div class="text-caption text-grey">No ID front uploaded</div>
                       </div>
                     </div>
 
                     <!-- Upload Button -->
-                    <v-btn color="primary" variant="outlined"
-                      @click="pickerTarget = 'valid_id_front'; showPicker = true" block class="upload-btn">
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
+                      @click="handleValidIdFrontUpload"
+                      block
+                      class="upload-btn"
+                    >
                       <v-icon left>{{ validIdFrontUrl ? 'mdi-reload' : 'mdi-upload' }}</v-icon>
                       {{ validIdFrontUrl ? 'Replace Front ID' : 'Upload Front ID' }}
                     </v-btn>
@@ -1304,7 +1478,11 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
               <!-- Back ID Card -->
               <v-col cols="12" md="6">
-                <v-card variant="outlined" class="id-upload-card" :class="{ 'has-image': validIdBackUrl }">
+                <v-card
+                  variant="outlined"
+                  class="id-upload-card"
+                  :class="{ 'has-image': validIdBackUrl }"
+                >
                   <v-card-title class="text-subtitle-1 d-flex align-center">
                     <v-icon color="primary" class="mr-2">mdi-card-bulleted</v-icon>
                     Valid ID Back
@@ -1316,8 +1494,14 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
                   <v-card-text class="text-center pa-4">
                     <!-- Image Preview -->
                     <div class="image-preview-container mb-4">
-                      <v-img v-if="validIdBackUrl" :src="validIdBackUrl" :max-height="200"
-                        class="id-preview-image mx-auto" cover style="border-radius: 8px;">
+                      <v-img
+                        v-if="validIdBackUrl"
+                        :src="validIdBackUrl"
+                        :max-height="200"
+                        class="id-preview-image mx-auto"
+                        cover
+                        style="border-radius: 8px"
+                      >
                         <template #placeholder>
                           <v-skeleton-loader type="image" />
                         </template>
@@ -1325,14 +1509,21 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
                       <!-- Placeholder when no image -->
                       <div v-else class="placeholder-container">
-                        <v-icon size="64" color="grey-lighten-1" class="mb-2">mdi-account-card-details-outline</v-icon>
+                        <v-icon size="64" color="grey-lighten-1" class="mb-2"
+                          >mdi-account-card-details-outline</v-icon
+                        >
                         <div class="text-caption text-grey">No ID back uploaded</div>
                       </div>
                     </div>
 
                     <!-- Upload Button -->
-                    <v-btn color="primary" variant="outlined" @click="pickerTarget = 'valid_id_back'; showPicker = true"
-                      block class="upload-btn">
+                    <v-btn
+                      color="primary"
+                      variant="outlined"
+                      @click="handleValidIdBackUpload"
+                      block
+                      class="upload-btn"
+                    >
                       <v-icon left>{{ validIdBackUrl ? 'mdi-reload' : 'mdi-upload' }}</v-icon>
                       {{ validIdBackUrl ? 'Replace Back ID' : 'Upload Back ID' }}
                     </v-btn>
@@ -1373,10 +1564,18 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               <v-icon left>mdi-arrow-left</v-icon>
               Back
             </v-btn>
-            <v-btn color="#3f83c7" :loading="saving" @click="saveShop" class="text-white save-btn"
-              :disabled="!shopName" size="large">
+            <v-btn
+              color="#3f83c7"
+              :loading="saving"
+              @click="saveShop"
+              class="text-white save-btn"
+              :disabled="!shopName"
+              size="large"
+            >
               <v-icon left>{{ saving ? 'mdi-loading' : 'mdi-content-save' }}</v-icon>
-              {{ saving ? 'Saving...' : (currentShopId ? 'Update Shop' : 'Save Shop') }}
+              {{
+                saving ? 'Saving...' : currentShopId ? 'Update & View Status' : 'Save & View Status'
+              }}
             </v-btn>
           </v-card-actions>
         </v-card>
@@ -1391,9 +1590,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       <v-dialog v-model="showPicker" max-width="400">
         <v-card>
           <v-card-title class="headline">Pick Image Source</v-card-title>
-          <v-card-text class="text-center">
-            Choose how you want to upload the image
-          </v-card-text>
+          <v-card-text class="text-center"> Choose how you want to upload the image </v-card-text>
           <v-card-actions class="justify-center pb-4">
             <v-btn color="primary" @click="pickImage('camera')" class="mr-2">
               <v-icon left>mdi-camera</v-icon>
@@ -1648,7 +1845,8 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   background-color: #fafafa;
 }
 
-.prev-btn, .next-btn {
+.prev-btn,
+.next-btn {
   min-width: 120px;
 }
 
@@ -1768,7 +1966,9 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
     gap: 12px;
   }
 
-  .prev-btn, .next-btn, .save-btn {
+  .prev-btn,
+  .next-btn,
+  .save-btn {
     width: 100%;
   }
 
