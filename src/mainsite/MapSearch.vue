@@ -225,6 +225,31 @@ const createUserMarker = (lat: number, lng: number) => {
   userMarker.setPopup(popup)
 }
 
+/* -------------------- TIME FORMATTING FUNCTIONS -------------------- */
+const formatTime12Hour = (time24: string): string => {
+  if (!time24) return ''
+  
+  try {
+    const [hours, minutes] = time24.split(':').map(Number)
+    
+    if (isNaN(hours) || isNaN(minutes)) return time24
+    
+    const period = hours >= 12 ? 'PM' : 'AM'
+    const hours12 = hours % 12 || 12 // Convert 0 to 12 for midnight
+    const minutesStr = minutes.toString().padStart(2, '0')
+    
+    return `${hours12}:${minutesStr} ${period}`
+  } catch (error) {
+    console.warn('Error formatting time:', error)
+    return time24
+  }
+}
+
+const formatTimeRange = (openTime: string, closeTime: string): string => {
+  if (!openTime || !closeTime) return ''
+  return `${formatTime12Hour(openTime)} - ${formatTime12Hour(closeTime)}`
+}
+
 /* -------------------- CITY BOUNDARY DETECTION & DISPLAY -------------------- */
 const detectUserCity = async (lat: number, lng: number): Promise<string | null> => {
   try {
@@ -974,6 +999,7 @@ const getSingleRoute = async (
   return null
 }
 
+
 /* -------------------- DISTANCE CALCULATION -------------------- */
 const getDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371
@@ -986,7 +1012,23 @@ const getDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) =
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-/* -------------------- FETCH SHOPS -------------------- */
+/* -------------------- COORDINATE VALIDATION -------------------- */
+const validateCoordinates = (lat: number, lng: number): boolean => {
+  if (!isFinite(lat) || !isFinite(lng)) return false
+  if (lat === 0 && lng === 0) return false // Avoid 0,0 coordinates
+  if (lat < -90 || lat > 90) return false  // Valid latitude range
+  if (lng < -180 || lng > 180) return false // Valid longitude range
+  return true
+}
+
+const validateShopCoordinates = (shop: any): boolean => {
+  if (!shop.latitude || !shop.longitude) return false
+  const lat = Number(shop.latitude)
+  const lng = Number(shop.longitude)
+  return validateCoordinates(lat, lng)
+}
+
+/* -------------------- FETCH SHOPS - UPDATED WITH COORDINATE FILTERS -------------------- */
 const doFetchShops = async () => {
   try {
     loading.value = true
@@ -995,45 +1037,58 @@ const doFetchShops = async () => {
     const userLat = Number(latitude.value ?? lastKnown.value?.[0] ?? 0)
     const userLng = Number(longitude.value ?? lastKnown.value?.[1] ?? 0)
 
+    // ✅ FIXED: Only fetch approved shops with valid coordinates
     const { data, error } = await supabase
       .from('shops')
       .select(
         `
-    id,
-    business_name,
-    latitude,
-    longitude,
-    logo_url,
-    physical_store,
-    detected_address,
-    house_no,
-    building,
-    street,
-    barangay,
-    city,
-    province,
-    postal,
-    status,
-    manual_status,
-    open_time,
-    close_time,
-    open_days,
-    products:products(id, prod_name, price, main_img_urls)
-  `,
+        id,
+        business_name,
+        latitude,
+        longitude,
+        logo_url,
+        physical_store,
+        detected_address,
+        house_no,
+        building,
+        street,
+        barangay,
+        city,
+        province,
+        postal,
+        status,
+        manual_status,
+        open_time,
+        close_time,
+        open_days,
+        products:products(id, prod_name, price, main_img_urls)
+      `
       )
-      .eq('status', 'approved')
+      .eq('status', 'approved')           // ✅ Only approved shops
+      .not('latitude', 'is', null)        // ✅ Only shops with latitude
+      .not('longitude', 'is', null)       // ✅ Only shops with longitude
+
     if (error) throw error
+    
     if (!data) {
       shops.value = []
       clearShopMarkers()
       return
     }
 
-    const mapped = data.map((s) => {
+    // ✅ Additional validation to ensure coordinates are valid numbers
+    const validShops = data.filter(shop => {
+      const lat = Number(shop.latitude)
+      const lng = Number(shop.longitude)
+      return validateCoordinates(lat, lng)
+    })
+
+    console.log(`✅ Found ${validShops.length} approved shops with valid coordinates (filtered from ${data.length} total)`)
+
+    const mapped = validShops.map((s) => {
       const lat = Number(s.latitude)
       const lng = Number(s.longitude)
-      const distanceKm =
-        isFinite(lat) && isFinite(lng) ? getDistanceKm(userLat, userLng, lat, lng) : Infinity
+      const distanceKm = getDistanceKm(userLat, userLng, lat, lng)
 
       // Check if shop is within city boundary
       const withinBoundary = isShopWithinBoundary(s)
@@ -1045,11 +1100,13 @@ const doFetchShops = async () => {
       }
     })
 
-    shops.value = mapped.sort((a, b) => (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity))
+    shops.value = mapped.sort((a, b) => a.distanceKm - b.distanceKm)
     applyShopFilters()
+    
   } catch (e) {
-    console.error(e)
+    console.error('Error fetching shops:', e)
     errorMsg.value = 'Failed to fetch shops.'
+    shops.value = []
   } finally {
     loading.value = false
   }
@@ -1096,7 +1153,6 @@ const toggleDisplayMode = (mode: 'within' | 'outside') => {
 }
 
 /* -------------------- SHOP POPUP -------------------- */
-/* -------------------- SHOP POPUP -------------------- */
 const createShopPopup = (shop: any): string => {
   const statusDisplay = getShopStatusDisplay(shop)
   const isOpen = isShopCurrentlyOpen(shop)
@@ -1134,7 +1190,7 @@ const createShopPopup = (shop: any): string => {
             <path d="M12 8v4l3 3m6-3c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2s10 4.48 10 10z"/>
           </svg>
           <span>
-            ${Number(shop.distanceKm) !== Infinity ? shop.distanceKm.toFixed(1) + ' km away' : 'Distance unavailable'}
+            ${shop.distanceKm.toFixed(1)} km away
           </span>
         </div>
         
@@ -1143,7 +1199,7 @@ const createShopPopup = (shop: any): string => {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
             <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
           </svg>
-          <span>${shop.open_time} - ${shop.close_time}</span>
+          <span>${formatTimeRange(shop.open_time, shop.close_time)}</span>
         </div>
         ` : ''}
       </div>
@@ -1164,7 +1220,7 @@ const createShopPopup = (shop: any): string => {
       
       ${!isOpen ? 
         `<p style="color: #ef4444; font-size: 12px; margin-top: 8px; padding: 4px; background: #fee; border-radius: 4px;">
-          Currently closed • Opens at ${shop.open_time || 'unknown'}
+          Currently closed • Opens at ${formatTime12Hour(shop.open_time) || 'unknown'}
         </p>` : ''}
     </div>
   `
@@ -1193,7 +1249,7 @@ const attachPopupEventHandlers = (popup: any, shopId: string) => {
   }, 100)
 }
 
-/* -------------------- MARKER MANAGEMENT -------------------- */
+/* -------------------- MARKER MANAGEMENT - UPDATED -------------------- */
 const clearShopMarkers = () => {
   shopMarkers.forEach((m) => {
     try {
@@ -1207,12 +1263,25 @@ const plotShops = () => {
   if (!map.value || !mapboxgl) return
   clearShopMarkers()
 
+  let plottedCount = 0
+  let skippedCount = 0
+
   for (const shop of filteredShops.value) {
-    if (shop.status !== 'approved') continue
+    // Double-check: only plot approved shops
+    if (shop.status !== 'approved') {
+      skippedCount++
+      continue
+    }
 
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
-    if (!isFinite(lat) || !isFinite(lng)) continue
+    
+    // ✅ Validate coordinates before plotting
+    if (!validateCoordinates(lat, lng)) {
+      console.warn(`Skipping shop ${shop.id} - invalid coordinates: ${lat}, ${lng}`)
+      skippedCount++
+      continue
+    }
 
     // Create custom marker
     const el = document.createElement('div')
@@ -1255,7 +1324,11 @@ const plotShops = () => {
     el.addEventListener('click', () => {
       marker.togglePopup()
     })
+
+    plottedCount++
   }
+  
+  console.log(`📍 Plotted ${plottedCount} shop markers (skipped ${skippedCount} shops without valid coordinates)`)
 }
 
 /* -------------------- FOCUS ON SHOP MARKER -------------------- */
@@ -2024,11 +2097,7 @@ onUnmounted(() => {
                 <div class="d-flex align-center mb-1">
                   <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
                   <span>
-                    {{
-                      Number(shop.distanceKm) !== Infinity
-                        ? shop.distanceKm.toFixed(1) + ' km away'
-                        : 'Distance unknown'
-                    }}
+                    {{ shop.distanceKm.toFixed(1) }} km away
                   </span>
                 </div>
 
@@ -2057,10 +2126,12 @@ onUnmounted(() => {
                   </span>
                 </div>
 
-                <!-- Shop Hours -->
+                <!-- Shop Hours (12-hour format) -->
                 <div v-if="shop.open_time && shop.close_time" class="d-flex align-center mt-1">
                   <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
-                  <span class="text-caption"> {{ shop.open_time }} - {{ shop.close_time }} </span>
+                  <span class="text-caption">
+                    {{ formatTime12Hour(shop.open_time) }} - {{ formatTime12Hour(shop.close_time) }}
+                  </span>
                 </div>
               </v-list-item-subtitle>
 
@@ -2260,6 +2331,7 @@ onUnmounted(() => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.9);
   pointer-events: auto;
+  margin-bottom: -50px; /* Desktop default */
 }
 
 .mode-chip {
@@ -2573,6 +2645,12 @@ onUnmounted(() => {
     height: 44px !important;
   }
 
+  /* NEW: Responsive margin for tablet/small screens */
+  .map-controls-group {
+    margin-bottom: -30px; /* Reduced from -50px for mobile */
+    padding: 8px; /* Optional: slightly smaller padding */
+  }
+
   .route-info-alert {
     top: 70px; /* Increased from 50px */
     width: 95%;
@@ -2624,6 +2702,12 @@ onUnmounted(() => {
     max-width: 340px;
   }
 
+  /* NEW: Smaller margin for extra small devices */
+  .map-controls-group {
+    margin-bottom: -20px; /* Even less margin for very small screens */
+    padding: 6px; /* Smaller padding */
+  }
+
   .route-info-alert {
     top: 65px;
     font-size: 13px;
@@ -2649,6 +2733,13 @@ onUnmounted(() => {
   .route-selection-panel.bottom-panel {
     bottom: 70px;
     max-width: 350px;
+  }
+
+  /* NEW: Minimal margin for landscape mode */
+  .map-controls-group {
+    margin-bottom: -15px; /* Minimal negative margin for landscape */
+    padding: 5px; /* Compact padding */
+    gap: 6px; /* Smaller gap between buttons */
   }
 
   .route-info-alert {
