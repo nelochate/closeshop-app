@@ -1574,7 +1574,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             >
               <v-icon left>{{ saving ? 'mdi-loading' : 'mdi-content-save' }}</v-icon>
               {{
-                saving ? 'Saving...' : currentShopId ? 'Update & View Status' : 'Save & View Status'
+                saving ? 'Saving...' : currentShopId ? 'Update & View Status' : 'Save Shop'
               }}
             </v-btn>
           </v-card-actions>
