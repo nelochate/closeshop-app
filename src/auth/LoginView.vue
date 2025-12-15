@@ -1,4 +1,3 @@
-
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
@@ -141,28 +140,15 @@ onMounted(async () => {
 
           <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
 
-
           <p class="register-link">
-            Don’t have an account? <RouterLink to="/register">Register</RouterLink>
+            Don't have an account? <RouterLink to="/register">Register</RouterLink>
           </p>
 
-          <!-- Divider -->
-          <div class="divider">
-            <span></span>
-            <p>Or sign up with</p>
-            <span></span>
+          <!-- Privacy Notice Section -->
+          <div class="privacy-notice">
+            <v-icon color="primary" size="small" class="mr-2">mdi-shield-lock-outline</v-icon>
+            <span class="privacy-text">Your data is protected with us. We never share your information with third parties.</span>
           </div>
-
-          <!-- Social Buttons -->
-          <v-btn block outlined class="social-btn">
-            <img width="20" height="20" src="https://img.icons8.com/fluency/48/facebook-new.png" alt="facebook-new" class="mr-2"/>
-            Continue with Facebook
-          </v-btn>
-
-          <v-btn block outlined class="social-btn">
-            <img width="20" height="20" src="https://img.icons8.com/color/48/google-logo.png" alt="google-logo" class="mr-2" />
-            Continue with Google
-          </v-btn>
 
         </v-form>
       </div>
@@ -243,6 +229,7 @@ onMounted(async () => {
   text-align: center;
   color: #2e73b8f5;
   font-weight: 580;
+  cursor: pointer;
 }
 
 .register-link {
@@ -250,34 +237,34 @@ onMounted(async () => {
   font-size: 13px;
   color: #666;
   text-align: center;
-  cursor: pointer;
 }
 
-.divider {
-  display: flex;
-  align-items: center;
-  text-align: center;
-  margin: 1.5rem 0;
-}
-
-.divider span {
-  flex: 1;
-  height: 1px;
-  background: #ddd;
-}
-
-.divider p {
-  margin: 0 10px;
-  font-size: 13px;
-  color: #777;
-}
-
-.social-btn {
-  margin-top: 0.6rem;
-  border-radius: 10px;
+.register-link a {
+  color: #2e73b8;
+  text-decoration: none;
   font-weight: 500;
-  text-transform: none;
 }
+
+.register-link a:hover {
+  text-decoration: underline;
+}
+
+.privacy-notice {
+  margin-top: 2rem;
+  padding: 1rem;
+  background-color: #f8f9fa;
+  border-radius: 10px;
+  border-left: 4px solid #2e73b8;
+  display: flex;
+  align-items: flex-start;
+}
+
+.privacy-text {
+  font-size: 12px;
+  color: #666;
+  line-height: 1.4;
+}
+
 .logo {
   width: 80px;
 }
@@ -304,5 +291,4 @@ onMounted(async () => {
   background: #c8e6c9d4;
   color: #1b5e1fa8;
 }
-
 </style>
