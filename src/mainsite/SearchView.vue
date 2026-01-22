@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch, onMounted } from 'vue'
+import { ref, watch, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
@@ -7,9 +7,11 @@ const route = useRoute()
 const router = useRouter()
 
 const query = ref(route.query.q || '')
-const results = ref([])
+const productResults = ref([])
+const shopResults = ref([])
 const loading = ref(false)
 const errorMsg = ref('')
+const activeTab = ref('products') // 'products' or 'shops'
 let debounceTimer
 
 // 🔄 Watch URL query param and refetch on change
@@ -27,10 +29,11 @@ function debounceFetch() {
   debounceTimer = setTimeout(fetchSearchResults, 400)
 }
 
-// 🔍 Fetch products that START with query
+// 🔍 Fetch products and shops
 async function fetchSearchResults() {
   if (!query.value || query.value.trim().length < 1) {
-    results.value = []
+    productResults.value = []
+    shopResults.value = []
     return
   }
 
@@ -38,22 +41,44 @@ async function fetchSearchResults() {
     loading.value = true
     errorMsg.value = ''
 
-    const { data, error } = await supabase
+    // Fetch products
+    const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, prod_name, price, main_img_urls, sold')
-      .ilike('prod_name', `%${query.value}%`) // contains search anywhere
+      .select('id, prod_name, price, main_img_urls, sold, shop_id')
+      .ilike('prod_name', `%${query.value}%`)
 
-    if (error) throw error
+    if (productsError) throw productsError
 
-    results.value = (data || []).map((p) => ({
+    // Fetch shops
+    const { data: shops, error: shopsError } = await supabase
+      .from('shops')
+      .select('id, business_name, logo_url, status, description')
+      .ilike('business_name', `%${query.value}%`)
+      .eq('status', 'approved') // Only show approved shops
+
+    if (shopsError) throw shopsError
+
+    // Process products
+    productResults.value = (products || []).map((p) => ({
       id: p.id,
       title: p.prod_name,
       price: p.price,
       img: Array.isArray(p.main_img_urls)
         ? p.main_img_urls[0]
         : JSON.parse(p.main_img_urls || '[]')[0],
-      sold: p.sold || 0
+      sold: p.sold || 0,
+      type: 'product'
     }))
+
+    // Process shops
+    shopResults.value = (shops || []).map((s) => ({
+      id: s.id,
+      title: s.business_name,
+      description: s.description || 'No description available',
+      img: s.logo_url || null,
+      type: 'shop'
+    }))
+
   } catch (err) {
     console.error('Search error:', err)
     errorMsg.value = err.message
@@ -67,11 +92,27 @@ onMounted(fetchSearchResults)
 // 🔙 Navigation helpers
 const goBack = () => router.back()
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
+const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
 // 🔁 Update search as user types
 watch(query, (val) => {
   router.replace({ name: 'search', query: { q: val } })
 })
+
+// Computed properties
+const hasResults = computed(() => 
+  productResults.value.length > 0 || shopResults.value.length > 0
+)
+
+const currentResults = computed(() => {
+  return activeTab.value === 'products' ? productResults.value : shopResults.value
+})
+
+const showEmptyState = computed(() => 
+  !loading.value && 
+  query.value.length >= 2 && 
+  !hasResults.value
+)
 </script>
 
 <template>
@@ -91,7 +132,7 @@ watch(query, (val) => {
             hide-details
             clearable
             density="comfortable"
-            placeholder="Search products..."
+            placeholder="Search products & shops..."
             prepend-inner-icon="mdi-magnify"
             class="search-field"
             autofocus
@@ -101,7 +142,32 @@ watch(query, (val) => {
 
       <!-- 🛍️ Results -->
       <v-container class="py-6" style="max-width: 720px;">
-        <h2 class="page-title" v-if="query">Search results for “{{ query }}”</h2>
+        <!-- Results Header -->
+        <div class="results-header" v-if="query && hasResults">
+          <h2 class="page-title">Results for "{{ query }}"</h2>
+          
+          <!-- Tabs -->
+          <div class="results-tabs">
+            <v-btn
+              @click="activeTab = 'products'"
+              :class="['tab-btn', { active: activeTab === 'products' }]"
+              variant="text"
+              size="small"
+            >
+              <v-icon left size="18">mdi-package-variant</v-icon>
+              Products ({{ productResults.length }})
+            </v-btn>
+            <v-btn
+              @click="activeTab = 'shops'"
+              :class="['tab-btn', { active: activeTab === 'shops' }]"
+              variant="text"
+              size="small"
+            >
+              <v-icon left size="18">mdi-storefront</v-icon>
+              Shops ({{ shopResults.length }})
+            </v-btn>
+          </div>
+        </div>
 
         <!-- Loading Skeleton -->
         <template v-if="loading">
@@ -120,11 +186,11 @@ watch(query, (val) => {
           {{ errorMsg }}
         </v-alert>
 
-        <!-- Results Grid -->
-        <template v-else-if="!loading && results.length > 0">
+        <!-- Product Results Grid -->
+        <template v-else-if="!loading && activeTab === 'products' && productResults.length > 0">
           <div class="product-grid">
             <div
-              v-for="item in results"
+              v-for="item in productResults"
               :key="item.id"
               class="product-card"
               @click="goToProduct(item.id)"
@@ -139,8 +205,34 @@ watch(query, (val) => {
           </div>
         </template>
 
+        <!-- Shop Results Grid -->
+        <template v-else-if="!loading && activeTab === 'shops' && shopResults.length > 0">
+          <div class="shop-grid">
+            <div v-for="shop in shopResults" :key="shop.id" class="shop-card" @click="goToShop(shop.id)">
+              <div class="shop-avatar-container">
+                <v-avatar size="64" class="shop-avatar" color="blue-lighten-4">
+                  <v-img v-if="shop.img && shop.img !== '/shop-placeholder.png'" :src="shop.img" class="shop-logo"
+                    cover />
+                  <div v-else class="default-shop-logo">
+                    <v-icon size="32" color="#3f83c7">mdi-storefront</v-icon>
+                  </div>
+                </v-avatar>
+                <div class="shop-badge">
+                  <v-icon size="16" color="white">mdi-storefront</v-icon>
+                </div>
+              </div>
+              <div class="shop-info">
+                <h3 class="shop-name">{{ shop.title }}</h3>
+                <p class="shop-description" v-if="shop.description">
+                  {{ shop.description.length > 80 ? shop.description.substring(0, 80) + '...' : shop.description }}
+                </p>
+              </div>
+            </div>
+          </div>
+        </template>
+
         <!-- Empty State -->
-        <template v-else-if="!loading && !results.length && query.length >= 2">
+        <template v-else-if="showEmptyState">
           <div class="empty-state">
             <v-icon size="48" color="grey">mdi-magnify</v-icon>
             <p class="empty-title">No results found</p>
@@ -153,7 +245,6 @@ watch(query, (val) => {
 </template>
 
 <style scoped>
-/* 🌈 PAGE LAYOUT */
 .page {
   background: #f5f7fa;
   min-height: 100vh;
@@ -203,12 +294,41 @@ watch(query, (val) => {
   font-size: 14px;
 }
 
-/* 🧾 PAGE TITLE */
+/* 🧾 RESULTS HEADER */
+.results-header {
+  margin-bottom: 24px;
+}
+
 .page-title {
   font-size: 18px;
   font-weight: 700;
   color: #1f2937;
   margin-bottom: 16px;
+}
+
+.results-tabs {
+  display: flex;
+  gap: 8px;
+  border-bottom: 2px solid #e5e7eb;
+  padding-bottom: 8px;
+}
+
+.tab-btn {
+  text-transform: none;
+  font-weight: 500;
+  color: #6b7280 !important;
+  border-radius: 8px;
+  padding: 8px 16px;
+}
+
+.tab-btn.active {
+  color: #3f83c7 !important;
+  background-color: #eff6ff;
+  font-weight: 600;
+}
+
+.tab-btn .v-icon {
+  margin-right: 6px;
 }
 
 /* 🛍️ PRODUCT GRID */
@@ -267,6 +387,86 @@ watch(query, (val) => {
   color: #6b7280;
 }
 
+/* 🏪 SHOP GRID */
+.shop-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.shop-card {
+  background: #fff;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.shop-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.shop-avatar-container {
+  position: relative;
+}
+
+.shop-avatar {
+  border: 2px solid #e5e7eb;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.1);
+}
+
+.shop-badge {
+  position: absolute;
+  bottom: -4px;
+  right: -4px;
+  background: #3f83c7;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+}
+
+.shop-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.shop-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111827;
+  margin: 0 0 4px 0;
+}
+
+.shop-description {
+  font-size: 13px;
+  color: #6b7280;
+  margin: 0 0 8px 0;
+  line-height: 1.4;
+}
+
+.default-shop-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
+  border-radius: 50%;
+}
+
+.shop-logo {
+  border-radius: 50%;
+}
+
 /* 💤 EMPTY STATE */
 .empty-state {
   text-align: center;
@@ -299,6 +499,35 @@ watch(query, (val) => {
 
   .page-title {
     font-size: 16px;
+  }
+
+  .shop-card {
+    padding: 12px;
+    gap: 12px;
+  }
+
+  .shop-avatar {
+    width: 56px !important;
+    height: 56px !important;
+  }
+
+  .shop-name {
+    font-size: 14px;
+  }
+
+  .shop-description {
+    font-size: 12px;
+  }
+
+  .tab-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 360px) {
+  .product-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

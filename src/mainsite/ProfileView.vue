@@ -600,7 +600,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
-      <!-- Enhanced Shopee-style Icon Navigation -->
+      <!-- Enhanced Icon Navigation -->
       <div class="shopee-nav-section">
         <div class="nav-grid">
           <div
@@ -835,6 +835,8 @@ onBeforeRouteUpdate((to, from, next) => {
   background: rgba(255, 255, 255, 0.9) !important;
   box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1) !important;
   white-space: nowrap;
+  margin-top: 22px !important;
+  margin-left: 15px;
 }
 
 .status-btn:hover {
@@ -915,8 +917,7 @@ onBeforeRouteUpdate((to, from, next) => {
   background: linear-gradient(135deg, #354d7c, #5276b0, #354d7c);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   color: #fff;
-  margin-top: 0px !important;
-  border-bottom-left-radius: 24px;
+  margin-top: -32px !important;
   border-bottom-right-radius: 24px;
 }
 
@@ -1315,7 +1316,6 @@ onBeforeRouteUpdate((to, from, next) => {
 
   .profile-header {
     padding: 140px 16px 20px !important;
-    border-bottom-left-radius: 20px;
     border-bottom-right-radius: 20px;
   }
 
