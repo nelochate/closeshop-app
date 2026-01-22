@@ -53,6 +53,7 @@ type RouteType = 'driving' | 'walking' | 'cycling'
 const selectedRouteType = ref<RouteType>('driving') // Default to driving
 const routeOptions = ref<RouteOption[]>([]) // All calculated routes
 const showRoutePanel = ref(false) // Control visibility of route panel
+const routePanelMinimized = ref(false) // Control minimized state
 
 /* -------------------- ROUTE CONFIG -------------------- */
 const routeConfig = {
@@ -661,6 +662,7 @@ const recenterToUser = async () => {
     locating.value = false
   }
 }
+
 /* -------------------- ROUTE MANAGEMENT -------------------- */
 let currentRouteLayers: string[] = []
 let currentRouteMarkers: any[] = []
@@ -878,8 +880,29 @@ const clearAllRoutes = () => {
   clearRoutes()
   routeOptions.value = []
   showRoutePanel.value = false
+  routePanelMinimized.value = false
   selectedRouteType.value = 'driving'
   console.log('All routes cleared')
+}
+
+/* -------------------- MINIMIZE/EXPAND ROUTE PANEL -------------------- */
+const toggleRoutePanelMinimize = () => {
+  routePanelMinimized.value = !routePanelMinimized.value
+  setErrorMessage(
+    routePanelMinimized.value ? 'Route panel minimized' : 'Route panel expanded',
+    2000,
+  )
+}
+
+/* -------------------- SHOW ROUTE PANEL -------------------- */
+const showRouteSelectionPanel = () => {
+  if (routeOptions.value.length > 0) {
+    showRoutePanel.value = true
+    routePanelMinimized.value = false
+    setErrorMessage('Route panel opened', 2000)
+  } else {
+    setErrorMessage('No route calculated yet. Select a shop first.', 3000)
+  }
 }
 
 /* -------------------- SELECT ROUTE TYPE -------------------- */
@@ -998,7 +1021,6 @@ const getSingleRoute = async (
 
   return null
 }
-
 
 /* -------------------- DISTANCE CALCULATION -------------------- */
 const getDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -1388,6 +1410,7 @@ const focusOnShopMarker = async (shopId: string) => {
 
     // Show route panel
     showRoutePanel.value = true
+    routePanelMinimized.value = false
 
     // Set default route type to driving if available, otherwise first available
     const defaultType = routes.find((r) => r.type === 'driving') ? 'driving' : routes[0].type
@@ -1802,18 +1825,37 @@ onUnmounted(() => {
       </div>
 
       <!-- Route Selection Panel -->
-      <v-card v-if="showRoutePanel" class="route-selection-panel bottom-panel" elevation="4">
+      <v-card v-if="showRoutePanel" :class="['route-selection-panel', 'bottom-panel', { 'minimized': routePanelMinimized }]" elevation="4">
         <v-card-title class="d-flex align-center justify-space-between py-2">
           <div class="d-flex align-center">
             <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
             <span class="text-subtitle-1 font-weight-bold">Route Options</span>
           </div>
-          <v-btn icon size="small" @click="clearAllRoutes" variant="text" title="Close route panel">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
+          <div class="d-flex align-center gap-1">
+            <!-- Minimize Button -->
+            <v-btn 
+              icon 
+              size="small" 
+              @click="toggleRoutePanelMinimize" 
+              variant="text" 
+              :title="routePanelMinimized ? 'Expand panel' : 'Minimize panel'"
+            >
+              <v-icon>{{ routePanelMinimized ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+            </v-btn>
+            <!-- Close Button -->
+            <v-btn 
+              icon 
+              size="small" 
+              @click="clearAllRoutes" 
+              variant="text" 
+              title="Close route panel"
+            >
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </div>
         </v-card-title>
 
-        <v-card-text class="py-3">
+        <v-card-text v-if="!routePanelMinimized" class="py-3">
           <div class="route-buttons-grid">
             <v-btn
               v-for="type in ['driving', 'walking', 'cycling'] as RouteType[]"
@@ -1866,6 +1908,26 @@ onUnmounted(() => {
                   minutes
                 </div>
               </div>
+            </div>
+          </div>
+        </v-card-text>
+
+        <!-- Minimized Panel Content -->
+        <v-card-text v-else class="py-2 px-3">
+          <div class="d-flex align-center justify-space-between">
+            <div class="d-flex align-center">
+              <v-icon color="primary" size="small" class="mr-2">mdi-routes</v-icon>
+              <span class="text-caption text-medium-emphasis">Route calculated</span>
+            </div>
+            <div class="d-flex align-center">
+              <span class="text-caption font-weight-medium mr-2">
+                {{ routeOptions.find((r) => r.type === selectedRouteType) ? 
+                  `${(routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(1)} km • ${Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)} min` 
+                  : '' }}
+              </span>
+              <v-icon size="small" :color="routeConfig[selectedRouteType].color">
+                {{ routeConfig[selectedRouteType].icon }}
+              </v-icon>
             </div>
           </div>
         </v-card-text>
@@ -1943,6 +2005,26 @@ onUnmounted(() => {
           </v-btn>
         </div>
       </div>
+
+      <!-- Re-open Route Panel Button -->
+      <v-btn
+        v-if="routeOptions.length > 0 && !showRoutePanel"
+        class="reopen-route-btn"
+        @click="showRouteSelectionPanel"
+        icon
+        size="large"
+        elevation="3"
+        title="Show route options"
+      >
+        <v-badge
+          dot
+          color="green"
+          offset-x="-8"
+          offset-y="2"
+        >
+          <v-icon color="primary">mdi-routes</v-icon>
+        </v-badge>
+      </v-btn>
 
       <!-- Error Message Alert -->
       <v-alert
@@ -2271,6 +2353,11 @@ onUnmounted(() => {
   animation: slideUp 0.3s ease-out;
 }
 
+.route-selection-panel.bottom-panel.minimized {
+  max-height: 60px;
+  overflow: hidden;
+}
+
 /* Animation for bottom panel */
 @keyframes slideUp {
   from {
@@ -2305,6 +2392,36 @@ onUnmounted(() => {
   background: #f8fafc;
   border-radius: 8px;
   padding: 12px;
+}
+
+/* Re-open Route Panel Button */
+.reopen-route-btn {
+  position: absolute;
+  bottom: 100px; /* Position above bottom navigation */
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2000;
+  background: white !important;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
+  border-radius: 50% !important;
+  width: 56px !important;
+  height: 56px !important;
+  border: 2px solid #3b82f6 !important;
+  transition: all 0.3s ease !important;
+}
+
+.reopen-route-btn:hover {
+  transform: translateX(-50%) scale(1.1);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
+  background: #f8fafc !important;
+}
+
+.reopen-route-btn .v-badge {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Map Controls */
@@ -2630,6 +2747,13 @@ onUnmounted(() => {
     font-size: 14px;
   }
 
+  /* Re-open Route Panel Button adjustments for mobile */
+  .reopen-route-btn {
+    bottom: calc(80px + env(safe-area-inset-bottom));
+    width: 52px !important;
+    height: 52px !important;
+  }
+
   .map-controls-container {
     bottom: 140px; /* Adjusted for mobile */
     right: max(12px, env(safe-area-inset-right));
@@ -2702,6 +2826,18 @@ onUnmounted(() => {
     max-width: 340px;
   }
 
+  .route-selection-panel.bottom-panel.minimized {
+    max-width: 300px;
+    max-height: 50px;
+  }
+
+  /* Re-open Route Panel Button adjustments for extra small */
+  .reopen-route-btn {
+    bottom: calc(75px + env(safe-area-inset-bottom));
+    width: 48px !important;
+    height: 48px !important;
+  }
+
   /* NEW: Smaller margin for extra small devices */
   .map-controls-group {
     margin-bottom: -20px; /* Even less margin for very small screens */
@@ -2735,6 +2871,18 @@ onUnmounted(() => {
     max-width: 350px;
   }
 
+  .route-selection-panel.bottom-panel.minimized {
+    max-width: 320px;
+    max-height: 48px;
+  }
+
+  /* Re-open Route Panel Button adjustments for landscape */
+  .reopen-route-btn {
+    bottom: 80px;
+    width: 44px !important;
+    height: 44px !important;
+  }
+
   /* NEW: Minimal margin for landscape mode */
   .map-controls-group {
     margin-bottom: -15px; /* Minimal negative margin for landscape */
@@ -2758,6 +2906,11 @@ onUnmounted(() => {
     padding-top: calc(20px + env(safe-area-inset-top)) !important;
     min-height: calc(80px + constant(safe-area-inset-top)) !important;
     min-height: calc(80px + env(safe-area-inset-top)) !important;
+  }
+  
+  .reopen-route-btn {
+    bottom: calc(100px + constant(safe-area-inset-bottom)) !important;
+    bottom: calc(100px + env(safe-area-inset-bottom)) !important;
   }
 }
 </style>
