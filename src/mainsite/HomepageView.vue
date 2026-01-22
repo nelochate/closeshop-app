@@ -553,7 +553,7 @@ onMounted(() => {
             hide-details
             clearable
             density="comfortable"
-            placeholder="Search products..."
+            placeholder="Search product or shop..."
             prepend-inner-icon="mdi-magnify"
             append-inner-icon="mdi-earth"
             @focus="goToSearch"
@@ -578,7 +578,6 @@ onMounted(() => {
         </div>
       </v-sheet>
 
-      <!-- ... rest of your template remains the same ... -->
       <v-container class="py-4" style="max-width: 720px">
         <!-- 🏬 Nearby Stores -->
         <div class="section-header mt-6">
@@ -592,7 +591,7 @@ onMounted(() => {
               <v-icon small class="mr-1">mdi-crosshairs-gps</v-icon>
               {{ getLocationStatusText(locationAccuracy) }}
             </v-chip>
-            <button class="see-more" @click="seeMoreNearby">See more</button>
+            <button class="see-more" @click="seeMoreNearby"><u>See more</u></button>
           </div>
         </div>
 
