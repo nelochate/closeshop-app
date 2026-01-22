@@ -41,7 +41,7 @@ async function fetchSearchResults() {
     const { data, error } = await supabase
       .from('products')
       .select('id, prod_name, price, main_img_urls, sold')
-      .ilike('prod_name', `${query.value}%`) // starts-with search
+      .ilike('prod_name', `%${query.value}%`) // contains search anywhere
 
     if (error) throw error
 
