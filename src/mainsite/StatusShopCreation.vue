@@ -1208,7 +1208,7 @@ const statusTitle = computed(() => {
 const statusMessage = computed(() => {
   const messages = {
     approved: 'Your shop is now live and ready for business',
-    declined: 'Your application requires some updates',
+    declined: 'Your application requires is being revoked',
     pending: 'Your shop application is being reviewed'
   }
   return messages[shopStatus.value] || 'Status information unavailable'
