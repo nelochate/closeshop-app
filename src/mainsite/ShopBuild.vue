@@ -861,11 +861,15 @@ const saveShop = async () => {
     let addressSource = 'detected' // Default to detected address
 
     // Check if manual address fields are filled (user manually edited the address)
-    const hasManualAddressFields = address.barangay.value ||
+    const hasManualAddressFields =
+      address.barangay.value ||
       address.building.value ||
       address.street.value ||
       address.house_no.value ||
-      (selectedBarangay.value && selectedCity.value && selectedProvince.value && selectedRegion.value)
+      (selectedBarangay.value &&
+        selectedCity.value &&
+        selectedProvince.value &&
+        selectedRegion.value)
 
     if (addressOption.value === 'manual' || hasManualAddressFields) {
       addressSource = 'manual'
@@ -898,7 +902,7 @@ const saveShop = async () => {
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
       open_days: openDays.value,
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString(),
     }
 
     if (!currentShopId.value) {
@@ -907,37 +911,36 @@ const saveShop = async () => {
       const { data, error } = await supabase.from('shops').insert(shopData).select().single()
       if (error) throw error
       currentShopId.value = data.id
-      
+
       // UPDATED: Redirect to status shop creation page with shop ID
       showSnackbar('Shop created successfully! Waiting for admin approval.', 'success')
-      
+
       // Add a delay to ensure the user sees the success message
       setTimeout(() => {
         // Store shop ID in localStorage (your status page reads from this)
         localStorage.setItem('lastCreatedShopId', currentShopId.value)
-        
+
         // Also pass as query parameter for direct access
         router.push({
           path: '/statusshopcreation',
-          query: { shopId: currentShopId.value }
+          query: { shopId: currentShopId.value },
         })
       }, 1500)
-      
     } else {
       // Existing shop - preserve status and update
       const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
       if (error) throw error
-      
+
       // UPDATED: For updates, also redirect to status page with shop ID
       showSnackbar('Shop updated successfully!', 'success')
-      
+
       setTimeout(() => {
         // Ensure shop ID is in localStorage
         localStorage.setItem('lastCreatedShopId', currentShopId.value)
-        
+
         router.push({
           path: '/statusshopcreation',
-          query: { shopId: currentShopId.value }
+          query: { shopId: currentShopId.value },
         })
       }, 1500)
     }
@@ -1023,12 +1026,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           cover
         >
           <div class="cover-overlay"></div>
-          <v-btn
-            icon
-            color="white"
-            class="cover-upload"
-            @click="handlePhysicalUpload"
-          >
+          <v-btn icon color="white" class="cover-upload" @click="handlePhysicalUpload">
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
           <h2 class="text-center text-blue">Upload Physical Store Photo</h2>
@@ -1040,11 +1038,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             <v-img v-if="avatarUrl" :src="avatarUrl" cover />
             <v-icon v-else size="70" color="grey">mdi-store</v-icon>
           </v-avatar>
-          <v-btn
-            icon
-            class="logo-upload-btn"
-            @click="handleLogoUpload"
-          >
+          <v-btn icon class="logo-upload-btn" @click="handleLogoUpload">
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
         </div>
@@ -1172,7 +1166,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             </v-chip>
           </v-card-title>
           <v-card-text>
-            <v-checkbox v-model="deliveryOptions" label="Call a Courier" value="courier" />
+            <v-checkbox v-model="deliveryOptions" label="Deliver or Call a Rider" value="courier" />
             <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
             <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
             <v-text-field
@@ -1573,9 +1567,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               size="large"
             >
               <v-icon left>{{ saving ? 'mdi-loading' : 'mdi-content-save' }}</v-icon>
-              {{
-                saving ? 'Saving...' : currentShopId ? 'Update & View Status' : 'Save Shop'
-              }}
+              {{ saving ? 'Saving...' : currentShopId ? 'Update & View Status' : 'Save Shop' }}
             </v-btn>
           </v-card-actions>
         </v-card>
