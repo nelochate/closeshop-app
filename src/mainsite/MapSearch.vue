@@ -38,6 +38,8 @@ const userCity = ref<string | null>(null)
 const lastKnownKey = 'closeshop_last_location'
 const lastKnown = ref<[number, number] | null>(null)
 let lastUpdateTs = 0
+let lastShopFetchTs = 0
+let lastBoundaryUpdateTime = 0
 const productMatches = ref<any[]>([])
 const routeLoading = ref(false)
 const filteredShops = ref<any[]>([])
@@ -47,7 +49,79 @@ const boundaryLoading = ref(false)
 const hasValidLocation = ref(false)
 const selectedShopId = ref<string | null>(null)
 const showBoundary = ref(true)
-const geolocateControl = ref<any>(null) // Added reference to geolocate control
+const geolocateControl = ref<any>(null)
+
+/* -------------------- BOUNDARY STATE MANAGEMENT -------------------- */
+const currentBoundaryCity = ref<string | null>(null)
+const currentBoundaryBounds = ref<any>(null)
+const isWithinCurrentBoundary = ref(true)
+const boundarySourceId = 'city-boundary-source'
+const BOUNDARY_UPDATE_THRESHOLD = 1000 // meters - only update if user moves 1km outside boundary
+
+/* -------------------- DEBOUNCE & THROTTLE HELPERS -------------------- */
+let boundaryUpdateTimeout: number | null = null
+let isBoundaryUpdating = false
+const BOUNDARY_UPDATE_DELAY = 3000 // 3 seconds between boundary updates
+const MIN_BOUNDARY_UPDATE_INTERVAL = 30000 // 30 seconds minimum between updates (increased from 10)
+const MIN_SHOP_FETCH_INTERVAL = 30000 // 30 seconds between shop fetches
+
+const debounceBoundaryUpdate = (lat: number, lng: number) => {
+  if (isBoundaryUpdating) {
+    console.log('Boundary update already in progress, skipping...')
+    return
+  }
+
+  // Check if we're still within current boundary
+  if (currentBoundaryCity.value && currentBoundaryBounds.value) {
+    const distanceToBoundary = calculateDistanceToBoundary(lat, lng, currentBoundaryBounds.value)
+    console.log(`Distance to current boundary: ${distanceToBoundary.toFixed(2)}m`)
+    
+    // Only update if user has moved significantly outside the boundary
+    if (distanceToBoundary < BOUNDARY_UPDATE_THRESHOLD) {
+      console.log('Still within current boundary, skipping update')
+      return
+    }
+  }
+
+  if (boundaryUpdateTimeout) {
+    clearTimeout(boundaryUpdateTimeout)
+  }
+
+  boundaryUpdateTimeout = setTimeout(() => {
+    if (!isBoundaryUpdating) {
+      isBoundaryUpdating = true
+      highlightUserCityBoundary(lat, lng)
+        .finally(() => {
+          isBoundaryUpdating = false
+          boundaryUpdateTimeout = null
+        })
+    }
+  }, BOUNDARY_UPDATE_DELAY)
+}
+
+/* -------------------- CALCULATE DISTANCE TO BOUNDARY -------------------- */
+const calculateDistanceToBoundary = (lat: number, lng: number, bounds: any): number => {
+  if (!bounds || !bounds[0] || !bounds[1]) return 0
+  
+  // Get the center of the bounds
+  const centerLng = (bounds[0][0] + bounds[1][0]) / 2
+  const centerLat = (bounds[0][1] + bounds[1][1]) / 2
+  
+  // Calculate distance from user to boundary center
+  return getDistance(lat, lng, centerLat, centerLng)
+}
+
+/* -------------------- GET DISTANCE IN METERS -------------------- */
+const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+  const R = 6371000 // Earth's radius in meters
+  const toRad = (v: number) => (v * Math.PI) / 180
+  const dLat = toRad(lat2 - lat1)
+  const dLon = toRad(lon2 - lon1)
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon / 2) ** 2
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
+}
 
 /* -------------------- ROUTE TYPE SELECTOR -------------------- */
 type RouteType = 'driving' | 'walking' | 'cycling'
@@ -144,28 +218,19 @@ const initializeMap = async (): Promise<void> => {
       'top-right',
     )
 
-    // Add geolocate control - USING MAPBOX'S BUILT-IN MARKER
+    // Add geolocate control
     geolocateControl.value = new mapboxgl.GeolocateControl({
       positionOptions: {
         enableHighAccuracy: true,
       },
-      trackUserLocation: true,  // This enables Mapbox's built-in marker
-      showUserLocation: true,   // This shows the default blue dot
-      showAccuracyCircle: true, // Shows accuracy circle
+      trackUserLocation: true,
+      showUserLocation: true,
+      showAccuracyCircle: true,
       fitBoundsOptions: {
         maxZoom: 15,
       },
     })
     map.value.addControl(geolocateControl.value, 'top-right')
-
-    // ✅ AUTO-TRIGGER GEOLOCATION AFTER ADDING CONTROL
-    // Wait a bit for the map to be ready, then trigger geolocation
-    setTimeout(() => {
-      if (geolocateControl.value) {
-        geolocateControl.value.trigger();
-        console.log('Auto-triggered geolocation on map load');
-      }
-    }, 1500);
 
     // Add attribution
     map.value.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
@@ -182,38 +247,45 @@ const initializeMap = async (): Promise<void> => {
 
       // Load city boundary if we have location
       if (lastKnown.value) {
-        await highlightUserCityBoundary(lastKnown.value[0], lastKnown.value[1])
+        // Don't debounce initial load
+        highlightUserCityBoundary(lastKnown.value[0], lastKnown.value[1])
       }
     })
 
     // Handle geolocate events
     geolocateControl.value.on('geolocate', (event: any) => {
-      console.log('Geolocate triggered:', event)
-      hasValidLocation.value = true
+      console.log('Mapbox geolocate triggered')
       
-      // Trigger location update for boundary highlighting
-      if (latitude.value && longitude.value) {
-        highlightUserCityBoundary(latitude.value, longitude.value)
+      if (event.coords) {
+        const lat = event.coords.latitude
+        const lng = event.coords.longitude
+        
+        if (lat && lng) {
+          hasValidLocation.value = true
+          saveCachedLocation(lat, lng)
+          
+          // Check if we need to update boundary
+          const now = Date.now()
+          if (now - lastBoundaryUpdateTime > MIN_BOUNDARY_UPDATE_INTERVAL) {
+            lastBoundaryUpdateTime = now
+            debounceBoundaryUpdate(lat, lng)
+          }
+        }
       }
     })
 
-    // ✅ ADDITIONAL EVENT HANDLERS FOR GEOLOCATION
-    geolocateControl.value.on('geolocate', (position: any) => {
-      console.log('Geolocation successful:', position);
-      hasValidLocation.value = true;
-    });
-
+    // Handle geolocation errors
     geolocateControl.value.on('error', (error: any) => {
-      console.warn('Geolocation error:', error);
-    });
+      console.warn('Geolocation error:', error)
+    })
 
     geolocateControl.value.on('trackuserlocationstart', () => {
-      console.log('User location tracking started');
-    });
+      console.log('User location tracking started')
+    })
 
     geolocateControl.value.on('trackuserlocationend', () => {
-      console.log('User location tracking ended');
-    });
+      console.log('User location tracking ended')
+    })
 
     // Handle map errors
     map.value.on('error', (e: any) => {
@@ -378,6 +450,7 @@ const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) 
 const highlightUserCityBoundary = async (lat: number, lng: number) => {
   if (!map.value || !mapboxgl || !showBoundary.value) {
     console.log('Boundary display is disabled or map not available')
+    isBoundaryUpdating = false
     return
   }
 
@@ -385,19 +458,36 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
     boundaryLoading.value = true
     console.log('Starting boundary highlighting for:', lat, lng)
 
-    // Clear existing boundary
-    clearCityBoundary()
-
-    // Detect city name
+    // First detect city name
     const detectedCity = await detectUserCity(lat, lng)
+    
+    // Check if we're already in the same city
+    if (currentBoundaryCity.value === detectedCity && currentBoundaryBounds.value) {
+      const distanceToBoundary = calculateDistanceToBoundary(lat, lng, currentBoundaryBounds.value)
+      console.log(`Already in ${detectedCity}, distance to boundary: ${distanceToBoundary.toFixed(2)}m`)
+      
+      if (distanceToBoundary < BOUNDARY_UPDATE_THRESHOLD) {
+        console.log('Still within same city boundary, skipping update')
+        isBoundaryUpdating = false
+        boundaryLoading.value = false
+        return
+      }
+    }
+
+    // Update current city
     userCity.value = detectedCity
+    currentBoundaryCity.value = detectedCity
 
     if (!detectedCity) {
       console.warn('Could not detect city name')
       setErrorMessage('Could not detect your city. Showing all shops.', 3000)
+      isBoundaryUpdating = false
       boundaryLoading.value = false
       return
     }
+
+    // Clear existing boundary (with error handling)
+    clearCityBoundary()
 
     // Fetch boundary data
     const boundaryData = await fetchCityBoundaryData(detectedCity)
@@ -405,12 +495,13 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
     if (!boundaryData) {
       console.warn('Could not fetch boundary data')
       setErrorMessage('Could not load city boundary. Showing all shops.', 3000)
+      isBoundaryUpdating = false
       boundaryLoading.value = false
       return
     }
 
     // Add boundary source to map
-    const sourceId = 'city-boundary-source'
+    const sourceId = boundarySourceId
     const fillLayerId = 'city-boundary-fill'
     const lineLayerId = 'city-boundary-line'
 
@@ -421,7 +512,9 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
       })
     } else {
       const source = map.value.getSource(sourceId)
-      source.setData(boundaryData)
+      if (source && source.setData) {
+        source.setData(boundaryData)
+      }
     }
 
     // Add fill layer if not exists
@@ -453,10 +546,9 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
       })
     }
 
-    // Fit map to boundary
-    try {
-      const bounds = new mapboxgl.LngLatBounds()
-
+    // Calculate and store boundary bounds
+    const bounds = new mapboxgl.LngLatBounds()
+    if (boundaryData.geometry && boundaryData.geometry.coordinates) {
       if (boundaryData.geometry.type === 'Polygon') {
         boundaryData.geometry.coordinates[0].forEach((coord: [number, number]) => {
           bounds.extend(coord)
@@ -468,11 +560,19 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
       } else if (boundaryData.geometry.type === 'Point') {
         bounds.extend(boundaryData.geometry.coordinates as [number, number])
       }
+    }
 
-      // Include user location
-      bounds.extend([lng, lat])
+    // Include user location
+    bounds.extend([lng, lat])
 
-      // Only fit bounds if we have valid bounds
+    // Store the bounds for future comparisons
+    currentBoundaryBounds.value = [
+      [bounds.getWest(), bounds.getSouth()],
+      [bounds.getEast(), bounds.getNorth()]
+    ]
+
+    // Only fit bounds if we have valid bounds and it's not mobile
+    if (Capacitor.getPlatform() === 'web' || !lastBoundaryUpdateTime) {
       if (bounds.getNorth() !== bounds.getSouth() && bounds.getEast() !== bounds.getWest()) {
         map.value.fitBounds(bounds, {
           padding: 50,
@@ -481,45 +581,52 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
           maxZoom: 15,
         })
       }
-    } catch (boundsError) {
-      console.warn('Could not fit bounds to boundary:', boundsError)
-      // Fallback to centering on user
-      map.value.flyTo({
-        center: [lng, lat],
-        zoom: 13,
-        animate: true,
-        duration: 1000,
-      })
     }
 
     setErrorMessage(`Showing shops in ${detectedCity}`, 3000)
     console.log('Boundary highlighted successfully')
+    
+    // Mark user as within current boundary
+    isWithinCurrentBoundary.value = true
   } catch (error) {
     console.error('Error highlighting city boundary:', error)
     setErrorMessage('Error loading city boundary', 3000)
   } finally {
     boundaryLoading.value = false
+    isBoundaryUpdating = false
+    lastBoundaryUpdateTime = Date.now()
   }
 }
 
 const clearCityBoundary = () => {
   if (!map.value || !mapboxgl) return
 
-  // Remove layers
+  // Remove layers safely
   const layers = ['city-boundary-fill', 'city-boundary-line']
   layers.forEach((layerId) => {
-    if (map.value.getLayer(layerId)) {
-      map.value.removeLayer(layerId)
+    try {
+      if (map.value.getLayer(layerId)) {
+        map.value.removeLayer(layerId)
+      }
+    } catch (error) {
+      console.warn(`Failed to remove layer ${layerId}:`, error)
     }
   })
 
-  // Remove source
-  const sourceId = 'city-boundary-source'
-  if (map.value.getSource(sourceId)) {
-    map.value.removeSource(sourceId)
+  // Remove source safely
+  const sourceId = boundarySourceId
+  try {
+    if (map.value.getSource(sourceId)) {
+      map.value.removeSource(sourceId)
+    }
+  } catch (error) {
+    console.warn(`Failed to remove source ${sourceId}:`, error)
   }
 
-  userCity.value = null
+  // Reset state
+  currentBoundaryCity.value = null
+  currentBoundaryBounds.value = null
+  isWithinCurrentBoundary.value = false
   console.log('City boundary cleared')
 }
 
@@ -528,6 +635,7 @@ const toggleBoundaryVisibility = () => {
 
   if (showBoundary.value && latitude.value && longitude.value) {
     // Redraw boundary if turned on
+    lastBoundaryUpdateTime = 0 // Reset to force update
     highlightUserCityBoundary(latitude.value, longitude.value)
   } else {
     // Clear boundary if turned off
@@ -602,16 +710,48 @@ function saveCachedLocation(lat: number, lng: number) {
 
 /* -------------------- RECENTER -------------------- */
 const recenterToUser = async () => {
-  if (!map.value || !mapboxgl || !geolocateControl.value) return
+  if (!map.value || !mapboxgl) return
 
   locating.value = true
   errorMsg.value = null
 
   try {
-    // Use Mapbox's geolocate control to trigger location
-    geolocateControl.value.trigger()
-    
-    setErrorMessage('Updating your location...', 2000)
+    // On mobile, use direct geolocation instead of Mapbox's control
+    if (Capacitor.getPlatform() !== 'web') {
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0 // Get fresh location
+      })
+      
+      const lat = position.coords.latitude
+      const lng = position.coords.longitude
+      
+      // Update the cached location
+      saveCachedLocation(lat, lng)
+      hasValidLocation.value = true
+      
+      // Fly to location
+      map.value.flyTo({
+        center: [lng, lat],
+        zoom: 14,
+        essential: true,
+        duration: 1000,
+      })
+      
+      // Check if we need boundary update
+      const now = Date.now()
+      if (now - lastBoundaryUpdateTime > MIN_BOUNDARY_UPDATE_INTERVAL) {
+        lastBoundaryUpdateTime = now
+        debounceBoundaryUpdate(lat, lng)
+      }
+      
+      setErrorMessage('Location updated successfully', 2000)
+    } else {
+      // On web, use Mapbox's control
+      geolocateControl.value.trigger()
+      setErrorMessage('Updating your location...', 2000)
+    }
   } catch (error) {
     console.error('Error recentering:', error)
     setErrorMessage('Failed to update location', 3000)
@@ -1647,48 +1787,90 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
   }
 }
 
+/* -------------------- FOOTER ACTIVE STATE -------------------- */
+const updateFooterActiveState = () => {
+  // Force set to 'map' tab
+  activeTab.value = 'map'
+  
+  // Save to localStorage for persistence
+  try {
+    localStorage.setItem('closeshop_active_tab', 'map')
+  } catch (e) {
+    console.warn('Could not save active tab state', e)
+  }
+  
+  console.log('Footer set to map tab')
+}
+
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
   console.log('Mounting map component...')
+  
+  // Set footer to active state
+  updateFooterActiveState()
 
   try {
     await initializeMap()
 
-    if (Capacitor.getPlatform() !== 'web') await requestPermission()
-
-    const pos = await Geolocation.getCurrentPosition({
-      enableHighAccuracy: false,
-      timeout: 10000,
-    })
-    const quickLat = pos.coords.latitude
-    const quickLng = pos.coords.longitude
-
-    console.log('Got location:', quickLat, quickLng)
-
-    if (map.value) {
-      // Fly to location using Mapbox's built-in marker
-      map.value.flyTo({
-        center: [quickLng, quickLat],
-        zoom: 14,
-        essential: true,
-        duration: 1000,
-      })
-
-      await highlightUserCityBoundary(quickLat, quickLng)
+    if (Capacitor.getPlatform() !== 'web') {
+      await requestPermission()
+      
+      // Add a small delay for Android
+      await new Promise(resolve => setTimeout(resolve, 1000))
     }
 
-    saveCachedLocation(quickLat, quickLng)
+    // Don't trigger geolocation immediately - let the map load first
+    setTimeout(async () => {
+      try {
+        const pos = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: false,
+          timeout: 10000,
+          maximumAge: 60000 // Use cached location
+        })
+        
+        const quickLat = pos.coords.latitude
+        const quickLng = pos.coords.longitude
 
-    setTimeout(() => {
-      doFetchShops()
-    }, 1000)
+        console.log('Got initial location:', quickLat, quickLng)
+
+        if (map.value) {
+          // Only fly to location if we don't have cached location
+          if (!lastKnown.value) {
+            map.value.flyTo({
+              center: [quickLng, quickLat],
+              zoom: 14,
+              essential: true,
+              duration: 1000,
+            })
+          }
+
+          // Don't debounce initial boundary detection
+          highlightUserCityBoundary(quickLat, quickLng)
+        }
+
+        saveCachedLocation(quickLat, quickLng)
+        hasValidLocation.value = true
+        
+        // Fetch shops after location is set
+        setTimeout(() => {
+          doFetchShops()
+          lastShopFetchTs = Date.now()
+        }, 3000)
+        
+      } catch (err) {
+        console.warn('Initial geolocation failed:', err)
+        setErrorMessage('Location access failed. Using default location.', 3000)
+        doFetchShops()
+        lastShopFetchTs = Date.now()
+      }
+    }, 2000) // Increased delay for map to fully initialize
+    
   } catch (err) {
-    console.warn('Quick geolocation failed:', err)
-    setErrorMessage('Location access failed. Using default location.', 3000)
-    doFetchShops()
+    console.error('Mounting error:', err)
   }
 })
 
+/* -------------------- WATCH HANDLER - OPTIMIZED -------------------- */
 watch(
   [latitude, longitude],
   async ([lat, lng]) => {
@@ -1700,17 +1882,33 @@ watch(
     if (!isFinite(userLat) || !isFinite(userLng)) return
 
     const now = Date.now()
-    if (now - lastUpdateTs < 1000) {
+    
+    // Skip if too frequent (increase from 1s to 5s for mobile)
+    if (now - lastUpdateTs < (Capacitor.getPlatform() === 'web' ? 1000 : 5000)) {
       saveCachedLocation(userLat, userLng)
       return
     }
     lastUpdateTs = now
 
-    hasValidLocation.value = true
+    // Check if enough time has passed since last boundary update
+    if (now - lastBoundaryUpdateTime < MIN_BOUNDARY_UPDATE_INTERVAL) {
+      console.log('Skipping boundary update - too recent')
+      return
+    }
 
+    hasValidLocation.value = true
     saveCachedLocation(userLat, userLng)
-    await highlightUserCityBoundary(userLat, userLng)
-    void doFetchShops()
+    
+    // Only update boundary if user has moved significantly
+    lastBoundaryUpdateTime = now
+    debounceBoundaryUpdate(userLat, userLng)
+    
+    // Only fetch shops if it's been more than MIN_SHOP_FETCH_INTERVAL
+    const now2 = Date.now()
+    if (now2 - lastShopFetchTs > MIN_SHOP_FETCH_INTERVAL) {
+      lastShopFetchTs = now2
+      void doFetchShops()
+    }
   },
   { immediate: true },
 )
@@ -1723,6 +1921,11 @@ onUnmounted(() => {
     } catch (e) {
       console.warn('Error removing map:', e)
     }
+  }
+  
+  // Clear any pending timeouts
+  if (boundaryUpdateTimeout) {
+    clearTimeout(boundaryUpdateTimeout)
   }
 })
 </script>
@@ -1942,7 +2145,7 @@ onUnmounted(() => {
             </v-list>
           </v-menu>
 
-          <!-- Recenter Button - Now triggers Mapbox's geolocate control -->
+          <!-- Recenter Button -->
           <v-btn
             icon
             :loading="locating"
@@ -2553,7 +2756,13 @@ onUnmounted(() => {
   padding: 4px 8px !important;
 }
 
-/* Mapbox Geolocate Control Customization */
+/* Mapbox Geolocate Control Customization - Hide on mobile to prevent multiple triggers */
+@media (max-width: 768px) {
+  :deep(.mapboxgl-ctrl-geolocate) {
+    display: none !important;
+  }
+}
+
 :deep(.mapboxgl-ctrl-geolocate) {
   background-color: #3b82f6 !important;
   color: white !important;
@@ -2821,10 +3030,6 @@ onUnmounted(() => {
     bottom: calc(100px + env(safe-area-inset-bottom)) !important;
   }
 }
-/* Hide only Mapbox's geolocate control button */
-:deep(.mapboxgl-ctrl-geolocate) {
-  display: none !important;
-}
 
 /* Keep all other Mapbox controls visible */
 :deep(.mapboxgl-ctrl-group) > button:not(.mapboxgl-ctrl-geolocate) {
@@ -2835,6 +3040,4 @@ onUnmounted(() => {
 :deep(.mapboxgl-ctrl-attrib) {
   display: block !important;
 }
-
-
 </style>
