@@ -75,7 +75,7 @@ const debounceBoundaryUpdate = (lat: number, lng: number) => {
   if (currentBoundaryCity.value && currentBoundaryBounds.value) {
     const distanceToBoundary = calculateDistanceToBoundary(lat, lng, currentBoundaryBounds.value)
     console.log(`Distance to current boundary: ${distanceToBoundary.toFixed(2)}m`)
-    
+
     // Only update if user has moved significantly outside the boundary
     if (distanceToBoundary < BOUNDARY_UPDATE_THRESHOLD) {
       console.log('Still within current boundary, skipping update')
@@ -90,11 +90,10 @@ const debounceBoundaryUpdate = (lat: number, lng: number) => {
   boundaryUpdateTimeout = setTimeout(() => {
     if (!isBoundaryUpdating) {
       isBoundaryUpdating = true
-      highlightUserCityBoundary(lat, lng)
-        .finally(() => {
-          isBoundaryUpdating = false
-          boundaryUpdateTimeout = null
-        })
+      highlightUserCityBoundary(lat, lng).finally(() => {
+        isBoundaryUpdating = false
+        boundaryUpdateTimeout = null
+      })
     }
   }, BOUNDARY_UPDATE_DELAY)
 }
@@ -102,11 +101,11 @@ const debounceBoundaryUpdate = (lat: number, lng: number) => {
 /* -------------------- CALCULATE DISTANCE TO BOUNDARY -------------------- */
 const calculateDistanceToBoundary = (lat: number, lng: number, bounds: any): number => {
   if (!bounds || !bounds[0] || !bounds[1]) return 0
-  
+
   // Get the center of the bounds
   const centerLng = (bounds[0][0] + bounds[1][0]) / 2
   const centerLat = (bounds[0][1] + bounds[1][1]) / 2
-  
+
   // Calculate distance from user to boundary center
   return getDistance(lat, lng, centerLat, centerLng)
 }
@@ -255,15 +254,15 @@ const initializeMap = async (): Promise<void> => {
     // Handle geolocate events
     geolocateControl.value.on('geolocate', (event: any) => {
       console.log('Mapbox geolocate triggered')
-      
+
       if (event.coords) {
         const lat = event.coords.latitude
         const lng = event.coords.longitude
-        
+
         if (lat && lng) {
           hasValidLocation.value = true
           saveCachedLocation(lat, lng)
-          
+
           // Check if we need to update boundary
           const now = Date.now()
           if (now - lastBoundaryUpdateTime > MIN_BOUNDARY_UPDATE_INTERVAL) {
@@ -301,16 +300,16 @@ const initializeMap = async (): Promise<void> => {
 /* -------------------- TIME FORMATTING FUNCTIONS -------------------- */
 const formatTime12Hour = (time24: string): string => {
   if (!time24) return ''
-  
+
   try {
     const [hours, minutes] = time24.split(':').map(Number)
-    
+
     if (isNaN(hours) || isNaN(minutes)) return time24
-    
+
     const period = hours >= 12 ? 'PM' : 'AM'
     const hours12 = hours % 12 || 12 // Convert 0 to 12 for midnight
     const minutesStr = minutes.toString().padStart(2, '0')
-    
+
     return `${hours12}:${minutesStr} ${period}`
   } catch (error) {
     console.warn('Error formatting time:', error)
@@ -460,12 +459,14 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
 
     // First detect city name
     const detectedCity = await detectUserCity(lat, lng)
-    
+
     // Check if we're already in the same city
     if (currentBoundaryCity.value === detectedCity && currentBoundaryBounds.value) {
       const distanceToBoundary = calculateDistanceToBoundary(lat, lng, currentBoundaryBounds.value)
-      console.log(`Already in ${detectedCity}, distance to boundary: ${distanceToBoundary.toFixed(2)}m`)
-      
+      console.log(
+        `Already in ${detectedCity}, distance to boundary: ${distanceToBoundary.toFixed(2)}m`,
+      )
+
       if (distanceToBoundary < BOUNDARY_UPDATE_THRESHOLD) {
         console.log('Still within same city boundary, skipping update')
         isBoundaryUpdating = false
@@ -568,7 +569,7 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
     // Store the bounds for future comparisons
     currentBoundaryBounds.value = [
       [bounds.getWest(), bounds.getSouth()],
-      [bounds.getEast(), bounds.getNorth()]
+      [bounds.getEast(), bounds.getNorth()],
     ]
 
     // Only fit bounds if we have valid bounds and it's not mobile
@@ -585,7 +586,7 @@ const highlightUserCityBoundary = async (lat: number, lng: number) => {
 
     setErrorMessage(`Showing shops in ${detectedCity}`, 3000)
     console.log('Boundary highlighted successfully')
-    
+
     // Mark user as within current boundary
     isWithinCurrentBoundary.value = true
   } catch (error) {
@@ -721,16 +722,16 @@ const recenterToUser = async () => {
       const position = await Geolocation.getCurrentPosition({
         enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 0 // Get fresh location
+        maximumAge: 0, // Get fresh location
       })
-      
+
       const lat = position.coords.latitude
       const lng = position.coords.longitude
-      
+
       // Update the cached location
       saveCachedLocation(lat, lng)
       hasValidLocation.value = true
-      
+
       // Fly to location
       map.value.flyTo({
         center: [lng, lat],
@@ -738,14 +739,14 @@ const recenterToUser = async () => {
         essential: true,
         duration: 1000,
       })
-      
+
       // Check if we need boundary update
       const now = Date.now()
       if (now - lastBoundaryUpdateTime > MIN_BOUNDARY_UPDATE_INTERVAL) {
         lastBoundaryUpdateTime = now
         debounceBoundaryUpdate(lat, lng)
       }
-      
+
       setErrorMessage('Location updated successfully', 2000)
     } else {
       // On web, use Mapbox's control
@@ -1135,7 +1136,7 @@ const getDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) =
 const validateCoordinates = (lat: number, lng: number): boolean => {
   if (!isFinite(lat) || !isFinite(lng)) return false
   if (lat === 0 && lng === 0) return false // Avoid 0,0 coordinates
-  if (lat < -90 || lat > 90) return false  // Valid latitude range
+  if (lat < -90 || lat > 90) return false // Valid latitude range
   if (lng < -180 || lng > 180) return false // Valid longitude range
   return true
 }
@@ -1181,14 +1182,14 @@ const doFetchShops = async () => {
         close_time,
         open_days,
         products:products(id, prod_name, price, main_img_urls)
-      `
+      `,
       )
-      .eq('status', 'approved')           // ✅ Only approved shops
-      .not('latitude', 'is', null)        // ✅ Only shops with latitude
-      .not('longitude', 'is', null)       // ✅ Only shops with longitude
+      .eq('status', 'approved') // ✅ Only approved shops
+      .not('latitude', 'is', null) // ✅ Only shops with latitude
+      .not('longitude', 'is', null) // ✅ Only shops with longitude
 
     if (error) throw error
-    
+
     if (!data) {
       shops.value = []
       clearShopMarkers()
@@ -1196,13 +1197,15 @@ const doFetchShops = async () => {
     }
 
     // ✅ Additional validation to ensure coordinates are valid numbers
-    const validShops = data.filter(shop => {
+    const validShops = data.filter((shop) => {
       const lat = Number(shop.latitude)
       const lng = Number(shop.longitude)
       return validateCoordinates(lat, lng)
     })
 
-    console.log(`✅ Found ${validShops.length} approved shops with valid coordinates (filtered from ${data.length} total)`)
+    console.log(
+      `✅ Found ${validShops.length} approved shops with valid coordinates (filtered from ${data.length} total)`,
+    )
 
     const mapped = validShops.map((s) => {
       const lat = Number(s.latitude)
@@ -1221,7 +1224,6 @@ const doFetchShops = async () => {
 
     shops.value = mapped.sort((a, b) => a.distanceKm - b.distanceKm)
     applyShopFilters()
-    
   } catch (e) {
     console.error('Error fetching shops:', e)
     errorMsg.value = 'Failed to fetch shops.'
@@ -1275,7 +1277,7 @@ const toggleDisplayMode = (mode: 'within' | 'outside') => {
 const createShopPopup = (shop: any): string => {
   const statusDisplay = getShopStatusDisplay(shop)
   const isOpen = isShopCurrentlyOpen(shop)
-  
+
   return `
     <div style="min-width: 240px; max-width: 280px; padding: 12px;" class="shop-popup-content">
       <!-- Shop Header -->
@@ -1289,8 +1291,11 @@ const createShopPopup = (shop: any): string => {
             <div style="background:${statusDisplay.color};color:white;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:bold;">
               ${statusDisplay.text}
             </div>
-            ${shop.manual_status !== 'auto' ? 
-              '<span style="font-size:10px;color:#f59e0b;" title="Manual override">⚡</span>' : ''}
+            ${
+              shop.manual_status !== 'auto'
+                ? '<span style="font-size:10px;color:#f59e0b;" title="Manual override">⚡</span>'
+                : ''
+            }
           </div>
         </div>
       </div>
@@ -1313,14 +1318,18 @@ const createShopPopup = (shop: any): string => {
           </span>
         </div>
         
-        ${shop.open_time && shop.close_time ? `
+        ${
+          shop.open_time && shop.close_time
+            ? `
         <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
             <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
           </svg>
           <span>${formatTimeRange(shop.open_time, shop.close_time)}</span>
         </div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
       
       <!-- Action Buttons -->
@@ -1337,10 +1346,13 @@ const createShopPopup = (shop: any): string => {
         </button>
       </div>
       
-      ${!isOpen ? 
-        `<p style="color: #ef4444; font-size: 12px; margin-top: 8px; padding: 4px; background: #fee; border-radius: 4px;">
+      ${
+        !isOpen
+          ? `<p style="color: #ef4444; font-size: 12px; margin-top: 8px; padding: 4px; background: #fee; border-radius: 4px;">
           Currently closed • Opens at ${formatTime12Hour(shop.open_time) || 'unknown'}
-        </p>` : ''}
+        </p>`
+          : ''
+      }
     </div>
   `
 }
@@ -1394,7 +1406,7 @@ const plotShops = () => {
 
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
-    
+
     // ✅ Validate coordinates before plotting
     if (!validateCoordinates(lat, lng)) {
       console.warn(`Skipping shop ${shop.id} - invalid coordinates: ${lat}, ${lng}`)
@@ -1446,8 +1458,10 @@ const plotShops = () => {
 
     plottedCount++
   }
-  
-  console.log(`📍 Plotted ${plottedCount} shop markers (skipped ${skippedCount} shops without valid coordinates)`)
+
+  console.log(
+    `📍 Plotted ${plottedCount} shop markers (skipped ${skippedCount} shops without valid coordinates)`,
+  )
 }
 
 /* -------------------- FOCUS ON SHOP MARKER -------------------- */
@@ -1634,6 +1648,10 @@ const smartSearch = async () => {
   isSearchMode.value = true
 
   try {
+    // Get current user location for distance calculation
+    const userLat = Number(latitude.value ?? lastKnown.value?.[0])
+    const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+
     const searchResults = shops.value.filter((shop) => {
       const searchTerms = [
         shop.business_name?.toLowerCase(),
@@ -1647,22 +1665,25 @@ const smartSearch = async () => {
       return searchTerms.some((term) => term && term.includes(query))
     })
 
-    const sortedResults = searchResults.sort((a, b) => {
-      const aNameMatch = a.business_name?.toLowerCase().includes(query)
-      const bNameMatch = b.business_name?.toLowerCase().includes(query)
-
-      if (aNameMatch && !bNameMatch) return -1
-      if (!aNameMatch && bNameMatch) return 1
-
-      const aProductMatches = getMatchingProducts(a).length
-      const bProductMatches = getMatchingProducts(b).length
-
-      if (aProductMatches !== bProductMatches) {
-        return bProductMatches - aProductMatches
-      }
-
-      return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
-    })
+    // Calculate distance for each result and sort
+    const sortedResults = searchResults
+      .map(shop => {
+        const lat = Number(shop.latitude)
+        const lng = Number(shop.longitude)
+        let distance = shop.distanceKm || 0
+        
+        // Recalculate distance if we have user location
+        if (isFinite(userLat) && isFinite(userLng) && isFinite(lat) && isFinite(lng)) {
+          distance = getDistanceKm(userLat, userLng, lat, lng)
+        }
+        
+        return {
+          ...shop,
+          searchDistance: distance
+        }
+      })
+      // Sort by distance (nearest first)
+      .sort((a, b) => a.searchDistance - b.searchDistance)
 
     if (sortedResults.length === 0) {
       errorMsg.value = `No shops or products found for "${query}"`
@@ -1671,14 +1692,13 @@ const smartSearch = async () => {
     } else {
       const matchTypes = {
         shops: sortedResults.filter(
-          (shop) =>
-            shop.business_name?.toLowerCase().includes(query) ||
-            shop.city?.toLowerCase().includes(query),
+          (shop) => shop.business_name?.toLowerCase().includes(query) ||
+                  shop.city?.toLowerCase().includes(query)
         ).length,
         products: sortedResults.filter((shop) => getMatchingProducts(shop).length > 0).length,
       }
 
-      errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products)`
+      errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products) - Sorted by distance`
       filteredShops.value = sortedResults
       showShopMenu.value = true
       plotShops()
@@ -1791,21 +1811,21 @@ const setErrorMessage = (message: string | null, duration: number = 4000) => {
 const updateFooterActiveState = () => {
   // Force set to 'map' tab
   activeTab.value = 'map'
-  
+
   // Save to localStorage for persistence
   try {
     localStorage.setItem('closeshop_active_tab', 'map')
   } catch (e) {
     console.warn('Could not save active tab state', e)
   }
-  
+
   console.log('Footer set to map tab')
 }
 
 /* -------------------- LIFECYCLE -------------------- */
 onMounted(async () => {
   console.log('Mounting map component...')
-  
+
   // Set footer to active state
   updateFooterActiveState()
 
@@ -1814,9 +1834,9 @@ onMounted(async () => {
 
     if (Capacitor.getPlatform() !== 'web') {
       await requestPermission()
-      
+
       // Add a small delay for Android
-      await new Promise(resolve => setTimeout(resolve, 1000))
+      await new Promise((resolve) => setTimeout(resolve, 1000))
     }
 
     // Don't trigger geolocation immediately - let the map load first
@@ -1825,9 +1845,9 @@ onMounted(async () => {
         const pos = await Geolocation.getCurrentPosition({
           enableHighAccuracy: false,
           timeout: 10000,
-          maximumAge: 60000 // Use cached location
+          maximumAge: 60000, // Use cached location
         })
-        
+
         const quickLat = pos.coords.latitude
         const quickLng = pos.coords.longitude
 
@@ -1850,13 +1870,12 @@ onMounted(async () => {
 
         saveCachedLocation(quickLat, quickLng)
         hasValidLocation.value = true
-        
+
         // Fetch shops after location is set
         setTimeout(() => {
           doFetchShops()
           lastShopFetchTs = Date.now()
         }, 3000)
-        
       } catch (err) {
         console.warn('Initial geolocation failed:', err)
         setErrorMessage('Location access failed. Using default location.', 3000)
@@ -1864,7 +1883,6 @@ onMounted(async () => {
         lastShopFetchTs = Date.now()
       }
     }, 2000) // Increased delay for map to fully initialize
-    
   } catch (err) {
     console.error('Mounting error:', err)
   }
@@ -1882,7 +1900,7 @@ watch(
     if (!isFinite(userLat) || !isFinite(userLng)) return
 
     const now = Date.now()
-    
+
     // Skip if too frequent (increase from 1s to 5s for mobile)
     if (now - lastUpdateTs < (Capacitor.getPlatform() === 'web' ? 1000 : 5000)) {
       saveCachedLocation(userLat, userLng)
@@ -1898,11 +1916,11 @@ watch(
 
     hasValidLocation.value = true
     saveCachedLocation(userLat, userLng)
-    
+
     // Only update boundary if user has moved significantly
     lastBoundaryUpdateTime = now
     debounceBoundaryUpdate(userLat, userLng)
-    
+
     // Only fetch shops if it's been more than MIN_SHOP_FETCH_INTERVAL
     const now2 = Date.now()
     if (now2 - lastShopFetchTs > MIN_SHOP_FETCH_INTERVAL) {
@@ -1922,7 +1940,7 @@ onUnmounted(() => {
       console.warn('Error removing map:', e)
     }
   }
-  
+
   // Clear any pending timeouts
   if (boundaryUpdateTimeout) {
     clearTimeout(boundaryUpdateTimeout)
@@ -1978,7 +1996,11 @@ onUnmounted(() => {
       </div>
 
       <!-- Route Selection Panel -->
-      <v-card v-if="showRoutePanel" :class="['route-selection-panel', 'bottom-panel', { 'minimized': routePanelMinimized }]" elevation="4">
+      <v-card
+        v-if="showRoutePanel"
+        :class="['route-selection-panel', 'bottom-panel', { minimized: routePanelMinimized }]"
+        elevation="4"
+      >
         <v-card-title class="d-flex align-center justify-space-between py-2">
           <div class="d-flex align-center">
             <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
@@ -1986,21 +2008,21 @@ onUnmounted(() => {
           </div>
           <div class="d-flex align-center gap-1">
             <!-- Minimize Button -->
-            <v-btn 
-              icon 
-              size="small" 
-              @click="toggleRoutePanelMinimize" 
-              variant="text" 
+            <v-btn
+              icon
+              size="small"
+              @click="toggleRoutePanelMinimize"
+              variant="text"
               :title="routePanelMinimized ? 'Expand panel' : 'Minimize panel'"
             >
               <v-icon>{{ routePanelMinimized ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
             </v-btn>
             <!-- Close Button -->
-            <v-btn 
-              icon 
-              size="small" 
-              @click="clearAllRoutes" 
-              variant="text" 
+            <v-btn
+              icon
+              size="small"
+              @click="clearAllRoutes"
+              variant="text"
               title="Close route panel"
             >
               <v-icon>mdi-close</v-icon>
@@ -2074,9 +2096,11 @@ onUnmounted(() => {
             </div>
             <div class="d-flex align-center">
               <span class="text-caption font-weight-medium mr-2">
-                {{ routeOptions.find((r) => r.type === selectedRouteType) ? 
-                  `${(routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(1)} km • ${Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)} min` 
-                  : '' }}
+                {{
+                  routeOptions.find((r) => r.type === selectedRouteType)
+                    ? `${(routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(1)} km • ${Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)} min`
+                    : ''
+                }}
               </span>
               <v-icon size="small" :color="routeConfig[selectedRouteType].color">
                 {{ routeConfig[selectedRouteType].icon }}
@@ -2169,12 +2193,7 @@ onUnmounted(() => {
         elevation="3"
         title="Show route options"
       >
-        <v-badge
-          dot
-          color="green"
-          offset-x="-8"
-          offset-y="2"
-        >
+        <v-badge dot color="green" offset-x="-8" offset-y="2">
           <v-icon color="primary">mdi-routes</v-icon>
         </v-badge>
       </v-btn>
@@ -2328,11 +2347,11 @@ onUnmounted(() => {
                   <span>{{ getFullAddress(shop) }}</span>
                 </div>
 
-                <!-- Distance -->
+                <!-- In the shop list item template -->
                 <div class="d-flex align-center mb-1">
                   <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
                   <span>
-                    {{ shop.distanceKm.toFixed(1) }} km away
+                    {{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km away
                   </span>
                 </div>
 
@@ -2834,7 +2853,9 @@ onUnmounted(() => {
   }
 
   .main-content {
-    height: calc(100vh - 150px - env(safe-area-inset-top)) !important; /* Adjusted for taller header */
+    height: calc(
+      100vh - 150px - env(safe-area-inset-top)
+    ) !important; /* Adjusted for taller header */
   }
 
   .search-field {
@@ -2915,7 +2936,7 @@ onUnmounted(() => {
     padding: calc(18px + env(safe-area-inset-top)) 10px 14px 10px;
     min-height: calc(85px + env(safe-area-inset-top));
   }
-  
+
   .hero-row {
     gap: 8px;
     padding-top: 4px;
@@ -3024,7 +3045,7 @@ onUnmounted(() => {
     min-height: calc(80px + constant(safe-area-inset-top)) !important;
     min-height: calc(80px + env(safe-area-inset-top)) !important;
   }
-  
+
   .reopen-route-btn {
     bottom: calc(100px + constant(safe-area-inset-bottom)) !important;
     bottom: calc(100px + env(safe-area-inset-bottom)) !important;
