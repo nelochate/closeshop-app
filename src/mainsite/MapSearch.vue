@@ -47,7 +47,6 @@ const boundaryLoading = ref(false)
 const hasValidLocation = ref(false)
 const selectedShopId = ref<string | null>(null)
 const showBoundary = ref(true)
-const geolocateControl = ref<any>(null) // Added reference to geolocate control
 
 /* -------------------- ROUTE TYPE SELECTOR -------------------- */
 type RouteType = 'driving' | 'walking' | 'cycling'
@@ -80,6 +79,7 @@ const routeConfig = {
 
 /* -------------------- GEOLOCATION -------------------- */
 const { latitude, longitude, requestPermission, startWatching, stopWatching } = useGeolocation()
+let userMarker: any = null
 let shopMarkers: any[] = []
 let cityBoundarySourceId: string | null = null
 const locating = ref(false)
@@ -144,28 +144,16 @@ const initializeMap = async (): Promise<void> => {
       'top-right',
     )
 
-    // Add geolocate control - USING MAPBOX'S BUILT-IN MARKER
-    geolocateControl.value = new mapboxgl.GeolocateControl({
+    // Add geolocate control
+    const geolocate = new mapboxgl.GeolocateControl({
       positionOptions: {
         enableHighAccuracy: true,
       },
-      trackUserLocation: true,  // This enables Mapbox's built-in marker
-      showUserLocation: true,   // This shows the default blue dot
-      showAccuracyCircle: true, // Shows accuracy circle
-      fitBoundsOptions: {
-        maxZoom: 15,
-      },
+      trackUserLocation: true,
+      showUserLocation: true,
+      showAccuracyCircle: true,
     })
-    map.value.addControl(geolocateControl.value, 'top-right')
-
-    // ✅ AUTO-TRIGGER GEOLOCATION AFTER ADDING CONTROL
-    // Wait a bit for the map to be ready, then trigger geolocation
-    setTimeout(() => {
-      if (geolocateControl.value) {
-        geolocateControl.value.trigger();
-        console.log('Auto-triggered geolocation on map load');
-      }
-    }, 1500);
+    map.value.addControl(geolocate, 'top-right')
 
     // Add attribution
     map.value.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
@@ -174,6 +162,9 @@ const initializeMap = async (): Promise<void> => {
     map.value.on('load', async () => {
       console.log('Mapbox map loaded successfully')
       mapInitialized.value = true
+
+      // Add user marker
+      createUserMarker(initialCenter[0], initialCenter[1])
 
       // Force map resize
       setTimeout(() => {
@@ -186,35 +177,6 @@ const initializeMap = async (): Promise<void> => {
       }
     })
 
-    // Handle geolocate events
-    geolocateControl.value.on('geolocate', (event: any) => {
-      console.log('Geolocate triggered:', event)
-      hasValidLocation.value = true
-      
-      // Trigger location update for boundary highlighting
-      if (latitude.value && longitude.value) {
-        highlightUserCityBoundary(latitude.value, longitude.value)
-      }
-    })
-
-    // ✅ ADDITIONAL EVENT HANDLERS FOR GEOLOCATION
-    geolocateControl.value.on('geolocate', (position: any) => {
-      console.log('Geolocation successful:', position);
-      hasValidLocation.value = true;
-    });
-
-    geolocateControl.value.on('error', (error: any) => {
-      console.warn('Geolocation error:', error);
-    });
-
-    geolocateControl.value.on('trackuserlocationstart', () => {
-      console.log('User location tracking started');
-    });
-
-    geolocateControl.value.on('trackuserlocationend', () => {
-      console.log('User location tracking ended');
-    });
-
     // Handle map errors
     map.value.on('error', (e: any) => {
       console.error('Mapbox error:', e)
@@ -224,6 +186,44 @@ const initializeMap = async (): Promise<void> => {
   } catch (error) {
     console.error('Error initializing map:', error)
   }
+}
+
+/* -------------------- USER MARKER -------------------- */
+const createUserMarker = (lat: number, lng: number) => {
+  if (!map.value || !mapboxgl) return
+
+  // Remove existing marker
+  if (userMarker) {
+    userMarker.remove()
+  }
+
+  // Create custom HTML marker
+  const el = document.createElement('div')
+  el.className = 'user-marker'
+  el.innerHTML = `
+    <div class="user-marker-pulse"></div>
+    <div class="user-marker-inner">
+      <svg width="24" height="24" viewBox="0 0 24 24" fill="#3B82F6">
+        <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+      </svg>
+    </div>
+  `
+
+  userMarker = new mapboxgl.Marker({
+    element: el,
+    anchor: 'center',
+  })
+    .setLngLat([lng, lat])
+    .addTo(map.value)
+
+  // Add popup
+  const popup = new mapboxgl.Popup({
+    closeButton: false,
+    offset: 25,
+    className: 'user-popup',
+  }).setHTML('<div class="p-2"><strong>You are here</strong></div>')
+
+  userMarker.setPopup(popup)
 }
 
 /* -------------------- TIME FORMATTING FUNCTIONS -------------------- */
@@ -602,16 +602,59 @@ function saveCachedLocation(lat: number, lng: number) {
 
 /* -------------------- RECENTER -------------------- */
 const recenterToUser = async () => {
-  if (!map.value || !mapboxgl || !geolocateControl.value) return
+  if (!map.value || !mapboxgl) return
 
   locating.value = true
   errorMsg.value = null
 
   try {
-    // Use Mapbox's geolocate control to trigger location
-    geolocateControl.value.trigger()
-    
-    setErrorMessage('Updating your location...', 2000)
+    let targetLat: number, targetLng: number
+
+    if (latitude.value && longitude.value) {
+      targetLat = Number(latitude.value)
+      targetLng = Number(longitude.value)
+    } else {
+      try {
+        const position = await Geolocation.getCurrentPosition({
+          enableHighAccuracy: true,
+          timeout: 10000,
+        })
+        targetLat = position.coords.latitude
+        targetLng = position.coords.longitude
+      } catch (geolocationError) {
+        if (lastKnown.value) {
+          targetLat = lastKnown.value[0]
+          targetLng = lastKnown.value[1]
+          errorMsg.value = 'Using last known location'
+        } else {
+          errorMsg.value = 'Unable to determine your location'
+          return
+        }
+      }
+    }
+
+    // Update user marker
+    if (userMarker) {
+      userMarker.setLngLat([targetLng, targetLat])
+    }
+
+    // ALWAYS zoom to level 16 (zoom in)
+    const targetZoom = 16
+
+    // Center map
+    map.value.flyTo({
+      center: [targetLng, targetLat],
+      zoom: targetZoom,
+      essential: true,
+      duration: 1000,
+    })
+
+    // Save and refresh boundary
+    saveCachedLocation(targetLat, targetLng)
+    await highlightUserCityBoundary(targetLat, targetLng)
+
+    // Show success message
+    setErrorMessage('Location updated', 2000)
   } catch (error) {
     console.error('Error recentering:', error)
     setErrorMessage('Failed to update location', 3000)
@@ -1666,7 +1709,8 @@ onMounted(async () => {
     console.log('Got location:', quickLat, quickLng)
 
     if (map.value) {
-      // Fly to location using Mapbox's built-in marker
+      createUserMarker(quickLat, quickLng)
+
       map.value.flyTo({
         center: [quickLng, quickLat],
         zoom: 14,
@@ -1707,6 +1751,12 @@ watch(
     lastUpdateTs = now
 
     hasValidLocation.value = true
+
+    if (userMarker) {
+      userMarker.setLngLat([userLng, userLat])
+    } else {
+      createUserMarker(userLat, userLng)
+    }
 
     saveCachedLocation(userLat, userLng)
     await highlightUserCityBoundary(userLat, userLng)
@@ -1942,7 +1992,7 @@ onUnmounted(() => {
             </v-list>
           </v-menu>
 
-          <!-- Recenter Button - Now triggers Mapbox's geolocate control -->
+          <!-- Recenter Button -->
           <v-btn
             icon
             :loading="locating"
@@ -2194,6 +2244,19 @@ onUnmounted(() => {
             </v-list-item>
           </v-list>
         </v-card-text>
+
+        <!-- Footer Actions -->
+        <v-card-actions v-if="filteredShops.length > 0" class="bg-grey-lighten-4">
+          <v-btn
+            variant="text"
+            block
+            @click="recenterToUser"
+            :loading="locating"
+            prepend-icon="mdi-crosshairs-gps"
+          >
+            Recenter Map
+          </v-btn>
+        </v-card-actions>
       </v-card>
     </v-navigation-drawer>
 
@@ -2497,9 +2560,41 @@ onUnmounted(() => {
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
-/* REMOVED: Custom user marker styles since we're using Mapbox's built-in marker */
+/* Custom Marker Styles */
+:deep(.user-marker) {
+  position: relative;
+  width: 50px;
+  height: 50px;
+}
 
-/* Shop Marker Styles */
+.user-marker-pulse {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 30px;
+  height: 30px;
+  background: #3b82f6;
+  border-radius: 50%;
+  opacity: 0.6;
+  animation: pulse 2s infinite;
+}
+
+.user-marker-inner {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 24px;
+  height: 24px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
 :deep(.shop-marker) {
   cursor: pointer;
   transition: all 0.3s ease;
@@ -2553,28 +2648,25 @@ onUnmounted(() => {
   padding: 4px 8px !important;
 }
 
-/* Mapbox Geolocate Control Customization */
-:deep(.mapboxgl-ctrl-geolocate) {
-  background-color: #3b82f6 !important;
-  color: white !important;
-}
-
-:deep(.mapboxgl-ctrl-geolocate:hover) {
-  background-color: #2563eb !important;
-}
-
-:deep(.mapboxgl-user-location-dot) {
-  background-color: #3b82f6 !important;
-}
-
-:deep(.mapboxgl-user-location-accuracy-circle) {
-  background-color: rgba(59, 130, 246, 0.2) !important;
-}
-
 /* Animation for search matches */
 .bg-blue-lighten-5 {
   transition: all 0.3s ease;
   animation: highlight-pulse 2s ease-in-out;
+}
+
+@keyframes pulse {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0.6;
+  }
+  70% {
+    transform: translate(-50%, -50%) scale(1.5);
+    opacity: 0;
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
 }
 
 @keyframes highlight-pulse {
@@ -2821,20 +2913,4 @@ onUnmounted(() => {
     bottom: calc(100px + env(safe-area-inset-bottom)) !important;
   }
 }
-/* Hide only Mapbox's geolocate control button */
-:deep(.mapboxgl-ctrl-geolocate) {
-  display: none !important;
-}
-
-/* Keep all other Mapbox controls visible */
-:deep(.mapboxgl-ctrl-group) > button:not(.mapboxgl-ctrl-geolocate) {
-  display: block !important;
-}
-
-/* Ensure the attribution footer is still visible */
-:deep(.mapboxgl-ctrl-attrib) {
-  display: block !important;
-}
-
-
 </style>
