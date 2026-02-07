@@ -1537,6 +1537,10 @@ const smartSearch = async () => {
   isSearchMode.value = true
 
   try {
+    // Get current user location for distance calculation
+    const userLat = Number(latitude.value ?? lastKnown.value?.[0])
+    const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+
     const searchResults = shops.value.filter((shop) => {
       const searchTerms = [
         shop.business_name?.toLowerCase(),
@@ -1550,22 +1554,25 @@ const smartSearch = async () => {
       return searchTerms.some((term) => term && term.includes(query))
     })
 
-    const sortedResults = searchResults.sort((a, b) => {
-      const aNameMatch = a.business_name?.toLowerCase().includes(query)
-      const bNameMatch = b.business_name?.toLowerCase().includes(query)
-
-      if (aNameMatch && !bNameMatch) return -1
-      if (!aNameMatch && bNameMatch) return 1
-
-      const aProductMatches = getMatchingProducts(a).length
-      const bProductMatches = getMatchingProducts(b).length
-
-      if (aProductMatches !== bProductMatches) {
-        return bProductMatches - aProductMatches
-      }
-
-      return (a.distanceKm ?? Infinity) - (b.distanceKm ?? Infinity)
-    })
+    // Calculate distance for each result and sort
+    const sortedResults = searchResults
+      .map(shop => {
+        const lat = Number(shop.latitude)
+        const lng = Number(shop.longitude)
+        let distance = shop.distanceKm || 0
+        
+        // Recalculate distance if we have user location
+        if (isFinite(userLat) && isFinite(userLng) && isFinite(lat) && isFinite(lng)) {
+          distance = getDistanceKm(userLat, userLng, lat, lng)
+        }
+        
+        return {
+          ...shop,
+          searchDistance: distance
+        }
+      })
+      // Sort by distance (nearest first)
+      .sort((a, b) => a.searchDistance - b.searchDistance)
 
     if (sortedResults.length === 0) {
       errorMsg.value = `No shops or products found for "${query}"`
@@ -1574,14 +1581,13 @@ const smartSearch = async () => {
     } else {
       const matchTypes = {
         shops: sortedResults.filter(
-          (shop) =>
-            shop.business_name?.toLowerCase().includes(query) ||
-            shop.city?.toLowerCase().includes(query),
+          (shop) => shop.business_name?.toLowerCase().includes(query) ||
+                  shop.city?.toLowerCase().includes(query)
         ).length,
         products: sortedResults.filter((shop) => getMatchingProducts(shop).length > 0).length,
       }
 
-      errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products)`
+      errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products) - Sorted by distance`
       filteredShops.value = sortedResults
       showShopMenu.value = true
       plotShops()
@@ -2175,13 +2181,13 @@ onUnmounted(() => {
                   <span>{{ getFullAddress(shop) }}</span>
                 </div>
 
-                <!-- Distance -->
-                <div class="d-flex align-center mb-1">
-                  <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
-                  <span>
-                    {{ shop.distanceKm.toFixed(1) }} km away
-                  </span>
-                </div>
+                <!-- In the shop list item template -->
+              <div class="d-flex align-center mb-1">
+                <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
+                <span>
+                  {{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km away
+                </span>
+              </div>
 
                 <!-- Matching Products (if in search mode) -->
                 <div
