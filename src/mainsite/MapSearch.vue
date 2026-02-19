@@ -11,8 +11,7 @@ import { Geolocation } from '@capacitor/geolocation'
 let mapboxgl: any = null
 
 /* -------------------- MAPBOX CONFIG -------------------- */
-const MAPBOX_ACCESS_TOKEN =
-  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+const MAPBOX_ACCESS_TOKEN = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
 
 /* -------------------- ROUTE OPTIONS INTERFACE -------------------- */
 interface RouteOption {
