@@ -1,0 +1,19 @@
+R_DEF: Internal format may change without notice
+local
+color closeshop_background
+color ic_launcher_background
+drawable ic_launcher
+drawable splash
+layout activity_main
+mipmap closeshop
+mipmap closeshop_foreground
+mipmap closeshop_round
+string app_name
+string custom_url_scheme
+string package_name
+string title_activity_main
+style AppTheme
+style AppTheme.NoActionBar
+style AppTheme.NoActionBarLaunch
+xml config
+xml file_paths

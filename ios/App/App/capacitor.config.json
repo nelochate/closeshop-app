@@ -1,0 +1,15 @@
+{
+	"appId": "closeshop.dev",
+	"appName": "closeshop-dev",
+	"webDir": "dist",
+	"bundledWebRuntime": false,
+	"packageClassList": [
+		"AppPlugin",
+		"CAPCameraPlugin",
+		"GeolocationPlugin",
+		"HapticsPlugin",
+		"KeyboardPlugin",
+		"CAPNetworkPlugin",
+		"StatusBarPlugin"
+	]
+}
