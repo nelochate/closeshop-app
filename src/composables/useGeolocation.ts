@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 // 🧭 useGeolocation composable - Android Optimized for Capacitor
 // ------------------------------------------------------------
 // This Vue composable provides reactive access to the user's
@@ -9,16 +10,42 @@ import { Geolocation } from '@capacitor/geolocation'
 import { Capacitor } from '@capacitor/core'
 
 export function useGeolocation() {
+=======
+// 🧭 useGeolocation composable - Enhanced for Mapbox
+// ------------------------------------------------------------
+// This Vue composable provides reactive access to the user's
+// geolocation data (latitude and longitude). It supports:
+// - One-time location retrieval
+// - Continuous tracking (watch mode)
+// - Stopping geolocation tracking when no longer needed
+// - Optional Mapbox integration
+// ------------------------------------------------------------
+
+import { ref, onUnmounted } from 'vue'
+
+export function useGeolocation(options?: {
+  enableHighAccuracy?: boolean
+  timeout?: number
+  maximumAge?: number
+  mapboxControl?: any // Optional Mapbox geolocate control
+}) {
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
   // Reactive state for coordinates
   const latitude = ref<number | null>(null)
   const longitude = ref<number | null>(null)
   const accuracy = ref<number | null>(null)
+<<<<<<< HEAD
   const error = ref<string | null>(null)
+=======
+  const heading = ref<number | null>(null)
+  const speed = ref<number | null>(null)
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
 
   // Flags
   const watching = ref(false)
   const permissionGranted = ref(false)
   const permissionDenied = ref(false)
+<<<<<<< HEAD
 
   // Platform detection
   const isNative = Capacitor.isNativePlatform()
@@ -173,11 +200,104 @@ export function useGeolocation() {
       error.value = err instanceof Error ? err.message : 'Unknown error getting position'
       throw err
     }
+=======
+  const error = ref<string | null>(null)
+
+  // Default options
+  const defaultOptions = {
+    enableHighAccuracy: true,
+    timeout: 10000, // 10 seconds
+    maximumAge: 0,
+    ...options
+  }
+
+  // Keep track of the geolocation watcher ID for cleanup
+  let watchId: number | null = null
+
+  // ------------------------------------------------------------
+  // 🧾 requestPermission()
+  // Requests location permission and fetches initial position.
+  // ------------------------------------------------------------
+  const requestPermission = async () => {
+    if (!navigator.geolocation) {
+      error.value = 'Geolocation is not supported by your browser.'
+      throw new Error(error.value)
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      const success = (position: GeolocationPosition) => {
+        latitude.value = position.coords.latitude
+        longitude.value = position.coords.longitude
+        accuracy.value = position.coords.accuracy
+        heading.value = position.coords.heading ?? null
+        speed.value = position.coords.speed ?? null
+        permissionGranted.value = true
+        error.value = null
+        resolve()
+      }
+
+      const failure = (err: GeolocationPositionError) => {
+        permissionDenied.value = true
+        error.value = getErrorMessage(err)
+        reject(err)
+      }
+
+      // Use Mapbox control if available
+      if (options?.mapboxControl) {
+        try {
+          options.mapboxControl.trigger()
+          // Mapbox will handle permission internally
+          permissionGranted.value = true
+          resolve()
+        } catch (err) {
+          failure(err as GeolocationPositionError)
+        }
+      } else {
+        // Use standard browser API
+        navigator.geolocation.getCurrentPosition(
+          success,
+          failure,
+          defaultOptions
+        )
+      }
+    })
+  }
+
+  // ------------------------------------------------------------
+  // 📍 getLocation()
+  // Fetches the current location once
+  // ------------------------------------------------------------
+  const getLocation = async () => {
+    if (!navigator.geolocation) {
+      error.value = 'Geolocation is not supported by your browser.'
+      throw new Error(error.value)
+    }
+
+    return new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latitude.value = position.coords.latitude
+          longitude.value = position.coords.longitude
+          accuracy.value = position.coords.accuracy
+          heading.value = position.coords.heading ?? null
+          speed.value = position.coords.speed ?? null
+          error.value = null
+          resolve(position)
+        },
+        (err) => {
+          error.value = getErrorMessage(err)
+          reject(err)
+        },
+        defaultOptions
+      )
+    })
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
   }
 
   // ------------------------------------------------------------
   // 🛰 startWatching()
   // Starts continuously tracking the user's position
+<<<<<<< HEAD
   // Android optimized with Capacitor
   // ------------------------------------------------------------
   const startWatching = async () => {
@@ -250,6 +370,33 @@ export function useGeolocation() {
       error.value = err instanceof Error ? err.message : 'Unknown error starting watch'
       throw err
     }
+=======
+  // ------------------------------------------------------------
+  const startWatching = () => {
+    if (!navigator.geolocation) {
+      error.value = 'Geolocation is not supported by your browser.'
+      throw new Error(error.value)
+    }
+
+    if (watching.value) return
+
+    watching.value = true
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        latitude.value = position.coords.latitude
+        longitude.value = position.coords.longitude
+        accuracy.value = position.coords.accuracy
+        heading.value = position.coords.heading ?? null
+        speed.value = position.coords.speed ?? null
+        error.value = null
+      },
+      (err) => {
+        error.value = getErrorMessage(err)
+        console.error('Error watching position:', err)
+      },
+      defaultOptions
+    )
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
   }
 
   // ------------------------------------------------------------
@@ -257,6 +404,7 @@ export function useGeolocation() {
   // Stops the ongoing geolocation watcher
   // ------------------------------------------------------------
   const stopWatching = () => {
+<<<<<<< HEAD
     console.log('📍 Stopping location watch...')
     
     if (watchId) {
@@ -275,16 +423,31 @@ export function useGeolocation() {
     
     watching.value = false
     console.log('Location watch stopped')
+=======
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId)
+      watchId = null
+    }
+    watching.value = false
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
   }
 
   // ------------------------------------------------------------
   // 🎯 recenterToLocation()
+<<<<<<< HEAD
   // Helper function to center map on user's location
   // ------------------------------------------------------------
   const recenterToLocation = (map: any) => {
     if (!latitude.value || !longitude.value) {
       error.value = 'No location data available'
       return false
+=======
+  // Helper function to center map on user's location (Mapbox specific)
+  // ------------------------------------------------------------
+  const recenterToLocation = (map: any) => {
+    if (!latitude.value || !longitude.value) {
+      throw new Error('No location data available')
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
     }
 
     if (map && typeof map.flyTo === 'function') {
@@ -294,6 +457,7 @@ export function useGeolocation() {
         essential: true,
         duration: 1000,
       })
+<<<<<<< HEAD
       return true
     }
     
@@ -308,6 +472,19 @@ export function useGeolocation() {
       case error.PERMISSION_DENIED:
         permissionDenied.value = true
         return 'Location permission denied. Please enable location services in your browser.'
+=======
+    }
+  }
+
+  // ------------------------------------------------------------
+  // 🆘 Helper function for error messages
+  // ------------------------------------------------------------
+  const getErrorMessage = (error: GeolocationPositionError): string => {
+    switch (error.code) {
+      case error.PERMISSION_DENIED:
+        permissionDenied.value = true
+        return 'Location permission denied. Please enable location services.'
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
       case error.POSITION_UNAVAILABLE:
         return 'Location information is unavailable.'
       case error.TIMEOUT:
@@ -318,6 +495,7 @@ export function useGeolocation() {
   }
 
   // ------------------------------------------------------------
+<<<<<<< HEAD
   // 🔄 refreshLocation()
   // Force a fresh location update
   // ------------------------------------------------------------
@@ -332,6 +510,8 @@ export function useGeolocation() {
   }
 
   // ------------------------------------------------------------
+=======
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
   // 🧹 Lifecycle cleanup
   // ------------------------------------------------------------
   onUnmounted(() => {
@@ -346,6 +526,7 @@ export function useGeolocation() {
     latitude,
     longitude,
     accuracy,
+<<<<<<< HEAD
     error,
     watching,
     permissionGranted,
@@ -362,9 +543,160 @@ export function useGeolocation() {
     stopWatching,
     recenterToLocation,
     refreshLocation,
+=======
+    heading,
+    speed,
+    watching,
+    permissionGranted,
+    permissionDenied,
+    error,
+    
+    // Methods
+    requestPermission,
+    getLocation,
+    startWatching,
+    stopWatching,
+    recenterToLocation,
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
     
     // Convenience computed values
     hasLocation: () => latitude.value !== null && longitude.value !== null,
     isTracking: () => watching.value,
   }
+<<<<<<< HEAD
 }
+=======
+}
+
+
+/*
+// 🧭 useGeolocation composable
+// ------------------------------------------------------------
+// This Vue composable provides reactive access to the user's
+// geolocation data (latitude and longitude). It supports:
+// - One-time location retrieval
+// - Continuous tracking (watch mode)
+// - Stopping geolocation tracking when no longer needed
+// ------------------------------------------------------------
+
+import { ref, onUnmounted } from 'vue'
+
+export function useGeolocation() {
+  // Reactive state for coordinates
+  const latitude = ref<number | null>(null)
+  const longitude = ref<number | null>(null)
+
+  // Flag to indicate if we are currently tracking the user
+  const watching = ref(false)
+
+  // ------------------------------------------------------------
+  // 🧾 requestPermission()
+  // Requests location permission and fetches initial position.
+  // This is useful to trigger the browser's permission prompt
+  // before starting background tracking.
+  // ------------------------------------------------------------
+  const requestPermission = async () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation is not supported by your browser.')
+    }
+
+    return new Promise<void>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          // Store user's current coordinates
+          latitude.value = position.coords.latitude
+          longitude.value = position.coords.longitude
+          resolve()
+        },
+        (error) => reject(error) // Handle denied or failed requests
+      )
+    })
+  }
+
+  // ------------------------------------------------------------
+  // 📍 getLocation()
+  // Fetches the current location once (without continuous tracking)
+  // and updates the reactive latitude/longitude refs.
+  // Returns a Promise that resolves once a position is retrieved.
+  // ------------------------------------------------------------
+  const getLocation = async () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation is not supported by your browser.')
+    }
+
+    return new Promise<GeolocationPosition>((resolve, reject) => {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          latitude.value = position.coords.latitude
+          longitude.value = position.coords.longitude
+          resolve(position) // Return the position for convenience
+        },
+        (error) => reject(error)
+      )
+    })
+  }
+
+  // Keep track of the geolocation watcher ID for cleanup
+  let watchId: number | null = null
+
+  // ------------------------------------------------------------
+  // 🛰 startWatching()
+  // Starts continuously tracking the user's position using
+  // navigator.geolocation.watchPosition(). Each time the user's
+  // position changes, the reactive latitude and longitude are updated.
+  // ------------------------------------------------------------
+  const startWatching = () => {
+    if (!navigator.geolocation) {
+      throw new Error('Geolocation is not supported by your browser.')
+    }
+
+    // Prevent multiple watchers from being started
+    if (watching.value) return
+
+    watching.value = true
+    watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        latitude.value = position.coords.latitude
+        longitude.value = position.coords.longitude
+      },
+      (error) => console.error('Error watching position:', error)
+    )
+  }
+
+  // ------------------------------------------------------------
+  // 🛑 stopWatching()
+  // Stops the ongoing geolocation watcher to save resources.
+  // Should be called when the component unmounts or when
+  // location tracking is no longer needed.
+  // ------------------------------------------------------------
+  const stopWatching = () => {
+    if (watchId !== null) {
+      navigator.geolocation.clearWatch(watchId)
+      watchId = null
+    }
+    watching.value = false
+  }
+
+  // ------------------------------------------------------------
+  // 🧹 Lifecycle cleanup
+  // Automatically stop tracking when the component using this
+  // composable is unmounted to prevent memory leaks.
+  // ------------------------------------------------------------
+  onUnmounted(() => {
+    stopWatching()
+  })
+
+  // ------------------------------------------------------------
+  // Expose the reactive data and functions to components
+  // ------------------------------------------------------------
+  return {
+    latitude,
+    longitude,
+    requestPermission,
+    getLocation,
+    startWatching,
+    stopWatching,
+  }
+}
+*/
+>>>>>>> 60136d593ea6f108a4b2a0949e150167fd61b2bb
