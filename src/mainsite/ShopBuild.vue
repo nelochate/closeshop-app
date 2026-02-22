@@ -43,21 +43,22 @@ const loadingShopData = ref(false)
 
 // -------------------- FORM STEPS --------------------
 const currentStep = ref(1)
-const totalSteps = 6
+const totalSteps = 7
 const steps = [
   { number: 1, title: 'Business Info', icon: 'mdi-store' },
   { number: 2, title: 'Open Days', icon: 'mdi-calendar' },
   { number: 3, title: 'Operating Hours', icon: 'mdi-clock' },
   { number: 4, title: 'Delivery Options', icon: 'mdi-truck' },
-  { number: 5, title: 'Location', icon: 'mdi-map-marker' },
-  { number: 6, title: 'Valid ID', icon: 'mdi-card-account-details' },
+  { number: 5, title: 'Payment Options', icon: 'mdi-currency-php' },
+  { number: 6, title: 'Location', icon: 'mdi-map-marker' },
+  { number: 7, title: 'Valid ID', icon: 'mdi-card-account-details' },
 ]
 
 const nextStep = () => {
   if (currentStep.value < totalSteps) {
     currentStep.value++
-    // Initialize map when moving to step 5
-    if (currentStep.value === 5) {
+    // Initialize map when moving to step 6
+    if (currentStep.value === 6) {
       nextTick(() => {
         initMap(latitude.value!, longitude.value!)
       })
@@ -79,6 +80,7 @@ const closeTime = ref('')
 const avatarUrl = ref<string | null>(null)
 const physicalUrl = ref<string | null>(null)
 const deliveryOptions = ref<string[]>([])
+const paymentOptions = ref<string[]>([])
 const meetUpDetails = ref('')
 const fullAddress = ref('')
 const validIdFrontUrl = ref<string | null>(null)
@@ -163,6 +165,31 @@ const toggleDay = (dayId: number) => {
     openDays.value.push(dayId)
   }
   openDays.value.sort((a, b) => a - b)
+}
+
+// -------------------- PAYMENT OPTIONS FUNCTIONS --------------------
+const togglePayment = (option: string) => {
+  const index = paymentOptions.value.indexOf(option)
+  if (index > -1) {
+    paymentOptions.value.splice(index, 1)
+  } else {
+    paymentOptions.value.push(option)
+  }
+}
+
+const removePayment = (option: string) => {
+  const index = paymentOptions.value.indexOf(option)
+  if (index > -1) {
+    paymentOptions.value.splice(index, 1)
+  }
+}
+
+const getPaymentIcon = (option: string) => {
+  return option === 'gcash' ? 'mdi-cellphone' : 'mdi-cash-multiple'
+}
+
+const getPaymentLabel = (option: string) => {
+  return option === 'gcash' ? 'GCash' : 'Cash on Delivery'
 }
 
 // -------------------- PSGC MAPPING FUNCTIONS --------------------
@@ -645,6 +672,7 @@ const loadShopData = async () => {
     longitude.value = data.longitude || 125.5406
     fullAddress.value = data.detected_address || ''
     deliveryOptions.value = data.delivery_options || []
+    paymentOptions.value = data.payment_options || []
     meetUpDetails.value = data.meetup_details || ''
     openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
     validIdFrontUrl.value = data.valid_id_front
@@ -766,7 +794,7 @@ watch(selectedBarangay, async (barangayCode) => {
       latitude.value = coords.lat
       longitude.value = coords.lon
       // Only update map if it's initialized and we're on the location step
-      if (mapInitialized.value && currentStep.value === 5) {
+      if (mapInitialized.value && currentStep.value === 6) {
         map.value?.setCenter([coords.lon, coords.lat])
         shopMarker?.setLngLat([coords.lon, coords.lat])
       }
@@ -776,7 +804,7 @@ watch(selectedBarangay, async (barangayCode) => {
 
 // Update map when full address changes
 watch(fullAddress, async (newVal) => {
-  if (!newVal || !mapInitialized.value || currentStep.value !== 5) return
+  if (!newVal || !mapInitialized.value || currentStep.value !== 6) return
 
   const coords = await getCoordinatesFromAddress(newVal)
   if (coords) {
@@ -804,7 +832,7 @@ const getLocation = () => {
       longitude.value = pos.coords.longitude
 
       // Update map if it's initialized and we're on the location step
-      if (mapInitialized.value && currentStep.value === 5) {
+      if (mapInitialized.value && currentStep.value === 6) {
         map.value?.setCenter([longitude.value, latitude.value])
         map.value?.setZoom(17)
         shopMarker?.setLngLat([longitude.value, latitude.value])
@@ -895,6 +923,7 @@ const saveShop = async () => {
       province: address.province.value,
       region: address.region.value,
       delivery_options: deliveryOptions.value,
+      payment_options: paymentOptions.value,
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
       address_source: addressSource,
@@ -962,7 +991,7 @@ onMounted(async () => {
     await loadShopData()
   }
 
-  // Don't initialize map here - wait until step 5 is active
+  // Don't initialize map here - wait until step 6 is active
 })
 
 // Add a watcher to debug the selection process
@@ -1189,8 +1218,132 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           </v-card-actions>
         </v-card>
 
-        <!-- Step 5: Location -->
+        <!-- Step 5: Payment Options -->
         <v-card v-if="currentStep === 5" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-currency-php</v-icon>
+            Payment Options
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+          
+          <v-card-text>
+            <!-- Payment Options Description -->
+            <v-alert type="info" variant="tonal" class="mb-4">
+              <template #title>
+                <strong>Select Payment Methods</strong>
+              </template>
+              <div class="text-caption">
+                Choose which payment methods you accept. You can select both options.
+              </div>
+            </v-alert>
+
+            <!-- Payment Method Cards - Only COD and GCash -->
+            <v-row>
+              <!-- COD Option -->
+              <v-col cols="12" md="6">
+                <v-card 
+                  variant="outlined"
+                  class="payment-card"
+                  :class="{ 'selected-payment': paymentOptions.includes('cod') }"
+                  @click="togglePayment('cod')"
+                >
+                  <v-card-text class="text-center">
+                    <v-icon 
+                      size="48" 
+                      :color="paymentOptions.includes('cod') ? 'success' : 'grey'"
+                      class="mb-2"
+                    >
+                      mdi-cash-multiple
+                    </v-icon>
+                    <div class="text-h6">Cash on Delivery</div>
+                    <div class="text-caption text-grey">Pay cash when you receive the order</div>
+                    <v-checkbox-btn
+                      :model-value="paymentOptions.includes('cod')"
+                      color="success"
+                      class="mt-2"
+                      @click.stop="togglePayment('cod')"
+                    ></v-checkbox-btn>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+
+              <!-- GCash Option -->
+              <v-col cols="12" md="6">
+                <v-card 
+                  variant="outlined"
+                  class="payment-card"
+                  :class="{ 'selected-payment': paymentOptions.includes('gcash') }"
+                  @click="togglePayment('gcash')"
+                >
+                  <v-card-text class="text-center">
+                    <v-icon 
+                      size="48" 
+                      :color="paymentOptions.includes('gcash') ? 'success' : 'grey'"
+                      class="mb-2"
+                    >
+                      mdi-cellphone
+                    </v-icon>
+                    <div class="text-h6">GCash</div>
+                    <div class="text-caption text-grey">Mobile payment via GCash</div>
+                    <v-checkbox-btn
+                      :model-value="paymentOptions.includes('gcash')"
+                      color="success"
+                      class="mt-2"
+                      @click.stop="togglePayment('gcash')"
+                    ></v-checkbox-btn>
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+
+            <!-- Selected Payment Methods Summary -->
+            <v-divider class="my-4"></v-divider>
+            
+            <div class="d-flex align-center justify-space-between">
+              <div>
+                <span class="text-subtitle-2">Selected Payment Methods:</span>
+                <div class="mt-1">
+                  <v-chip
+                    v-for="option in paymentOptions"
+                    :key="option"
+                    :color="option === 'gcash' ? '#0077e5' : 'success'"
+                    size="small"
+                    class="mr-1 payment-chip"
+                    closable
+                    @click:close="removePayment(option)"
+                  >
+                    <v-icon start size="16">
+                      {{ getPaymentIcon(option) }}
+                    </v-icon>
+                    {{ getPaymentLabel(option) }}
+                  </v-chip>
+                  <span v-if="paymentOptions.length === 0" class="text-caption text-grey">
+                    No payment methods selected
+                  </span>
+                </div>
+              </div>
+              <v-chip :color="paymentOptions.length > 0 ? 'success' : 'warning'" size="small">
+                {{ paymentOptions.length }} selected
+              </v-chip>
+            </div>
+          </v-card-text>
+
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="primary" @click="nextStep" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+
+        <!-- Step 6: Location -->
+        <v-card v-if="currentStep === 6" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
             <v-icon class="mr-2">mdi-map-marker</v-icon>
             Location
@@ -1389,8 +1542,8 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           </v-card-actions>
         </v-card>
 
-        <!-- Step 6: Valid ID Upload -->
-        <v-card v-if="currentStep === 6" class="mb-4 step-card" variant="outlined">
+        <!-- Step 7: Valid ID Upload -->
+        <v-card v-if="currentStep === 7" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
             <v-icon class="mr-2">mdi-card-account-details</v-icon>
             Valid ID Upload
@@ -1646,6 +1799,32 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 .mapboxgl-ctrl-group {
   border-radius: 8px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* Payment Card Styles */
+.payment-card {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-width: 2px !important;
+  height: 100%;
+}
+
+.payment-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+.payment-card.selected-payment {
+  border-color: #4caf50 !important;
+  background-color: rgba(76, 175, 80, 0.05);
+}
+
+.payment-card:active {
+  transform: translateY(-2px);
+}
+
+.payment-chip {
+  margin: 2px;
 }
 
 .app-bar {
