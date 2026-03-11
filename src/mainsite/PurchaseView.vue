@@ -18,7 +18,7 @@ const address = ref<any>(null)
 const addresses = ref<any[]>([])
 const showAddressDialog = ref(false)
 const deliveryOption = ref('meetup')
-const paymentMethod = ref('cash')
+const paymentMethod = ref('')
 const note = ref('')
 // 📋 CLIPBOARD STATE
 const showCopySuccess = ref(false)
@@ -47,6 +47,7 @@ const shopSchedule = ref({
   closeHour: 19, // Default closing hour
   meetupDetails: 'Main Entrance',
   manualStatus: 'auto',
+  paymentOptions: ['cod'] as string[], // Default payment options
 })
 
 // 🎫 GENERATE TRANSACTION NUMBER (BASE FUNCTION)
@@ -104,7 +105,7 @@ const initializePage = async () => {
   // Load items first to get shop_id
   await loadItems()
 
-  // Load shop data (needed for schedule validation)
+  // Load shop data (needed for schedule validation and payment options)
   await loadShopData()
 
   // Load user data
@@ -122,7 +123,7 @@ const initializePage = async () => {
   })
 }
 
-// 🏪 LOAD SHOP DATA FROM SUPABASE
+// 🏪 LOAD SHOP DATA FROM SUPABASE - UPDATED TO INCLUDE PAYMENT OPTIONS
 const loadShopData = async () => {
   try {
     console.log('🏪 Loading shop data for items...')
@@ -137,6 +138,7 @@ const loadShopData = async () => {
         closeHour: 19,
         meetupDetails: 'Main Entrance',
         manualStatus: 'auto',
+        paymentOptions: ['cod'],
       }
       return
     }
@@ -145,7 +147,7 @@ const loadShopData = async () => {
 
     const { data: shop, error } = await supabase
       .from('shops')
-      .select('open_time, close_time, open_days, manual_status, physical_store, meetup_details')
+      .select('open_time, close_time, open_days, manual_status, physical_store, meetup_details, payment_options')
       .eq('id', shopId)
       .single()
 
@@ -158,6 +160,7 @@ const loadShopData = async () => {
         closeHour: 19,
         meetupDetails: 'Main Entrance',
         manualStatus: 'auto',
+        paymentOptions: ['cod'],
       }
       return
     }
@@ -192,16 +195,34 @@ const loadShopData = async () => {
     const openHour = parseTimeToHour(shop.open_time)
     const closeHour = parseTimeToHour(shop.close_time)
 
+    // Parse payment options
+    let paymentOptions = ['cod'] // Default to COD only
+    
+    if (shop.payment_options && Array.isArray(shop.payment_options) && shop.payment_options.length > 0) {
+      paymentOptions = shop.payment_options
+      console.log('✅ Using shop payment options:', paymentOptions)
+      
+      // Set default payment method to the first available option
+      if (!paymentMethod.value && paymentOptions.length > 0) {
+        paymentMethod.value = paymentOptions[0]
+      }
+    } else {
+      console.log('ℹ️ Using default payment options (COD only)')
+      paymentMethod.value = 'cod'
+    }
+
     shopSchedule.value = {
       openDays,
       openHour,
       closeHour,
       meetupDetails: shop.meetup_details || shop.physical_store || 'Main Entrance',
       manualStatus: shop.manual_status || 'auto',
+      paymentOptions,
     }
 
     console.log('✅ Final shop schedule:', shopSchedule.value)
     console.log('🔍 Open days include Sunday (0):', shopSchedule.value.openDays.includes(0))
+    console.log('💰 Available payment options:', shopSchedule.value.paymentOptions)
   } catch (err) {
     console.error('❌ Error loading shop data:', err)
     // Always include Sunday in fallback
@@ -211,7 +232,9 @@ const loadShopData = async () => {
       closeHour: 19,
       meetupDetails: 'Main Entrance',
       manualStatus: 'auto',
+      paymentOptions: ['cod'],
     }
+    paymentMethod.value = 'cod'
   }
 }
 
@@ -836,7 +859,7 @@ const updateContactInfo = async () => {
   }
 }
 
-// ✅ VALIDATE ALL FIELDS BEFORE CHECKOUT - SIMPLIFIED ADDRESS VALIDATION
+// ✅ VALIDATE ALL FIELDS BEFORE CHECKOUT - UPDATED TO CHECK PAYMENT METHOD
 const validateAllFields = (): boolean => {
   validationErrors.value = []
 
@@ -875,7 +898,7 @@ const validateAllFields = (): boolean => {
     validationErrors.value.push('Delivery option is required')
   }
 
-  // 7. Check payment method
+  // 7. Check payment method - UPDATED
   if (!paymentMethod.value) {
     validationErrors.value.push('Payment method is required')
   }
@@ -1684,7 +1707,32 @@ const deliveryOptionsDisplay = computed(() =>
   ),
 )
 
-// ✅ COMPLETE CHECKOUT FUNCTION
+// 💳 PAYMENT OPTIONS - UPDATED TO USE SHOP'S PAYMENT OPTIONS
+const paymentOptionsDisplay = computed(() => {
+  const options = []
+  
+  if (shopSchedule.value.paymentOptions.includes('cod')) {
+    options.push({
+      label: 'Cash on Delivery',
+      value: 'cod',
+      icon: 'mdi-cash',
+      description: 'Pay cash when you receive the order'
+    })
+  }
+  
+  if (shopSchedule.value.paymentOptions.includes('gcash')) {
+    options.push({
+      label: 'GCash',
+      value: 'gcash',
+      icon: 'mdi-cellphone',
+      description: 'Pay via GCash mobile wallet'
+    })
+  }
+  
+  return options
+})
+
+// ✅ COMPLETE CHECKOUT FUNCTION - UPDATED TO USE SHOP'S PAYMENT OPTIONS
 const handleCheckout = async () => {
   console.log('🛒 Starting checkout process...')
 
@@ -1954,7 +2002,10 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       })
       .join('\n')
 
-    const orderMessage = `🛍️ New Order Received!\n\nShop: ${shopName}\nTransaction #: ${transactionNumber.value}\nTotal Amount: ₱${shopItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}\n\nItems:\n${itemsSummary}\n\nDelivery: ${deliveryOption.value}\nPayment: ${paymentMethod.value}\nSchedule: ${formattedDate.value} at ${deliveryTime.value}\n\nNote: ${note.value || 'No message'}`
+    // Format payment method for display
+    const paymentMethodDisplay = paymentMethod.value === 'cod' ? 'Cash on Delivery' : 'GCash'
+
+    const orderMessage = `🛍️ New Order Received!\n\nShop: ${shopName}\nTransaction #: ${transactionNumber.value}\nTotal Amount: ₱${shopItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}\n\nItems:\n${itemsSummary}\n\nDelivery: ${deliveryOption.value}\nPayment: ${paymentMethodDisplay}\nSchedule: ${formattedDate.value} at ${deliveryTime.value}\n\nNote: ${note.value || 'No message'}`
 
     console.log(`💌 Sending order message to shop ${shopName}:`, conversationId)
 
@@ -2490,24 +2541,39 @@ watch(
             </v-card-text>
           </v-card>
 
-          <!-- Payment Method -->
+          <!-- Payment Method - UPDATED TO USE SHOP'S PAYMENT OPTIONS -->
           <v-card class="option-card" elevation="1" rounded="lg">
             <v-card-text class="pa-3">
               <div class="d-flex align-center mb-2">
                 <v-icon color="primary" size="small" class="mr-2">mdi-credit-card-outline</v-icon>
-                <div class="text-subtitle-2 font-weight-medium">Payment</div>
+                <div class="text-subtitle-2 font-weight-medium">Payment Method</div>
               </div>
-              <v-radio-group v-model="paymentMethod" hide-details class="option-radio">
+              
+              <!-- Show loading state if no payment options -->
+              <div v-if="paymentOptionsDisplay.length === 0" class="text-caption text-grey py-2">
+                Loading payment options...
+              </div>
+              
+              <!-- Display payment options from shop -->
+              <v-radio-group v-else v-model="paymentMethod" hide-details class="option-radio">
                 <v-radio
-                  label="Cash on Delivery"
-                  value="cash"
+                  v-for="option in paymentOptionsDisplay"
+                  :key="option.value"
+                  :label="option.label"
+                  :value="option.value"
                   color="primary"
                   density="compact"
                 >
                   <template #label>
                     <div class="d-flex align-center">
-                      <v-icon size="small" class="mr-1">mdi-cash</v-icon>
-                      Cash on Delivery
+                      <v-icon :icon="option.icon" size="small" class="mr-1"></v-icon>
+                      <span>{{ option.label }}</span>
+                      <v-tooltip location="top" v-if="option.description">
+                        <template #activator="{ props }">
+                          <v-icon v-bind="props" size="x-small" class="ml-1">mdi-information-outline</v-icon>
+                        </template>
+                        <span>{{ option.description }}</span>
+                      </v-tooltip>
                     </div>
                   </template>
                 </v-radio>
