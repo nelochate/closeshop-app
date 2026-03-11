@@ -17,6 +17,7 @@
   "dependencies": {
     "@capacitor/android": "^7.4.4",
     "@capacitor/app": "7.0.2",
+    "@capacitor/browser": "^7.0.4",
     "@capacitor/camera": "^7.0.2",
     "@capacitor/geolocation": "^7.1.5",
     "@capacitor/haptics": "7.0.2",
@@ -47,7 +48,7 @@
     "vuetify": "^3.10.9"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.4.4",
+    "@capacitor/cli": "^7.6.0",
     "@capacitor/core": "^7.4.4",
     "@eslint/js": "^9.31.0",
     "@mdi/font": "^7.4.47",

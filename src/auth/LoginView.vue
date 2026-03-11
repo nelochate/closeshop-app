@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { requiredValidator, emailValidator } from '@/utils/validators'
-import { onMounted } from 'vue'
+import { Browser } from '@capacitor/browser'
+import { Capacitor } from '@capacitor/core'
 
 const username = ref('')
 const password = ref('')
@@ -11,14 +12,14 @@ const showPassword = ref(false)
 const router = useRouter()
 
 // Reactive variable for error/success message
-const errorMessage = ref('') // Stores the error message
-const showError = ref(false) // Controls the visibility of the error message
-const successMessage = ref('') // Stores the success message
-const showSuccess = ref(false) // Controls the visibility of the success message
-
+const errorMessage = ref('')
+const showError = ref(false)
+const successMessage = ref('')
+const showSuccess = ref(false)
 const isLoading = ref(false)
 
-
+// Check if running on native platform (Android/iOS)
+const isNative = Capacitor.isNativePlatform()
 
 // Login function using Supabase
 const login = async () => {
@@ -43,7 +44,7 @@ const login = async () => {
     const user = data.user
     console.log('Login success:', user)
 
-    // ✅ Check profile role
+    // Check profile role
     let { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, role')
@@ -64,7 +65,7 @@ const login = async () => {
       profile = { id: user.id, role: 'customer' } // fallback
     }
 
-    // ✅ Redirect based on role
+    // Redirect based on role
     let redirectPath = '/homepage'
     if (profile?.role === 'admin') {
       redirectPath = '/admin-dashboard'
@@ -91,14 +92,17 @@ const login = async () => {
   }
 }
 
-// Google Sign-In function
+// Google Sign-In function for both web and native
 const signInWithGoogle = async () => {
   isLoading.value = true
+
   try {
     const { data, error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: window.location.origin + '/auth/callback',
+        redirectTo: isNative
+          ? 'closeshop.dev://auth/callback'  // Using your app ID as scheme
+          : window.location.origin + '/auth/callback',
         queryParams: {
           access_type: 'offline',
           prompt: 'consent',
@@ -107,19 +111,21 @@ const signInWithGoogle = async () => {
     })
 
     if (error) {
-      console.error('Google sign-in error:', error.message)
-      errorMessage.value = 'Failed to sign in with Google: ' + error.message
-      showError.value = true
-
-      setTimeout(() => {
-        showError.value = false
-      }, 3000)
+      throw error
     }
 
-    // Note: The OAuth flow will redirect to Google, so we don't need to handle success here
-  } catch (err) {
-    console.error('Unexpected error during Google sign-in:', err)
-    errorMessage.value = 'Something went wrong, please try again.'
+    if (data?.url) {
+      if (isNative) {
+        // For native platforms (Android), open URL in browser plugin
+        await Browser.open({ url: data.url })
+      } else {
+        // For web, redirect normally
+        window.location.href = data.url
+      }
+    }
+  } catch (err: any) {
+    console.error('Google sign-in error:', err.message)
+    errorMessage.value = 'Failed to sign in with Google: ' + err.message
     showError.value = true
 
     setTimeout(() => {
@@ -130,10 +136,30 @@ const signInWithGoogle = async () => {
   }
 }
 
+// Handle OAuth callback
+const handleOAuthCallback = async () => {
+  // Check if we have a hash fragment (for web OAuth)
+  if (window.location.hash) {
+    const { data, error } = await supabase.auth.getSession()
+    if (error) {
+      console.error('Error getting session:', error)
+      return
+    }
+
+    if (data.session) {
+      router.push('/homepage')
+    }
+  }
+}
+
 onMounted(async () => {
+  // Check if we're handling an OAuth callback
+  await handleOAuthCallback()
+
+  // Check if user is already logged in
   const { data: { session } } = await supabase.auth.getSession()
   if (session) {
-    router.push('/homepage') // auto redirect if already logged in
+    router.push('/homepage')
   }
 })
 </script>

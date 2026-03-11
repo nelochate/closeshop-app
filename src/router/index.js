@@ -16,10 +16,17 @@ import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import ChatView from '@/mainsite/ChatView.vue'
+import AuthCallback from '../auth/AuthCallback.vue'
+
 
 // ✅ Define routes
 const routes = [
   { path: '/', name: 'login', component: LoginView },
+      {
+    path: '/auth/callback',
+    name: 'auth-callback',
+    component: AuthCallback
+  },
   { path: '/register', name: 'register', component: RegisterView },
   { path: '/homepage', name: 'homepage', component: HomepageView, meta: { requiresAuth: true } },
   { path: '/mapsearch', name: 'mapsearch', component: MapSearch, meta: { requiresAuth: true } },
