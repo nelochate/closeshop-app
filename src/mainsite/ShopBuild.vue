@@ -641,6 +641,7 @@ const fetchBarangays = async (cityCode: string) => {
 }
 
 // Load shop data for editing
+// Load shop data for editing
 const loadShopData = async () => {
   if (!shopId.value) return
 
@@ -652,40 +653,57 @@ const loadShopData = async () => {
       return
     }
 
-    // Fill basic shop data
+    console.log('Raw loaded data:', data)
+
+    // Fill basic shop data - update all refs
     currentShopId.value = data.id
     avatarUrl.value = data.logo_url
     physicalUrl.value = data.physical_store
-    shopName.value = data.business_name
-    description.value = data.description
-    openTime.value = data.open_time
-    closeTime.value = data.close_time
-    address.barangay.value = data.barangay
-    address.building.value = data.building
-    address.street.value = data.street
-    address.postal.value = data.postal
-    address.house_no.value = data.house_no
-    address.city.value = data.city
-    address.province.value = data.province
-    address.region.value = data.region
+    shopName.value = data.business_name || ''
+    description.value = data.description || ''
+    openTime.value = data.open_time || ''
+    closeTime.value = data.close_time || ''
+    
+    // Address fields
+    address.barangay.value = data.barangay || ''
+    address.building.value = data.building || ''
+    address.street.value = data.street || ''
+    address.postal.value = data.postal || ''
+    address.house_no.value = data.house_no || ''
+    address.city.value = data.city || ''
+    address.province.value = data.province || ''
+    address.region.value = data.region || ''
+    
+    // Location
     latitude.value = data.latitude || 8.9489
     longitude.value = data.longitude || 125.5406
     fullAddress.value = data.detected_address || ''
+    
+    // Arrays
     deliveryOptions.value = data.delivery_options || []
     paymentOptions.value = data.payment_options || []
-    meetUpDetails.value = data.meetup_details || ''
     openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
-    validIdFrontUrl.value = data.valid_id_front
-    validIdBackUrl.value = data.valid_id_back
+    
+    // ID images
+    validIdFrontUrl.value = data.valid_id_front || null
+    validIdBackUrl.value = data.valid_id_back || null
+    
+    // Meetup details
+    meetUpDetails.value = data.meetup_details || ''
 
-    console.log('Loaded shop data:', {
-      region: data.region,
-      province: data.province,
-      city: data.city,
-      barangay: data.barangay,
+    console.log('After setting values:', {
+      shopName: shopName.value,
+      description: description.value,
+      openTime: openTime.value,
+      closeTime: closeTime.value,
+      address: {
+        barangay: address.barangay.value,
+        city: address.city.value,
+        province: address.province.value
+      }
     })
 
-    // Map PSGC values after a short delay to ensure regions are loaded
+    // Map PSGC values after a short delay
     setTimeout(async () => {
       if (data.region) {
         const regionCode = findRegionCodeByName(data.region)
@@ -693,7 +711,6 @@ const loadShopData = async () => {
           selectedRegion.value = regionCode
           console.log('Mapped region:', data.region, '->', regionCode)
 
-          // Wait for provinces to load
           await fetchProvinces(regionCode)
           await nextTick()
 
@@ -703,7 +720,6 @@ const loadShopData = async () => {
               selectedProvince.value = provinceCode
               console.log('Mapped province:', data.province, '->', provinceCode)
 
-              // Wait for cities to load
               await fetchCities(provinceCode)
               await nextTick()
 
@@ -713,7 +729,6 @@ const loadShopData = async () => {
                   selectedCity.value = cityCode
                   console.log('Mapped city:', data.city, '->', cityCode)
 
-                  // Wait for barangays to load
                   await fetchBarangays(cityCode)
                   await nextTick()
 
@@ -731,6 +746,10 @@ const loadShopData = async () => {
         }
       }
     }, 1000)
+
+    // Force a re-render
+    await nextTick()
+
   } catch (err) {
     console.error('Error loading shop:', err)
   } finally {
@@ -870,32 +889,6 @@ const saveShop = async () => {
     console.log('Current user:', user.id)
     console.log('Current shop ID:', currentShopId.value)
 
-    // DEBUG: First check if the shop exists and is owned by the user
-    if (currentShopId.value) {
-      const { data: existingShop, error: checkError } = await supabase
-        .from('shops')
-        .select('id, owner_id, business_name')
-        .eq('id', currentShopId.value)
-        .maybeSingle()
-      
-      console.log('Existing shop check:', { existingShop, checkError })
-      
-      if (checkError) {
-        console.error('Error checking shop:', checkError)
-        throw checkError
-      }
-      
-      if (!existingShop) {
-        throw new Error(`Shop with ID ${currentShopId.value} not found`)
-      }
-      
-      if (existingShop.owner_id !== user.id) {
-        throw new Error(`You don't own this shop. Owner is ${existingShop.owner_id}`)
-      }
-      
-      console.log('Shop verification passed')
-    }
-
     // Determine address source
     let addressSource = 'detected'
     const hasManualAddressFields = 
@@ -944,6 +937,7 @@ const saveShop = async () => {
     console.log('Shop data to save:', shopData)
 
     let savedShopId
+    let result
 
     if (!currentShopId.value) {
       // Insert new shop
@@ -968,39 +962,81 @@ const saveShop = async () => {
         throw new Error('Insert succeeded but no data returned')
       }
       
+      result = data[0]
       savedShopId = data[0].id
       console.log('Insert successful:', data[0])
       
     } else {
-      // Update existing shop
+      // Update existing shop - FIXED VERSION
       console.log('Updating shop with ID:', currentShopId.value)
       
-      // Try update WITHOUT select first to see if it works
-      const { error: updateError } = await supabase
+      // First, verify the shop exists and we have permission
+      const { data: existingShop, error: checkError } = await supabase
         .from('shops')
-        .update(shopData)
-        .eq('id', currentShopId.value)
-      
-      console.log('Update error (if any):', updateError)
-      
-      if (updateError) throw updateError
-      
-      // Now fetch the updated shop to confirm
-      const { data: updatedShop, error: fetchError } = await supabase
-        .from('shops')
-        .select('*')
+        .select('id, owner_id')
         .eq('id', currentShopId.value)
         .single()
       
-      console.log('Fetch after update:', { updatedShop, fetchError })
+      if (checkError) {
+        console.error('Error checking shop:', checkError)
+        throw new Error(`Shop not found: ${checkError.message}`)
+      }
       
-      if (fetchError) throw fetchError
+      if (existingShop.owner_id !== user.id) {
+        throw new Error('You do not have permission to update this shop')
+      }
       
-      savedShopId = updatedShop.id
-      console.log('Update successful:', updatedShop)
+      // Perform the update WITH select to get the updated data
+      const { data, error } = await supabase
+        .from('shops')
+        .update(shopData)
+        .eq('id', currentShopId.value)
+        .eq('owner_id', user.id) // Extra safety
+        .select()
+      
+      console.log('Update response:', { data, error })
+      
+      if (error) {
+        console.error('Update error:', error)
+        throw error
+      }
+      
+      if (!data || data.length === 0) {
+        throw new Error('Update failed - no data returned. Check RLS policies.')
+      }
+      
+      console.log('Update successful:', data[0])
+      result = data[0]
+      savedShopId = currentShopId.value
+    }
+
+    // Verify the save was successful by fetching the latest data
+    const { data: verifyData, error: verifyError } = await supabase
+      .from('shops')
+      .select('*')
+      .eq('id', savedShopId)
+      .single()
+    
+    console.log('Verification fetch after save:', { verifyData, verifyError })
+    
+    if (verifyError) {
+      console.error('Verification error:', verifyError)
+    } else {
+      console.log('Verified saved data:', {
+        business_name: verifyData.business_name,
+        description: verifyData.description,
+        // Add other fields you want to verify
+      })
     }
 
     showSnackbar('Shop saved successfully!', 'success')
+    
+    // Update local state with the verified data
+    if (verifyData) {
+      shopName.value = verifyData.business_name || ''
+      description.value = verifyData.description || ''
+      // Update other fields as needed
+    }
     
     setTimeout(() => {
       localStorage.setItem('lastCreatedShopId', savedShopId)
@@ -1125,7 +1161,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       </v-overlay>
 
       <!-- Form Section -->
-      <div class="form-section pa-4" v-if="!loadingShopData">
+      <div class="form-section pa-4" v-if="!loadingShopData"  :key="currentShopId">
         <!-- Step 1: Business Information -->
         <v-card v-if="currentStep === 1" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
