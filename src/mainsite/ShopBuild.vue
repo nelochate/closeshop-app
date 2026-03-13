@@ -864,48 +864,56 @@ const saveShop = async () => {
 
   saving.value = true
   try {
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
+    const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
+    
+    console.log('Current user:', user.id)
+    console.log('Current shop ID:', currentShopId.value)
 
-    // For existing shops, fetch current status first
-    let currentStatus = 'pending' // Default for new shops
-
+    // DEBUG: First check if the shop exists and is owned by the user
     if (currentShopId.value) {
-      const { data: existingShop } = await supabase
+      const { data: existingShop, error: checkError } = await supabase
         .from('shops')
-        .select('status')
+        .select('id, owner_id, business_name')
         .eq('id', currentShopId.value)
-        .single()
-
-      if (existingShop) {
-        currentStatus = existingShop.status
+        .maybeSingle()
+      
+      console.log('Existing shop check:', { existingShop, checkError })
+      
+      if (checkError) {
+        console.error('Error checking shop:', checkError)
+        throw checkError
       }
+      
+      if (!existingShop) {
+        throw new Error(`Shop with ID ${currentShopId.value} not found`)
+      }
+      
+      if (existingShop.owner_id !== user.id) {
+        throw new Error(`You don't own this shop. Owner is ${existingShop.owner_id}`)
+      }
+      
+      console.log('Shop verification passed')
     }
 
-    // Determine address source based on how the address was set
-    let addressSource = 'detected' // Default to detected address
-
-    // Check if manual address fields are filled (user manually edited the address)
-    const hasManualAddressFields =
+    // Determine address source
+    let addressSource = 'detected'
+    const hasManualAddressFields = 
       address.barangay.value ||
       address.building.value ||
       address.street.value ||
       address.house_no.value ||
-      (selectedBarangay.value &&
-        selectedCity.value &&
-        selectedProvince.value &&
-        selectedRegion.value)
+      (selectedBarangay.value && 
+       selectedCity.value && 
+       selectedProvince.value && 
+       selectedRegion.value)
 
     if (addressOption.value === 'manual' || hasManualAddressFields) {
       addressSource = 'manual'
     }
 
-    // Prepare shop data according to schema
+    // Prepare shop data
     const shopData = {
-      owner_id: user.id,
       business_name: shopName.value,
       description: description.value,
       logo_url: avatarUrl.value,
@@ -927,60 +935,94 @@ const saveShop = async () => {
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
       address_source: addressSource,
-      status: currentStatus, // Use existing status for updates, 'pending' for new shops
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
       open_days: openDays.value,
       updated_at: new Date().toISOString(),
     }
 
+    console.log('Shop data to save:', shopData)
+
+    let savedShopId
+
     if (!currentShopId.value) {
-      // New shop - set to pending
-      shopData.status = 'pending'
-      const { data, error } = await supabase.from('shops').insert(shopData).select().single()
+      // Insert new shop
+      const insertData = {
+        ...shopData,
+        owner_id: user.id,
+        status: 'pending'
+      }
+      
+      console.log('Inserting new shop...')
+      
+      const { data, error } = await supabase
+        .from('shops')
+        .insert(insertData)
+        .select()
+      
+      console.log('Insert response:', { data, error })
+      
       if (error) throw error
-      currentShopId.value = data.id
-
-      // UPDATED: Redirect to status shop creation page with shop ID
-      showSnackbar('Shop created successfully! Waiting for admin approval.', 'success')
-
-      // Add a delay to ensure the user sees the success message
-      setTimeout(() => {
-        // Store shop ID in localStorage (your status page reads from this)
-        localStorage.setItem('lastCreatedShopId', currentShopId.value)
-
-        // Also pass as query parameter for direct access
-        router.push({
-          path: '/statusshopcreation',
-          query: { shopId: currentShopId.value },
-        })
-      }, 1500)
+      
+      if (!data || data.length === 0) {
+        throw new Error('Insert succeeded but no data returned')
+      }
+      
+      savedShopId = data[0].id
+      console.log('Insert successful:', data[0])
+      
     } else {
-      // Existing shop - preserve status and update
-      const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
-      if (error) throw error
-
-      // UPDATED: For updates, also redirect to status page with shop ID
-      showSnackbar('Shop updated successfully!', 'success')
-
-      setTimeout(() => {
-        // Ensure shop ID is in localStorage
-        localStorage.setItem('lastCreatedShopId', currentShopId.value)
-
-        router.push({
-          path: '/statusshopcreation',
-          query: { shopId: currentShopId.value },
-        })
-      }, 1500)
+      // Update existing shop
+      console.log('Updating shop with ID:', currentShopId.value)
+      
+      // Try update WITHOUT select first to see if it works
+      const { error: updateError } = await supabase
+        .from('shops')
+        .update(shopData)
+        .eq('id', currentShopId.value)
+      
+      console.log('Update error (if any):', updateError)
+      
+      if (updateError) throw updateError
+      
+      // Now fetch the updated shop to confirm
+      const { data: updatedShop, error: fetchError } = await supabase
+        .from('shops')
+        .select('*')
+        .eq('id', currentShopId.value)
+        .single()
+      
+      console.log('Fetch after update:', { updatedShop, fetchError })
+      
+      if (fetchError) throw fetchError
+      
+      savedShopId = updatedShop.id
+      console.log('Update successful:', updatedShop)
     }
+
+    showSnackbar('Shop saved successfully!', 'success')
+    
+    setTimeout(() => {
+      localStorage.setItem('lastCreatedShopId', savedShopId)
+      router.push({
+        path: '/statusshopcreation',
+        query: { shopId: savedShopId }
+      })
+    }, 1500)
+
   } catch (err) {
     console.error('Save shop error:', err)
-    showSnackbar('Failed to save shop', 'error')
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      details: err.details,
+      hint: err.hint
+    })
+    showSnackbar(err.message || 'Failed to save shop', 'error')
   } finally {
     saving.value = false
   }
 }
-
 // -------------------- MOUNT --------------------
 onMounted(async () => {
   await fetchRegions()
