@@ -28,4 +28,11 @@ coverage
 *.sw?
 
 *.tsbuildinfo
+
+# Firebase configuration
+android/app/google-services.json
+android/app/*.json
+ios/App/GoogleService-Info.plist
+
+# Environment variables
 .env
