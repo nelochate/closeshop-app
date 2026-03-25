@@ -35,4 +35,4 @@ android/app/*.json
 ios/App/GoogleService-Info.plist
 
 # Environment variables
-.env
+.envandroid/app/google-services.json
