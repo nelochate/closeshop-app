@@ -5,6 +5,7 @@
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/closeshop"
@@ -12,6 +13,16 @@
         android:roundIcon="@mipmap/closeshop_round"
         android:supportsRtl="true"
         android:theme="@style/AppTheme">
+
+         <meta-data
+            android:name="com.google.android.gms.version"
+            android:value="@integer/google_play_services_version" />
+
+        <!-- Google Sign-In configuration -->
+        <meta-data
+            android:name="com.google.android.gms.auth.api.signin.DEFAULT_SIGN_IN"
+            android:value="@string/google_android_client_id" />
+
 
         <activity
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|locale|smallestScreenSize|screenLayout|uiMode|navigation"
@@ -27,11 +38,11 @@
             </intent-filter>
 
             <!-- OAuth Callback-->
-            <intent-filter android:autoVerify="true">
+            <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="closeshop.dev" />
+                <data android:scheme="com.googleusercontent.apps.618681645336-d1s591p0okdttm6m1pb2vjb2nukdsknl" />
             </intent-filter>
 
         </activity>

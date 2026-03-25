@@ -3,25 +3,63 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { requiredValidator, emailValidator } from '@/utils/validators'
-import { Browser } from '@capacitor/browser'
 import { Capacitor } from '@capacitor/core'
+import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in'
 
 const username = ref('')
 const password = ref('')
 const showPassword = ref(false)
 const router = useRouter()
 
-// Reactive variable for error/success message
 const errorMessage = ref('')
 const showError = ref(false)
 const successMessage = ref('')
 const showSuccess = ref(false)
 const isLoading = ref(false)
 
-// Check if running on native platform (Android/iOS)
 const isNative = Capacitor.isNativePlatform()
+const isWeb = Capacitor.getPlatform() === 'web'
 
-// Login function using Supabase
+// Store initialization promise to ensure it's only done once
+let initPromise: Promise<boolean> | null = null
+
+// Initialize Google Sign-In
+const initializeGoogleSignIn = async (): Promise<boolean> => {
+  if (!isNative) return true
+  
+  // Return existing promise if already initializing
+  if (initPromise) {
+    return initPromise
+  }
+  
+  initPromise = (async () => {
+    try {
+      console.log('Initializing Google Sign-In...')
+      const clientId = '618681645336-0fqba348n7kfcc65qkvh90lsioo7l3ti.apps.googleusercontent.com'
+      
+      await GoogleSignIn.initialize({
+        clientId: clientId,
+        scopes: ['profile', 'email'],
+        grantOfflineAccess: true,
+      })
+      
+      console.log('Google Sign-In initialized successfully')
+      return true
+    } catch (err: any) {
+      console.error('Failed to initialize Google Sign-In:', err)
+      errorMessage.value = 'Failed to initialize Google Sign-In'
+      showError.value = true
+      setTimeout(() => {
+        showError.value = false
+      }, 3000)
+      return false
+    }
+  })()
+  
+  return initPromise
+}
+
+// Regular email login
 const login = async () => {
   isLoading.value = true
   try {
@@ -31,10 +69,9 @@ const login = async () => {
     })
 
     if (error) {
-      console.error('', error.message)
-      errorMessage.value = '' + error.message
+      console.error('Login error:', error.message)
+      errorMessage.value = error.message
       showError.value = true
-
       setTimeout(() => {
         showError.value = false
       }, 3000)
@@ -44,7 +81,6 @@ const login = async () => {
     const user = data.user
     console.log('Login success:', user)
 
-    // Check profile role
     let { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, role')
@@ -52,26 +88,23 @@ const login = async () => {
       .single()
 
     if (profileError && profileError.code === 'PGRST116') {
-      // No profile found → create one
       const { error: insertError } = await supabase.from('profiles').insert([
         {
           id: user.id,
-          role: 'customer', // default role
+          role: 'customer',
         },
       ])
       if (insertError) {
         console.error('Failed to auto-create profile:', insertError.message)
       }
-      profile = { id: user.id, role: 'customer' } // fallback
+      profile = { id: user.id, role: 'customer' }
     }
 
-    // Redirect based on role
     let redirectPath = '/homepage'
     if (profile?.role === 'admin') {
       redirectPath = '/admin-dashboard'
     }
 
-    // Show success message
     successMessage.value = 'Redirecting...'
     showSuccess.value = true
 
@@ -83,7 +116,6 @@ const login = async () => {
     console.error('Unexpected error:', err)
     errorMessage.value = 'Something went wrong, please try again.'
     showError.value = true
-
     setTimeout(() => {
       showError.value = false
     }, 3000)
@@ -92,42 +124,117 @@ const login = async () => {
   }
 }
 
-// Google Sign-In function for both web and native
+// Process Google sign-in result
+const processGoogleSignInResult = async (result: any) => {
+  const idToken = result.idToken
+  
+  if (!idToken) {
+    throw new Error('No ID token received from Google')
+  }
+
+  console.log('ID token received, signing in to Supabase...')
+
+  const { data, error: supabaseError } = await supabase.auth.signInWithIdToken({
+    provider: 'google',
+    token: idToken
+  })
+
+  if (supabaseError) throw supabaseError
+
+  console.log('Supabase login success:', data.user)
+
+  let { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('id, role')
+    .eq('id', data.user.id)
+    .single()
+
+  if (profileError && profileError.code === 'PGRST116') {
+    const { error: insertError } = await supabase.from('profiles').insert([
+      {
+        id: data.user.id,
+        role: 'customer',
+      },
+    ])
+    if (insertError) {
+      console.error('Failed to auto-create profile:', insertError.message)
+    }
+    profile = { id: data.user.id, role: 'customer' }
+  }
+
+  let redirectPath = '/homepage'
+  if (profile?.role === 'admin') {
+    redirectPath = '/admin-dashboard'
+  }
+
+  successMessage.value = 'Redirecting...'
+  showSuccess.value = true
+
+  setTimeout(() => {
+    showSuccess.value = false
+    router.push(redirectPath)
+  }, 2000)
+}
+
+// Google Sign-In handler
 const signInWithGoogle = async () => {
   isLoading.value = true
-
+  
   try {
-    const { data, error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
-      options: {
-        redirectTo: isNative
-          ? 'closeshop.dev://auth/callback'  // Using your app ID as scheme
-          : window.location.origin + '/auth/callback',
-        queryParams: {
-          access_type: 'offline',
-          prompt: 'consent',
-        },
+    if (isNative) {
+      console.log('=== Google Sign-In Flow Started ===')
+      
+      // IMPORTANT: Initialize first and wait for completion
+      console.log('Step 1: Initializing...')
+      const initialized = await initializeGoogleSignIn()
+      console.log('Step 1: Initialization result:', initialized)
+      
+      if (!initialized) {
+        throw new Error('Google Sign-In could not be initialized')
       }
-    })
-
-    if (error) {
-      throw error
-    }
-
-    if (data?.url) {
-      if (isNative) {
-        // For native platforms (Android), open URL in browser plugin
-        await Browser.open({ url: data.url })
-      } else {
-        // For web, redirect normally
+      
+      // Give the native side a moment to process
+      await new Promise(resolve => setTimeout(resolve, 1000))
+      
+      // Now sign in
+      console.log('Step 2: Calling signIn()...')
+      const result = await GoogleSignIn.signIn()
+      console.log('Step 2: Sign-in result received')
+      
+      // Process the result
+      await processGoogleSignInResult(result)
+      
+    } else {
+      // Web platform
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo: `${window.location.origin}/auth/callback`,
+          queryParams: {
+            access_type: 'offline',
+            prompt: 'consent',
+          },
+        }
+      })
+      
+      if (error) throw error
+      
+      if (data?.url) {
         window.location.href = data.url
       }
     }
   } catch (err: any) {
-    console.error('Google sign-in error:', err.message)
-    errorMessage.value = 'Failed to sign in with Google: ' + err.message
+    console.error('Google Sign-In error:', err)
+    
+    if (err.message?.includes('canceled')) {
+      errorMessage.value = 'Sign-in was cancelled'
+    } else if (err.message?.includes('network')) {
+      errorMessage.value = 'Network error. Please check your connection'
+    } else {
+      errorMessage.value = err.message || 'Failed to sign in with Google'
+    }
+    
     showError.value = true
-
     setTimeout(() => {
       showError.value = false
     }, 3000)
@@ -136,76 +243,106 @@ const signInWithGoogle = async () => {
   }
 }
 
-// Handle OAuth callback
-const handleOAuthCallback = async () => {
-  // Check if we have a hash fragment (for web OAuth)
-  if (window.location.hash) {
-    const { data, error } = await supabase.auth.getSession()
-    if (error) {
-      console.error('Error getting session:', error)
-      return
+// Handle web redirect callback
+const handleRedirectCallback = async () => {
+  if (!isWeb) return
+  
+  try {
+    const result = await GoogleSignIn.handleRedirectCallback()
+    if (result) {
+      console.log('Redirect callback result:', result)
+      await processGoogleSignInResult(result)
+    }
+  } catch (err) {
+    console.error('Redirect callback error:', err)
+  }
+}
+
+// Check existing session
+const checkExistingSession = async () => {
+  const { data: { session } } = await supabase.auth.getSession()
+  if (session) {
+    let { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', session.user.id)
+      .single()
+
+    let redirectPath = '/homepage'
+    if (profile?.role === 'admin') {
+      redirectPath = '/admin-dashboard'
     }
 
-    if (data.session) {
-      router.push('/homepage')
-    }
+    router.push(redirectPath)
   }
 }
 
 onMounted(async () => {
-  // Check if we're handling an OAuth callback
-  await handleOAuthCallback()
-
-  // Check if user is already logged in
-  const { data: { session } } = await supabase.auth.getSession()
-  if (session) {
-    router.push('/homepage')
+  console.log('Component mounted, platform:', Capacitor.getPlatform())
+  
+  if (isNative) {
+    // Pre-initialize on mount to save time
+    console.log('Pre-initializing Google Sign-In...')
+    await initializeGoogleSignIn()
   }
+  
+  await handleRedirectCallback()
+  await checkExistingSession()
 })
 </script>
 
 <template>
   <v-app class="main-bg">
     <div class="login-container">
-      <!-- Logo + Title -->
       <div class="login-header d-flex flex-column align-center">
         <div class="circle-deco"></div>
-
-        <!-- Logo -->
         <v-img src="/images/logo.png" max-width="100" class="logo"></v-img>
-
-        <!-- Title + Subtitle -->
         <h2 class="login-title">CloseShop</h2>
         <p class="login-subtitle">Use the account below to sign in</p>
       </div>
 
-
-      <!-- Error & Success Messages -->
       <div v-if="showError" class="error-message">{{ errorMessage }}</div>
       <div v-if="showSuccess" class="success-message">{{ successMessage }}</div>
 
-      <!-- Form Card -->
       <div class="login-card">
         <v-form @submit.prevent="login">
-          <v-text-field v-model="username" placeholder="Email" variant="outlined" density="comfortable"
-            class="login-input" :rules="[requiredValidator, emailValidator]" />
+          <v-text-field
+            v-model="username"
+            placeholder="Email"
+            variant="outlined"
+            density="comfortable"
+            class="login-input"
+            :rules="[requiredValidator, emailValidator]"
+          />
 
-          <v-text-field v-model="password" :type="showPassword ? 'text' : 'password'" placeholder="Password"
-            variant="outlined" density="comfortable" class="login-input"
+          <v-text-field
+            v-model="password"
+            :type="showPassword ? 'text' : 'password'"
+            placeholder="Password"
+            variant="outlined"
+            density="comfortable"
+            class="login-input"
             :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword" :rules="[requiredValidator]" />
+            @click:append-inner="showPassword = !showPassword"
+            :rules="[requiredValidator]"
+          />
 
-          <v-btn type="submit" color="primary" block class="login-btn" :loading="isLoading" :disabled="isLoading"
-            prepend-icon="mdi-login">
+          <v-btn
+            type="submit"
+            color="primary"
+            block
+            class="login-btn"
+            :loading="isLoading"
+            :disabled="isLoading"
+            prepend-icon="mdi-login"
+          >
             Sign In
           </v-btn>
 
-          <!-- Divider -->
           <div class="divider">
             <span class="divider-text">or</span>
           </div>
 
-          <!-- Google Sign-In Button with colored icon -->
           <v-btn
             @click="signInWithGoogle"
             block
@@ -226,12 +363,10 @@ onMounted(async () => {
             Don't have an account? <RouterLink to="/register">Register</RouterLink>
           </p>
 
-          <!-- Privacy Notice Section -->
           <div class="privacy-notice">
             <v-icon color="primary" size="small" class="mr-2">mdi-shield-lock-outline</v-icon>
             <span class="privacy-text">Your data is protected with us. We never share your information with third parties.</span>
           </div>
-
         </v-form>
       </div>
     </div>
@@ -248,7 +383,6 @@ onMounted(async () => {
   background: #f5f5f5;
   padding: 0;
 }
-
 
 .login-header {
   background-color: #2e73b8;
