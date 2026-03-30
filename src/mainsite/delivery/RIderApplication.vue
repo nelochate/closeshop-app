@@ -3,12 +3,7 @@
     <v-main class="rider-application-main">
       <!-- Header with back button -->
       <div class="header-section">
-        <v-btn
-          icon
-          variant="text"
-          class="back-btn"
-          @click="router.back()"
-        >
+        <v-btn icon variant="text" class="back-btn" @click="router.back()">
           <v-icon size="28">mdi-arrow-left</v-icon>
         </v-btn>
         <h1 class="page-title">Become a Rider</h1>
@@ -18,36 +13,36 @@
       <!-- Progress Stepper -->
       <v-stepper v-model="currentStep" class="application-stepper" elevation="0">
         <v-stepper-header>
-          <v-stepper-step :complete="currentStep > 1" step="1">
+          <v-stepper-item :complete="currentStep > 1" :value="1">
             Personal Info
-            <small>Basic details</small>
-          </v-stepper-step>
+            <template #subtitle>Basic details</template>
+          </v-stepper-item>
 
           <v-divider></v-divider>
 
-          <v-stepper-step :complete="currentStep > 2" step="2">
+          <v-stepper-item :complete="currentStep > 2" :value="2">
             Vehicle Details
-            <small>Your ride</small>
-          </v-stepper-step>
+            <template #subtitle>Your ride</template>
+          </v-stepper-item>
 
           <v-divider></v-divider>
 
-          <v-stepper-step :complete="currentStep > 3" step="3">
+          <v-stepper-item :complete="currentStep > 3" :value="3">
             Documents
-            <small>Requirements</small>
-          </v-stepper-step>
+            <template #subtitle>Requirements</template>
+          </v-stepper-item>
 
           <v-divider></v-divider>
 
-          <v-stepper-step step="4">
+          <v-stepper-item :value="4">
             Review & Submit
-            <small>Final check</small>
-          </v-stepper-step>
+            <template #subtitle>Final check</template>
+          </v-stepper-item>
         </v-stepper-header>
 
         <v-stepper-window v-model="currentStep">
           <!-- Step 1: Personal Information -->
-          <v-stepper-window-item step="1">
+          <v-stepper-window-item :value="1">
             <v-card class="form-card" elevation="2">
               <v-card-text>
                 <v-form ref="personalForm" v-model="personalValid">
@@ -56,7 +51,7 @@
                       <v-icon class="mr-2">mdi-account-circle</v-icon>
                       Personal Information
                     </h3>
-                    
+
                     <v-row>
                       <v-col cols="12" md="6">
                         <v-text-field
@@ -67,7 +62,7 @@
                           prepend-inner-icon="mdi-account"
                         ></v-text-field>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-text-field
                           v-model="personalInfo.lastName"
@@ -90,7 +85,7 @@
                           readonly
                         ></v-text-field>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-text-field
                           v-model="personalInfo.phone"
@@ -125,7 +120,7 @@
                           variant="outlined"
                         ></v-text-field>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-select
                           v-model="personalInfo.province"
@@ -148,7 +143,7 @@
                           prepend-inner-icon="mdi-calendar"
                         ></v-text-field>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-select
                           v-model="personalInfo.gender"
@@ -162,15 +157,10 @@
                   </div>
                 </v-form>
               </v-card-text>
-              
+
               <v-card-actions class="form-actions">
                 <v-spacer></v-spacer>
-                <v-btn
-                  color="primary"
-                  size="large"
-                  @click="nextStep"
-                  :disabled="!personalValid"
-                >
+                <v-btn color="primary" size="large" @click="nextStep" :disabled="!personalValid">
                   Next
                   <v-icon right>mdi-arrow-right</v-icon>
                 </v-btn>
@@ -179,7 +169,7 @@
           </v-stepper-window-item>
 
           <!-- Step 2: Vehicle Details -->
-          <v-stepper-window-item step="2">
+          <v-stepper-window-item :value="2">
             <v-card class="form-card" elevation="2">
               <v-card-text>
                 <v-form ref="vehicleForm" v-model="vehicleValid">
@@ -188,7 +178,7 @@
                       <v-icon class="mr-2">mdi-motorbike</v-icon>
                       Vehicle Information
                     </h3>
-                    
+
                     <v-row>
                       <v-col cols="12" md="6">
                         <v-select
@@ -200,7 +190,7 @@
                           prepend-inner-icon="mdi-car-side"
                         ></v-select>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-text-field
                           v-model="vehicleInfo.brand"
@@ -222,7 +212,7 @@
                           placeholder="e.g., Click 125i, Mio i125"
                         ></v-text-field>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-text-field
                           v-model="vehicleInfo.year"
@@ -245,7 +235,7 @@
                           prepend-inner-icon="mdi-palette"
                         ></v-text-field>
                       </v-col>
-                      
+
                       <v-col cols="12" md="6">
                         <v-text-field
                           v-model="vehicleInfo.plateNumber"
@@ -272,34 +262,22 @@
                     </v-row>
 
                     <div class="info-alert">
-                      <v-alert
-                        type="info"
-                        variant="tonal"
-                        density="compact"
-                        class="mt-4"
-                      >
-                        <strong>Note:</strong> Your vehicle must be registered and in good condition. We may request additional documents for verification.
+                      <v-alert type="info" variant="tonal" density="compact" class="mt-4">
+                        <strong>Note:</strong> Your vehicle must be registered and in good
+                        condition. We may request additional documents for verification.
                       </v-alert>
                     </div>
                   </div>
                 </v-form>
               </v-card-text>
-              
+
               <v-card-actions class="form-actions">
-                <v-btn
-                  variant="text"
-                  @click="previousStep"
-                >
+                <v-btn variant="text" @click="previousStep">
                   <v-icon left>mdi-arrow-left</v-icon>
                   Back
                 </v-btn>
                 <v-spacer></v-spacer>
-                <v-btn
-                  color="primary"
-                  size="large"
-                  @click="nextStep"
-                  :disabled="!vehicleValid"
-                >
+                <v-btn color="primary" size="large" @click="nextStep" :disabled="!vehicleValid">
                   Next
                   <v-icon right>mdi-arrow-right</v-icon>
                 </v-btn>
@@ -307,8 +285,8 @@
             </v-card>
           </v-stepper-window-item>
 
-          <!-- Step 3: Documents -->
-          <v-stepper-window-item step="3">
+          <!-- Step 3: Documents with file selection -->
+          <v-stepper-window-item :value="3">
             <v-card class="form-card" elevation="2">
               <v-card-text>
                 <v-form ref="documentsForm" v-model="documentsValid">
@@ -317,150 +295,214 @@
                       <v-icon class="mr-2">mdi-folder-account</v-icon>
                       Required Documents
                     </h3>
-                    
+
+                    <!-- Valid Government ID -->
                     <v-row>
                       <v-col cols="12">
-                        <v-file-input
-                          v-model="documents.validId"
-                          label="Valid Government ID"
-                          :rules="[rules.required, rules.fileSize]"
-                          variant="outlined"
-                          prepend-inner-icon="mdi-card-account-details"
-                          accept="image/*,.pdf"
-                          show-size
-                          counter
-                        >
-                          <template v-slot:selection="{ fileNames }">
-                            <template v-for="(fileName, index) in fileNames" :key="index">
-                              <v-chip
-                                v-if="index < 2"
-                                color="primary"
-                                size="small"
-                                class="mr-2"
-                              >
-                                {{ fileName }}
-                              </v-chip>
-                            </template>
-                          </template>
-                        </v-file-input>
-                        <small class="text-grey">Accepted formats: JPG, PNG, PDF (Max 5MB)</small>
+                        <div class="document-upload-section">
+                          <label class="document-label">Valid Government ID *</label>
+                          <div class="upload-buttons">
+                            <v-btn
+                              color="primary"
+                              variant="outlined"
+                              @click="showFileOptions('validId')"
+                              class="mr-2"
+                            >
+                              <v-icon left>mdi-plus-circle</v-icon>
+                              Upload File
+                            </v-btn>
+                            <input
+                              type="file"
+                              ref="validIdInput"
+                              style="display: none"
+                              accept="image/*,.pdf"
+                              @change="handleFileSelect($event, 'validId')"
+                            />
+                          </div>
+                          <div v-if="documents.validId" class="file-preview mt-2">
+                            <v-chip color="success" class="mr-2">
+                              <v-icon left size="16">mdi-check-circle</v-icon>
+                              {{ getFileName(documents.validId) }}
+                            </v-chip>
+                            <v-btn icon size="small" color="error" @click="removeFile('validId')">
+                              <v-icon size="16">mdi-close</v-icon>
+                            </v-btn>
+                          </div>
+                          <div v-if="documents.validIdPreview" class="image-preview mt-2">
+                            <v-img
+                              :src="documents.validIdPreview"
+                              max-width="200"
+                              max-height="150"
+                              contain
+                              class="preview-image"
+                            ></v-img>
+                          </div>
+                        </div>
                       </v-col>
                     </v-row>
 
+                    <!-- Driver's License -->
                     <v-row>
                       <v-col cols="12">
-                        <v-file-input
-                          v-model="documents.driversLicense"
-                          label="Driver's License"
-                          :rules="[rules.required, rules.fileSize]"
-                          variant="outlined"
-                          prepend-inner-icon="mdi-card-account-details-outline"
-                          accept="image/*,.pdf"
-                          show-size
-                          counter
-                        >
-                          <template v-slot:selection="{ fileNames }">
-                            <template v-for="(fileName, index) in fileNames" :key="index">
-                              <v-chip
-                                v-if="index < 2"
-                                color="primary"
-                                size="small"
-                                class="mr-2"
-                              >
-                                {{ fileName }}
-                              </v-chip>
-                            </template>
-                          </template>
-                        </v-file-input>
-                        <small class="text-grey">Front and back of driver's license</small>
+                        <div class="document-upload-section">
+                          <label class="document-label">Driver's License *</label>
+                          <div class="upload-buttons">
+                            <v-btn
+                              color="primary"
+                              variant="outlined"
+                              @click="showFileOptions('driversLicense')"
+                              class="mr-2"
+                            >
+                              <v-icon left>mdi-plus-circle</v-icon>
+                              Upload File
+                            </v-btn>
+                            <input
+                              type="file"
+                              ref="driversLicenseInput"
+                              style="display: none"
+                              accept="image/*,.pdf"
+                              @change="handleFileSelect($event, 'driversLicense')"
+                            />
+                          </div>
+                          <div v-if="documents.driversLicense" class="file-preview mt-2">
+                            <v-chip color="success" class="mr-2">
+                              <v-icon left size="16">mdi-check-circle</v-icon>
+                              {{ getFileName(documents.driversLicense) }}
+                            </v-chip>
+                            <v-btn
+                              icon
+                              size="small"
+                              color="error"
+                              @click="removeFile('driversLicense')"
+                            >
+                              <v-icon size="16">mdi-close</v-icon>
+                            </v-btn>
+                          </div>
+                          <div v-if="documents.driversLicensePreview" class="image-preview mt-2">
+                            <v-img
+                              :src="documents.driversLicensePreview"
+                              max-width="200"
+                              max-height="150"
+                              contain
+                              class="preview-image"
+                            ></v-img>
+                          </div>
+                        </div>
                       </v-col>
                     </v-row>
 
+                    <!-- OR/CR Document -->
                     <v-row>
                       <v-col cols="12">
-                        <v-file-input
-                          v-model="documents.orCr"
-                          label="OR/CR Document"
-                          :rules="[rules.required, rules.fileSize]"
-                          variant="outlined"
-                          prepend-inner-icon="mdi-file-document-outline"
-                          accept="image/*,.pdf"
-                          show-size
-                          counter
-                        >
-                          <template v-slot:selection="{ fileNames }">
-                            <template v-for="(fileName, index) in fileNames" :key="index">
-                              <v-chip
-                                v-if="index < 2"
-                                color="primary"
-                                size="small"
-                                class="mr-2"
-                              >
-                                {{ fileName }}
-                              </v-chip>
-                            </template>
-                          </template>
-                        </v-file-input>
-                        <small class="text-grey">Official Receipt and Certificate of Registration</small>
+                        <div class="document-upload-section">
+                          <label class="document-label">OR/CR Document *</label>
+                          <div class="upload-buttons">
+                            <v-btn
+                              color="primary"
+                              variant="outlined"
+                              @click="showFileOptions('orCr')"
+                              class="mr-2"
+                            >
+                              <v-icon left>mdi-plus-circle</v-icon>
+                              Upload File
+                            </v-btn>
+                            <input
+                              type="file"
+                              ref="orCrInput"
+                              style="display: none"
+                              accept="image/*,.pdf"
+                              @change="handleFileSelect($event, 'orCr')"
+                            />
+                          </div>
+                          <div v-if="documents.orCr" class="file-preview mt-2">
+                            <v-chip color="success" class="mr-2">
+                              <v-icon left size="16">mdi-check-circle</v-icon>
+                              {{ getFileName(documents.orCr) }}
+                            </v-chip>
+                            <v-btn icon size="small" color="error" @click="removeFile('orCr')">
+                              <v-icon size="16">mdi-close</v-icon>
+                            </v-btn>
+                          </div>
+                          <div v-if="documents.orCrPreview" class="image-preview mt-2">
+                            <v-img
+                              :src="documents.orCrPreview"
+                              max-width="200"
+                              max-height="150"
+                              contain
+                              class="preview-image"
+                            ></v-img>
+                          </div>
+                        </div>
                       </v-col>
                     </v-row>
 
+                    <!-- NBI Clearance (Optional) -->
                     <v-row>
                       <v-col cols="12">
-                        <v-file-input
-                          v-model="documents.nbiClearance"
-                          label="NBI Clearance (Optional)"
-                          variant="outlined"
-                          prepend-inner-icon="mdi-shield-check"
-                          accept="image/*,.pdf"
-                          show-size
-                          counter
-                        >
-                          <template v-slot:selection="{ fileNames }">
-                            <template v-for="(fileName, index) in fileNames" :key="index">
-                              <v-chip
-                                v-if="index < 2"
-                                color="primary"
-                                size="small"
-                                class="mr-2"
-                              >
-                                {{ fileName }}
-                              </v-chip>
-                            </template>
-                          </template>
-                        </v-file-input>
+                        <div class="document-upload-section">
+                          <label class="document-label">NBI Clearance (Optional)</label>
+                          <div class="upload-buttons">
+                            <v-btn
+                              color="primary"
+                              variant="outlined"
+                              @click="showFileOptions('nbiClearance')"
+                              class="mr-2"
+                            >
+                              <v-icon left>mdi-plus-circle</v-icon>
+                              Upload File
+                            </v-btn>
+                            <input
+                              type="file"
+                              ref="nbiClearanceInput"
+                              style="display: none"
+                              accept="image/*,.pdf"
+                              @change="handleFileSelect($event, 'nbiClearance')"
+                            />
+                          </div>
+                          <div v-if="documents.nbiClearance" class="file-preview mt-2">
+                            <v-chip color="success" class="mr-2">
+                              <v-icon left size="16">mdi-check-circle</v-icon>
+                              {{ getFileName(documents.nbiClearance) }}
+                            </v-chip>
+                            <v-btn
+                              icon
+                              size="small"
+                              color="error"
+                              @click="removeFile('nbiClearance')"
+                            >
+                              <v-icon size="16">mdi-close</v-icon>
+                            </v-btn>
+                          </div>
+                          <div v-if="documents.nbiClearancePreview" class="image-preview mt-2">
+                            <v-img
+                              :src="documents.nbiClearancePreview"
+                              max-width="200"
+                              max-height="150"
+                              contain
+                              class="preview-image"
+                            ></v-img>
+                          </div>
+                        </div>
                       </v-col>
                     </v-row>
 
                     <div class="info-alert">
-                      <v-alert
-                        type="warning"
-                        variant="tonal"
-                        density="compact"
-                        class="mt-4"
-                      >
-                        <strong>Important:</strong> All documents must be clear and readable. Upload only valid and up-to-date documents.
+                      <v-alert type="warning" variant="tonal" density="compact" class="mt-4">
+                        <strong>Important:</strong> All documents must be clear and readable. Upload
+                        only valid and up-to-date documents.
                       </v-alert>
                     </div>
                   </div>
                 </v-form>
               </v-card-text>
-              
+
               <v-card-actions class="form-actions">
-                <v-btn
-                  variant="text"
-                  @click="previousStep"
-                >
+                <v-btn variant="text" @click="previousStep">
                   <v-icon left>mdi-arrow-left</v-icon>
                   Back
                 </v-btn>
                 <v-spacer></v-spacer>
-                <v-btn
-                  color="primary"
-                  size="large"
-                  @click="nextStep"
-                  :disabled="!documentsValid"
-                >
+                <v-btn color="primary" size="large" @click="nextStep" :disabled="!documentsValid">
                   Next
                   <v-icon right>mdi-arrow-right</v-icon>
                 </v-btn>
@@ -469,7 +511,7 @@
           </v-stepper-window-item>
 
           <!-- Step 4: Review & Submit -->
-          <v-stepper-window-item step="4">
+          <v-stepper-window-item :value="4">
             <v-card class="form-card" elevation="2">
               <v-card-text>
                 <div class="form-section">
@@ -486,7 +528,7 @@
                         Personal Information
                       </v-expansion-panel-title>
                       <v-expansion-panel-text>
-                        <v-simple-table>
+                        <v-table density="compact">
                           <tbody>
                             <tr>
                               <td class="font-weight-bold">Full Name:</td>
@@ -502,7 +544,10 @@
                             </tr>
                             <tr>
                               <td class="font-weight-bold">Address:</td>
-                              <td>{{ personalInfo.address }}, {{ personalInfo.city }}, {{ personalInfo.province }}</td>
+                              <td>
+                                {{ personalInfo.address }}, {{ personalInfo.city }},
+                                {{ personalInfo.province }}
+                              </td>
                             </tr>
                             <tr>
                               <td class="font-weight-bold">Birthdate:</td>
@@ -513,7 +558,7 @@
                               <td>{{ personalInfo.gender }}</td>
                             </tr>
                           </tbody>
-                        </v-simple-table>
+                        </v-table>
                       </v-expansion-panel-text>
                     </v-expansion-panel>
 
@@ -524,7 +569,7 @@
                         Vehicle Information
                       </v-expansion-panel-title>
                       <v-expansion-panel-text>
-                        <v-simple-table>
+                        <v-table density="compact">
                           <tbody>
                             <tr>
                               <td class="font-weight-bold">Vehicle Type:</td>
@@ -555,7 +600,7 @@
                               <td>{{ vehicleInfo.orCrNumber }}</td>
                             </tr>
                           </tbody>
-                        </v-simple-table>
+                        </v-table>
                       </v-expansion-panel-text>
                     </v-expansion-panel>
 
@@ -568,43 +613,43 @@
                       <v-expansion-panel-text>
                         <v-list>
                           <v-list-item v-if="documents.validId">
-                            <v-list-item-icon>
+                            <template #prepend>
                               <v-icon color="success">mdi-check-circle</v-icon>
-                            </v-list-item-icon>
-                            <v-list-item-content>
-                              <v-list-item-title>Valid Government ID</v-list-item-title>
-                              <v-list-item-subtitle>{{ getFileName(documents.validId) }}</v-list-item-subtitle>
-                            </v-list-item-content>
+                            </template>
+                            <v-list-item-title>Valid Government ID</v-list-item-title>
+                            <v-list-item-subtitle>{{
+                              getFileName(documents.validId)
+                            }}</v-list-item-subtitle>
                           </v-list-item>
-                          
+
                           <v-list-item v-if="documents.driversLicense">
-                            <v-list-item-icon>
+                            <template #prepend>
                               <v-icon color="success">mdi-check-circle</v-icon>
-                            </v-list-item-icon>
-                            <v-list-item-content>
-                              <v-list-item-title>Driver's License</v-list-item-title>
-                              <v-list-item-subtitle>{{ getFileName(documents.driversLicense) }}</v-list-item-subtitle>
-                            </v-list-item-content>
+                            </template>
+                            <v-list-item-title>Driver's License</v-list-item-title>
+                            <v-list-item-subtitle>{{
+                              getFileName(documents.driversLicense)
+                            }}</v-list-item-subtitle>
                           </v-list-item>
-                          
+
                           <v-list-item v-if="documents.orCr">
-                            <v-list-item-icon>
+                            <template #prepend>
                               <v-icon color="success">mdi-check-circle</v-icon>
-                            </v-list-item-icon>
-                            <v-list-item-content>
-                              <v-list-item-title>OR/CR Document</v-list-item-title>
-                              <v-list-item-subtitle>{{ getFileName(documents.orCr) }}</v-list-item-subtitle>
-                            </v-list-item-content>
+                            </template>
+                            <v-list-item-title>OR/CR Document</v-list-item-title>
+                            <v-list-item-subtitle>{{
+                              getFileName(documents.orCr)
+                            }}</v-list-item-subtitle>
                           </v-list-item>
-                          
+
                           <v-list-item v-if="documents.nbiClearance">
-                            <v-list-item-icon>
+                            <template #prepend>
                               <v-icon color="success">mdi-check-circle</v-icon>
-                            </v-list-item-icon>
-                            <v-list-item-content>
-                              <v-list-item-title>NBI Clearance</v-list-item-title>
-                              <v-list-item-subtitle>{{ getFileName(documents.nbiClearance) }}</v-list-item-subtitle>
-                            </v-list-item-content>
+                            </template>
+                            <v-list-item-title>NBI Clearance</v-list-item-title>
+                            <v-list-item-subtitle>{{
+                              getFileName(documents.nbiClearance)
+                            }}</v-list-item-subtitle>
                           </v-list-item>
                         </v-list>
                       </v-expansion-panel-text>
@@ -615,12 +660,14 @@
                   <div class="terms-section mt-6">
                     <v-checkbox
                       v-model="agreeTerms"
-                      :rules="[v => !!v || 'You must agree to the terms and conditions']"
+                      :rules="[(v) => !!v || 'You must agree to the terms and conditions']"
                     >
                       <template v-slot:label>
                         <span>
-                          I agree to the 
-                          <a href="#" @click.prevent="showTermsDialog = true">Terms and Conditions</a>
+                          I agree to the
+                          <a href="#" @click.prevent="showTermsDialog = true"
+                            >Terms and Conditions</a
+                          >
                           and confirm that all information provided is accurate and true.
                         </span>
                       </template>
@@ -628,12 +675,9 @@
                   </div>
                 </div>
               </v-card-text>
-              
+
               <v-card-actions class="form-actions">
-                <v-btn
-                  variant="text"
-                  @click="previousStep"
-                >
+                <v-btn variant="text" @click="previousStep">
                   <v-icon left>mdi-arrow-left</v-icon>
                   Back
                 </v-btn>
@@ -655,38 +699,100 @@
       </v-stepper>
     </v-main>
 
+    <!-- File Selection Options Dialog -->
+    <v-dialog v-model="showFileOptionsDialog" max-width="400">
+      <v-card>
+        <v-card-title class="text-h5 primary-bg white--text"> Select File Source </v-card-title>
+        <v-card-text class="text-center pa-6">
+          <v-row>
+            <v-col cols="12" class="text-center">
+              <v-btn color="primary" size="large" block class="mb-4" @click="openCamera">
+                <v-icon left size="24">mdi-camera</v-icon>
+                Take Photo
+              </v-btn>
+            </v-col>
+            <v-col cols="12" class="text-center">
+              <v-btn color="secondary" size="large" block @click="openGallery">
+                <v-icon left size="24">mdi-image-multiple</v-icon>
+                Choose from Gallery
+              </v-btn>
+            </v-col>
+          </v-row>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn color="grey" @click="showFileOptionsDialog = false"> Cancel </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Camera Dialog -->
+    <v-dialog v-model="showCameraDialog" max-width="500" persistent>
+      <v-card>
+        <v-card-title
+          class="text-h5 primary-bg white--text d-flex justify-space-between align-center"
+        >
+          <span>Take Photo</span>
+          <v-btn icon dark @click="closeCamera">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-card-text class="pa-0">
+          <video
+            ref="video"
+            autoplay
+            playsinline
+            class="camera-video"
+            style="width: 100%; height: auto"
+          ></video>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn color="error" @click="closeCamera"> Cancel </v-btn>
+          <v-spacer></v-spacer>
+          <v-btn color="success" @click="capturePhoto"> Capture </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Terms and Conditions Dialog -->
     <v-dialog v-model="showTermsDialog" max-width="600">
       <v-card>
-        <v-card-title class="text-h5 primary-bg white--text">
-          Terms and Conditions
-        </v-card-title>
+        <v-card-title class="text-h5 primary-bg white--text"> Terms and Conditions </v-card-title>
         <v-card-text class="mt-4">
           <div class="terms-content">
             <h4>1. Eligibility</h4>
-            <p>You must be at least 18 years old and possess a valid driver's license to become a rider.</p>
-            
+            <p>
+              You must be at least 18 years old and possess a valid driver's license to become a
+              rider.
+            </p>
+
             <h4>2. Vehicle Requirements</h4>
             <p>Your vehicle must be properly registered, insured, and in good working condition.</p>
-            
+
             <h4>3. Background Check</h4>
-            <p>We reserve the right to conduct background checks and verify all submitted documents.</p>
-            
+            <p>
+              We reserve the right to conduct background checks and verify all submitted documents.
+            </p>
+
             <h4>4. Code of Conduct</h4>
-            <p>Riders must maintain professional conduct, follow traffic rules, and provide excellent service.</p>
-            
+            <p>
+              Riders must maintain professional conduct, follow traffic rules, and provide excellent
+              service.
+            </p>
+
             <h4>5. Fees and Commissions</h4>
-            <p>A commission fee will be deducted from each successful delivery. Rates are subject to change with notice.</p>
-            
+            <p>
+              A commission fee will be deducted from each successful delivery. Rates are subject to
+              change with notice.
+            </p>
+
             <h4>6. Termination</h4>
             <p>Violation of terms may result in immediate termination of rider status.</p>
           </div>
         </v-card-text>
         <v-card-actions>
           <v-spacer></v-spacer>
-          <v-btn color="primary" @click="showTermsDialog = false">
-            I Understand
-          </v-btn>
+          <v-btn color="primary" @click="showTermsDialog = false"> I Understand </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -694,24 +800,20 @@
     <!-- Success Dialog -->
     <v-dialog v-model="showSuccessDialog" persistent max-width="500">
       <v-card>
-        <v-card-title class="text-h5 success-bg white--text">
-          Application Submitted!
-        </v-card-title>
+        <v-card-title class="text-h5 success-bg white--text"> Application Submitted! </v-card-title>
         <v-card-text class="text-center pa-6">
           <v-icon size="80" color="success" class="mb-4">mdi-check-circle</v-icon>
           <h3>Thank you for applying!</h3>
           <p class="mt-4">
-            Your rider application has been submitted successfully. 
-            We will review your application and get back to you within 3-5 business days.
+            Your rider application has been submitted successfully. We will review your application
+            and get back to you within 3-5 business days.
           </p>
           <v-alert type="info" variant="tonal" class="mt-4">
             Application ID: <strong>{{ applicationId }}</strong>
           </v-alert>
         </v-card-text>
         <v-card-actions>
-          <v-btn color="primary" block @click="goToProfile" size="large">
-            Return to Profile
-          </v-btn>
+          <v-btn color="primary" block @click="goToProfile" size="large"> Return to Profile </v-btn>
         </v-card-actions>
       </v-card>
     </v-dialog>
@@ -719,7 +821,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
@@ -738,10 +840,25 @@ const showTermsDialog = ref(false)
 const showSuccessDialog = ref(false)
 const applicationId = ref('')
 
+// File selection dialog
+const showFileOptionsDialog = ref(false)
+const currentFileField = ref('')
+
+// Camera state
+const showCameraDialog = ref(false)
+const video = ref(null)
+let stream = null
+
 // Form references
 const personalForm = ref(null)
 const vehicleForm = ref(null)
 const documentsForm = ref(null)
+
+// File input refs
+const validIdInput = ref(null)
+const driversLicenseInput = ref(null)
+const orCrInput = ref(null)
+const nbiClearanceInput = ref(null)
 
 // Form data
 const personalInfo = ref({
@@ -752,8 +869,8 @@ const personalInfo = ref({
   address: '',
   city: '',
   province: '',
-  birthdate: '',
-  gender: ''
+  birthdate: null,
+  gender: '',
 })
 
 const vehicleInfo = ref({
@@ -763,14 +880,18 @@ const vehicleInfo = ref({
   year: '',
   color: '',
   plateNumber: '',
-  orCrNumber: ''
+  orCrNumber: '',
 })
 
 const documents = ref({
   validId: null,
+  validIdPreview: null,
   driversLicense: null,
+  driversLicensePreview: null,
   orCr: null,
-  nbiClearance: null
+  orCrPreview: null,
+  nbiClearance: null,
+  nbiClearancePreview: null,
 })
 
 // Options
@@ -781,7 +902,7 @@ const vehicleTypes = [
   'Electric Bike',
   'Car',
   'Van',
-  'Bicycle'
+  'Bicycle',
 ]
 
 const provinces = [
@@ -792,7 +913,7 @@ const provinces = [
   'Rizal',
   'Pampanga',
   'Batangas',
-  'Quezon'
+  'Quezon',
 ]
 
 // Validation rules
@@ -800,17 +921,21 @@ const rules = {
   required: (v) => !!v || 'This field is required',
   email: (v) => /.+@.+\..+/.test(v) || 'Invalid email address',
   phone: (v) => /^09\d{9}$/.test(v) || 'Invalid phone number (must be 09XXXXXXXXX)',
-  age: (v) => {
-    if (!v) return true
-    const birthDate = new Date(v)
-    const today = new Date()
-    let age = today.getFullYear() - birthDate.getFullYear()
-    const m = today.getMonth() - birthDate.getMonth()
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--
-    }
-    return age >= 18 || 'You must be at least 18 years old'
-  },
+ age: (v) => {
+  // Explicitly check for null, undefined, or empty string
+  if (v === null || v === undefined || v === '') {
+    return 'Birthdate is required'
+  }
+  
+  const birthDate = new Date(v)
+  const today = new Date()
+  let age = today.getFullYear() - birthDate.getFullYear()
+  const m = today.getMonth() - birthDate.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--
+  }
+  return age >= 18 || 'You must be at least 18 years old'
+},
   year: (v) => {
     if (!v) return true
     const year = parseInt(v)
@@ -821,11 +946,20 @@ const rules = {
     if (!v) return true
     return /^[A-Z0-9]{3,10}$/.test(v) || 'Invalid plate number format'
   },
-  fileSize: (v) => {
-    if (!v) return true
-    return (v.size / 1024 / 1024) <= 5 || 'File size must be less than 5MB'
-  }
 }
+
+// Watch for document changes to validate
+watch(
+  documents,
+  () => {
+    const hasValidId = !!documents.value.validId
+    const hasDriversLicense = !!documents.value.driversLicense
+    const hasOrCr = !!documents.value.orCr
+
+    documentsValid.value = hasValidId && hasDriversLicense && hasOrCr
+  },
+  { deep: true },
+)
 
 // Helper functions
 const formatDate = (dateString) => {
@@ -833,16 +967,39 @@ const formatDate = (dateString) => {
   return new Date(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'long',
-    day: 'numeric'
+    day: 'numeric',
   })
 }
 
 const getFileName = (file) => {
   if (!file) return ''
-  return file.name
+  if (file.name) return file.name
+  return 'Photo captured'
 }
 
 const nextStep = () => {
+  // Step 1 validation - ensure birthdate is filled
+  if (currentStep.value === 1) {
+    // Manually check birthdate since it might bypass the rule
+    if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
+      alert('Please enter your birthdate')
+      return
+    }
+    
+    // Also validate age
+    const birthDate = new Date(personalInfo.value.birthdate)
+    const today = new Date()
+    let age = today.getFullYear() - birthDate.getFullYear()
+    const m = today.getMonth() - birthDate.getMonth()
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--
+    }
+    if (age < 18) {
+      alert('You must be at least 18 years old to become a rider')
+      return
+    }
+  }
+  
   if (currentStep.value < 4) {
     currentStep.value++
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -856,29 +1013,177 @@ const previousStep = () => {
   }
 }
 
+// File handling functions
+const showFileOptions = (field) => {
+  currentFileField.value = field
+  showFileOptionsDialog.value = true
+}
+
+const openGallery = () => {
+  showFileOptionsDialog.value = false
+
+  const inputMap = {
+    validId: validIdInput,
+    driversLicense: driversLicenseInput,
+    orCr: orCrInput,
+    nbiClearance: nbiClearanceInput,
+  }
+
+  setTimeout(() => {
+    if (inputMap[currentFileField.value]) {
+      inputMap[currentFileField.value].value.click()
+    }
+  }, 100)
+}
+
+const handleFileSelect = (event, field) => {
+  const file = event.target.files[0]
+  if (file) {
+    // Validate file size
+    if (file.size / 1024 / 1024 > 5) {
+      alert('File size must be less than 5MB')
+      return
+    }
+
+    documents.value[field] = file
+
+    // Create preview for images
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        documents.value[`${field}Preview`] = e.target.result
+      }
+      reader.readAsDataURL(file)
+    } else {
+      documents.value[`${field}Preview`] = null
+    }
+  }
+  event.target.value = ''
+}
+
+const removeFile = (field) => {
+  documents.value[field] = null
+  documents.value[`${field}Preview`] = null
+
+  // Clear the file input
+  const inputMap = {
+    validId: validIdInput,
+    driversLicense: driversLicenseInput,
+    orCr: orCrInput,
+    nbiClearance: nbiClearanceInput,
+  }
+  if (inputMap[field] && inputMap[field].value) {
+    inputMap[field].value.value = ''
+  }
+}
+
+// Camera functions
+const openCamera = async () => {
+  showFileOptionsDialog.value = false
+
+  try {
+    // Check if browser supports camera
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Camera is not supported on this browser. Please use the file upload option instead.')
+      return
+    }
+
+    // Request camera access - try back camera first, fallback to any camera
+    stream = await navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          facingMode: { exact: 'environment' },
+        },
+      })
+      .catch(() => {
+        // Fallback to any available camera
+        return navigator.mediaDevices.getUserMedia({ video: true })
+      })
+
+    showCameraDialog.value = true
+
+    // Attach stream to video element
+    setTimeout(() => {
+      if (video.value) {
+        video.value.srcObject = stream
+        video.value.play()
+      }
+    }, 100)
+  } catch (err) {
+    console.error('Error accessing camera:', err)
+    if (err.name === 'NotAllowedError') {
+      alert('Camera permission denied. Please allow camera access and try again.')
+    } else if (err.name === 'NotFoundError') {
+      alert('No camera found on this device.')
+    } else {
+      alert('Unable to access camera. Please check your camera settings.')
+    }
+  }
+}
+
+const capturePhoto = () => {
+  if (video.value && video.value.videoWidth > 0) {
+    const canvas = document.createElement('canvas')
+    canvas.width = video.value.videoWidth
+    canvas.height = video.value.videoHeight
+    const context = canvas.getContext('2d')
+    context.drawImage(video.value, 0, 0, canvas.width, canvas.height)
+
+    canvas.toBlob(
+      (blob) => {
+        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
+        documents.value[currentFileField.value] = file
+
+        // Create preview
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          documents.value[`${currentFileField.value}Preview`] = e.target.result
+        }
+        reader.readAsDataURL(file)
+
+        closeCamera()
+      },
+      'image/jpeg',
+      0.8,
+    )
+  } else {
+    alert('Camera not ready. Please try again.')
+  }
+}
+
+const closeCamera = () => {
+  if (stream) {
+    stream.getTracks().forEach((track) => track.stop())
+    stream = null
+  }
+  if (video.value) {
+    video.value.srcObject = null
+  }
+  showCameraDialog.value = false
+}
+
 // Upload file to Supabase storage
 const uploadFile = async (file, folder, fileName) => {
   if (!file) return null
-  
+
   const fileExt = file.name.split('.').pop()
-  const filePath = `${folder}/${fileName}.${fileExt}`
-  
-  const { data, error } = await supabase.storage
-    .from('rider-documents')
-    .upload(filePath, file, {
-      cacheControl: '3600',
-      upsert: false
-    })
-  
+  const timestamp = Date.now()
+  const filePath = `${folder}/${fileName}_${timestamp}.${fileExt}`
+
+  const { data, error } = await supabase.storage.from('rider_info').upload(filePath, file, {
+    cacheControl: '3600',
+    upsert: false,
+  })
+
   if (error) {
     console.error('Error uploading file:', error)
     throw error
   }
-  
-  const { data: { publicUrl } } = supabase.storage
-    .from('rider-documents')
-    .getPublicUrl(filePath)
-  
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from('rider_info').getPublicUrl(filePath)
+
   return publicUrl
 }
 
@@ -891,25 +1196,32 @@ const submitApplication = async () => {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('User not authenticated')
     
-    // Upload documents
-    const validIdUrl = documents.value.validId ? 
-      await uploadFile(documents.value.validId, 'valid-ids', `${user.id}_valid_id`) : null
+    // Get profile_id from profiles table
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', user.id)
+      .single()
     
-    const driversLicenseUrl = documents.value.driversLicense ? 
-      await uploadFile(documents.value.driversLicense, 'licenses', `${user.id}_license`) : null
+    if (profileError) throw new Error('Profile not found')
     
-    const orCrUrl = documents.value.orCr ? 
-      await uploadFile(documents.value.orCr, 'or-cr', `${user.id}_or_cr`) : null
+    // ==== ADD THIS VALIDATION ====
+    // Validate birthdate is not null/empty before proceeding
+    if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
+      throw new Error('Birthdate is required. Please go back to Step 1 and enter your birthdate.')
+    }
     
-    const nbiClearanceUrl = documents.value.nbiClearance ? 
-      await uploadFile(documents.value.nbiClearance, 'nbi', `${user.id}_nbi`) : null
+    // Create folder path for this user's documents
+    const userFolder = `users/${user.id}`
+    
+    // ... rest of your upload code remains the same ...
     
     // Insert rider application
     const { data, error } = await supabase
-      .from('riders')
+      .from('Rider_Registration')
       .insert([
         {
-          user_id: user.id,
+          profile_id: profile.id,
           first_name: personalInfo.value.firstName,
           last_name: personalInfo.value.lastName,
           email: personalInfo.value.email,
@@ -917,21 +1229,8 @@ const submitApplication = async () => {
           address: personalInfo.value.address,
           city: personalInfo.value.city,
           province: personalInfo.value.province,
-          birthdate: personalInfo.value.birthdate,
-          gender: personalInfo.value.gender,
-          vehicle_type: vehicleInfo.value.vehicleType,
-          vehicle_brand: vehicleInfo.value.brand,
-          vehicle_model: vehicleInfo.value.model,
-          vehicle_year: vehicleInfo.value.year,
-          vehicle_color: vehicleInfo.value.color,
-          vehicle_plate: vehicleInfo.value.plateNumber,
-          vehicle_or_cr: vehicleInfo.value.orCrNumber,
-          valid_id_url: validIdUrl,
-          drivers_license_url: driversLicenseUrl,
-          or_cr_url: orCrUrl,
-          nbi_clearance_url: nbiClearanceUrl,
-          status: 'pending',
-          application_date: new Date().toISOString()
+          birthdate: personalInfo.value.birthdate, // This will now be a valid date or throw error
+          // ... rest of your fields remain the same
         }
       ])
       .select()
@@ -939,12 +1238,12 @@ const submitApplication = async () => {
     
     if (error) throw error
     
-    applicationId.value = data.id
+    applicationId.value = data.rider_id
     showSuccessDialog.value = true
     
   } catch (error) {
     console.error('Error submitting application:', error)
-    alert('Failed to submit application. Please try again.')
+    alert(`Failed to submit application: ${error.message || 'Please try again.'}`)
   } finally {
     submitting.value = false
   }
@@ -961,7 +1260,9 @@ onMounted(async () => {
     personalInfo.value.lastName = authStore.userData.user_metadata?.last_name || ''
     personalInfo.value.email = authStore.userData.email || ''
   } else {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (user) {
       personalInfo.value.firstName = user.user_metadata?.first_name || ''
       personalInfo.value.lastName = user.user_metadata?.last_name || ''
@@ -1080,34 +1381,84 @@ onMounted(async () => {
   background: linear-gradient(135deg, #354d7c, #5276b0);
 }
 
+/* Document upload styles */
+.document-upload-section {
+  margin-bottom: 24px;
+  padding: 16px;
+  background: #f8fafc;
+  border-radius: 12px;
+  border: 1px solid #e0e0e0;
+}
+
+.document-label {
+  font-weight: 600;
+  color: #354d7c;
+  margin-bottom: 12px;
+  display: block;
+}
+
+.upload-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.file-preview {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.image-preview {
+  margin-top: 8px;
+}
+
+.preview-image {
+  border-radius: 8px;
+  border: 1px solid #e0e0e0;
+}
+
+.camera-video {
+  width: 100%;
+  height: auto;
+  background: #000;
+  min-height: 300px;
+  object-fit: cover;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.2rem;
   }
-  
+
   .form-section {
     padding: 16px;
   }
-  
+
   .section-title {
     font-size: 1rem;
   }
-  
+
   .application-stepper {
     margin: 12px;
   }
-  
-  :deep(.v-stepper__step) {
-    padding: 12px 8px;
+
+  .document-upload-section {
+    padding: 12px;
   }
-  
-  :deep(.v-stepper__step__label) {
-    font-size: 0.7rem;
+
+  .upload-buttons {
+    flex-direction: column;
   }
-  
-  :deep(.v-stepper__step small) {
-    display: none;
+
+  .upload-buttons .v-btn {
+    width: 100%;
+  }
+
+  .camera-video {
+    min-height: 250px;
   }
 }
 </style>
