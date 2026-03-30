@@ -25,7 +25,7 @@ const isRider = ref(false)
 const riderStatus = ref(null)
 const showRiderTermsDialog = ref(false)
 const agreeRiderTerms = ref(false)
-
+const riderApplicationId = ref(null)
 //for navigation items
 const sectionItems = ref([]) // Holds items for the selected section
 const isLoadingSection = ref(false)
@@ -127,15 +127,28 @@ const checkUserShop = async () => {
   }
 }
 
-// Check if user is a rider
+// Check if user is a rider - FIXED
 const checkRiderStatus = async () => {
   if (!user.value?.id) return
   
   try {
+    // Get profile first
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', user.value.id)
+      .single()
+    
+    if (profileError) {
+      console.error('Error fetching profile:', profileError)
+      return
+    }
+    
+    // Query Rider_Registration
     const { data, error } = await supabase
-      .from('riders')
-      .select('id, status')
-      .eq('user_id', user.value.id)
+      .from('Rider_Registration')
+      .select('rider_id, status')
+      .eq('profile_id', profile.id)
       .maybeSingle()
     
     if (error && error.code !== 'PGRST116') {
@@ -144,31 +157,46 @@ const checkRiderStatus = async () => {
     
     isRider.value = !!data
     riderStatus.value = data?.status || null
+    riderApplicationId.value = data?.rider_id || null
+    
+    console.log('Rider status check result:', { 
+      isRider: isRider.value, 
+      status: riderStatus.value 
+    })
   } catch (err) {
     console.error('Error checking rider:', err)
   }
 }
 
-// Updated Rider navigation function with terms dialog
+// Rider navigation
 const goToRiderPage = () => {
   if (isRider.value && riderStatus.value === 'approved') {
     router.push('/rider-dashboard')
-  } else if (riderStatus.value === 'pending') {
+  } else if (isRider.value && riderStatus.value === 'pending') {
     alert('Your rider application is still pending review. Please wait for approval.')
+  } else if (isRider.value && riderStatus.value === 'rejected') {
+    const confirmReapply = confirm('Your rider application was rejected. Would you like to reapply with corrected information?')
+    if (confirmReapply) {
+      showRiderTermsDialog.value = true
+      agreeRiderTerms.value = false
+    }
   } else {
-    // Show terms and conditions dialog first
     showRiderTermsDialog.value = true
+    agreeRiderTerms.value = false
   }
 }
 
-// Proceed to rider application after agreeing to terms
+// Proceed to application
 const proceedToRiderApplication = () => {
   if (agreeRiderTerms.value) {
     showRiderTermsDialog.value = false
-    router.push('/RiderApplication')
+    if (riderStatus.value === 'rejected') {
+      router.push('/RiderApplication?reapply=true')
+    } else {
+      router.push('/RiderApplication')
+    }
   }
 }
-
 // FIXED: Load order counts for each section with correct status mapping
 const loadOrderCounts = async () => {
   if (!user.value?.id) return
