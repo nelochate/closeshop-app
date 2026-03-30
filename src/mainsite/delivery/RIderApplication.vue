@@ -1,3 +1,508 @@
+
+<script setup>
+import { ref, onMounted, watch } from 'vue'
+import { useRouter } from 'vue-router'
+import { supabase } from '@/utils/supabase'
+import { useAuthUserStore } from '@/stores/authUser'
+
+const router = useRouter()
+const authStore = useAuthUserStore()
+
+// Stepper state
+const currentStep = ref(1)
+const personalValid = ref(false)
+const vehicleValid = ref(false)
+const documentsValid = ref(false)
+const submitting = ref(false)
+const agreeTerms = ref(false)
+const showTermsDialog = ref(false)
+const showSuccessDialog = ref(false)
+const applicationId = ref('')
+
+// File selection dialog
+const showFileOptionsDialog = ref(false)
+const currentFileField = ref('')
+
+// Camera state
+const showCameraDialog = ref(false)
+const video = ref(null)
+let stream = null
+
+// Form references
+const personalForm = ref(null)
+const vehicleForm = ref(null)
+const documentsForm = ref(null)
+
+// File input refs
+const validIdInput = ref(null)
+const driversLicenseInput = ref(null)
+const orCrInput = ref(null)
+const nbiClearanceInput = ref(null)
+
+const isMissingDocuments = computed(() => {
+  return !documents.value.validId || !documents.value.driversLicense || !documents.value.orCr
+})
+// Form data
+const personalInfo = ref({
+  firstName: '',
+  lastName: '',
+  email: '',
+  phone: '',
+  address: '',
+  city: '',
+  province: '',
+  birthdate: null,
+  gender: '',
+})
+
+const vehicleInfo = ref({
+  vehicleType: '',
+  brand: '',
+  model: '',
+  year: '',
+  color: '',
+  plateNumber: '',
+  orCrNumber: '',
+})
+
+const documents = ref({
+  validId: null,
+  validIdPreview: null,
+  driversLicense: null,
+  driversLicensePreview: null,
+  orCr: null,
+  orCrPreview: null,
+  nbiClearance: null,
+  nbiClearancePreview: null,
+})
+
+// Options
+const vehicleTypes = [
+  'Motorcycle - Under 200cc',
+  'Motorcycle - 200cc and above',
+  'Scooter',
+  'Electric Bike',
+  'Car',
+  'Van',
+  'Bicycle',
+]
+
+const provinces = [
+  'Metro Manila',
+  'Bulacan',
+  'Cavite',
+  'Laguna',
+  'Rizal',
+  'Pampanga',
+  'Batangas',
+  'Quezon',
+]
+
+
+// Validation rules
+const rules = {
+  required: (v) => !!v || 'This field is required',
+  email: (v) => /.+@.+\..+/.test(v) || 'Invalid email address',
+  phone: (v) => /^09\d{9}$/.test(v) || 'Invalid phone number (must be 09XXXXXXXXX)',
+ age: (v) => {
+  // Explicitly check for null, undefined, or empty string
+  if (v === null || v === undefined || v === '') {
+    return 'Birthdate is required'
+  }
+  
+  const birthDate = new Date(v)
+  const today = new Date()
+  let age = today.getFullYear() - birthDate.getFullYear()
+  const m = today.getMonth() - birthDate.getMonth()
+  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+    age--
+  }
+  return age >= 18 || 'You must be at least 18 years old'
+},
+  year: (v) => {
+    if (!v) return true
+    const year = parseInt(v)
+    const currentYear = new Date().getFullYear()
+    return (year >= 1990 && year <= currentYear) || `Year must be between 1990 and ${currentYear}`
+  },
+  plateNumber: (v) => {
+    if (!v) return true
+    return /^[A-Z0-9]{3,10}$/.test(v) || 'Invalid plate number format'
+  },
+}
+
+// Watch for document changes to validate
+watch(
+  documents,
+  () => {
+    const hasValidId = !!documents.value.validId
+    const hasDriversLicense = !!documents.value.driversLicense
+    const hasOrCr = !!documents.value.orCr
+
+    documentsValid.value = hasValidId && hasDriversLicense && hasOrCr
+  },
+  { deep: true },
+)
+
+// Helper functions
+const formatDate = (dateString) => {
+  if (!dateString) return ''
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}
+
+const getFileName = (file) => {
+  if (!file) return ''
+  if (file.name) return file.name
+  return 'Photo captured'
+}
+
+const nextStep = () => {
+  // Step 1 validation - ensure birthdate is filled
+  if (currentStep.value === 1) {
+    // Manually check birthdate since it might bypass the rule
+    if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
+      alert('Please enter your birthdate')
+      return
+    }
+    
+    // Also validate age
+    const birthDate = new Date(personalInfo.value.birthdate)
+    const today = new Date()
+    let age = today.getFullYear() - birthDate.getFullYear()
+    const m = today.getMonth() - birthDate.getMonth()
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--
+    }
+    if (age < 18) {
+      alert('You must be at least 18 years old to become a rider')
+      return
+    }
+  }
+  
+  if (currentStep.value < 4) {
+    currentStep.value++
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+const previousStep = () => {
+  if (currentStep.value > 1) {
+    currentStep.value--
+    window.scrollTo({ top: 0, behavior: 'smooth' })
+  }
+}
+
+// File handling functions
+const showFileOptions = (field) => {
+  currentFileField.value = field
+  showFileOptionsDialog.value = true
+}
+
+const openGallery = () => {
+  showFileOptionsDialog.value = false
+
+  const inputMap = {
+    validId: validIdInput,
+    driversLicense: driversLicenseInput,
+    orCr: orCrInput,
+    nbiClearance: nbiClearanceInput,
+  }
+
+  setTimeout(() => {
+    if (inputMap[currentFileField.value]) {
+      inputMap[currentFileField.value].value.click()
+    }
+  }, 100)
+}
+
+const handleFileSelect = (event, field) => {
+  const file = event.target.files[0]
+  if (file) {
+    // Validate file size
+    if (file.size / 1024 / 1024 > 5) {
+      alert('File size must be less than 5MB')
+      return
+    }
+
+    documents.value[field] = file
+
+    // Create preview for images
+    if (file.type.startsWith('image/')) {
+      const reader = new FileReader()
+      reader.onload = (e) => {
+        documents.value[`${field}Preview`] = e.target.result
+      }
+      reader.readAsDataURL(file)
+    } else {
+      documents.value[`${field}Preview`] = null
+    }
+  }
+  event.target.value = ''
+}
+
+const removeFile = (field) => {
+  documents.value[field] = null
+  documents.value[`${field}Preview`] = null
+
+  // Clear the file input
+  const inputMap = {
+    validId: validIdInput,
+    driversLicense: driversLicenseInput,
+    orCr: orCrInput,
+    nbiClearance: nbiClearanceInput,
+  }
+  if (inputMap[field] && inputMap[field].value) {
+    inputMap[field].value.value = ''
+  }
+}
+
+// Camera functions
+const openCamera = async () => {
+  showFileOptionsDialog.value = false
+
+  try {
+    // Check if browser supports camera
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      alert('Camera is not supported on this browser. Please use the file upload option instead.')
+      return
+    }
+
+    // Request camera access - try back camera first, fallback to any camera
+    stream = await navigator.mediaDevices
+      .getUserMedia({
+        video: {
+          facingMode: { exact: 'environment' },
+        },
+      })
+      .catch(() => {
+        // Fallback to any available camera
+        return navigator.mediaDevices.getUserMedia({ video: true })
+      })
+
+    showCameraDialog.value = true
+
+    // Attach stream to video element
+    setTimeout(() => {
+      if (video.value) {
+        video.value.srcObject = stream
+        video.value.play()
+      }
+    }, 100)
+  } catch (err) {
+    console.error('Error accessing camera:', err)
+    if (err.name === 'NotAllowedError') {
+      alert('Camera permission denied. Please allow camera access and try again.')
+    } else if (err.name === 'NotFoundError') {
+      alert('No camera found on this device.')
+    } else {
+      alert('Unable to access camera. Please check your camera settings.')
+    }
+  }
+}
+
+const capturePhoto = () => {
+  if (video.value && video.value.videoWidth > 0) {
+    const canvas = document.createElement('canvas')
+    canvas.width = video.value.videoWidth
+    canvas.height = video.value.videoHeight
+    const context = canvas.getContext('2d')
+    context.drawImage(video.value, 0, 0, canvas.width, canvas.height)
+
+    canvas.toBlob(
+      (blob) => {
+        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
+        documents.value[currentFileField.value] = file
+
+        // Create preview
+        const reader = new FileReader()
+        reader.onload = (e) => {
+          documents.value[`${currentFileField.value}Preview`] = e.target.result
+        }
+        reader.readAsDataURL(file)
+
+        closeCamera()
+      },
+      'image/jpeg',
+      0.8,
+    )
+  } else {
+    alert('Camera not ready. Please try again.')
+  }
+}
+
+const closeCamera = () => {
+  if (stream) {
+    stream.getTracks().forEach((track) => track.stop())
+    stream = null
+  }
+  if (video.value) {
+    video.value.srcObject = null
+  }
+  showCameraDialog.value = false
+}
+
+// Upload file to Supabase storage
+const uploadFile = async (file, folder, fileName) => {
+  if (!file) return null
+
+  const fileExt = file.name.split('.').pop()
+  const timestamp = Date.now()
+  const filePath = `${folder}/${fileName}_${timestamp}.${fileExt}`
+
+  const { data, error } = await supabase.storage.from('rider_info').upload(filePath, file, {
+    cacheControl: '3600',
+    upsert: false,
+  })
+
+  if (error) {
+    console.error('Error uploading file:', error)
+    throw error
+  }
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from('rider_info').getPublicUrl(filePath)
+
+  return publicUrl
+}
+
+// Submit application with warning for missing documents
+const submitApplication = async () => {
+  // Check for missing documents
+  const missingDocs = []
+  if (!documents.value.validId) missingDocs.push('Valid ID')
+  if (!documents.value.driversLicense) missingDocs.push("Driver's License")
+  if (!documents.value.orCr) missingDocs.push('OR/CR')
+  
+  // Show warning if documents are missing
+  if (missingDocs.length > 0) {
+    const confirmSubmit = confirm(
+      `⚠️ WARNING: You are missing the following required documents:\n\n` +
+      `- ${missingDocs.join('\n- ')}\n\n` +
+      `Your application may be REJECTED or DELAYED significantly.\n\n` +
+      `Do you still want to submit your application?`
+    )
+    if (!confirmSubmit) return
+  }
+  
+  submitting.value = true
+  
+  try {
+    // Get current user
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) throw new Error('User not authenticated')
+    
+    // Get profile_id from profiles table
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', user.id)
+      .single()
+    
+    if (profileError) throw new Error('Profile not found')
+    
+    // Validate birthdate
+    if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
+      throw new Error('Birthdate is required. Please go back to Step 1 and enter your birthdate.')
+    }
+    
+    // Create folder path for this user's documents
+    const userFolder = `users/${user.id}`
+    
+    // Upload documents (only if they exist)
+    let validIdUrl = null
+    let driversLicenseUrl = null
+    let orCrUrl = null
+    let nbiClearanceUrl = null
+    
+    if (documents.value.validId) {
+      validIdUrl = await uploadFile(documents.value.validId, userFolder, 'valid_id')
+    }
+    
+    if (documents.value.driversLicense) {
+      driversLicenseUrl = await uploadFile(documents.value.driversLicense, userFolder, 'drivers_license')
+    }
+    
+    if (documents.value.orCr) {
+      orCrUrl = await uploadFile(documents.value.orCr, userFolder, 'or_cr')
+    }
+    
+    if (documents.value.nbiClearance) {
+      nbiClearanceUrl = await uploadFile(documents.value.nbiClearance, userFolder, 'nbi_clearance')
+    }
+    
+    // Insert rider application with all fields
+    const { data, error } = await supabase
+      .from('Rider_Registration')
+      .insert([
+        {
+          profile_id: profile.id,
+          first_name: personalInfo.value.firstName,
+          last_name: personalInfo.value.lastName,
+          email: personalInfo.value.email,
+          phone: personalInfo.value.phone,
+          address: personalInfo.value.address,
+          city: personalInfo.value.city,
+          province: personalInfo.value.province,
+          birthdate: personalInfo.value.birthdate,
+          gender: personalInfo.value.gender,
+          vehicle_type: vehicleInfo.value.vehicleType,
+          vehicle_brand: vehicleInfo.value.brand,
+          vehicle_model: vehicleInfo.value.model,
+          vehicle_year: vehicleInfo.value.year,
+          vehicle_color: vehicleInfo.value.color,
+          vehicle_plate: vehicleInfo.value.plateNumber,
+          vehicle_or_cr_number: vehicleInfo.value.orCrNumber,
+          valid_id_url: validIdUrl,
+          drivers_license_url: driversLicenseUrl,
+          or_cr_url: orCrUrl,
+          nbi_clearance_url: nbiClearanceUrl,
+          status: 'pending',
+          application_date: new Date().toISOString()
+        }
+      ])
+      .select()
+      .single()
+    
+    if (error) throw error
+    
+    applicationId.value = data.rider_id
+    showSuccessDialog.value = true
+    
+  } catch (error) {
+    console.error('Error submitting application:', error)
+    alert(`Failed to submit application: ${error.message || 'Please try again.'}`)
+  } finally {
+    submitting.value = false
+  }
+}
+
+const goToProfile = () => {
+  router.push('/profile')
+}
+
+// Load user data on mount
+onMounted(async () => {
+  if (authStore.userData) {
+    personalInfo.value.firstName = authStore.userData.user_metadata?.first_name || ''
+    personalInfo.value.lastName = authStore.userData.user_metadata?.last_name || ''
+    personalInfo.value.email = authStore.userData.email || ''
+  } else {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+    if (user) {
+      personalInfo.value.firstName = user.user_metadata?.first_name || ''
+      personalInfo.value.lastName = user.user_metadata?.last_name || ''
+      personalInfo.value.email = user.email || ''
+    }
+  }
+})
+</script>
 <template>
   <v-app>
     <v-main class="rider-application-main">
@@ -820,458 +1325,6 @@
   </v-app>
 </template>
 
-<script setup>
-import { ref, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
-import { supabase } from '@/utils/supabase'
-import { useAuthUserStore } from '@/stores/authUser'
-
-const router = useRouter()
-const authStore = useAuthUserStore()
-
-// Stepper state
-const currentStep = ref(1)
-const personalValid = ref(false)
-const vehicleValid = ref(false)
-const documentsValid = ref(false)
-const submitting = ref(false)
-const agreeTerms = ref(false)
-const showTermsDialog = ref(false)
-const showSuccessDialog = ref(false)
-const applicationId = ref('')
-
-// File selection dialog
-const showFileOptionsDialog = ref(false)
-const currentFileField = ref('')
-
-// Camera state
-const showCameraDialog = ref(false)
-const video = ref(null)
-let stream = null
-
-// Form references
-const personalForm = ref(null)
-const vehicleForm = ref(null)
-const documentsForm = ref(null)
-
-// File input refs
-const validIdInput = ref(null)
-const driversLicenseInput = ref(null)
-const orCrInput = ref(null)
-const nbiClearanceInput = ref(null)
-
-// Form data
-const personalInfo = ref({
-  firstName: '',
-  lastName: '',
-  email: '',
-  phone: '',
-  address: '',
-  city: '',
-  province: '',
-  birthdate: null,
-  gender: '',
-})
-
-const vehicleInfo = ref({
-  vehicleType: '',
-  brand: '',
-  model: '',
-  year: '',
-  color: '',
-  plateNumber: '',
-  orCrNumber: '',
-})
-
-const documents = ref({
-  validId: null,
-  validIdPreview: null,
-  driversLicense: null,
-  driversLicensePreview: null,
-  orCr: null,
-  orCrPreview: null,
-  nbiClearance: null,
-  nbiClearancePreview: null,
-})
-
-// Options
-const vehicleTypes = [
-  'Motorcycle - Under 200cc',
-  'Motorcycle - 200cc and above',
-  'Scooter',
-  'Electric Bike',
-  'Car',
-  'Van',
-  'Bicycle',
-]
-
-const provinces = [
-  'Metro Manila',
-  'Bulacan',
-  'Cavite',
-  'Laguna',
-  'Rizal',
-  'Pampanga',
-  'Batangas',
-  'Quezon',
-]
-
-// Validation rules
-const rules = {
-  required: (v) => !!v || 'This field is required',
-  email: (v) => /.+@.+\..+/.test(v) || 'Invalid email address',
-  phone: (v) => /^09\d{9}$/.test(v) || 'Invalid phone number (must be 09XXXXXXXXX)',
- age: (v) => {
-  // Explicitly check for null, undefined, or empty string
-  if (v === null || v === undefined || v === '') {
-    return 'Birthdate is required'
-  }
-  
-  const birthDate = new Date(v)
-  const today = new Date()
-  let age = today.getFullYear() - birthDate.getFullYear()
-  const m = today.getMonth() - birthDate.getMonth()
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-    age--
-  }
-  return age >= 18 || 'You must be at least 18 years old'
-},
-  year: (v) => {
-    if (!v) return true
-    const year = parseInt(v)
-    const currentYear = new Date().getFullYear()
-    return (year >= 1990 && year <= currentYear) || `Year must be between 1990 and ${currentYear}`
-  },
-  plateNumber: (v) => {
-    if (!v) return true
-    return /^[A-Z0-9]{3,10}$/.test(v) || 'Invalid plate number format'
-  },
-}
-
-// Watch for document changes to validate
-watch(
-  documents,
-  () => {
-    const hasValidId = !!documents.value.validId
-    const hasDriversLicense = !!documents.value.driversLicense
-    const hasOrCr = !!documents.value.orCr
-
-    documentsValid.value = hasValidId && hasDriversLicense && hasOrCr
-  },
-  { deep: true },
-)
-
-// Helper functions
-const formatDate = (dateString) => {
-  if (!dateString) return ''
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
-
-const getFileName = (file) => {
-  if (!file) return ''
-  if (file.name) return file.name
-  return 'Photo captured'
-}
-
-const nextStep = () => {
-  // Step 1 validation - ensure birthdate is filled
-  if (currentStep.value === 1) {
-    // Manually check birthdate since it might bypass the rule
-    if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
-      alert('Please enter your birthdate')
-      return
-    }
-    
-    // Also validate age
-    const birthDate = new Date(personalInfo.value.birthdate)
-    const today = new Date()
-    let age = today.getFullYear() - birthDate.getFullYear()
-    const m = today.getMonth() - birthDate.getMonth()
-    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-      age--
-    }
-    if (age < 18) {
-      alert('You must be at least 18 years old to become a rider')
-      return
-    }
-  }
-  
-  if (currentStep.value < 4) {
-    currentStep.value++
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-}
-
-const previousStep = () => {
-  if (currentStep.value > 1) {
-    currentStep.value--
-    window.scrollTo({ top: 0, behavior: 'smooth' })
-  }
-}
-
-// File handling functions
-const showFileOptions = (field) => {
-  currentFileField.value = field
-  showFileOptionsDialog.value = true
-}
-
-const openGallery = () => {
-  showFileOptionsDialog.value = false
-
-  const inputMap = {
-    validId: validIdInput,
-    driversLicense: driversLicenseInput,
-    orCr: orCrInput,
-    nbiClearance: nbiClearanceInput,
-  }
-
-  setTimeout(() => {
-    if (inputMap[currentFileField.value]) {
-      inputMap[currentFileField.value].value.click()
-    }
-  }, 100)
-}
-
-const handleFileSelect = (event, field) => {
-  const file = event.target.files[0]
-  if (file) {
-    // Validate file size
-    if (file.size / 1024 / 1024 > 5) {
-      alert('File size must be less than 5MB')
-      return
-    }
-
-    documents.value[field] = file
-
-    // Create preview for images
-    if (file.type.startsWith('image/')) {
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        documents.value[`${field}Preview`] = e.target.result
-      }
-      reader.readAsDataURL(file)
-    } else {
-      documents.value[`${field}Preview`] = null
-    }
-  }
-  event.target.value = ''
-}
-
-const removeFile = (field) => {
-  documents.value[field] = null
-  documents.value[`${field}Preview`] = null
-
-  // Clear the file input
-  const inputMap = {
-    validId: validIdInput,
-    driversLicense: driversLicenseInput,
-    orCr: orCrInput,
-    nbiClearance: nbiClearanceInput,
-  }
-  if (inputMap[field] && inputMap[field].value) {
-    inputMap[field].value.value = ''
-  }
-}
-
-// Camera functions
-const openCamera = async () => {
-  showFileOptionsDialog.value = false
-
-  try {
-    // Check if browser supports camera
-    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-      alert('Camera is not supported on this browser. Please use the file upload option instead.')
-      return
-    }
-
-    // Request camera access - try back camera first, fallback to any camera
-    stream = await navigator.mediaDevices
-      .getUserMedia({
-        video: {
-          facingMode: { exact: 'environment' },
-        },
-      })
-      .catch(() => {
-        // Fallback to any available camera
-        return navigator.mediaDevices.getUserMedia({ video: true })
-      })
-
-    showCameraDialog.value = true
-
-    // Attach stream to video element
-    setTimeout(() => {
-      if (video.value) {
-        video.value.srcObject = stream
-        video.value.play()
-      }
-    }, 100)
-  } catch (err) {
-    console.error('Error accessing camera:', err)
-    if (err.name === 'NotAllowedError') {
-      alert('Camera permission denied. Please allow camera access and try again.')
-    } else if (err.name === 'NotFoundError') {
-      alert('No camera found on this device.')
-    } else {
-      alert('Unable to access camera. Please check your camera settings.')
-    }
-  }
-}
-
-const capturePhoto = () => {
-  if (video.value && video.value.videoWidth > 0) {
-    const canvas = document.createElement('canvas')
-    canvas.width = video.value.videoWidth
-    canvas.height = video.value.videoHeight
-    const context = canvas.getContext('2d')
-    context.drawImage(video.value, 0, 0, canvas.width, canvas.height)
-
-    canvas.toBlob(
-      (blob) => {
-        const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
-        documents.value[currentFileField.value] = file
-
-        // Create preview
-        const reader = new FileReader()
-        reader.onload = (e) => {
-          documents.value[`${currentFileField.value}Preview`] = e.target.result
-        }
-        reader.readAsDataURL(file)
-
-        closeCamera()
-      },
-      'image/jpeg',
-      0.8,
-    )
-  } else {
-    alert('Camera not ready. Please try again.')
-  }
-}
-
-const closeCamera = () => {
-  if (stream) {
-    stream.getTracks().forEach((track) => track.stop())
-    stream = null
-  }
-  if (video.value) {
-    video.value.srcObject = null
-  }
-  showCameraDialog.value = false
-}
-
-// Upload file to Supabase storage
-const uploadFile = async (file, folder, fileName) => {
-  if (!file) return null
-
-  const fileExt = file.name.split('.').pop()
-  const timestamp = Date.now()
-  const filePath = `${folder}/${fileName}_${timestamp}.${fileExt}`
-
-  const { data, error } = await supabase.storage.from('rider_info').upload(filePath, file, {
-    cacheControl: '3600',
-    upsert: false,
-  })
-
-  if (error) {
-    console.error('Error uploading file:', error)
-    throw error
-  }
-
-  const {
-    data: { publicUrl },
-  } = supabase.storage.from('rider_info').getPublicUrl(filePath)
-
-  return publicUrl
-}
-
-// Submit application
-const submitApplication = async () => {
-  submitting.value = true
-  
-  try {
-    // Get current user
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) throw new Error('User not authenticated')
-    
-    // Get profile_id from profiles table
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', user.id)
-      .single()
-    
-    if (profileError) throw new Error('Profile not found')
-    
-    // ==== ADD THIS VALIDATION ====
-    // Validate birthdate is not null/empty before proceeding
-    if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
-      throw new Error('Birthdate is required. Please go back to Step 1 and enter your birthdate.')
-    }
-    
-    // Create folder path for this user's documents
-    const userFolder = `users/${user.id}`
-    
-    // ... rest of your upload code remains the same ...
-    
-    // Insert rider application
-    const { data, error } = await supabase
-      .from('Rider_Registration')
-      .insert([
-        {
-          profile_id: profile.id,
-          first_name: personalInfo.value.firstName,
-          last_name: personalInfo.value.lastName,
-          email: personalInfo.value.email,
-          phone: personalInfo.value.phone,
-          address: personalInfo.value.address,
-          city: personalInfo.value.city,
-          province: personalInfo.value.province,
-          birthdate: personalInfo.value.birthdate, // This will now be a valid date or throw error
-          // ... rest of your fields remain the same
-        }
-      ])
-      .select()
-      .single()
-    
-    if (error) throw error
-    
-    applicationId.value = data.rider_id
-    showSuccessDialog.value = true
-    
-  } catch (error) {
-    console.error('Error submitting application:', error)
-    alert(`Failed to submit application: ${error.message || 'Please try again.'}`)
-  } finally {
-    submitting.value = false
-  }
-}
-
-const goToProfile = () => {
-  router.push('/profile')
-}
-
-// Load user data on mount
-onMounted(async () => {
-  if (authStore.userData) {
-    personalInfo.value.firstName = authStore.userData.user_metadata?.first_name || ''
-    personalInfo.value.lastName = authStore.userData.user_metadata?.last_name || ''
-    personalInfo.value.email = authStore.userData.email || ''
-  } else {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (user) {
-      personalInfo.value.firstName = user.user_metadata?.first_name || ''
-      personalInfo.value.lastName = user.user_metadata?.last_name || ''
-      personalInfo.value.email = user.email || ''
-    }
-  }
-})
-</script>
-
 <style scoped>
 .rider-application-main {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
@@ -1459,6 +1512,23 @@ onMounted(async () => {
 
   .camera-video {
     min-height: 250px;
+  }
+}
+/* Warning button animation for missing documents */
+.warning-btn {
+  background: linear-gradient(135deg, #ff9800, #ffc107) !important;
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(255, 152, 0, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
   }
 }
 </style>
