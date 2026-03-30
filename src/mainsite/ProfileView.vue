@@ -20,6 +20,12 @@ const shopCreationStatus = ref(null)
 const showStatusInfo = ref(false)
 const statusLoading = ref(false)
 
+// Rider state
+const isRider = ref(false)
+const riderStatus = ref(null)
+const showRiderTermsDialog = ref(false)
+const agreeRiderTerms = ref(false)
+
 //for navigation items
 const sectionItems = ref([]) // Holds items for the selected section
 const isLoadingSection = ref(false)
@@ -118,6 +124,48 @@ const checkUserShop = async () => {
     console.log('Shop lookup:', data, 'hasShop:', hasShop.value)
   } catch (err) {
     console.error('Error checking shop:', err)
+  }
+}
+
+// Check if user is a rider
+const checkRiderStatus = async () => {
+  if (!user.value?.id) return
+  
+  try {
+    const { data, error } = await supabase
+      .from('riders')
+      .select('id, status')
+      .eq('user_id', user.value.id)
+      .maybeSingle()
+    
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error checking rider status:', error.message)
+    }
+    
+    isRider.value = !!data
+    riderStatus.value = data?.status || null
+  } catch (err) {
+    console.error('Error checking rider:', err)
+  }
+}
+
+// Updated Rider navigation function with terms dialog
+const goToRiderPage = () => {
+  if (isRider.value && riderStatus.value === 'approved') {
+    router.push('/rider-dashboard')
+  } else if (riderStatus.value === 'pending') {
+    alert('Your rider application is still pending review. Please wait for approval.')
+  } else {
+    // Show terms and conditions dialog first
+    showRiderTermsDialog.value = true
+  }
+}
+
+// Proceed to rider application after agreeing to terms
+const proceedToRiderApplication = () => {
+  if (agreeRiderTerms.value) {
+    showRiderTermsDialog.value = false
+    router.push('/RiderApplication')
   }
 }
 
@@ -441,6 +489,7 @@ const closeStatusInfo = () => {
 onMounted(async () => {
   await loadUser()
   await checkShopStatus()
+  await checkRiderStatus()
   await loadOrderCounts()
   await loadSectionItems(selectedSection.value)
 })
@@ -451,6 +500,7 @@ watch(
   async (newId) => {
     if (newId) {
       await checkShopStatus()
+      await checkRiderStatus()
       await loadOrderCounts()
       await loadSectionItems(selectedSection.value)
     }
@@ -493,11 +543,26 @@ onBeforeRouteUpdate((to, from, next) => {
   <v-app>
     <!-- Main Profile Content -->
     <v-main class="profile-main">
-      <!-- Shop Button - Top Left (ORIGINAL POSITION) -->
-      <div class="shop-btn-container">
-        <v-btn @click="goShopOrBuild" class="shop-btn" size="large" elevation="2">
+      <!-- Action Buttons Container - Top Left -->
+      <div class="action-buttons-container">
+        <!-- Shop Button -->
+        <v-btn @click="goShopOrBuild" class="action-btn shop-btn" size="large" elevation="2">
           <v-icon start size="25">mdi-storefront-outline</v-icon>
           {{ hasShop ? 'My Shop' : 'Create Shop' }}
+        </v-btn>
+        
+        <!-- Rider/Delivery Button -->
+        <v-btn @click="goToRiderPage" class="action-btn rider-btn" size="large" elevation="2">
+          <v-icon start size="25">mdi-motorbike</v-icon>
+          <template v-if="isRider && riderStatus === 'approved'">
+            Rider Dashboard
+          </template>
+          <template v-else-if="riderStatus === 'pending'">
+            Application Pending
+          </template>
+          <template v-else>
+            Be a Rider
+          </template>
         </v-btn>
       </div>
 
@@ -757,6 +822,72 @@ onBeforeRouteUpdate((to, from, next) => {
       </div>
     </v-main>
 
+    <!-- Rider Terms and Conditions Dialog -->
+    <v-dialog v-model="showRiderTermsDialog" max-width="600" persistent>
+      <v-card>
+        <v-card-title class="text-h5 primary-bg white--text">
+          Terms and Conditions for Riders
+        </v-card-title>
+        <v-card-text class="mt-4">
+          <div class="terms-content">
+            <h4>1. Eligibility</h4>
+            <p>You must be at least 18 years old and possess a valid driver's license to become a rider.</p>
+            
+            <h4>2. Vehicle Requirements</h4>
+            <p>Your vehicle must be properly registered, insured, and in good working condition.</p>
+            
+            <h4>3. Background Check</h4>
+            <p>We reserve the right to conduct background checks and verify all submitted documents.</p>
+            
+            <h4>4. Code of Conduct</h4>
+            <p>Riders must maintain professional conduct, follow traffic rules, and provide excellent service.</p>
+            
+            <h4>5. Fees and Commissions</h4>
+            <p>A commission fee will be deducted from each successful delivery. Rates are subject to change with notice.</p>
+            
+            <h4>6. Delivery Responsibilities</h4>
+            <p>You are responsible for ensuring timely and safe delivery of orders. Any damages or delays may affect your rider status.</p>
+            
+            <h4>7. Account Termination</h4>
+            <p>Violation of terms may result in immediate termination of rider status and account suspension.</p>
+            
+            <h4>8. Data Privacy</h4>
+            <p>Your personal information will be handled in accordance with our Privacy Policy.</p>
+          </div>
+          
+          <v-checkbox
+            v-model="agreeRiderTerms"
+            class="mt-4"
+          >
+            <template v-slot:label>
+              <span>
+                I have read and agree to the 
+                <strong>Terms and Conditions</strong> for becoming a rider.
+              </span>
+            </template>
+          </v-checkbox>
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer></v-spacer>
+          <v-btn 
+            color="grey" 
+            variant="text" 
+            @click="showRiderTermsDialog = false"
+          >
+            Cancel
+          </v-btn>
+          <v-btn 
+            color="primary" 
+            @click="proceedToRiderApplication"
+            :disabled="!agreeRiderTerms"
+          >
+            I Agree & Proceed
+            <v-icon right>mdi-arrow-right</v-icon>
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
     <!-- Reusable BottomNav -->
     <BottomNav v-model="activeTab" />
   </v-app>
@@ -772,39 +903,55 @@ onBeforeRouteUpdate((to, from, next) => {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
 }
 
-/* Shop Button Container - Top Left (ORIGINAL) */
-.shop-btn-container {
-  padding-top: 15px;
+/* Action Buttons Container - Top Left */
+.action-buttons-container {
   position: absolute;
   top: 20px;
   left: 16px;
   z-index: 1200;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
-.shop-btn {
+/* Common styles for both buttons */
+.action-btn {
   text-transform: none;
-  border-top-right-radius: 20px;
-  border-bottom-right-radius: 20px;
+  border-radius: 20px;
   transition: all 0.3s ease;
-  background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
-  color: #464749 !important;
   font-weight: 600;
   font-size: 0.95rem;
   padding: 8px 20px;
-  height: 35px !important;
-  margin-left: -14px;
-  max-width: 200px;
-  margin-top: 12px !important;
+  height: 40px !important;
+  min-width: 140px;
+  justify-content: center;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
 
-.shop-btn:hover {
+.action-btn:hover {
   transform: translateY(-2px);
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
-  background: linear-gradient(135deg, #ffffff, #ffffff) !important;
 }
 
-/* Settings Button - Top Right (ORIGINAL) */
+/* Shop Button specific styles */
+.shop-btn {
+  background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
+  color: #464749 !important;
+  margin-left: -14px;
+}
+
+/* Rider Button specific styles */
+.rider-btn {
+  background: linear-gradient(135deg, #ff6b35, #ff8c5a) !important;
+  color: white !important;
+  margin-left: -14px;
+}
+
+.rider-btn:hover {
+  background: linear-gradient(135deg, #ff5a22, #ff7a46) !important;
+}
+
+/* Settings Button - Top Right */
 .settings-btn {
   margin-top: 23px;
   position: absolute;
@@ -816,7 +963,7 @@ onBeforeRouteUpdate((to, from, next) => {
   height: 40px;
 }
 
-/* Check Status Button - Top Center (NEW POSITION) */
+/* Check Status Button - Top Center */
 .status-btn {
   position: absolute;
   top: 27px;
@@ -1257,6 +1404,33 @@ onBeforeRouteUpdate((to, from, next) => {
   font-weight: 600;
 }
 
+/* Terms Content Styles */
+.terms-content {
+  max-height: 400px;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.terms-content h4 {
+  color: #354d7c;
+  margin-top: 16px;
+  margin-bottom: 8px;
+}
+
+.terms-content p {
+  color: #666;
+  line-height: 1.6;
+  margin-bottom: 12px;
+}
+
+.primary-bg {
+  background: linear-gradient(135deg, #354d7c, #5276b0);
+}
+
+.white--text {
+  color: white !important;
+}
+
 /* Responsive styles */
 @media (max-width: 1024px) {
   .nav-grid {
@@ -1269,8 +1443,35 @@ onBeforeRouteUpdate((to, from, next) => {
     padding: 140px 20px 24px !important;
   }
 
+  .action-buttons-container {
+    top: 16px;
+    left: 12px;
+    gap: 8px;
+  }
+  
+  .action-btn {
+    padding: 6px 16px;
+    font-size: 0.85rem;
+    height: 36px !important;
+    min-width: 120px;
+  }
+
   .status-info-card {
     margin: 120px 12px 12px;
+  }
+
+  .settings-btn {
+    top: 16px;
+    right: 12px;
+    width: 36px;
+    height: 36px;
+  }
+
+  .status-btn {
+    top: 24px;
+    font-size: 0.8rem;
+    padding: 3px 12px;
+    height: 28px !important;
   }
 
   .nav-grid {
@@ -1290,21 +1491,15 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 600px) {
-  .shop-btn-container {
-    top: 16px;
-    left: 12px;
-  }
-
-  .shop-btn {
-    padding: 8px 16px;
-    font-size: 0.9rem;
-    max-width: 180px;
-  }
-
-  .status-btn {
-    top: 24px;
+  .action-btn {
+    padding: 5px 14px;
     font-size: 0.8rem;
-    padding: 4px 12px;
+    height: 34px !important;
+    min-width: 110px;
+  }
+  
+  .shop-btn, .rider-btn {
+    margin-left: -12px;
   }
 
   .settings-btn {
@@ -1367,15 +1562,24 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 480px) {
-  .shop-btn {
-    max-width: 160px;
-    font-size: 0.85rem;
-    padding: 6px 14px;
+  .action-buttons-container {
+    gap: 6px;
+  }
+  
+  .action-btn {
+    padding: 4px 12px;
+    font-size: 0.75rem;
+    height: 32px !important;
+    min-width: 100px;
+  }
+  
+  .shop-btn, .rider-btn {
+    margin-left: -10px;
   }
 
   .status-btn {
-    font-size: 0.75rem;
-    padding: 3px 10px;
+    font-size: 0.7rem;
+    padding: 2px 8px;
   }
 
   .nav-grid {
@@ -1388,14 +1592,14 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 380px) {
-  .shop-btn {
-    max-width: 140px;
-    font-size: 0.8rem;
+  .action-btn {
+    min-width: 90px;
+    font-size: 0.7rem;
   }
 
   .status-btn {
-    font-size: 0.7rem;
-    padding: 2px 8px;
+    font-size: 0.65rem;
+    padding: 2px 6px;
   }
 }
 

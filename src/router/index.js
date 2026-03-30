@@ -213,6 +213,12 @@ const routes = [
     name: 'statusshopcreation',
     component:() => import('@/mainsite/StatusShopCreation.vue'),
   },
+   {
+    path: '/RiderApplication',
+    name: 'RiderApplication',
+    component:() => import('@/mainsite/delivery/RiderApplication.vue'),
+    meta: { requiresAuth: true } 
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
