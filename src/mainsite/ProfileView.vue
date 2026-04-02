@@ -171,7 +171,7 @@ const checkRiderStatus = async () => {
 // Rider navigation
 const goToRiderPage = () => {
   if (isRider.value && riderStatus.value === 'approved') {
-    router.push('/rider-dashboard')
+    router.push('/RiderDashboard')
   } else if (isRider.value && riderStatus.value === 'pending') {
     alert('Your rider application is still pending review. Please wait for approval.')
   } else if (isRider.value && riderStatus.value === 'rejected') {

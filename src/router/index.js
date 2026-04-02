@@ -219,6 +219,18 @@ const routes = [
     component:() => import('@/mainsite/delivery/RiderApplication.vue'),
     meta: { requiresAuth: true } 
   },
+   {
+    path: '/RiderDashboard',
+    name: 'RiderDashboard',
+    component:() => import('@/mainsite/delivery/RiderDashboard.vue'),
+    meta: { requiresAuth: true } 
+  },
+   {
+    path: '/RiderLocation',
+    name: 'RiderLocation',
+    component:() => import('@/mainsite/delivery/RiderLocation.vue'),
+    meta: { requiresAuth: true } 
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode
