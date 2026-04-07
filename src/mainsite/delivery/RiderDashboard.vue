@@ -9,7 +9,7 @@ const authStore = useAuthUserStore()
 
 // State
 const loading = ref(false)
-const activeTab = ref('active')
+const activeTab = ref('available')
 const showOrderDetails = ref(false)
 const showAcceptDialog = ref(false)
 const showUpdateDialog = ref(false)
@@ -27,38 +27,64 @@ const locationWatchId = ref(null)
 const goToRiderLocation = () => {
   router.push('/RiderLocation')
 }
+
 // Orders data
 const orders = ref([])
 
+// Get current rider ID
+const currentRiderId = computed(() => authStore.userData?.id)
+
 // Computed orders by status
-const activeOrders = computed(() => {
-  return orders.value.filter(order => 
-    order.status === 'accepted' || order.status === 'picked_up'
-  ).sort((a, b) => new Date(a.pickup_time) - new Date(b.pickup_time))
+const acceptedOrders = computed(() => {
+  return orders.value
+    .filter((order) => order.status === 'accepted' && order.rider_id === currentRiderId.value)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
 })
 
 const availableOrders = computed(() => {
-  return orders.value.filter(order => 
-    order.status === 'pending' || order.status === 'ready_for_pickup'
-  ).sort((a, b) => new Date(a.pickup_time) - new Date(b.pickup_time))
+  return orders.value
+    .filter(
+      (order) =>
+        (order.status === 'pending' ||
+          order.status === 'ready_for_pickup' ||
+          order.delivery_option === 'meetup') &&
+        (!order.rider_id || order.status !== 'accepted'),
+    )
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+})
+
+const pickedUpOrders = computed(() => {
+  return orders.value
+    .filter((order) => order.status === 'picked_up' && order.rider_id === currentRiderId.value)
+    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
 })
 
 const completedOrders = computed(() => {
-  return orders.value.filter(order => 
-    order.status === 'delivered' || order.status === 'completed'
-  ).sort((a, b) => new Date(b.completed_at || b.updated_at) - new Date(a.completed_at || a.updated_at))
+  return orders.value
+    .filter(
+      (order) =>
+        (order.status === 'delivered' || order.status === 'completed') &&
+        order.rider_id === currentRiderId.value,
+    )
+    .sort(
+      (a, b) => new Date(b.completed_at || b.updated_at) - new Date(a.completed_at || a.updated_at),
+    )
 })
 
 // Stats
 const stats = computed(() => ({
-  activeOrders: activeOrders.value.length,
-  pendingOrders: availableOrders.value.length,
-  completedToday: completedOrders.value.filter(order => {
+  acceptedOrders: acceptedOrders.value.length,
+  availableOrders: availableOrders.value.length,
+  pickedUpOrders: pickedUpOrders.value.length,
+  completedToday: completedOrders.value.filter((order) => {
     const today = new Date().toDateString()
     const orderDate = new Date(order.completed_at || order.updated_at).toDateString()
     return orderDate === today
   }).length,
-  totalEarnings: completedOrders.value.reduce((sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0), 0)
+  totalEarnings: completedOrders.value.reduce(
+    (sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0),
+    0,
+  ),
 }))
 
 // Helper functions
@@ -77,7 +103,13 @@ const formatDate = (dateString) => {
 const formatDateTime = (dateString) => {
   if (!dateString) return ''
   const date = new Date(dateString)
-  return date.toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true })
+  return date.toLocaleString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
 }
 
 const formatNumber = (num) => {
@@ -88,13 +120,13 @@ const formatNumber = (num) => {
 const getStatusText = (status) => {
   const statusMap = {
     pending: 'Pending',
-    ready_for_pickup: 'Ready for Pickup',
+    paid: 'Paid',
     accepted: 'Accepted',
     picked_up: 'Picked Up',
-    in_transit: 'In Transit',
+    shipped: 'Shipped',
     delivered: 'Delivered',
     completed: 'Completed',
-    cancelled: 'Cancelled'
+    cancelled: 'Cancelled',
   }
   return statusMap[status] || status
 }
@@ -102,13 +134,13 @@ const getStatusText = (status) => {
 const getStatusClass = (status) => {
   const classMap = {
     pending: 'status-pending',
-    ready_for_pickup: 'status-ready',
+    paid: 'status-paid',
     accepted: 'status-accepted',
     picked_up: 'status-picked',
-    in_transit: 'status-transit',
+    shipped: 'status-shipped',
     delivered: 'status-delivered',
     completed: 'status-completed',
-    cancelled: 'status-cancelled'
+    cancelled: 'status-cancelled',
   }
   return classMap[status] || 'status-default'
 }
@@ -116,42 +148,51 @@ const getStatusClass = (status) => {
 const updateStatusText = computed(() => {
   const statusMap = {
     picked_up: 'Picked Up',
-    delivered: 'Delivered'
+    delivered: 'Delivered',
   }
   return statusMap[pendingStatusUpdate.value] || pendingStatusUpdate.value
 })
 
+const getStatusColor = (status) => {
+  const colorMap = {
+    pending: '#ff9800',
+    paid: '#2196f3',
+    accepted: '#2196f3',
+    picked_up: '#9c27b0',
+    shipped: '#9c27b0',
+    delivered: '#4caf50',
+    completed: '#4caf50',
+    cancelled: '#f44336',
+  }
+  return colorMap[status] || '#999'
+}
+
 // Location functions
 const getCurrentLocation = () => {
   locationLoading.value = true
-  
+
   if (!navigator.geolocation) {
     alert('Geolocation is not supported by your browser')
     locationLoading.value = false
     return
   }
-  
+
   navigator.geolocation.getCurrentPosition(
     async (position) => {
       const { latitude, longitude } = position.coords
       currentLocation.value = { latitude, longitude }
-      
-      // Get address from coordinates
+
       await getAddressFromCoords(latitude, longitude)
-      
+
       locationLoading.value = false
-      
-      // Filter and sort orders by distance
       filterOrdersByDistance(latitude, longitude)
-      
-      // Optional success feedback
       console.log('Location updated successfully')
     },
     (error) => {
       console.error('Location error:', error)
       let errorMessage = 'Unable to get your location. '
-      
-      switch(error.code) {
+
+      switch (error.code) {
         case error.PERMISSION_DENIED:
           errorMessage += 'Please enable location access in your browser settings.'
           break
@@ -162,29 +203,27 @@ const getCurrentLocation = () => {
           errorMessage += 'Location request timed out.'
           break
       }
-      
+
       alert(errorMessage)
       locationLoading.value = false
     },
     {
       enableHighAccuracy: true,
       timeout: 10000,
-      maximumAge: 0
-    }
+      maximumAge: 0,
+    },
   )
 }
 
 // Get address from coordinates (reverse geocoding)
 const getAddressFromCoords = async (lat, lng) => {
   try {
-    // Using OpenStreetMap's Nominatim (free, no API key needed)
     const response = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
     )
     const data = await response.json()
-    
+
     if (data && data.display_name) {
-      // Get a shorter address for display
       const addressParts = data.display_name.split(',')
       currentLocation.value.address = addressParts.slice(0, 3).join(', ')
       currentLocation.value.fullAddress = data.display_name
@@ -197,57 +236,55 @@ const getAddressFromCoords = async (lat, lng) => {
 
 // Calculate distance between two coordinates (Haversine formula)
 const calculateDistance = (lat1, lon1, lat2, lon2) => {
-  const R = 6371 // Earth's radius in km
-  const dLat = (lat2 - lat1) * Math.PI / 180
-  const dLon = (lon2 - lon1) * Math.PI / 180
-  const a = 
-    Math.sin(dLat/2) * Math.sin(dLat/2) +
-    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
-    Math.sin(dLon/2) * Math.sin(dLon/2)
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a))
+  const R = 6371
+  const dLat = ((lat2 - lat1) * Math.PI) / 180
+  const dLon = ((lon2 - lon1) * Math.PI) / 180
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   return R * c
 }
 
 // Filter and sort orders by distance from current location
 const filterOrdersByDistance = (lat, lng) => {
-  // For now, this just updates the distance display
-  // In production, you would have actual coordinates for pickup locations
-  orders.value = orders.value.map(order => {
-    // If order has pickup coordinates, calculate real distance
+  orders.value = orders.value.map((order) => {
     if (order.pickup_lat && order.pickup_lng) {
       const distance = calculateDistance(lat, lng, order.pickup_lat, order.pickup_lng)
       return { ...order, distance: distance.toFixed(1) }
     }
-    // Otherwise keep existing distance or generate a random one for demo
     return order
   })
-  
-  // Sort available orders by distance (closest first)
+
   const sortedAvailable = [...availableOrders.value].sort((a, b) => {
     const distA = parseFloat(a.distance) || 999
     const distB = parseFloat(b.distance) || 999
     return distA - distB
   })
-  
-  // Update the orders array with sorted available orders
-  const otherOrders = orders.value.filter(order => 
-    order.status !== 'pending' && order.status !== 'ready_for_pickup'
+
+  const otherOrders = orders.value.filter(
+    (order) =>
+      order.status !== 'pending' &&
+      order.status !== 'ready_for_pickup' &&
+      order.delivery_option !== 'meetup',
   )
   orders.value = [...sortedAvailable, ...otherOrders]
 }
 
-// Start watching user's position (optional real-time updates)
+// Start watching user's position
 const startWatchingLocation = () => {
   if (navigator.geolocation) {
     locationWatchId.value = navigator.geolocation.watchPosition(
       (position) => {
         const { latitude, longitude } = position.coords
-        currentLocation.value = { 
+        currentLocation.value = {
           ...currentLocation.value,
-          latitude, 
-          longitude 
+          latitude,
+          longitude,
         }
-        // Update order distances in real-time
         if (currentLocation.value.latitude) {
           filterOrdersByDistance(latitude, longitude)
         }
@@ -257,9 +294,9 @@ const startWatchingLocation = () => {
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 30000, // Update every 30 seconds
-        timeout: 10000
-      }
+        maximumAge: 30000,
+        timeout: 10000,
+      },
     )
   }
 }
@@ -278,97 +315,130 @@ const fetchOrders = async () => {
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select('*')
-      .order('pickup_time', { ascending: true })
+      .select(
+        `
+        *,
+        order_items (
+          id,
+          quantity,
+          price,
+          selected_size,
+          selected_variety,
+          variety_data,
+          products (
+            id,
+            prod_name,
+            main_img_urls,
+            price
+          )
+        ),
+        profiles:user_id (
+          first_name,
+          last_name,
+          phone
+        ),
+        shop:shop_id (
+          business_name,
+          building,
+          street,
+          barangay,
+          city,
+          province,
+          latitude,
+          longitude
+        ),
+        address:address_id (
+          recipient_name,
+          phone,
+          street,
+          building,
+          house_no,
+          barangay_name,
+          city_name,
+          province_name
+        )
+      `,
+      )
+      .or(
+        'status.eq.pending,status.eq.ready_for_pickup,status.eq.accepted,status.eq.picked_up,status.eq.delivered,status.eq.completed,delivery_option.eq.meetup',
+      )
+      .order('created_at', { ascending: false })
 
     if (error) throw error
 
-    // Mock data if no orders exist yet
-    if (!data || data.length === 0) {
-      orders.value = getMockOrders()
+    if (data && data.length > 0) {
+      orders.value = data.map((order) => {
+        const shop = order.shop || {}
+        const pickupAddress =
+          [shop.building, shop.street, shop.barangay, shop.city, shop.province]
+            .filter(Boolean)
+            .join(', ') || 'Store Address'
+
+        const address = order.address || {}
+        const deliveryAddress =
+          [
+            address.house_no,
+            address.building,
+            address.street,
+            address.barangay_name,
+            address.city_name,
+            address.province_name,
+          ]
+            .filter(Boolean)
+            .join(', ') || 'Delivery Address'
+
+        const profile = order.profiles || {}
+        const customerName =
+          `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Customer'
+
+        const items = (order.order_items || []).map((item) => {
+          const product = item.products || {}
+          return {
+            id: item.id,
+            name: product.prod_name || 'Product',
+            quantity: item.quantity,
+            price: item.price,
+            selected_size: item.selected_size,
+            selected_variety: item.selected_variety,
+            variety_data: item.variety_data,
+            image: product.main_img_urls
+              ? Array.isArray(product.main_img_urls)
+                ? product.main_img_urls[0]
+                : product.main_img_urls
+              : null,
+          }
+        })
+
+        const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
+        const deliveryFee = order.total_amount - subtotal
+
+        return {
+          ...order,
+          pickup_address: pickupAddress,
+          delivery_address: deliveryAddress,
+          customer_name: customerName,
+          customer_phone: profile.phone || address.phone || '',
+          shop_name: shop.business_name || 'Shop',
+          pickup_lat: shop.latitude,
+          pickup_lng: shop.longitude,
+          items: items,
+          subtotal: subtotal,
+          delivery_fee: deliveryFee,
+          product_summary: items.map((item) => `${item.name} (x${item.quantity})`).join(', '),
+        }
+      })
+
+      console.log('✅ Orders loaded:', orders.value.length)
     } else {
-      orders.value = data
-    }
-    
-    // If we have a current location, update distances
-    if (currentLocation.value?.latitude) {
-      filterOrdersByDistance(currentLocation.value.latitude, currentLocation.value.longitude)
+      console.log('No orders found')
+      orders.value = []
     }
   } catch (error) {
     console.error('Error fetching orders:', error)
-    // Use mock data for demonstration
-    orders.value = getMockOrders()
+    orders.value = []
   } finally {
     loading.value = false
   }
-}
-
-// Mock data for demonstration
-const getMockOrders = () => {
-  const now = new Date()
-  return [
-    {
-      id: 'ORD-001',
-      status: 'accepted',
-      pickup_address: '123 Main St, Makati',
-      delivery_address: '456 Oak Ave, BGC',
-      pickup_time: new Date(now.getTime() + 15 * 60000).toISOString(),
-      total_amount: 450,
-      delivery_fee: 60,
-      subtotal: 390,
-      distance: '2.3',
-      customer_name: 'John Smith',
-      customer_phone: '09123456789',
-      customer_notes: 'Please call upon arrival',
-      payment_method: 'Cash',
-      payment_status: 'pending',
-      items: [
-        { id: 1, name: 'Burger Meal', quantity: 2, price: 150 },
-        { id: 2, name: 'Fries', quantity: 1, price: 90 }
-      ]
-    },
-    {
-      id: 'ORD-002',
-      status: 'pending',
-      pickup_address: '789 Pine St, Pasig',
-      delivery_address: '321 Cedar Rd, Mandaluyong',
-      pickup_time: new Date(now.getTime() + 45 * 60000).toISOString(),
-      total_amount: 780,
-      delivery_fee: 80,
-      subtotal: 700,
-      distance: '3.1',
-      customer_name: 'Maria Garcia',
-      customer_phone: '09876543210',
-      payment_method: 'Card',
-      payment_status: 'paid',
-      items: [
-        { id: 1, name: 'Pizza', quantity: 1, price: 450 },
-        { id: 2, name: 'Pasta', quantity: 1, price: 250 }
-      ]
-    },
-    {
-      id: 'ORD-003',
-      status: 'delivered',
-      pickup_address: '555 Commerce Ave, Pasay',
-      delivery_address: '777 Residences, Taguig',
-      pickup_time: new Date(now.getTime() - 120 * 60000).toISOString(),
-      completed_at: new Date(now.getTime() - 30 * 60000).toISOString(),
-      total_amount: 320,
-      delivery_fee: 50,
-      subtotal: 270,
-      distance: '1.8',
-      customer_name: 'Robert Johnson',
-      customer_phone: '09123456780',
-      payment_method: 'Cash',
-      payment_status: 'paid',
-      rider_earnings: 70,
-      rider_rating: 5,
-      items: [
-        { id: 1, name: 'Coffee', quantity: 2, price: 85 },
-        { id: 2, name: 'Sandwich', quantity: 1, price: 100 }
-      ]
-    }
-  ]
 }
 
 // Refresh orders
@@ -382,6 +452,12 @@ const viewOrderDetails = (order) => {
   showOrderDetails.value = true
 }
 
+// Update order status (this was missing)
+const updateOrderStatus = (status) => {
+  pendingStatusUpdate.value = status
+  showUpdateDialog.value = true
+}
+
 // Accept order
 const acceptOrder = (order) => {
   selectedOrder.value = order
@@ -391,25 +467,31 @@ const acceptOrder = (order) => {
 const confirmAcceptOrder = async () => {
   accepting.value = true
   try {
-    // Update order status to accepted and assign to current rider
+    const updateData = {
+      status: 'accepted',
+      rider_id: authStore.userData?.id,
+    }
+
+    try {
+      updateData.accepted_at = new Date().toISOString()
+    } catch (e) {
+      console.log('accepted_at column not available yet')
+    }
+
     const { error } = await supabase
       .from('orders')
-      .update({
-        status: 'accepted',
-        rider_id: authStore.userData?.id,
-        accepted_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('id', selectedOrder.value.id)
 
     if (error) throw error
 
-    // Update local data
-    const index = orders.value.findIndex(o => o.id === selectedOrder.value.id)
+    const index = orders.value.findIndex((o) => o.id === selectedOrder.value.id)
     if (index !== -1) {
       orders.value[index] = {
         ...orders.value[index],
         status: 'accepted',
-        accepted_at: new Date().toISOString()
+        rider_id: authStore.userData?.id,
+        accepted_at: new Date().toISOString(),
       }
     }
 
@@ -424,25 +506,26 @@ const confirmAcceptOrder = async () => {
   }
 }
 
-// Update order status
-const updateOrderStatus = (status) => {
-  pendingStatusUpdate.value = status
-  showUpdateDialog.value = true
-}
-
 const confirmUpdateStatus = async () => {
   updating.value = true
   try {
     const updateData = {
-      status: pendingStatusUpdate.value
+      status: pendingStatusUpdate.value,
     }
 
     if (pendingStatusUpdate.value === 'picked_up') {
-      updateData.picked_up_at = new Date().toISOString()
+      try {
+        updateData.picked_up_at = new Date().toISOString()
+      } catch (e) {
+        console.log('picked_up_at column not available yet')
+      }
     } else if (pendingStatusUpdate.value === 'delivered') {
-      updateData.delivered_at = new Date().toISOString()
-      updateData.completed_at = new Date().toISOString()
-      // Calculate rider earnings (example: 80% of delivery fee)
+      try {
+        updateData.delivered_at = new Date().toISOString()
+        updateData.completed_at = new Date().toISOString()
+      } catch (e) {
+        console.log('delivered_at or completed_at columns not available yet')
+      }
       updateData.rider_earnings = Math.round((selectedOrder.value.delivery_fee || 0) * 0.8)
     }
 
@@ -453,12 +536,11 @@ const confirmUpdateStatus = async () => {
 
     if (error) throw error
 
-    // Update local data
-    const index = orders.value.findIndex(o => o.id === selectedOrder.value.id)
+    const index = orders.value.findIndex((o) => o.id === selectedOrder.value.id)
     if (index !== -1) {
       orders.value[index] = {
         ...orders.value[index],
-        ...updateData
+        ...updateData,
       }
     }
 
@@ -487,75 +569,70 @@ const logout = async () => {
 // Load data on mount
 onMounted(() => {
   fetchOrders()
-  // Uncomment to auto-get location on mount
-  // getCurrentLocation()
-  // Uncomment to start real-time location tracking
-  // startWatchingLocation()
 })
 
 // Clean up on unmount
 onUnmounted(() => {
   stopWatchingLocation()
 })
+
+// Add this function in your script section
+const handleImageError = (event) => {
+  const img = event.target
+  img.src = 'https://via.placeholder.com/32?text=No+Image'
+  img.onerror = null // Prevent infinite loop
+}
 </script>
-
-
 <template>
   <v-app>
     <v-main class="rider-dashboard-main">
-      <!-- Header with Location Button -->
-    <!-- Header with Location Button -->
-<div class="header-section">
-  <v-btn icon variant="text" class="back-btn" @click="router.back()">
-    <v-icon size="28">mdi-arrow-left</v-icon>
-  </v-btn>
-  <h1 class="page-title">Rider Dashboard</h1>
-  <div class="header-actions">
-    <v-btn 
-      icon 
-      variant="text" 
-      class="location-btn"
-      @click="goToRiderLocation"
-    >
-      <v-icon size="24">mdi-crosshairs-gps</v-icon>
-    </v-btn>
-    <v-menu>
-      <template v-slot:activator="{ props }">
-        <v-btn icon variant="text" v-bind="props" class="menu-btn">
-          <v-icon size="24">mdi-dots-vertical</v-icon>
+      <!-- Header -->
+      <div class="header-section">
+        <v-btn icon variant="text" class="back-btn" @click="router.back()">
+          <v-icon size="28">mdi-arrow-left</v-icon>
         </v-btn>
-      </template>
-      <v-list>
-        <v-list-item @click="refreshOrders">
-          <template #prepend>
-            <v-icon>mdi-refresh</v-icon>
-          </template>
-          <v-list-item-title>Refresh</v-list-item-title>
-        </v-list-item>
-        <v-list-item @click="goToRiderLocation">
-          <template #prepend>
-            <v-icon>mdi-crosshairs-gps</v-icon>
-          </template>
-          <v-list-item-title>My Location</v-list-item-title>
-        </v-list-item>
-        <v-list-item @click="goToProfile">
-          <template #prepend>
-            <v-icon>mdi-account</v-icon>
-          </template>
-          <v-list-item-title>My Profile</v-list-item-title>
-        </v-list-item>
-        <v-list-item @click="logout">
-          <template #prepend>
-            <v-icon>mdi-logout</v-icon>
-          </template>
-          <v-list-item-title>Logout</v-list-item-title>
-        </v-list-item>
-      </v-list>
-    </v-menu>
-  </div>
-</div>
+        <h1 class="page-title">Rider Dashboard</h1>
+        <div class="header-actions">
+          <v-btn icon variant="text" class="location-btn" @click="goToRiderLocation">
+            <v-icon size="24">mdi-crosshairs-gps</v-icon>
+          </v-btn>
+          <v-menu>
+            <template v-slot:activator="{ props }">
+              <v-btn icon variant="text" v-bind="props" class="menu-btn">
+                <v-icon size="24">mdi-dots-vertical</v-icon>
+              </v-btn>
+            </template>
+            <v-list>
+              <v-list-item @click="refreshOrders">
+                <template #prepend>
+                  <v-icon>mdi-refresh</v-icon>
+                </template>
+                <v-list-item-title>Refresh</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="goToRiderLocation">
+                <template #prepend>
+                  <v-icon>mdi-crosshairs-gps</v-icon>
+                </template>
+                <v-list-item-title>My Location</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="goToProfile">
+                <template #prepend>
+                  <v-icon>mdi-account</v-icon>
+                </template>
+                <v-list-item-title>My Profile</v-list-item-title>
+              </v-list-item>
+              <v-list-item @click="logout">
+                <template #prepend>
+                  <v-icon>mdi-logout</v-icon>
+                </template>
+                <v-list-item-title>Logout</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
+        </div>
+      </div>
 
-      <!-- Location Status Bar (shows when location is active) -->
+      <!-- Location Status Bar -->
       <div v-if="currentLocation && currentLocation.address" class="location-status-bar">
         <v-icon size="16" color="#4caf50">mdi-map-marker</v-icon>
         <span class="location-text">{{ currentLocation.address }}</span>
@@ -566,37 +643,37 @@ onUnmounted(() => {
       <div class="stats-container">
         <v-card class="stat-card" elevation="2">
           <div class="stat-content">
-            <v-icon size="32" color="#4caf50">mdi-bike-fast</v-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.activeOrders }}</div>
-              <div class="stat-label">Active Orders</div>
-            </div>
-          </div>
-        </v-card>
-
-        <v-card class="stat-card" elevation="2">
-          <div class="stat-content">
-            <v-icon size="32" color="#ff9800">mdi-clock-outline</v-icon>
-            <div class="stat-info">
-              <div class="stat-value">{{ stats.pendingOrders }}</div>
-              <div class="stat-label">Pending Pickup</div>
-            </div>
-          </div>
-        </v-card>
-
-        <v-card class="stat-card" elevation="2">
-          <div class="stat-content">
             <v-icon size="32" color="#2196f3">mdi-check-circle</v-icon>
             <div class="stat-info">
-              <div class="stat-value">{{ stats.completedToday }}</div>
-              <div class="stat-label">Completed Today</div>
+              <div class="stat-value">{{ stats.acceptedOrders }}</div>
+              <div class="stat-label">Accepted Orders</div>
             </div>
           </div>
         </v-card>
 
         <v-card class="stat-card" elevation="2">
           <div class="stat-content">
-            <v-icon size="32" color="#9c27b0">mdi-currency-php</v-icon>
+            <v-icon size="32" color="#4caf50">mdi-bike-fast</v-icon>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.availableOrders }}</div>
+              <div class="stat-label">Available Orders</div>
+            </div>
+          </div>
+        </v-card>
+
+        <v-card class="stat-card" elevation="2">
+          <div class="stat-content">
+            <v-icon size="32" color="#9c27b0">mdi-truck-delivery</v-icon>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.pickedUpOrders }}</div>
+              <div class="stat-label">Picked Up</div>
+            </div>
+          </div>
+        </v-card>
+
+        <v-card class="stat-card" elevation="2">
+          <div class="stat-content">
+            <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
             <div class="stat-info">
               <div class="stat-value">₱{{ stats.totalEarnings }}</div>
               <div class="stat-label">Total Earnings</div>
@@ -605,18 +682,28 @@ onUnmounted(() => {
         </v-card>
       </div>
 
-      <!-- Tabs for Order Views -->
+      <!-- Tabs -->
       <v-tabs v-model="activeTab" class="order-tabs" color="#354d7c">
-        <v-tab value="active">
-          <v-icon left>mdi-bike-fast</v-icon>
-          Active Orders
-          <v-chip v-if="stats.activeOrders > 0" size="small" color="error" class="ml-2">
-            {{ stats.activeOrders }}
+        <v-tab value="accepted">
+          <v-icon left>mdi-check-circle</v-icon>
+          Accepted
+          <v-chip v-if="stats.acceptedOrders > 0" size="small" color="primary" class="ml-2">
+            {{ stats.acceptedOrders }}
           </v-chip>
         </v-tab>
         <v-tab value="available">
           <v-icon left>mdi-earth</v-icon>
-          Available Orders
+          Available
+          <v-chip v-if="stats.availableOrders > 0" size="small" color="success" class="ml-2">
+            {{ stats.availableOrders }}
+          </v-chip>
+        </v-tab>
+        <v-tab value="pickedup">
+          <v-icon left>mdi-truck-delivery</v-icon>
+          Picked Up
+          <v-chip v-if="stats.pickedUpOrders > 0" size="small" color="warning" class="ml-2">
+            {{ stats.pickedUpOrders }}
+          </v-chip>
         </v-tab>
         <v-tab value="completed">
           <v-icon left>mdi-history</v-icon>
@@ -625,58 +712,90 @@ onUnmounted(() => {
       </v-tabs>
 
       <v-tabs-window v-model="activeTab" class="mt-4">
-        <!-- Active Orders Tab -->
-        <v-tabs-window-item value="active">
+        <!-- Accepted Orders Tab -->
+        <v-tabs-window-item value="accepted">
           <div v-if="loading" class="text-center pa-8">
             <v-progress-circular indeterminate color="#354d7c"></v-progress-circular>
-            <p class="mt-4">Loading orders...</p>
+            <p class="mt-4">Loading accepted orders...</p>
           </div>
 
-          <div v-else-if="activeOrders.length === 0" class="empty-state">
-            <v-icon size="80" color="#ccc">mdi-bike-off</v-icon>
-            <h3>No Active Orders</h3>
-            <p>You don't have any active orders at the moment.</p>
+          <div v-else-if="acceptedOrders.length === 0" class="empty-state">
+            <v-icon size="80" color="#ccc">mdi-check-circle-outline</v-icon>
+            <h3>No Accepted Orders</h3>
+            <p>You haven't accepted any orders yet.</p>
           </div>
 
           <div v-else class="orders-list">
             <v-card
-              v-for="order in activeOrders"
+              v-for="order in acceptedOrders"
               :key="order.id"
-              class="order-card"
+              class="order-card accepted-card"
               elevation="2"
               @click="viewOrderDetails(order)"
             >
-              <div class="order-status-badge" :class="getStatusClass(order.status)">
-                {{ getStatusText(order.status) }}
-              </div>
+              <div class="order-status-badge status-accepted">Accepted</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.id.slice(-6) }}</div>
+                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
                 <div class="order-time">
                   <v-icon size="16">mdi-clock-outline</v-icon>
-                  {{ formatTime(order.pickup_time) }}
+                  {{ formatDateTime(order.created_at) }}
                 </div>
               </div>
 
-              <div class="order-locations">
-                <div class="location-item">
-                  <v-icon size="20" color="#4caf50">mdi-store</v-icon>
-                  <div class="location-details">
-                    <div class="location-label">Pickup</div>
-                    <div class="location-address">{{ order.pickup_address }}</div>
+              <div class="order-shop">
+                <v-icon size="14" color="#4caf50">mdi-store</v-icon>
+                <span class="shop-name">{{ order.shop_name }}</span>
+              </div>
+
+              <!-- Products with Images -->
+              <div class="order-products">
+                <div class="products-label">
+                  <v-icon size="14">mdi-package-variant</v-icon>
+                  Products:
+                </div>
+                <div class="products-list">
+                  <div
+                    v-for="(item, index) in order.items.slice(0, 3)"
+                    :key="item.id"
+                    class="product-item"
+                  >
+                    <div class="product-image-wrapper">
+                      <v-img
+                        v-if="item.image"
+                        :src="item.image"
+                        :alt="item.name"
+                        width="32"
+                        height="32"
+                        class="product-img"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon size="20">mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                    </div>
+                    <div class="product-details">
+                      <span class="product-name">{{ item.name }}</span>
+                      <span class="product-qty">x{{ item.quantity }}</span>
+                    </div>
+                  </div>
+                  <div v-if="order.items.length > 3" class="more-products">
+                    +{{ order.items.length - 3 }} more
                   </div>
                 </div>
+              </div>
 
-                <div class="location-arrow">
-                  <v-icon size="20" color="#999">mdi-arrow-down</v-icon>
+              <div class="order-info">
+                <div class="info-row">
+                  <span class="info-label">Pickup:</span>
+                  <span class="info-value">{{ order.pickup_address }}</span>
                 </div>
-
-                <div class="location-item">
-                  <v-icon size="20" color="#f44336">mdi-home</v-icon>
-                  <div class="location-details">
-                    <div class="location-label">Delivery</div>
-                    <div class="location-address">{{ order.delivery_address }}</div>
-                  </div>
+                <div class="info-row">
+                  <span class="info-label">Delivery:</span>
+                  <span class="info-value">{{ order.delivery_address }}</span>
                 </div>
               </div>
 
@@ -685,12 +804,15 @@ onUnmounted(() => {
                   <v-icon size="16">mdi-currency-php</v-icon>
                   {{ formatNumber(order.total_amount) }}
                 </div>
-                <div class="order-distance">
+                <div class="order-distance" v-if="order.distance">
                   <v-icon size="14">mdi-map-marker-distance</v-icon>
-                  {{ order.distance || '~2.5' }} km
+                  {{ order.distance }} km
                 </div>
                 <div class="order-action">
-                  <v-btn size="small" color="#354d7c" variant="outlined">View Details</v-btn>
+                  <v-btn size="small" color="#ff9800" @click.stop="updateOrderStatus('picked_up')">
+                    <v-icon size="16" left>mdi-truck</v-icon>
+                    Mark Picked Up
+                  </v-btn>
                 </div>
               </div>
             </v-card>
@@ -705,7 +827,7 @@ onUnmounted(() => {
           </div>
 
           <div v-else-if="availableOrders.length === 0" class="empty-state">
-            <v-icon size="80" color="#ccc">mdi-clipboard-clock-outline</v-icon>
+            <v-icon size="80" color="#ccc">mdi-bike-off</v-icon>
             <h3>No Available Orders</h3>
             <p>Check back later for new delivery opportunities.</p>
           </div>
@@ -714,39 +836,73 @@ onUnmounted(() => {
             <v-card
               v-for="order in availableOrders"
               :key="order.id"
-              class="order-card available"
+              class="order-card"
               elevation="2"
               @click="viewOrderDetails(order)"
             >
-              <div class="order-status-badge available-badge">Available</div>
+              <div class="order-status-badge status-pending">Available</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.id.slice(-6) }}</div>
+                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
                 <div class="order-time">
                   <v-icon size="16">mdi-clock-outline</v-icon>
-                  {{ formatTime(order.pickup_time) }}
+                  {{ formatDateTime(order.created_at) }}
                 </div>
               </div>
 
-              <div class="order-locations">
-                <div class="location-item">
-                  <v-icon size="20" color="#4caf50">mdi-store</v-icon>
-                  <div class="location-details">
-                    <div class="location-label">Pickup</div>
-                    <div class="location-address">{{ order.pickup_address }}</div>
+              <div class="order-shop">
+                <v-icon size="14" color="#4caf50">mdi-store</v-icon>
+                <span class="shop-name">{{ order.shop_name }}</span>
+              </div>
+
+              <!-- Products with Images -->
+              <div class="order-products">
+                <div class="products-label">
+                  <v-icon size="14">mdi-package-variant</v-icon>
+                  Products:
+                </div>
+                <div class="products-list">
+                  <div
+                    v-for="(item, index) in order.items.slice(0, 3)"
+                    :key="item.id"
+                    class="product-item"
+                  >
+                    <div class="product-image-wrapper">
+                      <v-img
+                        v-if="item.image"
+                        :src="item.image"
+                        :alt="item.name"
+                        width="32"
+                        height="32"
+                        class="product-img"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon size="20">mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                    </div>
+                    <div class="product-details">
+                      <span class="product-name">{{ item.name }}</span>
+                      <span class="product-qty">x{{ item.quantity }}</span>
+                    </div>
+                  </div>
+                  <div v-if="order.items.length > 3" class="more-products">
+                    +{{ order.items.length - 3 }} more
                   </div>
                 </div>
+              </div>
 
-                <div class="location-arrow">
-                  <v-icon size="20" color="#999">mdi-arrow-down</v-icon>
+              <div class="order-info">
+                <div class="info-row">
+                  <span class="info-label">Pickup:</span>
+                  <span class="info-value">{{ order.pickup_address }}</span>
                 </div>
-
-                <div class="location-item">
-                  <v-icon size="20" color="#f44336">mdi-home</v-icon>
-                  <div class="location-details">
-                    <div class="location-label">Delivery</div>
-                    <div class="location-address">{{ order.delivery_address }}</div>
-                  </div>
+                <div class="info-row">
+                  <span class="info-label">Delivery:</span>
+                  <span class="info-value">{{ order.delivery_address }}</span>
                 </div>
               </div>
 
@@ -755,14 +911,117 @@ onUnmounted(() => {
                   <v-icon size="16">mdi-currency-php</v-icon>
                   {{ formatNumber(order.total_amount) }}
                 </div>
-                <div class="order-distance">
+                <div class="order-distance" v-if="order.distance">
                   <v-icon size="14">mdi-map-marker-distance</v-icon>
-                  {{ order.distance || '~2.5' }} km
+                  {{ order.distance }} km
                 </div>
                 <div class="order-action">
                   <v-btn size="small" color="#4caf50" @click.stop="acceptOrder(order)">
                     <v-icon size="16" left>mdi-check</v-icon>
                     Accept
+                  </v-btn>
+                </div>
+              </div>
+            </v-card>
+          </div>
+        </v-tabs-window-item>
+
+        <!-- Picked Up Orders Tab -->
+        <v-tabs-window-item value="pickedup">
+          <div v-if="loading" class="text-center pa-8">
+            <v-progress-circular indeterminate color="#354d7c"></v-progress-circular>
+            <p class="mt-4">Loading picked up orders...</p>
+          </div>
+
+          <div v-else-if="pickedUpOrders.length === 0" class="empty-state">
+            <v-icon size="80" color="#ccc">mdi-truck-off</v-icon>
+            <h3>No Picked Up Orders</h3>
+            <p>Orders you've picked up will appear here.</p>
+          </div>
+
+          <div v-else class="orders-list">
+            <v-card
+              v-for="order in pickedUpOrders"
+              :key="order.id"
+              class="order-card picked-card"
+              elevation="2"
+              @click="viewOrderDetails(order)"
+            >
+              <div class="order-status-badge status-picked">Picked Up</div>
+
+              <div class="order-header">
+                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
+                <div class="order-time">
+                  <v-icon size="16">mdi-clock-outline</v-icon>
+                  {{ formatDateTime(order.created_at) }}
+                </div>
+              </div>
+
+              <div class="order-shop">
+                <v-icon size="14" color="#4caf50">mdi-store</v-icon>
+                <span class="shop-name">{{ order.shop_name }}</span>
+              </div>
+
+              <!-- Products with Images -->
+              <div class="order-products">
+                <div class="products-label">
+                  <v-icon size="14">mdi-package-variant</v-icon>
+                  Products:
+                </div>
+                <div class="products-list">
+                  <div
+                    v-for="(item, index) in order.items.slice(0, 3)"
+                    :key="item.id"
+                    class="product-item"
+                  >
+                    <div class="product-image-wrapper">
+                      <v-img
+                        v-if="item.image"
+                        :src="item.image"
+                        :alt="item.name"
+                        width="32"
+                        height="32"
+                        class="product-img"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon size="20">mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                    </div>
+                    <div class="product-details">
+                      <span class="product-name">{{ item.name }}</span>
+                      <span class="product-qty">x{{ item.quantity }}</span>
+                    </div>
+                  </div>
+                  <div v-if="order.items.length > 3" class="more-products">
+                    +{{ order.items.length - 3 }} more
+                  </div>
+                </div>
+              </div>
+
+              <div class="order-info">
+                <div class="info-row">
+                  <span class="info-label">Delivery:</span>
+                  <span class="info-value">{{ order.delivery_address }}</span>
+                </div>
+              </div>
+
+              <div class="order-footer">
+                <div class="order-amount">
+                  <v-icon size="16">mdi-currency-php</v-icon>
+                  {{ formatNumber(order.total_amount) }}
+                </div>
+                <div class="order-distance" v-if="order.distance">
+                  <v-icon size="14">mdi-map-marker-distance</v-icon>
+                  {{ order.distance }} km
+                </div>
+                <div class="order-action">
+                  <v-btn size="small" color="#4caf50" @click.stop="updateOrderStatus('delivered')">
+                    <v-icon size="16" left>mdi-check</v-icon>
+                    Mark Delivered
                   </v-btn>
                 </div>
               </div>
@@ -787,39 +1046,69 @@ onUnmounted(() => {
             <v-card
               v-for="order in completedOrders"
               :key="order.id"
-              class="order-card completed"
+              class="order-card completed-card"
               elevation="2"
               @click="viewOrderDetails(order)"
             >
-              <div class="order-status-badge completed-badge">Completed</div>
+              <div class="order-status-badge status-completed">Completed</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.id.slice(-6) }}</div>
+                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
                 <div class="order-time">
                   <v-icon size="16">mdi-calendar-check</v-icon>
                   {{ formatDate(order.completed_at || order.created_at) }}
                 </div>
               </div>
 
-              <div class="order-locations">
-                <div class="location-item">
-                  <v-icon size="20" color="#4caf50">mdi-store</v-icon>
-                  <div class="location-details">
-                    <div class="location-label">Pickup</div>
-                    <div class="location-address">{{ order.pickup_address }}</div>
+              <div class="order-shop">
+                <v-icon size="14" color="#4caf50">mdi-store</v-icon>
+                <span class="shop-name">{{ order.shop_name }}</span>
+              </div>
+
+              <!-- Products with Images -->
+              <div class="order-products">
+                <div class="products-label">
+                  <v-icon size="14">mdi-package-variant</v-icon>
+                  Products:
+                </div>
+                <div class="products-list">
+                  <div
+                    v-for="(item, index) in order.items.slice(0, 3)"
+                    :key="item.id"
+                    class="product-item"
+                  >
+                    <div class="product-image-wrapper">
+                      <v-img
+                        v-if="item.image"
+                        :src="item.image"
+                        :alt="item.name"
+                        width="32"
+                        height="32"
+                        class="product-img"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon size="20">mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                    </div>
+                    <div class="product-details">
+                      <span class="product-name">{{ item.name }}</span>
+                      <span class="product-qty">x{{ item.quantity }}</span>
+                    </div>
+                  </div>
+                  <div v-if="order.items.length > 3" class="more-products">
+                    +{{ order.items.length - 3 }} more
                   </div>
                 </div>
+              </div>
 
-                <div class="location-arrow">
-                  <v-icon size="20" color="#999">mdi-arrow-down</v-icon>
-                </div>
-
-                <div class="location-item">
-                  <v-icon size="20" color="#f44336">mdi-home</v-icon>
-                  <div class="location-details">
-                    <div class="location-label">Delivery</div>
-                    <div class="location-address">{{ order.delivery_address }}</div>
-                  </div>
+              <div class="order-info">
+                <div class="info-row">
+                  <span class="info-label">Delivery:</span>
+                  <span class="info-value">{{ order.delivery_address }}</span>
                 </div>
               </div>
 
@@ -828,9 +1117,9 @@ onUnmounted(() => {
                   <v-icon size="16">mdi-currency-php</v-icon>
                   {{ formatNumber(order.total_amount) }}
                 </div>
-                <div class="order-rating" v-if="order.rider_rating">
-                  <v-icon size="14" color="#ffc107">mdi-star</v-icon>
-                  {{ order.rider_rating }}
+                <div class="order-earnings" v-if="order.rider_earnings">
+                  <v-icon size="14" color="#4caf50">mdi-cash</v-icon>
+                  ₱{{ order.rider_earnings }}
                 </div>
                 <div class="order-action">
                   <v-btn size="small" color="#666" variant="outlined">View Details</v-btn>
@@ -848,7 +1137,7 @@ onUnmounted(() => {
         <v-card-title class="dialog-header">
           <div>
             <div class="text-h6">Order Details</div>
-            <div class="order-id-small">#{{ selectedOrder.id }}</div>
+            <div class="order-id-small">#{{ selectedOrder.transaction_number || selectedOrder.id.slice(-6) }}</div>
           </div>
           <v-btn icon @click="showOrderDetails = false">
             <v-icon>mdi-close</v-icon>
@@ -878,10 +1167,7 @@ onUnmounted(() => {
                 <div class="point-details">
                   <div class="point-label">Pickup Location</div>
                   <div class="point-address">{{ selectedOrder.pickup_address }}</div>
-                  <div class="point-time" v-if="selectedOrder.pickup_time">
-                    <v-icon size="14">mdi-clock</v-icon>
-                    {{ formatDateTime(selectedOrder.pickup_time) }}
-                  </div>
+                  <div class="point-label">Shop: {{ selectedOrder.shop_name }}</div>
                 </div>
               </div>
 
@@ -892,16 +1178,14 @@ onUnmounted(() => {
                 <div class="point-details">
                   <div class="point-label">Delivery Location</div>
                   <div class="point-address">{{ selectedOrder.delivery_address }}</div>
-                  <div class="point-time" v-if="selectedOrder.delivery_time">
-                    <v-icon size="14">mdi-clock</v-icon>
-                    {{ formatDateTime(selectedOrder.delivery_time) }}
-                  </div>
+                  <div class="point-label">Customer: {{ selectedOrder.customer_name }}</div>
+                  <div class="point-label">Phone: {{ selectedOrder.customer_phone }}</div>
                 </div>
               </div>
             </div>
           </div>
 
-          <!-- Order Items -->
+          <!-- Order Items with Images -->
           <div class="info-section">
             <div class="info-title">
               <v-icon size="20" color="#354d7c">mdi-shopping-bag</v-icon>
@@ -911,6 +1195,7 @@ onUnmounted(() => {
             <v-table density="compact">
               <thead>
                 <tr>
+                  <th>Image</th>
                   <th>Item</th>
                   <th class="text-center">Qty</th>
                   <th class="text-right">Price</th>
@@ -918,49 +1203,42 @@ onUnmounted(() => {
               </thead>
               <tbody>
                 <tr v-for="item in selectedOrder.items" :key="item.id">
+                  <td style="width: 50px;">
+                    <v-img
+                      v-if="item.image"
+                      :src="item.image"
+                      width="40"
+                      height="40"
+                      class="rounded"
+                      cover
+                      @error="handleImageError"
+                    >
+                      <template #placeholder>
+                        <v-icon>mdi-package</v-icon>
+                      </template>
+                    </v-img>
+                    <v-icon v-else>mdi-package</v-icon>
+                   </td>
                   <td>{{ item.name }}</td>
                   <td class="text-center">x{{ item.quantity }}</td>
                   <td class="text-right">₱{{ formatNumber(item.price * item.quantity) }}</td>
                 </tr>
                 <tr class="subtotal-row">
-                  <td colspan="2" class="text-right font-weight-bold">Subtotal:</td>
+                  <td colspan="3" class="text-right font-weight-bold">Subtotal:</td>
                   <td class="text-right">₱{{ formatNumber(selectedOrder.subtotal) }}</td>
                 </tr>
                 <tr>
-                  <td colspan="2" class="text-right">Delivery Fee:</td>
+                  <td colspan="3" class="text-right">Delivery Fee:</td>
                   <td class="text-right">₱{{ formatNumber(selectedOrder.delivery_fee) }}</td>
                 </tr>
                 <tr class="total-row">
-                  <td colspan="2" class="text-right font-weight-bold">Total:</td>
+                  <td colspan="3" class="text-right font-weight-bold">Total:</td>
                   <td class="text-right font-weight-bold">
                     ₱{{ formatNumber(selectedOrder.total_amount) }}
                   </td>
                 </tr>
               </tbody>
             </v-table>
-          </div>
-
-          <!-- Customer Info -->
-          <div class="info-section">
-            <div class="info-title">
-              <v-icon size="20" color="#354d7c">mdi-account-circle</v-icon>
-              <span>Customer Information</span>
-            </div>
-
-            <div class="customer-info">
-              <div class="customer-field">
-                <span class="field-label">Name:</span>
-                <span class="field-value">{{ selectedOrder.customer_name }}</span>
-              </div>
-              <div class="customer-field">
-                <span class="field-label">Phone:</span>
-                <span class="field-value">{{ selectedOrder.customer_phone }}</span>
-              </div>
-              <div class="customer-field" v-if="selectedOrder.customer_notes">
-                <span class="field-label">Notes:</span>
-                <span class="field-value">{{ selectedOrder.customer_notes }}</span>
-              </div>
-            </div>
           </div>
 
           <!-- Payment Info -->
@@ -974,11 +1252,9 @@ onUnmounted(() => {
                 <span class="field-label">Method:</span>
                 <span class="field-value">{{ selectedOrder.payment_method }}</span>
               </div>
-              <div class="payment-field" v-if="selectedOrder.payment_status">
-                <span class="field-label">Status:</span>
-                <span class="field-value" :class="selectedOrder.payment_status === 'paid' ? 'success-text' : 'warning-text'">
-                  {{ selectedOrder.payment_status.toUpperCase() }}
-                </span>
+              <div class="payment-field">
+                <span class="field-label">Delivery Option:</span>
+                <span class="field-value">{{ selectedOrder.delivery_option || 'Standard' }}</span>
               </div>
             </div>
           </div>
@@ -989,13 +1265,6 @@ onUnmounted(() => {
         <v-card-actions class="dialog-actions">
           <v-btn variant="text" @click="showOrderDetails = false">Close</v-btn>
           <v-spacer></v-spacer>
-          <v-btn
-            v-if="selectedOrder.status === 'pending'"
-            color="primary"
-            @click="acceptOrder(selectedOrder)"
-          >
-            Accept Order
-          </v-btn>
           <v-btn
             v-if="selectedOrder.status === 'accepted'"
             color="warning"
@@ -1020,7 +1289,11 @@ onUnmounted(() => {
         <v-card-title class="text-h6">Accept Order</v-card-title>
         <v-card-text>
           <p>Are you sure you want to accept this order?</p>
-          <p class="text-caption text-grey">You will have {{ selectedOrder?.pickup_window || '30' }} minutes to pick up the order.</p>
+          <p class="text-caption text-grey">You will have 30 minutes to pick up the order.</p>
+          <p class="text-caption text-grey">
+            Note: If the order is not picked up or delivered, it will be automatically cancelled and
+            you may receive a penalty. Please make sure you can fulfill the order before accepting.
+          </p>
         </v-card-text>
         <v-card-actions>
           <v-btn variant="text" @click="showAcceptDialog = false">Cancel</v-btn>
@@ -1035,7 +1308,9 @@ onUnmounted(() => {
       <v-card>
         <v-card-title class="text-h6">Update Order Status</v-card-title>
         <v-card-text>
-          <p>Are you sure you want to mark this order as <strong>{{ updateStatusText }}</strong>?</p>
+          <p>
+            Are you sure you want to mark this order as <strong>{{ updateStatusText }}</strong>?
+          </p>
         </v-card-text>
         <v-card-actions>
           <v-btn variant="text" @click="showUpdateDialog = false">Cancel</v-btn>
@@ -1047,8 +1322,157 @@ onUnmounted(() => {
   </v-app>
 </template>
 
-
 <style scoped>
+/* Add new styles for different card types */
+.accepted-card {
+  border-left: 4px solid #2196f3;
+}
+
+.picked-card {
+  border-left: 4px solid #9c27b0;
+}
+
+.completed-card {
+  border-left: 4px solid #4caf50;
+}
+
+.order-earnings {
+  font-size: 0.75rem;
+  color: #4caf50;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+}
+
+/* Product styles with images */
+.order-shop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 16px;
+  background: #f0f7ff;
+  margin: 4px 16px;
+  border-radius: 8px;
+}
+
+.shop-name {
+  font-size: 0.8rem;
+  font-weight: 500;
+  color: #354d7c;
+}
+
+.order-products {
+  padding: 8px 16px;
+  background: #f8fafc;
+  margin: 8px 16px;
+  border-radius: 8px;
+}
+
+.products-label {
+  font-size: 0.7rem;
+  color: #666;
+  margin-bottom: 6px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.products-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.product-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: white;
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 0.75rem;
+  border: 1px solid #e0e0e0;
+  flex: 1;
+  min-width: 140px;
+}
+
+.product-image-wrapper {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.product-img {
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+.product-details {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.product-name {
+  font-weight: 500;
+  color: #333;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.product-qty {
+  color: #666;
+  font-size: 0.7rem;
+  font-weight: 500;
+  background: #f0f0f0;
+  padding: 2px 6px;
+  border-radius: 12px;
+}
+
+.more-products {
+  font-size: 0.7rem;
+  color: #999;
+  padding: 4px 8px;
+  background: #f5f5f5;
+  border-radius: 16px;
+}
+
+.order-info {
+  padding: 8px 16px;
+}
+
+.info-row {
+  display: flex;
+  margin-bottom: 6px;
+  font-size: 0.75rem;
+}
+
+.info-label {
+  width: 65px;
+  color: #666;
+  font-weight: 500;
+}
+
+.info-value {
+  flex: 1;
+  color: #333;
+  word-break: break-word;
+}
+
+/* Main layout styles */
 .rider-dashboard-main {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
   min-height: 100vh;
@@ -1073,18 +1497,11 @@ onUnmounted(() => {
   align-items: center;
 }
 
-.back-btn, .menu-btn, .location-btn {
+.back-btn,
+.menu-btn,
+.location-btn {
   color: white !important;
   background: rgba(255, 255, 255, 0.1) !important;
-}
-
-.location-btn {
-  transition: all 0.3s ease;
-}
-
-.location-btn:hover {
-  background: rgba(255, 255, 255, 0.2) !important;
-  transform: scale(1.05);
 }
 
 .page-title {
@@ -1093,7 +1510,6 @@ onUnmounted(() => {
   margin: 0;
 }
 
-/* Location Status Bar */
 .location-status-bar {
   display: flex;
   align-items: center;
@@ -1103,18 +1519,6 @@ onUnmounted(() => {
   border-bottom: 1px solid #c8e6c9;
   font-size: 0.8rem;
   color: #2e7d32;
-  animation: slideDown 0.3s ease;
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
 }
 
 .location-text {
@@ -1125,13 +1529,6 @@ onUnmounted(() => {
   font-weight: 500;
 }
 
-.location-update-time {
-  font-size: 0.7rem;
-  color: #66bb6a;
-  font-weight: 500;
-}
-
-/* Stats Container */
 .stats-container {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
@@ -1151,10 +1548,6 @@ onUnmounted(() => {
   padding: 16px;
 }
 
-.stat-info {
-  flex: 1;
-}
-
 .stat-value {
   font-size: 1.5rem;
   font-weight: bold;
@@ -1167,15 +1560,13 @@ onUnmounted(() => {
   color: #666;
 }
 
-/* Order Tabs */
 .order-tabs {
   background: white;
   margin: 0 16px;
   border-radius: 12px;
-  overflow: hidden;
+  overflow-x: auto;
 }
 
-/* Orders List */
 .orders-list {
   padding: 16px;
   display: flex;
@@ -1207,34 +1598,34 @@ onUnmounted(() => {
   text-transform: uppercase;
 }
 
-.status-pending, .status-ready {
-  background: #fff3e0;
-  color: #ff9800;
-}
-
-.status-accepted, .status-picked, .status-transit {
+.status-accepted {
   background: #e3f2fd;
   color: #2196f3;
 }
 
-.status-delivered, .status-completed {
+.status-picked {
+  background: #f3e5f5;
+  color: #9c27b0;
+}
+
+.status-completed {
   background: #e8f5e9;
   color: #4caf50;
 }
 
-.status-cancelled {
-  background: #ffebee;
-  color: #f44336;
+.status-pending {
+  background: #fff3e0;
+  color: #ff9800;
 }
 
-.available-badge {
-  background: #e8f5e9;
-  color: #4caf50;
+.status-paid {
+  background: #e3f2fd;
+  color: #2196f3;
 }
 
-.completed-badge {
-  background: #e0e0e0;
-  color: #666;
+.status-shipped {
+  background: #f3e5f5;
+  color: #9c27b0;
 }
 
 .order-header {
@@ -1256,37 +1647,6 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-.order-locations {
-  padding: 8px 16px;
-}
-
-.location-item {
-  display: flex;
-  gap: 12px;
-  align-items: flex-start;
-}
-
-.location-details {
-  flex: 1;
-}
-
-.location-label {
-  font-size: 0.7rem;
-  color: #999;
-  text-transform: uppercase;
-}
-
-.location-address {
-  font-size: 0.85rem;
-  color: #333;
-  font-weight: 500;
-}
-
-.location-arrow {
-  text-align: center;
-  padding: 4px 0 4px 28px;
 }
 
 .order-footer {
@@ -1315,7 +1675,6 @@ onUnmounted(() => {
   gap: 4px;
 }
 
-/* Empty State */
 .empty-state {
   text-align: center;
   padding: 60px 20px;
@@ -1331,7 +1690,7 @@ onUnmounted(() => {
   margin-top: 8px;
 }
 
-/* Dialog Styles */
+/* Dialog styles */
 .dialog-header {
   display: flex;
   justify-content: space-between;
@@ -1360,10 +1719,6 @@ onUnmounted(() => {
   margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 2px solid #e0e0e0;
-}
-
-.route-info {
-  padding: 8px 0;
 }
 
 .route-point {
@@ -1408,15 +1763,6 @@ onUnmounted(() => {
   color: #333;
 }
 
-.point-time {
-  font-size: 0.75rem;
-  color: #666;
-  margin-top: 4px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .route-line {
   width: 2px;
   height: 20px;
@@ -1424,13 +1770,13 @@ onUnmounted(() => {
   margin-left: 13px;
 }
 
-.customer-info, .payment-info {
+.payment-info {
   background: #f8fafc;
   padding: 12px;
   border-radius: 12px;
 }
 
-.customer-field, .payment-field {
+.payment-field {
   display: flex;
   margin-bottom: 8px;
 }
@@ -1461,22 +1807,13 @@ onUnmounted(() => {
   font-weight: 600;
 }
 
-.subtotal-row, .total-row {
+.subtotal-row,
+.total-row {
   border-top: 1px solid #eee;
 }
 
 .total-row {
   background: #f8fafc;
-  font-weight: bold;
-}
-
-.success-text {
-  color: #4caf50;
-  font-weight: bold;
-}
-
-.warning-text {
-  color: #ff9800;
   font-weight: bold;
 }
 
@@ -1491,29 +1828,33 @@ onUnmounted(() => {
     gap: 8px;
   }
 
-  .stat-content {
-    padding: 12px;
-  }
-
   .stat-value {
     font-size: 1.2rem;
-  }
-
-  .order-card:hover {
-    transform: none;
   }
 
   .page-title {
     font-size: 1.2rem;
   }
-  
-  .location-status-bar {
-    font-size: 0.7rem;
-    padding: 6px 12px;
+
+  .product-item {
+    min-width: 120px;
+    padding: 4px 8px;
   }
-  
-  .location-text {
+
+  .product-name {
+    max-width: 80px;
     font-size: 0.7rem;
+  }
+
+  .product-image-wrapper {
+    width: 28px;
+    height: 28px;
+  }
+
+  .order-shop,
+  .order-products {
+    margin: 4px 12px;
+    padding: 6px 12px;
   }
 }
 </style>
