@@ -23,6 +23,17 @@ const currentLocation = ref(null)
 const locationLoading = ref(false)
 const locationWatchId = ref(null)
 
+//for image view
+const showImageDialog = ref(false)
+const selectedImage = ref(null)
+const selectedProductName = ref('')
+
+// Add this function in your script section
+const viewFullImage = (imageUrl, productName) => {
+  selectedImage.value = imageUrl
+  selectedProductName.value = productName
+  showImageDialog.value = true
+}
 // Navigation to Rider Location page
 const goToRiderLocation = () => {
   router.push('/RiderLocation')
@@ -736,7 +747,9 @@ const handleImageError = (event) => {
               <div class="order-status-badge status-accepted">Accepted</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
+                <div class="order-id">
+                  Order #{{ order.transaction_number || order.id.slice(-6) }}
+                </div>
                 <div class="order-time">
                   <v-icon size="16">mdi-clock-outline</v-icon>
                   {{ formatDateTime(order.created_at) }}
@@ -760,7 +773,10 @@ const handleImageError = (event) => {
                     :key="item.id"
                     class="product-item"
                   >
-                    <div class="product-image-wrapper">
+                    <div
+                      class="product-image-wrapper"
+                      @click.stop="viewFullImage(item.image, item.name)"
+                    >
                       <v-img
                         v-if="item.image"
                         :src="item.image"
@@ -843,7 +859,9 @@ const handleImageError = (event) => {
               <div class="order-status-badge status-pending">Available</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
+                <div class="order-id">
+                  Order #{{ order.transaction_number || order.id.slice(-6) }}
+                </div>
                 <div class="order-time">
                   <v-icon size="16">mdi-clock-outline</v-icon>
                   {{ formatDateTime(order.created_at) }}
@@ -950,7 +968,9 @@ const handleImageError = (event) => {
               <div class="order-status-badge status-picked">Picked Up</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
+                <div class="order-id">
+                  Order #{{ order.transaction_number || order.id.slice(-6) }}
+                </div>
                 <div class="order-time">
                   <v-icon size="16">mdi-clock-outline</v-icon>
                   {{ formatDateTime(order.created_at) }}
@@ -1053,7 +1073,9 @@ const handleImageError = (event) => {
               <div class="order-status-badge status-completed">Completed</div>
 
               <div class="order-header">
-                <div class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</div>
+                <div class="order-id">
+                  Order #{{ order.transaction_number || order.id.slice(-6) }}
+                </div>
                 <div class="order-time">
                   <v-icon size="16">mdi-calendar-check</v-icon>
                   {{ formatDate(order.completed_at || order.created_at) }}
@@ -1137,7 +1159,9 @@ const handleImageError = (event) => {
         <v-card-title class="dialog-header">
           <div>
             <div class="text-h6">Order Details</div>
-            <div class="order-id-small">#{{ selectedOrder.transaction_number || selectedOrder.id.slice(-6) }}</div>
+            <div class="order-id-small">
+              #{{ selectedOrder.transaction_number || selectedOrder.id.slice(-6) }}
+            </div>
           </div>
           <v-btn icon @click="showOrderDetails = false">
             <v-icon>mdi-close</v-icon>
@@ -1203,22 +1227,24 @@ const handleImageError = (event) => {
               </thead>
               <tbody>
                 <tr v-for="item in selectedOrder.items" :key="item.id">
-                  <td style="width: 50px;">
-                    <v-img
-                      v-if="item.image"
-                      :src="item.image"
-                      width="40"
-                      height="40"
-                      class="rounded"
-                      cover
-                      @error="handleImageError"
-                    >
-                      <template #placeholder>
-                        <v-icon>mdi-package</v-icon>
-                      </template>
-                    </v-img>
-                    <v-icon v-else>mdi-package</v-icon>
-                   </td>
+                  <td style="width: 50px">
+                    <div @click="viewFullImage(item.image, item.name)" style="cursor: pointer">
+                      <v-img
+                        v-if="item.image"
+                        :src="item.image"
+                        width="40"
+                        height="40"
+                        class="rounded"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon>mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else>mdi-package</v-icon>
+                    </div>
+                  </td>
                   <td>{{ item.name }}</td>
                   <td class="text-center">x{{ item.quantity }}</td>
                   <td class="text-right">₱{{ formatNumber(item.price * item.quantity) }}</td>
@@ -1309,7 +1335,8 @@ const handleImageError = (event) => {
         <v-card-title class="text-h6">Update Order Status</v-card-title>
         <v-card-text>
           <p>
-            Are you sure you want to mark this order as <strong>{{ updateStatusText }}</strong>?
+            Are you sure you want to mark this order as <strong>{{ updateStatusText }}</strong
+            >?
           </p>
         </v-card-text>
         <v-card-actions>
@@ -1319,6 +1346,42 @@ const handleImageError = (event) => {
         </v-card-actions>
       </v-card>
     </v-dialog>
+    <!-- Full Screen Image Preview Dialog -->
+<v-dialog v-model="showImageDialog" max-width="90vw" @click:outside="showImageDialog = false">
+  <v-card class="image-preview-dialog">
+    <v-card-title class="dialog-header d-flex justify-space-between align-center">
+      <span class="text-h6">{{ selectedProductName }}</span>
+      <v-btn icon @click="showImageDialog = false">
+        <v-icon>mdi-close</v-icon>
+      </v-btn>
+    </v-card-title>
+    <v-divider></v-divider>
+    <v-card-text class="text-center pa-4">
+      <v-img
+        v-if="selectedImage"
+        :src="selectedImage"
+        :alt="selectedProductName"
+        max-height="70vh"
+        max-width="100%"
+        contain
+        class="mx-auto"
+      >
+        <template #placeholder>
+          <div class="d-flex align-center justify-center" style="height: 300px;">
+            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+          </div>
+        </template>
+      </v-img>
+      <div v-else class="text-center pa-8">
+        <v-icon size="64" color="grey">mdi-image-off</v-icon>
+        <p class="mt-2">No image available</p>
+      </div>
+    </v-card-text>
+    <v-card-actions class="dialog-actions">
+      <v-btn color="primary" @click="showImageDialog = false">Close</v-btn>
+    </v-card-actions>
+  </v-card>
+</v-dialog>
   </v-app>
 </template>
 
@@ -1578,7 +1641,9 @@ const handleImageError = (event) => {
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
   position: relative;
 }
 
@@ -1856,5 +1921,44 @@ const handleImageError = (event) => {
     margin: 4px 12px;
     padding: 6px 12px;
   }
+}
+/* Image preview dialog styles */
+.image-preview-dialog {
+  border-radius: 16px;
+  overflow: hidden;
+}
+
+.image-preview-dialog .dialog-header {
+  background: linear-gradient(135deg, #354d7c, #5276b0);
+  color: white;
+  padding: 16px 20px;
+}
+
+.image-preview-dialog .dialog-header .text-h6 {
+  color: white;
+  font-weight: 600;
+}
+
+.image-preview-dialog .v-card-text {
+  background: #f8fafc;
+}
+
+/* Make product images have a pointer cursor */
+.product-image-wrapper {
+  cursor: pointer;
+  transition: transform 0.2s ease;
+}
+
+.product-image-wrapper:hover {
+  transform: scale(1.1);
+}
+
+/* For the order details table image */
+.info-section .v-table td div[style*="cursor: pointer"] {
+  transition: transform 0.2s ease;
+}
+
+.info-section .v-table td div[style*="cursor: pointer"]:hover {
+  transform: scale(1.05);
 }
 </style>
