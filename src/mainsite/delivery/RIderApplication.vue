@@ -1,6 +1,5 @@
-
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
@@ -39,9 +38,18 @@ const driversLicenseInput = ref(null)
 const orCrInput = ref(null)
 const nbiClearanceInput = ref(null)
 
+// PSGC Address Data
+const provinces = ref([])
+const cities = ref([])
+const barangays = ref([])
+const loadingProvinces = ref(false)
+const loadingCities = ref(false)
+const loadingBarangays = ref(false)
+
 const isMissingDocuments = computed(() => {
   return !documents.value.validId || !documents.value.driversLicense || !documents.value.orCr
 })
+
 // Form data
 const personalInfo = ref({
   firstName: '',
@@ -49,8 +57,12 @@ const personalInfo = ref({
   email: '',
   phone: '',
   address: '',
-  city: '',
-  province: '',
+  province_code: '',
+  province_name: '',
+  city_code: '',
+  city_name: '',
+  barangay_code: '',
+  barangay_name: '',
   birthdate: null,
   gender: '',
 })
@@ -76,7 +88,7 @@ const documents = ref({
   nbiClearancePreview: null,
 })
 
-// Options
+// Vehicle options
 const vehicleTypes = [
   'Motorcycle - Under 200cc',
   'Motorcycle - 200cc and above',
@@ -87,38 +99,25 @@ const vehicleTypes = [
   'Bicycle',
 ]
 
-const provinces = [
-  'Metro Manila',
-  'Bulacan',
-  'Cavite',
-  'Laguna',
-  'Rizal',
-  'Pampanga',
-  'Batangas',
-  'Quezon',
-]
-
-
 // Validation rules
 const rules = {
   required: (v) => !!v || 'This field is required',
   email: (v) => /.+@.+\..+/.test(v) || 'Invalid email address',
   phone: (v) => /^09\d{9}$/.test(v) || 'Invalid phone number (must be 09XXXXXXXXX)',
- age: (v) => {
-  // Explicitly check for null, undefined, or empty string
-  if (v === null || v === undefined || v === '') {
-    return 'Birthdate is required'
-  }
-  
-  const birthDate = new Date(v)
-  const today = new Date()
-  let age = today.getFullYear() - birthDate.getFullYear()
-  const m = today.getMonth() - birthDate.getMonth()
-  if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
-    age--
-  }
-  return age >= 18 || 'You must be at least 18 years old'
-},
+  age: (v) => {
+    if (v === null || v === undefined || v === '') {
+      return 'Birthdate is required'
+    }
+    
+    const birthDate = new Date(v)
+    const today = new Date()
+    let age = today.getFullYear() - birthDate.getFullYear()
+    const m = today.getMonth() - birthDate.getMonth()
+    if (m < 0 || (m === 0 && today.getDate() < birthDate.getDate())) {
+      age--
+    }
+    return age >= 18 || 'You must be at least 18 years old'
+  },
   year: (v) => {
     if (!v) return true
     const year = parseInt(v)
@@ -130,6 +129,91 @@ const rules = {
     return /^[A-Z0-9]{3,10}$/.test(v) || 'Invalid plate number format'
   },
 }
+
+// PSGC API Functions
+const fetchProvinces = async () => {
+  loadingProvinces.value = true
+  try {
+    const response = await fetch('https://psgc.gitlab.io/api/provinces/')
+    const data = await response.json()
+    provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Error fetching provinces:', error)
+    alert('Failed to load provinces. Please refresh the page.')
+  } finally {
+    loadingProvinces.value = false
+  }
+}
+
+const fetchCities = async (provinceCode) => {
+  loadingCities.value = true
+  cities.value = []
+  personalInfo.value.city_code = ''
+  personalInfo.value.city_name = ''
+  barangays.value = []
+  personalInfo.value.barangay_code = ''
+  personalInfo.value.barangay_name = ''
+  
+  try {
+    const response = await fetch(`https://psgc.gitlab.io/api/provinces/${provinceCode}/cities-municipalities/`)
+    const data = await response.json()
+    cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Error fetching cities:', error)
+    alert('Failed to load cities/municipalities. Please try again.')
+  } finally {
+    loadingCities.value = false
+  }
+}
+
+const fetchBarangays = async (cityCode) => {
+  loadingBarangays.value = true
+  barangays.value = []
+  personalInfo.value.barangay_code = ''
+  personalInfo.value.barangay_name = ''
+  
+  try {
+    const response = await fetch(`https://psgc.gitlab.io/api/cities-municipalities/${cityCode}/barangays/`)
+    const data = await response.json()
+    barangays.value = data.sort((a, b) => a.name.localeCompare(b.name))
+  } catch (error) {
+    console.error('Error fetching barangays:', error)
+    alert('Failed to load barangays. Please try again.')
+  } finally {
+    loadingBarangays.value = false
+  }
+}
+
+// Watch for province selection
+watch(() => personalInfo.value.province_code, (newProvinceCode) => {
+  if (newProvinceCode) {
+    const selectedProvince = provinces.value.find(p => p.code === newProvinceCode)
+    personalInfo.value.province_name = selectedProvince?.name || ''
+    fetchCities(newProvinceCode)
+  } else {
+    cities.value = []
+    barangays.value = []
+  }
+})
+
+// Watch for city selection
+watch(() => personalInfo.value.city_code, (newCityCode) => {
+  if (newCityCode) {
+    const selectedCity = cities.value.find(c => c.code === newCityCode)
+    personalInfo.value.city_name = selectedCity?.name || ''
+    fetchBarangays(newCityCode)
+  } else {
+    barangays.value = []
+  }
+})
+
+// Watch for barangay selection
+watch(() => personalInfo.value.barangay_code, (newBarangayCode) => {
+  if (newBarangayCode) {
+    const selectedBarangay = barangays.value.find(b => b.code === newBarangayCode)
+    personalInfo.value.barangay_name = selectedBarangay?.name || ''
+  }
+})
 
 // Watch for document changes to validate
 watch(
@@ -160,16 +244,22 @@ const getFileName = (file) => {
   return 'Photo captured'
 }
 
+const getFullAddress = () => {
+  const parts = []
+  if (personalInfo.value.address) parts.push(personalInfo.value.address)
+  if (personalInfo.value.barangay_name) parts.push(personalInfo.value.barangay_name)
+  if (personalInfo.value.city_name) parts.push(personalInfo.value.city_name)
+  if (personalInfo.value.province_name) parts.push(personalInfo.value.province_name)
+  return parts.join(', ')
+}
+
 const nextStep = () => {
-  // Step 1 validation - ensure birthdate is filled
   if (currentStep.value === 1) {
-    // Manually check birthdate since it might bypass the rule
     if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
       alert('Please enter your birthdate')
       return
     }
     
-    // Also validate age
     const birthDate = new Date(personalInfo.value.birthdate)
     const today = new Date()
     let age = today.getFullYear() - birthDate.getFullYear()
@@ -179,6 +269,12 @@ const nextStep = () => {
     }
     if (age < 18) {
       alert('You must be at least 18 years old to become a rider')
+      return
+    }
+
+    // Validate address selection
+    if (!personalInfo.value.province_code || !personalInfo.value.city_code || !personalInfo.value.barangay_code) {
+      alert('Please complete your address (Province, City/Municipality, and Barangay)')
       return
     }
   }
@@ -222,7 +318,6 @@ const openGallery = () => {
 const handleFileSelect = (event, field) => {
   const file = event.target.files[0]
   if (file) {
-    // Validate file size
     if (file.size / 1024 / 1024 > 5) {
       alert('File size must be less than 5MB')
       return
@@ -230,7 +325,6 @@ const handleFileSelect = (event, field) => {
 
     documents.value[field] = file
 
-    // Create preview for images
     if (file.type.startsWith('image/')) {
       const reader = new FileReader()
       reader.onload = (e) => {
@@ -248,7 +342,6 @@ const removeFile = (field) => {
   documents.value[field] = null
   documents.value[`${field}Preview`] = null
 
-  // Clear the file input
   const inputMap = {
     validId: validIdInput,
     driversLicense: driversLicenseInput,
@@ -265,13 +358,11 @@ const openCamera = async () => {
   showFileOptionsDialog.value = false
 
   try {
-    // Check if browser supports camera
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       alert('Camera is not supported on this browser. Please use the file upload option instead.')
       return
     }
 
-    // Request camera access - try back camera first, fallback to any camera
     stream = await navigator.mediaDevices
       .getUserMedia({
         video: {
@@ -279,13 +370,11 @@ const openCamera = async () => {
         },
       })
       .catch(() => {
-        // Fallback to any available camera
         return navigator.mediaDevices.getUserMedia({ video: true })
       })
 
     showCameraDialog.value = true
 
-    // Attach stream to video element
     setTimeout(() => {
       if (video.value) {
         video.value.srcObject = stream
@@ -317,7 +406,6 @@ const capturePhoto = () => {
         const file = new File([blob], `camera_${Date.now()}.jpg`, { type: 'image/jpeg' })
         documents.value[currentFileField.value] = file
 
-        // Create preview
         const reader = new FileReader()
         reader.onload = (e) => {
           documents.value[`${currentFileField.value}Preview`] = e.target.result
@@ -370,15 +458,13 @@ const uploadFile = async (file, folder, fileName) => {
   return publicUrl
 }
 
-// Submit application with warning for missing documents
+// Submit application
 const submitApplication = async () => {
-  // Check for missing documents
   const missingDocs = []
   if (!documents.value.validId) missingDocs.push('Valid ID')
   if (!documents.value.driversLicense) missingDocs.push("Driver's License")
   if (!documents.value.orCr) missingDocs.push('OR/CR')
   
-  // Show warning if documents are missing
   if (missingDocs.length > 0) {
     const confirmSubmit = confirm(
       `⚠️ WARNING: You are missing the following required documents:\n\n` +
@@ -392,11 +478,9 @@ const submitApplication = async () => {
   submitting.value = true
   
   try {
-    // Get current user
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('User not authenticated')
     
-    // Get profile_id from profiles table
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id')
@@ -405,15 +489,12 @@ const submitApplication = async () => {
     
     if (profileError) throw new Error('Profile not found')
     
-    // Validate birthdate
     if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
       throw new Error('Birthdate is required. Please go back to Step 1 and enter your birthdate.')
     }
     
-    // Create folder path for this user's documents
     const userFolder = `users/${user.id}`
     
-    // Upload documents (only if they exist)
     let validIdUrl = null
     let driversLicenseUrl = null
     let orCrUrl = null
@@ -435,7 +516,8 @@ const submitApplication = async () => {
       nbiClearanceUrl = await uploadFile(documents.value.nbiClearance, userFolder, 'nbi_clearance')
     }
     
-    // Insert rider application with all fields
+    const fullAddress = getFullAddress()
+    
     const { data, error } = await supabase
       .from('Rider_Registration')
       .insert([
@@ -445,9 +527,11 @@ const submitApplication = async () => {
           last_name: personalInfo.value.lastName,
           email: personalInfo.value.email,
           phone: personalInfo.value.phone,
-          address: personalInfo.value.address,
-          city: personalInfo.value.city,
-          province: personalInfo.value.province,
+          address: fullAddress,
+          street_address: personalInfo.value.address,
+          province: personalInfo.value.province_name,
+          city: personalInfo.value.city_name,
+          barangay: personalInfo.value.barangay_name,
           birthdate: personalInfo.value.birthdate,
           gender: personalInfo.value.gender,
           vehicle_type: vehicleInfo.value.vehicleType,
@@ -485,8 +569,11 @@ const goToProfile = () => {
   router.push('/profile')
 }
 
-// Load user data on mount
+// Load user data and provinces on mount
 onMounted(async () => {
+  // Load provinces from PSGC API
+  await fetchProvinces()
+  
   if (authStore.userData) {
     personalInfo.value.firstName = authStore.userData.user_metadata?.first_name || ''
     personalInfo.value.lastName = authStore.userData.user_metadata?.last_name || ''
@@ -503,6 +590,7 @@ onMounted(async () => {
   }
 })
 </script>
+
 <template>
   <v-app>
     <v-main class="rider-application-main">
@@ -603,41 +691,78 @@ onMounted(async () => {
                       </v-col>
                     </v-row>
 
+                    <!-- Address Section with PSGC API -->
                     <v-row>
                       <v-col cols="12">
                         <v-text-field
                           v-model="personalInfo.address"
-                          label="Complete Address"
-                          :rules="[rules.required]"
+                          label="House/Unit #, Street, Subdivision"
                           variant="outlined"
-                          prepend-inner-icon="mdi-map-marker"
-                          placeholder="Street, Barangay, City/Municipality, Province"
+                          prepend-inner-icon="mdi-home"
+                          placeholder="e.g., Block 1 Lot 2, Phase 3, Evergreen Subdivision"
                         ></v-text-field>
                       </v-col>
                     </v-row>
 
                     <v-row>
                       <v-col cols="12" md="6">
-                        <v-text-field
-                          v-model="personalInfo.city"
-                          label="City/Municipality"
+                        <v-select
+                          v-model="personalInfo.province_code"
+                          :items="provinces"
+                          item-title="name"
+                          item-value="code"
+                          label="Province"
                           :rules="[rules.required]"
                           variant="outlined"
-                        ></v-text-field>
+                          :loading="loadingProvinces"
+                          prepend-inner-icon="mdi-map"
+                        >
+                          <template v-slot:no-data>
+                            <v-list-item>No provinces found</v-list-item>
+                          </template>
+                        </v-select>
                       </v-col>
 
                       <v-col cols="12" md="6">
                         <v-select
-                          v-model="personalInfo.province"
-                          :items="provinces"
-                          label="Province"
+                          v-model="personalInfo.city_code"
+                          :items="cities"
+                          item-title="name"
+                          item-value="code"
+                          label="City/Municipality"
                           :rules="[rules.required]"
                           variant="outlined"
-                        ></v-select>
+                          :disabled="!personalInfo.province_code"
+                          :loading="loadingCities"
+                          prepend-inner-icon="mdi-city"
+                        >
+                          <template v-slot:no-data>
+                            <v-list-item>Select a province first</v-list-item>
+                          </template>
+                        </v-select>
                       </v-col>
                     </v-row>
 
                     <v-row>
+                      <v-col cols="12" md="6">
+                        <v-select
+                          v-model="personalInfo.barangay_code"
+                          :items="barangays"
+                          item-title="name"
+                          item-value="code"
+                          label="Barangay"
+                          :rules="[rules.required]"
+                          variant="outlined"
+                          :disabled="!personalInfo.city_code"
+                          :loading="loadingBarangays"
+                          prepend-inner-icon="mdi-home-variant"
+                        >
+                          <template v-slot:no-data>
+                            <v-list-item>Select a city/municipality first</v-list-item>
+                          </template>
+                        </v-select>
+                      </v-col>
+
                       <v-col cols="12" md="6">
                         <v-text-field
                           v-model="personalInfo.birthdate"
@@ -648,7 +773,9 @@ onMounted(async () => {
                           prepend-inner-icon="mdi-calendar"
                         ></v-text-field>
                       </v-col>
+                    </v-row>
 
+                    <v-row>
                       <v-col cols="12" md="6">
                         <v-select
                           v-model="personalInfo.gender"
@@ -659,6 +786,12 @@ onMounted(async () => {
                         ></v-select>
                       </v-col>
                     </v-row>
+
+                    <div class="info-alert">
+                      <v-alert type="info" variant="tonal" density="compact">
+                        <strong>Address Format:</strong> Please provide your complete address starting with house/unit number, street, and subdivision/barangay.
+                      </v-alert>
+                    </div>
                   </div>
                 </v-form>
               </v-card-text>
@@ -673,7 +806,7 @@ onMounted(async () => {
             </v-card>
           </v-stepper-window-item>
 
-          <!-- Step 2: Vehicle Details -->
+          <!-- Step 2: Vehicle Details (same as before) -->
           <v-stepper-window-item :value="2">
             <v-card class="form-card" elevation="2">
               <v-card-text>
@@ -790,7 +923,7 @@ onMounted(async () => {
             </v-card>
           </v-stepper-window-item>
 
-          <!-- Step 3: Documents with file selection -->
+          <!-- Step 3: Documents (same as before) -->
           <v-stepper-window-item :value="3">
             <v-card class="form-card" elevation="2">
               <v-card-text>
@@ -1015,7 +1148,7 @@ onMounted(async () => {
             </v-card>
           </v-stepper-window-item>
 
-          <!-- Step 4: Review & Submit -->
+          <!-- Step 4: Review & Submit (updated with new address format) -->
           <v-stepper-window-item :value="4">
             <v-card class="form-card" elevation="2">
               <v-card-text>
@@ -1050,8 +1183,10 @@ onMounted(async () => {
                             <tr>
                               <td class="font-weight-bold">Address:</td>
                               <td>
-                                {{ personalInfo.address }}, {{ personalInfo.city }},
-                                {{ personalInfo.province }}
+                                {{ personalInfo.address }}, 
+                                {{ personalInfo.barangay_name }}, 
+                                {{ personalInfo.city_name }}, 
+                                {{ personalInfo.province_name }}
                               </td>
                             </tr>
                             <tr>
@@ -1204,6 +1339,7 @@ onMounted(async () => {
       </v-stepper>
     </v-main>
 
+    <!-- Rest of your dialogs remain the same -->
     <!-- File Selection Options Dialog -->
     <v-dialog v-model="showFileOptionsDialog" max-width="400">
       <v-card>
@@ -1326,6 +1462,7 @@ onMounted(async () => {
 </template>
 
 <style scoped>
+/* Your existing styles remain the same */
 .rider-application-main {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
   min-height: 100vh;
@@ -1434,7 +1571,6 @@ onMounted(async () => {
   background: linear-gradient(135deg, #354d7c, #5276b0);
 }
 
-/* Document upload styles */
 .document-upload-section {
   margin-bottom: 24px;
   padding: 16px;
@@ -1480,7 +1616,6 @@ onMounted(async () => {
   object-fit: cover;
 }
 
-/* Responsive */
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.2rem;
@@ -1512,23 +1647,6 @@ onMounted(async () => {
 
   .camera-video {
     min-height: 250px;
-  }
-}
-/* Warning button animation for missing documents */
-.warning-btn {
-  background: linear-gradient(135deg, #ff9800, #ffc107) !important;
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.7);
-  }
-  70% {
-    box-shadow: 0 0 0 10px rgba(255, 152, 0, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0);
   }
 }
 </style>
