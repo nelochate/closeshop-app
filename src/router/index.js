@@ -231,6 +231,12 @@ const routes = [
     component:() => import('@/mainsite/delivery/RiderLocation.vue'),
     meta: { requiresAuth: true } 
   },
+   {
+    path: '/LocationToDeliver/:orderId',
+    name: 'LocationToDeliver',
+    component:() => import('@/mainsite/delivery/LocationToDeliver.vue'),
+    meta: { requiresAuth: true } 
+  },
 ]
 
 // ✅ Use HISTORY mode instead of hash mode

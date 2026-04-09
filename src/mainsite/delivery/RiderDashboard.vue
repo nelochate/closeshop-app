@@ -593,6 +593,11 @@ const handleImageError = (event) => {
   img.src = 'https://via.placeholder.com/32?text=No+Image'
   img.onerror = null // Prevent infinite loop
 }
+
+// Add this function to RiderDashboard.vue
+const goToLocationToDeliver = (orderId) => {
+  router.push(`/LocationToDeliver/${orderId}`)
+}
 </script>
 <template>
   <v-app>
@@ -1208,6 +1213,12 @@ const handleImageError = (event) => {
               </div>
             </div>
           </div>
+          <div>
+            <!-- In RiderDashboard.vue, update the button in order details dialog -->
+            <v-btn color="primary" @click="goToLocationToDeliver(selectedOrder.id)">
+              See on Map
+            </v-btn>
+          </div>
 
           <!-- Order Items with Images -->
           <div class="info-section">
@@ -1347,41 +1358,41 @@ const handleImageError = (event) => {
       </v-card>
     </v-dialog>
     <!-- Full Screen Image Preview Dialog -->
-<v-dialog v-model="showImageDialog" max-width="90vw" @click:outside="showImageDialog = false">
-  <v-card class="image-preview-dialog">
-    <v-card-title class="dialog-header d-flex justify-space-between align-center">
-      <span class="text-h6">{{ selectedProductName }}</span>
-      <v-btn icon @click="showImageDialog = false">
-        <v-icon>mdi-close</v-icon>
-      </v-btn>
-    </v-card-title>
-    <v-divider></v-divider>
-    <v-card-text class="text-center pa-4">
-      <v-img
-        v-if="selectedImage"
-        :src="selectedImage"
-        :alt="selectedProductName"
-        max-height="70vh"
-        max-width="100%"
-        contain
-        class="mx-auto"
-      >
-        <template #placeholder>
-          <div class="d-flex align-center justify-center" style="height: 300px;">
-            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+    <v-dialog v-model="showImageDialog" max-width="90vw" @click:outside="showImageDialog = false">
+      <v-card class="image-preview-dialog">
+        <v-card-title class="dialog-header d-flex justify-space-between align-center">
+          <span class="text-h6">{{ selectedProductName }}</span>
+          <v-btn icon @click="showImageDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text class="text-center pa-4">
+          <v-img
+            v-if="selectedImage"
+            :src="selectedImage"
+            :alt="selectedProductName"
+            max-height="70vh"
+            max-width="100%"
+            contain
+            class="mx-auto"
+          >
+            <template #placeholder>
+              <div class="d-flex align-center justify-center" style="height: 300px">
+                <v-progress-circular indeterminate color="primary"></v-progress-circular>
+              </div>
+            </template>
+          </v-img>
+          <div v-else class="text-center pa-8">
+            <v-icon size="64" color="grey">mdi-image-off</v-icon>
+            <p class="mt-2">No image available</p>
           </div>
-        </template>
-      </v-img>
-      <div v-else class="text-center pa-8">
-        <v-icon size="64" color="grey">mdi-image-off</v-icon>
-        <p class="mt-2">No image available</p>
-      </div>
-    </v-card-text>
-    <v-card-actions class="dialog-actions">
-      <v-btn color="primary" @click="showImageDialog = false">Close</v-btn>
-    </v-card-actions>
-  </v-card>
-</v-dialog>
+        </v-card-text>
+        <v-card-actions class="dialog-actions">
+          <v-btn color="primary" @click="showImageDialog = false">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-app>
 </template>
 
@@ -1954,11 +1965,11 @@ const handleImageError = (event) => {
 }
 
 /* For the order details table image */
-.info-section .v-table td div[style*="cursor: pointer"] {
+.info-section .v-table td div[style*='cursor: pointer'] {
   transition: transform 0.2s ease;
 }
 
-.info-section .v-table td div[style*="cursor: pointer"]:hover {
+.info-section .v-table td div[style*='cursor: pointer']:hover {
   transform: scale(1.05);
 }
 </style>
