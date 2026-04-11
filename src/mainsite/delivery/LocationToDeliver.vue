@@ -38,7 +38,7 @@
     </div>
 
     <!-- Location Summary Panel - Shows all 3 points -->
-    <div class="location-summary-panel">
+    <div class="location-summary-panel" v-if="shopLocation && customerLocation">
       <div class="location-summary-header">
         <v-icon color="#354d7c" size="20">mdi-map-marker-multiple</v-icon>
         <span>3 Delivery Points</span>
@@ -150,7 +150,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
@@ -530,30 +530,41 @@ const initMap = async () => {
   try {
     mapboxgl.accessToken = MAPBOX_TOKEN
 
-    const bounds = new mapboxgl.LngLatBounds()
-    if (riderLocation.value) bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
-    if (shopLocation.value) bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
-    if (customerLocation.value) bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
+    // Wait for map container to be ready
+    await nextTick()
 
+    // Create map instance
     map = new mapboxgl.Map({
       container: mapContainer.value,
       style: 'mapbox://styles/mapbox/streets-v12',
-      center: [shopLocation.value?.lng || 121.774, shopLocation.value?.lat || 12.8797],
-      zoom: 12
+      center: [121.774, 12.8797],
+      zoom: 11
     })
 
-    map.on('load', () => {
-      mapInitialized = true
-      if (!bounds.isEmpty()) {
-        map.fitBounds(bounds, { padding: 50 })
-      }
-      addMarkers()
-      addRoute()
-      loading.value = false
-      console.log('🎉 Map initialized with all 3 markers!')
-    })
-
+    // Add navigation control
     map.addControl(new mapboxgl.NavigationControl(), 'top-right')
+
+    // Wait for map to load
+    map.on('load', async () => {
+      mapInitialized = true
+      console.log('Map loaded, adding markers...')
+      
+      // Add markers after map is loaded
+      addMarkers()
+      
+      // Add route
+      await addRoute()
+      
+      // Fit bounds to show all markers
+      fitBounds()
+      
+      loading.value = false
+      console.log('🎉 Map initialization complete!')
+    })
+
+    map.on('error', (error) => {
+      console.error('Map error:', error)
+    })
 
   } catch (error) {
     console.error('Error initializing map:', error)
@@ -565,10 +576,18 @@ const initMap = async () => {
 
 // Add markers for all 3 points
 const addMarkers = () => {
-  if (!map) return
+  if (!map || !mapInitialized) {
+    console.log('Map not ready for markers yet')
+    return
+  }
+
+  console.log('Adding markers to map...')
 
   // Rider marker (Blue)
-  if (riderLocation.value) {
+  if (riderLocation.value && riderLocation.value.lat && riderLocation.value.lng) {
+    // Remove existing marker if any
+    if (riderMarker) riderMarker.remove()
+    
     const el = document.createElement('div')
     el.className = 'custom-marker rider-marker'
     el.innerHTML = `
@@ -589,14 +608,20 @@ const addMarkers = () => {
         </div>
       `)
     
-    riderMarker = new mapboxgl.Marker(el)
+    riderMarker = new mapboxgl.Marker({ element: el, draggable: false })
       .setLngLat([riderLocation.value.lng, riderLocation.value.lat])
       .setPopup(popup)
       .addTo(map)
+    
+    console.log('✅ Rider marker added at:', riderLocation.value.lat, riderLocation.value.lng)
+  } else {
+    console.log('Rider location not available yet')
   }
 
   // Shop marker (Orange)
-  if (shopLocation.value) {
+  if (shopLocation.value && shopLocation.value.lat && shopLocation.value.lng) {
+    if (shopMarker) shopMarker.remove()
+    
     const el = document.createElement('div')
     el.className = 'custom-marker shop-marker'
     el.innerHTML = `
@@ -618,14 +643,20 @@ const addMarkers = () => {
         </div>
       `)
     
-    shopMarker = new mapboxgl.Marker(el)
+    shopMarker = new mapboxgl.Marker({ element: el, draggable: false })
       .setLngLat([shopLocation.value.lng, shopLocation.value.lat])
       .setPopup(popup)
       .addTo(map)
+    
+    console.log('✅ Shop marker added at:', shopLocation.value.lat, shopLocation.value.lng)
+  } else {
+    console.log('Shop location not available yet')
   }
 
   // Customer marker (Green)
-  if (customerLocation.value) {
+  if (customerLocation.value && customerLocation.value.lat && customerLocation.value.lng) {
+    if (customerMarker) customerMarker.remove()
+    
     const el = document.createElement('div')
     el.className = 'custom-marker customer-marker'
     el.innerHTML = `
@@ -648,17 +679,22 @@ const addMarkers = () => {
         </div>
       `)
     
-    customerMarker = new mapboxgl.Marker(el)
+    customerMarker = new mapboxgl.Marker({ element: el, draggable: false })
       .setLngLat([customerLocation.value.lng, customerLocation.value.lat])
       .setPopup(popup)
       .addTo(map)
+    
+    console.log('✅ Customer marker added at:', customerLocation.value.lat, customerLocation.value.lng)
+  } else {
+    console.log('Customer location not available yet')
   }
 }
 
 // Update rider marker position
 const updateRiderMarker = () => {
-  if (riderMarker && riderLocation.value) {
+  if (riderMarker && riderLocation.value && riderLocation.value.lat && riderLocation.value.lng) {
     riderMarker.setLngLat([riderLocation.value.lng, riderLocation.value.lat])
+    console.log('Rider marker updated')
   }
 }
 
@@ -677,9 +713,15 @@ const updateRoute = async () => {
 
 // Add route line
 const addRoute = async () => {
-  if (!map) return
+  if (!map || !mapInitialized) return
+  
   await getRoute()
+  
   if (routeCoordinates.value.length > 0) {
+    // Remove existing route if any
+    if (map.getLayer('route')) map.removeLayer('route')
+    if (map.getSource('route')) map.removeSource('route')
+    
     map.addSource('route', {
       type: 'geojson',
       data: {
@@ -696,49 +738,80 @@ const addRoute = async () => {
       paint: { 'line-color': '#4caf50', 'line-width': 5, 'line-opacity': 0.9 }
     })
     routeSource = map.getSource('route')
+    console.log('✅ Route added to map')
   }
 }
 
 // Fit bounds to show all markers
 const fitBounds = () => {
-  if (!map) return
+  if (!map || !mapInitialized) return
+  
   const bounds = new mapboxgl.LngLatBounds()
-  if (riderLocation.value) bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
-  if (shopLocation.value) bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
-  if (customerLocation.value) bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
-  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 50 })
+  let hasPoints = false
+  
+  if (riderLocation.value && riderLocation.value.lat && riderLocation.value.lng) {
+    bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
+    hasPoints = true
+  }
+  if (shopLocation.value && shopLocation.value.lat && shopLocation.value.lng) {
+    bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
+    hasPoints = true
+  }
+  if (customerLocation.value && customerLocation.value.lat && customerLocation.value.lng) {
+    bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
+    hasPoints = true
+  }
+  
+  if (hasPoints) {
+    map.fitBounds(bounds, { padding: 50, duration: 1000 })
+    console.log('✅ Map bounds adjusted to show all points')
+  }
 }
 
 // Center on specific locations
 const centerOnRider = () => {
   activePoint.value = 'rider'
-  if (map && riderLocation.value) {
+  if (map && riderLocation.value && riderLocation.value.lat && riderLocation.value.lng) {
     map.flyTo({ center: [riderLocation.value.lng, riderLocation.value.lat], zoom: 16, duration: 1000 })
   }
 }
 
 const centerOnShop = () => {
   activePoint.value = 'shop'
-  if (map && shopLocation.value) {
+  if (map && shopLocation.value && shopLocation.value.lat && shopLocation.value.lng) {
     map.flyTo({ center: [shopLocation.value.lng, shopLocation.value.lat], zoom: 16, duration: 1000 })
   }
 }
 
 const centerOnCustomer = () => {
   activePoint.value = 'customer'
-  if (map && customerLocation.value) {
+  if (map && customerLocation.value && customerLocation.value.lat && customerLocation.value.lng) {
     map.flyTo({ center: [customerLocation.value.lng, customerLocation.value.lat], zoom: 16, duration: 1000 })
   }
 }
+
+// Watch for location changes and update markers
+watch([riderLocation, shopLocation, customerLocation], () => {
+  if (map && mapInitialized) {
+    addMarkers()
+    fitBounds()
+  }
+}, { deep: true })
 
 // Load all data
 const loadMapData = async () => {
   loading.value = true
   try {
+    // Fetch order details first
     await fetchOrderDetails()
+    
+    // Get rider location
     await getRiderLocation()
+    
+    // Initialize map (will add markers after load)
     await initMap()
-    console.log('🎉 Success! All 3 points displayed on map!')
+    
+    console.log('🎉 Success! All 3 points loaded!')
   } catch (error) {
     console.error('Error loading map data:', error)
     errorMessage.value = error.message || 'Failed to load map data'
@@ -760,11 +833,17 @@ const cleanup = () => {
   }
 }
 
-onMounted(() => loadMapData())
-onUnmounted(() => cleanup())
+onMounted(() => {
+  loadMapData()
+})
+
+onUnmounted(() => {
+  cleanup()
+})
 </script>
 
 <style scoped>
+/* Your existing styles remain the same */
 .location-deliver-container {
   position: fixed;
   top: 0;
