@@ -16,10 +16,17 @@ import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import ChatView from '@/mainsite/ChatView.vue'
+import AuthCallback from '../auth/AuthCallback.vue'
+
 
 // ✅ Define routes
 const routes = [
   { path: '/', name: 'login', component: LoginView },
+      {
+    path: '/auth/callback',
+    name: 'auth-callback',
+    component: AuthCallback
+  },
   { path: '/register', name: 'register', component: RegisterView },
   { path: '/homepage', name: 'homepage', component: HomepageView, meta: { requiresAuth: true } },
   { path: '/mapsearch', name: 'mapsearch', component: MapSearch, meta: { requiresAuth: true } },
@@ -205,6 +212,30 @@ const routes = [
     path: '/statusshopcreation',
     name: 'statusshopcreation',
     component:() => import('@/mainsite/StatusShopCreation.vue'),
+  },
+   {
+    path: '/RiderApplication',
+    name: 'RiderApplication',
+    component:() => import('@/mainsite/delivery/RiderApplication.vue'),
+    meta: { requiresAuth: true } 
+  },
+   {
+    path: '/RiderDashboard',
+    name: 'RiderDashboard',
+    component:() => import('@/mainsite/delivery/RiderDashboard.vue'),
+    meta: { requiresAuth: true } 
+  },
+   {
+    path: '/RiderLocation',
+    name: 'RiderLocation',
+    component:() => import('@/mainsite/delivery/RiderLocation.vue'),
+    meta: { requiresAuth: true } 
+  },
+   {
+    path: '/LocationToDeliver/:orderId',
+    name: 'LocationToDeliver',
+    component:() => import('@/mainsite/delivery/LocationToDeliver.vue'),
+    meta: { requiresAuth: true } 
   },
 ]
 

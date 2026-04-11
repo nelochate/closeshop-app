@@ -17,7 +17,8 @@
   "dependencies": {
     "@capacitor/android": "^7.4.4",
     "@capacitor/app": "7.0.2",
-    "@capacitor/camera": "^7.0.2",
+    "@capacitor/browser": "^7.0.4",
+    "@capacitor/camera": "^7.0.5",
     "@capacitor/geolocation": "^7.1.5",
     "@capacitor/haptics": "7.0.2",
     "@capacitor/ios": "^7.4.4",
@@ -36,7 +37,7 @@
     "leaflet-routing-machine": "^3.2.12",
     "leaflet.fullscreen": "^4.0.0",
     "lodash": "^4.17.21",
-    "mapbox-gl": "^3.17.0",
+    "mapbox-gl": "^3.21.0",
     "monaco-editor": "^0.53.0",
     "node-fetch": "^3.3.2",
     "phil-address": "^2.0.1",
@@ -47,7 +48,7 @@
     "vuetify": "^3.10.9"
   },
   "devDependencies": {
-    "@capacitor/cli": "^7.4.4",
+    "@capacitor/cli": "^7.6.0",
     "@capacitor/core": "^7.4.4",
     "@eslint/js": "^9.31.0",
     "@mdi/font": "^7.4.47",

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick } from 'vue'
+import { ref, watch, onMounted, nextTick, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
@@ -43,21 +43,22 @@ const loadingShopData = ref(false)
 
 // -------------------- FORM STEPS --------------------
 const currentStep = ref(1)
-const totalSteps = 6
+const totalSteps = 7
 const steps = [
   { number: 1, title: 'Business Info', icon: 'mdi-store' },
   { number: 2, title: 'Open Days', icon: 'mdi-calendar' },
   { number: 3, title: 'Operating Hours', icon: 'mdi-clock' },
   { number: 4, title: 'Delivery Options', icon: 'mdi-truck' },
-  { number: 5, title: 'Location', icon: 'mdi-map-marker' },
-  { number: 6, title: 'Valid ID', icon: 'mdi-card-account-details' },
+  { number: 5, title: 'Payment Options', icon: 'mdi-currency-php' },
+  { number: 6, title: 'Location', icon: 'mdi-map-marker' },
+  { number: 7, title: 'Valid ID', icon: 'mdi-card-account-details' },
 ]
 
 const nextStep = () => {
   if (currentStep.value < totalSteps) {
     currentStep.value++
-    // Initialize map when moving to step 5
-    if (currentStep.value === 5) {
+    // Initialize map when moving to step 6
+    if (currentStep.value === 6) {
       nextTick(() => {
         initMap(latitude.value!, longitude.value!)
       })
@@ -79,11 +80,184 @@ const closeTime = ref('')
 const avatarUrl = ref<string | null>(null)
 const physicalUrl = ref<string | null>(null)
 const deliveryOptions = ref<string[]>([])
+const paymentOptions = ref<string[]>([])
 const meetUpDetails = ref('')
 const fullAddress = ref('')
 const validIdFrontUrl = ref<string | null>(null)
 const validIdBackUrl = ref<string | null>(null)
 const pickerTarget = ref<'logo' | 'physical' | 'valid_id_front' | 'valid_id_back' | null>(null)
+
+// -------------------- GCASH/PAYMONGO CONFIG --------------------
+const showGcashSetup = ref(false)
+const paymongoPublicKey = ref('')
+const paymongoSecretKey = ref('')
+const paymongoWebhookSecret = ref('')
+const testMode = ref(true)
+const gcashEnabled = ref(false)
+const savingGcash = ref(false)
+const testingGcash = ref(false)
+const showPublicKey = ref(false)
+const showSecretKey = ref(false)
+const showWebhookSecret = ref(false)
+const copied = ref(false)
+const gcashError = ref('')
+const debugInfo = ref('')
+const currentUser = ref<any>(null)
+
+// Debug Supabase client
+console.log('🔧 Supabase client initialized:', {
+  hasAuth: !!supabase.auth,
+  hasFrom: !!supabase.from,
+})
+
+// Computed webhook URL
+const webhookUrl = computed(() => {
+  const baseUrl = import.meta.env.VITE_BASE_URL || window.location.origin
+  return `${baseUrl}/api/paymongo-webhook`
+})
+
+// Copy webhook URL
+const copyWebhookUrl = async () => {
+  try {
+    await navigator.clipboard.writeText(webhookUrl.value)
+    copied.value = true
+    setTimeout(() => {
+      copied.value = false
+    }, 2000)
+    showSnackbar('Webhook URL copied!', 'success')
+  } catch (err) {
+    console.error('Failed to copy:', err)
+  }
+}
+
+// -------------------- TEST FUNCTIONS --------------------
+const testSupabaseConnection = async () => {
+  try {
+    console.log('🔍 Testing Supabase connection...')
+    const { data, error } = await supabase.from('shops').select('count').limit(1)
+
+    if (error) {
+      console.error('❌ Supabase connection error:', error)
+      showSnackbar('Supabase connection failed: ' + error.message, 'error')
+    } else {
+      console.log('✅ Supabase connection successful')
+      showSnackbar('Supabase connection successful!', 'success')
+    }
+  } catch (err) {
+    console.error('❌ Network error:', err)
+    showSnackbar('Network error: ' + err, 'error')
+  }
+}
+
+const checkAuthStatus = async () => {
+  console.log('========== CHECKING AUTH STATUS ==========')
+
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser()
+
+    console.log('Auth check result:', { user, error })
+
+    if (user) {
+      console.log('✅ User is authenticated:', {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+      })
+      currentUser.value = user
+      showSnackbar(`Logged in as: ${user.email}`, 'success')
+    } else {
+      console.log('❌ No authenticated user found')
+      showSnackbar('No user logged in', 'error')
+    }
+
+    // Also check session
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession()
+    console.log('Session check:', { session, sessionError })
+  } catch (err) {
+    console.error('❌ Auth check exception:', err)
+    showSnackbar('Auth check failed: ' + err, 'error')
+  }
+
+  console.log('========== END AUTH CHECK ==========')
+}
+
+const testAuthDirectly = async () => {
+  console.log('========== TEST AUTH DIRECTLY ==========')
+  try {
+    const {
+      data: { session },
+      error,
+    } = await supabase.auth.getSession()
+    console.log('Session check:', { session, error })
+
+    const {
+      data: { user },
+      error: userError,
+    } = await supabase.auth.getUser()
+    console.log('User check:', { user, error: userError })
+
+    if (user) {
+      showSnackbar(`Logged in as: ${user.email}`, 'success')
+    } else {
+      showSnackbar('Not logged in', 'error')
+    }
+  } catch (err) {
+    console.error('Auth test error:', err)
+    showSnackbar('Auth test failed', 'error')
+  }
+}
+
+const testSimpleUpdate = async () => {
+  console.log('========== TEST SIMPLE UPDATE ==========')
+
+  if (!currentShopId.value) {
+    console.error('❌ No shop ID')
+    showSnackbar('No shop ID found', 'error')
+    return
+  }
+
+  try {
+    console.log('Attempting simple update with ID:', currentShopId.value)
+
+    const testValue = { test: 'simple value ' + new Date().toISOString() }
+    console.log('Test data:', testValue)
+
+    const { data, error } = await supabase
+      .from('shops')
+      .update({
+        gcash_enabled: true,
+        paymongo_config: testValue,
+      })
+      .eq('id', currentShopId.value)
+      .select()
+
+    console.log('Simple update result:', { data, error })
+
+    if (error) {
+      console.error('❌ Error details:', {
+        message: error.message,
+        code: error.code,
+        details: error.details,
+        hint: error.hint,
+      })
+      showSnackbar('Update failed: ' + error.message, 'error')
+    } else {
+      console.log('✅ Update successful!', data)
+      showSnackbar('Test update successful!', 'success')
+    }
+  } catch (err) {
+    console.error('❌ Exception:', err)
+    showSnackbar('Exception: ' + err, 'error')
+  }
+
+  console.log('========== END TEST ==========')
+}
 
 // -------------------- IMAGE UPLOAD HANDLERS --------------------
 const handlePhysicalUpload = () => {
@@ -165,6 +339,426 @@ const toggleDay = (dayId: number) => {
   openDays.value.sort((a, b) => a - b)
 }
 
+// -------------------- PAYMENT OPTIONS FUNCTIONS --------------------
+const togglePayment = (option: string) => {
+  const index = paymentOptions.value.indexOf(option)
+  if (index > -1) {
+    paymentOptions.value.splice(index, 1)
+    // If removing GCash, close setup
+    if (option === 'gcash') {
+      showGcashSetup.value = false
+      gcashError.value = '' // Clear any errors
+    }
+  } else {
+    paymentOptions.value.push(option)
+    // If adding GCash, open setup
+    if (option === 'gcash') {
+      showGcashSetup.value = true
+    }
+  }
+}
+
+const removePayment = (option: string) => {
+  const index = paymentOptions.value.indexOf(option)
+  if (index > -1) {
+    paymentOptions.value.splice(index, 1)
+    if (option === 'gcash') {
+      showGcashSetup.value = false
+      gcashEnabled.value = false
+      gcashError.value = ''
+    }
+  }
+}
+
+const getPaymentIcon = (option: string) => {
+  return option === 'gcash' ? 'mdi-cellphone' : 'mdi-cash-multiple'
+}
+
+const getPaymentLabel = (option: string) => {
+  return option === 'gcash' ? 'GCash' : 'Cash on Delivery'
+}
+
+// -------------------- GCASH SETUP FUNCTIONS - UPDATED WITH TIMEOUT PROTECTION --------------------
+const isSavingGcash = ref(false)
+
+const saveGcashConfig = async () => {
+  // Prevent multiple simultaneous calls
+  if (isSavingGcash.value) {
+    console.log('⏳ Already saving, please wait...')
+    return
+  }
+
+  // Clear previous errors
+  gcashError.value = ''
+  debugInfo.value = ''
+
+  console.log('========== START SAVE GCASH CONFIG ==========')
+  console.log('🔍 Checking authentication...')
+
+  isSavingGcash.value = true
+  savingGcash.value = true
+
+  let timeoutId: NodeJS.Timeout
+
+  try {
+    // Step 1: Get current session
+    console.log('🔍 Getting current session...')
+    const {
+      data: { session },
+      error: sessionError,
+    } = await supabase.auth.getSession()
+
+    if (sessionError) {
+      console.error('❌ Session error:', sessionError)
+      throw new Error('Session error: ' + sessionError.message)
+    }
+
+    if (!session) {
+      console.error('❌ No session found')
+      throw new Error('You must be logged in')
+    }
+
+    const user = session.user
+    console.log('✅ Authenticated:', { id: user.id, email: user.email })
+
+    // Step 2: Validate shop ID
+    if (!currentShopId.value) {
+      console.error('❌ No shop ID')
+      throw new Error('No shop ID found')
+    }
+
+    console.log('Shop ID:', currentShopId.value)
+
+    // Step 3: Validate inputs
+    if (!paymongoPublicKey.value || !paymongoSecretKey.value) {
+      console.error('❌ Missing keys')
+      throw new Error('Please enter both public and secret keys')
+    }
+
+    // Validate key format
+    if (!paymongoPublicKey.value.startsWith('pk_')) {
+      throw new Error('Invalid public key format. Should start with "pk_"')
+    }
+
+    if (!paymongoSecretKey.value.startsWith('sk_')) {
+      throw new Error('Invalid secret key format. Should start with "sk_"')
+    }
+
+    console.log('Keys validation passed')
+
+    // Step 4: Check if shop exists and verify ownership
+    console.log('Checking shop ownership...')
+    const { data: shop, error: shopError } = await supabase
+      .from('shops')
+      .select('id, owner_id, paymongo_config, gcash_enabled')
+      .eq('id', currentShopId.value)
+      .maybeSingle()
+
+    if (shopError) {
+      console.error('❌ Shop fetch error:', shopError)
+      throw new Error(`Error fetching shop: ${shopError.message}`)
+    }
+
+    if (!shop) {
+      console.error('❌ Shop not found')
+      throw new Error('Shop not found')
+    }
+
+    if (shop.owner_id !== user.id) {
+      console.error('❌ Ownership mismatch')
+      throw new Error('You do not have permission to update this shop')
+    }
+
+    console.log('✅ Ownership verified')
+
+    // Step 5: Prepare data with proper JSONB structure
+    const paymongoConfig = {
+      public_key: paymongoPublicKey.value.trim(),
+      secret_key: paymongoSecretKey.value.trim(),
+      webhook_secret: paymongoWebhookSecret.value?.trim() || null,
+      test_mode: testMode.value,
+      connected_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    }
+
+    // Ensure payment_options is an array and includes 'gcash'
+    const currentPaymentOptions = paymentOptions.value || []
+    const updatedPaymentOptions = [...new Set([...currentPaymentOptions, 'gcash'])]
+
+    // Filter to only allow 'cod' and 'gcash' as per your schema constraint
+    const validPaymentOptions = updatedPaymentOptions.filter(
+      (opt) => opt === 'cod' || opt === 'gcash',
+    )
+
+    console.log('Prepared data:', {
+      paymongoConfig,
+      validPaymentOptions,
+      gcash_enabled: true,
+    })
+
+    // Step 6: Attempt update with timeout
+    const updatePromise = supabase
+      .from('shops')
+      .update({
+        paymongo_config: paymongoConfig, // This will be stored as JSONB
+        gcash_enabled: true,
+        payment_options: validPaymentOptions,
+        payment_enabled: true, // Enable payments overall
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', currentShopId.value)
+      .eq('owner_id', user.id)
+      .select()
+
+    // Create timeout promise
+    timeoutId = setTimeout(() => {
+      console.log('⏰ Operation timeout reached')
+    }, 15000)
+
+    // Execute update
+    const { data, error } = await updatePromise
+
+    // Clear timeout
+    clearTimeout(timeoutId)
+
+    if (error) {
+      console.error('❌ Update error:', error)
+
+      // Check for specific error codes
+      if (error.code === '42501') {
+        throw new Error('Permission denied. Check RLS policies.')
+      } else if (error.code === '23505') {
+        throw new Error('Duplicate entry. This might be a unique constraint violation.')
+      } else if (error.code === '22P02') {
+        throw new Error('Invalid data format. Check your input.')
+      } else {
+        throw error
+      }
+    }
+
+    if (!data || data.length === 0) {
+      // Check if the update actually happened but no data returned
+      const { data: checkData } = await supabase
+        .from('shops')
+        .select('gcash_enabled, paymongo_config, payment_options')
+        .eq('id', currentShopId.value)
+        .single()
+
+      if (checkData?.gcash_enabled) {
+        console.log('✅ Update was successful despite no data return')
+        // Update local state
+        gcashEnabled.value = true
+        paymentOptions.value = validPaymentOptions
+        showSnackbar('GCash configuration saved successfully!', 'success')
+        return
+      } else {
+        throw new Error('Update failed - no data returned and verification failed')
+      }
+    }
+
+    console.log('✅ Update successful!', data[0])
+
+    // Update local state
+    gcashEnabled.value = true
+    paymentOptions.value = validPaymentOptions
+
+    showSnackbar('GCash configuration saved successfully!', 'success')
+  } catch (error: any) {
+    console.error('❌ Error:', error)
+
+    // Clear timeout if it exists
+    if (timeoutId) clearTimeout(timeoutId)
+
+    // Provide user-friendly error messages based on error type
+    if (error.message?.includes('timeout')) {
+      gcashError.value = 'Operation timed out. Please check your connection and try again.'
+    } else if (error.message?.includes('JWT') || error.message?.includes('token')) {
+      gcashError.value = 'Session expired. Please log in again.'
+    } else if (error.code === '42501' || error.message?.includes('permission')) {
+      gcashError.value =
+        'Permission denied. You may not own this shop or RLS policies are blocking the update.'
+    } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
+      gcashError.value = 'Network error. Please check your internet connection.'
+    } else if (error.message?.includes('JSON')) {
+      gcashError.value = 'Invalid configuration format. Please check your keys.'
+    } else if (error.code === '23505') {
+      gcashError.value = 'A unique constraint was violated. This might be a duplicate entry.'
+    } else {
+      gcashError.value = error.message || 'Failed to save configuration'
+    }
+
+    showSnackbar(gcashError.value, 'error')
+  } finally {
+    savingGcash.value = false
+    isSavingGcash.value = false
+    console.log('========== END SAVE GCASH CONFIG ==========')
+  }
+}
+
+// Add this helper function to test RLS policies
+const testRlsPolicy = async () => {
+  if (!currentShopId.value) {
+    showSnackbar('No shop ID', 'error')
+    return
+  }
+
+  try {
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    console.log('Testing RLS policies...')
+    console.log('User ID:', user?.id)
+    console.log('Shop ID:', currentShopId.value)
+
+    // Test 1: Can we select the shop?
+    const { data: selectData, error: selectError } = await supabase
+      .from('shops')
+      .select('id, owner_id, gcash_enabled')
+      .eq('id', currentShopId.value)
+      .single()
+
+    console.log('SELECT test:', { selectData, selectError })
+
+    // Test 2: Can we update a simple field?
+    const { data: updateData, error: updateError } = await supabase
+      .from('shops')
+      .update({
+        test_field: 'test_value',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', currentShopId.value)
+      .eq('owner_id', user?.id)
+      .select()
+
+    console.log('UPDATE test:', { updateData, updateError })
+
+    if (updateError) {
+      showSnackbar(`RLS test failed: ${updateError.message}`, 'error')
+    } else {
+      showSnackbar('RLS test passed! You can update the shop.', 'success')
+    }
+  } catch (err) {
+    console.error('RLS test error:', err)
+    showSnackbar('RLS test failed', 'error')
+  }
+}
+
+const disconnectGcash = async () => {
+  if (!currentShopId.value) return
+  if (!confirm('Are you sure you want to disconnect GCash payments?')) return
+
+  savingGcash.value = true
+  gcashError.value = ''
+
+  try {
+    // Remove GCash from payment options
+    const updatedPaymentOptions = paymentOptions.value.filter((opt) => opt !== 'gcash')
+
+    const { data, error } = await supabase
+      .from('shops')
+      .update({
+        paymongo_config: {},
+        gcash_enabled: false,
+        payment_options: updatedPaymentOptions,
+      })
+      .eq('id', currentShopId.value)
+      .select()
+
+    if (error) throw error
+
+    // Update local state
+    paymentOptions.value = updatedPaymentOptions
+    gcashEnabled.value = false
+    paymongoPublicKey.value = ''
+    paymongoSecretKey.value = ''
+    paymongoWebhookSecret.value = ''
+    showGcashSetup.value = false
+
+    showSnackbar('GCash disconnected successfully', 'success')
+  } catch (error: any) {
+    console.error('Error disconnecting GCash:', error)
+    gcashError.value = error.message || 'Failed to disconnect GCash'
+    showSnackbar(gcashError.value, 'error')
+  } finally {
+    savingGcash.value = false
+  }
+}
+const testDirectUpdate = async () => {
+  console.log('========== TEST DIRECT UPDATE ==========')
+
+  if (!currentShopId.value) {
+    console.error('❌ No shop ID')
+    return
+  }
+
+  try {
+    // Hardcode the user ID from your logs
+    const userId = '4bc1583e-3a3f-4c18-88a5-d6832329f81d' // Your user ID from logs
+
+    const testConfig = {
+      public_key: 'pk_test_xxx',
+      secret_key: 'sk_test_xxx',
+      test_mode: true,
+      test_date: new Date().toISOString(),
+    }
+
+    console.log('Attempting direct update with hardcoded user...')
+
+    const { data, error } = await supabase
+      .from('shops')
+      .update({
+        paymongo_config: testConfig,
+        gcash_enabled: true,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', currentShopId.value)
+      .eq('owner_id', userId) // Use hardcoded user ID
+      .select()
+
+    console.log('Direct update result:', { data, error })
+
+    if (error) {
+      console.error('❌ Error:', error)
+    } else {
+      console.log('✅ Success!', data)
+    }
+  } catch (err) {
+    console.error('❌ Exception:', err)
+  }
+}
+const testGcashConnection = async () => {
+  if (!currentShopId.value) return
+
+  testingGcash.value = true
+  gcashError.value = ''
+
+  try {
+    // First check if we have valid PayMongo config
+    const { data: shop, error: shopError } = await supabase
+      .from('shops')
+      .select('paymongo_config')
+      .eq('id', currentShopId.value)
+      .single()
+
+    if (shopError) throw shopError
+
+    if (!shop.paymongo_config?.public_key || !shop.paymongo_config?.secret_key) {
+      throw new Error('PayMongo configuration not found')
+    }
+
+    // Here you would typically make a test API call to PayMongo
+    // For now, we'll just simulate a success
+    showSnackbar('Test connection successful! Check your PayMongo dashboard.', 'success')
+  } catch (error: any) {
+    console.error('Test connection error:', error)
+    gcashError.value = error.message || 'Test connection failed'
+    showSnackbar(gcashError.value, 'error')
+  } finally {
+    testingGcash.value = false
+  }
+}
+
 // -------------------- PSGC MAPPING FUNCTIONS --------------------
 const findRegionCodeByName = (name: string) => {
   return regions.value.find((region) => region.name.includes(name))?.code || null
@@ -211,18 +805,6 @@ const autofillAddressFromGeocode = async (addressString: string) => {
   if (!addressString) return
 
   try {
-    // Parse the address string to extract components
-    const addressParts = addressString.split(', ')
-
-    // Extract basic components - this is a simplified parsing
-    // In a real application, you might want to use a more sophisticated geocoding service
-    // that returns structured address components
-
-    // For now, we'll set the full address and let the user refine it
-    // The reverse geocoding API doesn't return structured PSGC data,
-    // so we can't automatically populate the PSGC dropdowns
-
-    // However, we can try to extract the city/province/region from the address string
     const lowerAddress = addressString.toLowerCase()
 
     // Try to find region
@@ -263,14 +845,12 @@ const autofillAddressFromGeocode = async (addressString: string) => {
 
 // -------------------- MAP INITIALIZATION --------------------
 const initMap = (lat: number, lng: number) => {
-  // Check if map container exists
   const mapContainer = document.getElementById('map')
   if (!mapContainer) {
     console.error('Map container not found')
     return
   }
 
-  // Check if map is already initialized
   if (map.value) {
     map.value.setCenter([lng, lat])
     shopMarker?.setLngLat([lng, lat])
@@ -286,10 +866,7 @@ const initMap = (lat: number, lng: number) => {
       attributionControl: false,
     })
 
-    // Add navigation controls
     map.value.addControl(new mapboxgl.NavigationControl(), 'top-right')
-
-    // Add attribution
     map.value.addControl(
       new mapboxgl.AttributionControl({
         compact: true,
@@ -297,7 +874,6 @@ const initMap = (lat: number, lng: number) => {
       'bottom-right',
     )
 
-    // Add geolocate control
     const geolocate = new mapboxgl.GeolocateControl({
       positionOptions: {
         enableHighAccuracy: true,
@@ -307,7 +883,6 @@ const initMap = (lat: number, lng: number) => {
     })
     map.value.addControl(geolocate, 'top-right')
 
-    // Create custom marker element
     const markerEl = document.createElement('div')
     markerEl.className = 'shop-marker'
     markerEl.innerHTML = `
@@ -317,7 +892,6 @@ const initMap = (lat: number, lng: number) => {
       </svg>
     `
 
-    // Create marker
     shopMarker = new mapboxgl.Marker({
       element: markerEl,
       draggable: true,
@@ -325,7 +899,6 @@ const initMap = (lat: number, lng: number) => {
       .setLngLat([lng, lat])
       .addTo(map.value)
 
-    // Handle marker drag end
     shopMarker.on('dragend', async () => {
       if (!shopMarker) return
       const lngLat = shopMarker.getLngLat()
@@ -335,7 +908,6 @@ const initMap = (lat: number, lng: number) => {
       await reverseGeocode(lngLat.lat, lngLat.lng)
     })
 
-    // Handle map click
     map.value.on('click', async (e) => {
       const { lng, lat } = e.lngLat
       latitude.value = lat
@@ -345,13 +917,11 @@ const initMap = (lat: number, lng: number) => {
       await reverseGeocode(lat, lng)
     })
 
-    // Handle map load
     map.value.on('load', () => {
       mapInitialized.value = true
       console.log('Mapbox map loaded successfully')
     })
 
-    // Handle map errors
     map.value.on('error', (e) => {
       console.error('Mapbox error:', e.error)
     })
@@ -446,22 +1016,19 @@ const saveCoordinates = async (lat: number, lng: number) => {
   try {
     if (!currentShopId.value) return
 
-    // Save both coordinates and detected address
-    // Note: manual_status will be 'auto' when using detect address
     const { error } = await supabase
       .from('shops')
       .update({
         latitude: lat,
         longitude: lng,
-        detected_address: fullAddress.value, // This is the key line - saving to detected_address column
-        manual_status: 'auto', // Set to auto when using detect address
-        updated_at: new Date().toISOString(), // Update timestamp
+        detected_address: fullAddress.value,
+        manual_status: 'auto',
+        updated_at: new Date().toISOString(),
       })
       .eq('id', currentShopId.value)
 
     if (error) throw error
 
-    // Show success message with the detected address
     if (fullAddress.value) {
       showSnackbar(`📍 Address detected and saved: ${fullAddress.value}`, 'success')
     } else {
@@ -536,7 +1103,6 @@ const fetchRegions = async () => {
     const data = await res.json()
     regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
 
-    // Pre-select Region XIII (Caraga)
     const caragaRegion = data.find((r: any) => r.name.includes('Caraga'))
     if (caragaRegion) {
       selectedRegion.value = caragaRegion.code
@@ -559,7 +1125,6 @@ const fetchProvinces = async (regionCode: string) => {
     const data = await res.json()
     provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
 
-    // Pre-select Agusan del Norte if available
     const agusanDelNorte = data.find((p: any) => p.name === 'Agusan del Norte')
     if (agusanDelNorte) {
       selectedProvince.value = agusanDelNorte.code
@@ -584,7 +1149,6 @@ const fetchCities = async (provinceCode: string) => {
     const data = await res.json()
     cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
 
-    // Pre-select City of Butuan if available
     const butuanCity = data.find((c: any) => c.name === 'City of Butuan')
     if (butuanCity) {
       selectedCity.value = butuanCity.code
@@ -618,6 +1182,13 @@ const loadShopData = async () => {
   if (!shopId.value) return
 
   loadingShopData.value = true
+
+  // Clear all values first
+  shopName.value = ''
+  description.value = ''
+  openTime.value = ''
+  closeTime.value = ''
+
   try {
     const { data, error } = await supabase.from('shops').select('*').eq('id', shopId.value).single()
     if (error || !data) {
@@ -625,84 +1196,52 @@ const loadShopData = async () => {
       return
     }
 
-    // Fill basic shop data
+    console.log('Raw loaded data:', data)
+
     currentShopId.value = data.id
     avatarUrl.value = data.logo_url
     physicalUrl.value = data.physical_store
-    shopName.value = data.business_name
-    description.value = data.description
-    openTime.value = data.open_time
-    closeTime.value = data.close_time
-    address.barangay.value = data.barangay
-    address.building.value = data.building
-    address.street.value = data.street
-    address.postal.value = data.postal
-    address.house_no.value = data.house_no
-    address.city.value = data.city
-    address.province.value = data.province
-    address.region.value = data.region
+    shopName.value = data.business_name || ''
+    description.value = data.description || ''
+    openTime.value = data.open_time || ''
+    closeTime.value = data.close_time || ''
+
+    address.barangay.value = data.barangay || ''
+    address.building.value = data.building || ''
+    address.street.value = data.street || ''
+    address.postal.value = data.postal || ''
+    address.house_no.value = data.house_no || ''
+    address.city.value = data.city || ''
+    address.province.value = data.province || ''
+    address.region.value = data.region || ''
+
     latitude.value = data.latitude || 8.9489
     longitude.value = data.longitude || 125.5406
     fullAddress.value = data.detected_address || ''
-    deliveryOptions.value = data.delivery_options || []
-    meetUpDetails.value = data.meetup_details || ''
-    openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
-    validIdFrontUrl.value = data.valid_id_front
-    validIdBackUrl.value = data.valid_id_back
 
-    console.log('Loaded shop data:', {
-      region: data.region,
-      province: data.province,
-      city: data.city,
-      barangay: data.barangay,
+    deliveryOptions.value = data.delivery_options || []
+    paymentOptions.value = data.payment_options || []
+    openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
+
+    validIdFrontUrl.value = data.valid_id_front || null
+    validIdBackUrl.value = data.valid_id_back || null
+    meetUpDetails.value = data.meetup_details || ''
+
+    // Load GCash config if exists
+    if (data.paymongo_config) {
+      paymongoPublicKey.value = data.paymongo_config.public_key || ''
+      paymongoSecretKey.value = data.paymongo_config.secret_key || ''
+      paymongoWebhookSecret.value = data.paymongo_config.webhook_secret || ''
+      testMode.value = data.paymongo_config.test_mode !== false
+    }
+    gcashEnabled.value = data.gcash_enabled || false
+
+    console.log('After setting values:', {
+      shopName: shopName.value,
+      description: description.value,
     })
 
-    // Map PSGC values after a short delay to ensure regions are loaded
-    setTimeout(async () => {
-      if (data.region) {
-        const regionCode = findRegionCodeByName(data.region)
-        if (regionCode) {
-          selectedRegion.value = regionCode
-          console.log('Mapped region:', data.region, '->', regionCode)
-
-          // Wait for provinces to load
-          await fetchProvinces(regionCode)
-          await nextTick()
-
-          if (data.province) {
-            const provinceCode = findProvinceCodeByName(data.province)
-            if (provinceCode) {
-              selectedProvince.value = provinceCode
-              console.log('Mapped province:', data.province, '->', provinceCode)
-
-              // Wait for cities to load
-              await fetchCities(provinceCode)
-              await nextTick()
-
-              if (data.city) {
-                const cityCode = findCityCodeByName(data.city)
-                if (cityCode) {
-                  selectedCity.value = cityCode
-                  console.log('Mapped city:', data.city, '->', cityCode)
-
-                  // Wait for barangays to load
-                  await fetchBarangays(cityCode)
-                  await nextTick()
-
-                  if (data.barangay) {
-                    const barangayCode = findBarangayCodeByName(data.barangay)
-                    if (barangayCode) {
-                      selectedBarangay.value = barangayCode
-                      console.log('Mapped barangay:', data.barangay, '->', barangayCode)
-                    }
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    }, 1000)
+    await nextTick()
   } catch (err) {
     console.error('Error loading shop:', err)
   } finally {
@@ -765,8 +1304,7 @@ watch(selectedBarangay, async (barangayCode) => {
     if (coords) {
       latitude.value = coords.lat
       longitude.value = coords.lon
-      // Only update map if it's initialized and we're on the location step
-      if (mapInitialized.value && currentStep.value === 5) {
+      if (mapInitialized.value && currentStep.value === 6) {
         map.value?.setCenter([coords.lon, coords.lat])
         shopMarker?.setLngLat([coords.lon, coords.lat])
       }
@@ -776,7 +1314,7 @@ watch(selectedBarangay, async (barangayCode) => {
 
 // Update map when full address changes
 watch(fullAddress, async (newVal) => {
-  if (!newVal || !mapInitialized.value || currentStep.value !== 5) return
+  if (!newVal || !mapInitialized.value || currentStep.value !== 6) return
 
   const coords = await getCoordinatesFromAddress(newVal)
   if (coords) {
@@ -795,7 +1333,6 @@ const getLocation = () => {
     return
   }
 
-  // Set addressOption to 'map' when using detect address
   addressOption.value = 'map'
 
   navigator.geolocation.getCurrentPosition(
@@ -803,20 +1340,14 @@ const getLocation = () => {
       latitude.value = pos.coords.latitude
       longitude.value = pos.coords.longitude
 
-      // Update map if it's initialized and we're on the location step
-      if (mapInitialized.value && currentStep.value === 5) {
+      if (mapInitialized.value && currentStep.value === 6) {
         map.value?.setCenter([longitude.value, latitude.value])
         map.value?.setZoom(17)
         shopMarker?.setLngLat([longitude.value, latitude.value])
       }
 
-      // Get reverse geocoded address
       const detectedAddress = await reverseGeocode(latitude.value, longitude.value)
-
-      // Autofill form fields based on detected address
       await autofillAddressFromGeocode(detectedAddress)
-
-      // Save coordinates and detected address
       await saveCoordinates(latitude.value, longitude.value)
     },
     (err) => {
@@ -842,25 +1373,10 @@ const saveShop = async () => {
     } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
-    // For existing shops, fetch current status first
-    let currentStatus = 'pending' // Default for new shops
+    console.log('Current user:', user.id)
+    console.log('Current shop ID:', currentShopId.value)
 
-    if (currentShopId.value) {
-      const { data: existingShop } = await supabase
-        .from('shops')
-        .select('status')
-        .eq('id', currentShopId.value)
-        .single()
-
-      if (existingShop) {
-        currentStatus = existingShop.status
-      }
-    }
-
-    // Determine address source based on how the address was set
-    let addressSource = 'detected' // Default to detected address
-
-    // Check if manual address fields are filled (user manually edited the address)
+    let addressSource = 'detected'
     const hasManualAddressFields =
       address.barangay.value ||
       address.building.value ||
@@ -875,9 +1391,8 @@ const saveShop = async () => {
       addressSource = 'manual'
     }
 
-    // Prepare shop data according to schema
-    const shopData = {
-      owner_id: user.id,
+    // Prepare shop data with GCash config if enabled
+    const shopData: any = {
       business_name: shopName.value,
       description: description.value,
       logo_url: avatarUrl.value,
@@ -895,77 +1410,187 @@ const saveShop = async () => {
       province: address.province.value,
       region: address.region.value,
       delivery_options: deliveryOptions.value,
+      payment_options: paymentOptions.value,
       meetup_details: meetUpDetails.value || null,
       detected_address: fullAddress.value || null,
       address_source: addressSource,
-      status: currentStatus, // Use existing status for updates, 'pending' for new shops
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
       open_days: openDays.value,
       updated_at: new Date().toISOString(),
     }
 
-    if (!currentShopId.value) {
-      // New shop - set to pending
-      shopData.status = 'pending'
-      const { data, error } = await supabase.from('shops').insert(shopData).select().single()
-      if (error) throw error
-      currentShopId.value = data.id
-
-      // UPDATED: Redirect to status shop creation page with shop ID
-      showSnackbar('Shop created successfully! Waiting for admin approval.', 'success')
-
-      // Add a delay to ensure the user sees the success message
-      setTimeout(() => {
-        // Store shop ID in localStorage (your status page reads from this)
-        localStorage.setItem('lastCreatedShopId', currentShopId.value)
-
-        // Also pass as query parameter for direct access
-        router.push({
-          path: '/statusshopcreation',
-          query: { shopId: currentShopId.value },
-        })
-      }, 1500)
-    } else {
-      // Existing shop - preserve status and update
-      const { error } = await supabase.from('shops').update(shopData).eq('id', currentShopId.value)
-      if (error) throw error
-
-      // UPDATED: For updates, also redirect to status page with shop ID
-      showSnackbar('Shop updated successfully!', 'success')
-
-      setTimeout(() => {
-        // Ensure shop ID is in localStorage
-        localStorage.setItem('lastCreatedShopId', currentShopId.value)
-
-        router.push({
-          path: '/statusshopcreation',
-          query: { shopId: currentShopId.value },
-        })
-      }, 1500)
+    // Add GCash config if GCash is enabled
+    if (
+      paymentOptions.value.includes('gcash') &&
+      paymongoPublicKey.value &&
+      paymongoSecretKey.value
+    ) {
+      shopData.paymongo_config = {
+        public_key: paymongoPublicKey.value,
+        secret_key: paymongoSecretKey.value,
+        webhook_secret: paymongoWebhookSecret.value,
+        test_mode: testMode.value,
+        connected_at: new Date().toISOString(),
+      }
+      shopData.gcash_enabled = true
     }
+
+    console.log('Shop data to save:', shopData)
+
+    let savedShopId
+    let result
+
+    if (!currentShopId.value) {
+      // Insert new shop
+      const insertData = {
+        ...shopData,
+        owner_id: user.id,
+        status: 'pending',
+      }
+
+      console.log('Inserting new shop...')
+
+      const { data, error } = await supabase.from('shops').insert(insertData).select()
+
+      console.log('Insert response:', { data, error })
+
+      if (error) throw error
+
+      if (!data || data.length === 0) {
+        throw new Error('Insert succeeded but no data returned')
+      }
+
+      result = data[0]
+      savedShopId = data[0].id
+      console.log('Insert successful:', data[0])
+    } else {
+      // Update existing shop
+      console.log('Updating shop with ID:', currentShopId.value)
+
+      const { data: existingShop, error: checkError } = await supabase
+        .from('shops')
+        .select('id, owner_id')
+        .eq('id', currentShopId.value)
+        .single()
+
+      if (checkError) {
+        console.error('Error checking shop:', checkError)
+        throw new Error(`Shop not found: ${checkError.message}`)
+      }
+
+      if (existingShop.owner_id !== user.id) {
+        throw new Error('You do not have permission to update this shop')
+      }
+
+      const { data, error } = await supabase
+        .from('shops')
+        .update(shopData)
+        .eq('id', currentShopId.value)
+        .eq('owner_id', user.id)
+        .select()
+
+      console.log('Update response:', { data, error })
+
+      if (error) {
+        console.error('Update error:', error)
+        throw error
+      }
+
+      if (!data || data.length === 0) {
+        throw new Error('Update failed - no data returned. Check RLS policies.')
+      }
+
+      console.log('Update successful:', data[0])
+      result = data[0]
+      savedShopId = currentShopId.value
+    }
+
+    showSnackbar('Shop saved successfully!', 'success')
+
+    setTimeout(() => {
+      localStorage.setItem('lastCreatedShopId', savedShopId)
+      router.push({
+        path: '/statusshopcreation',
+        query: { shopId: savedShopId },
+      })
+    }, 1500)
   } catch (err) {
     console.error('Save shop error:', err)
-    showSnackbar('Failed to save shop', 'error')
+    console.error('Error details:', {
+      message: err.message,
+      code: err.code,
+      details: err.details,
+      hint: err.hint,
+    })
+    showSnackbar(err.message || 'Failed to save shop', 'error')
   } finally {
     saving.value = false
   }
 }
+const diagnoseAuth = async () => {
+  console.log('========== AUTH DIAGNOSTICS ==========')
 
+  try {
+    // Test 1: Check if we can get session (fast)
+    console.log('Test 1: getSession()')
+    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
+    console.log('Session result:', {
+      hasSession: !!sessionData.session,
+      user: sessionData.session?.user?.email,
+      expiresAt: sessionData.session?.expires_at
+        ? new Date(sessionData.session.expires_at * 1000).toLocaleString()
+        : 'N/A',
+      error: sessionError,
+    })
+
+    // Test 2: Check if we can refresh session
+    console.log('Test 2: refreshSession()')
+    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
+    console.log('Refresh result:', {
+      success: !!refreshData.session,
+      user: refreshData.session?.user?.email,
+      error: refreshError,
+    })
+
+    // Test 3: Check current shop ID and ownership
+    if (currentShopId.value) {
+      console.log('Test 3: Check shop ownership')
+      const { data: shop, error: shopError } = await supabase
+        .from('shops')
+        .select('id, owner_id, business_name')
+        .eq('id', currentShopId.value)
+        .single()
+
+      console.log('Shop check:', {
+        shop: shop,
+        currentUserId: sessionData.session?.user?.id,
+        isOwner: shop?.owner_id === sessionData.session?.user?.id,
+        error: shopError,
+      })
+    }
+
+    showSnackbar('Auth diagnostics complete - check console', 'success')
+  } catch (err) {
+    console.error('Diagnostic error:', err)
+    showSnackbar('Diagnostic failed', 'error')
+  }
+
+  console.log('========== END DIAGNOSTICS ==========')
+}
 // -------------------- MOUNT --------------------
 onMounted(async () => {
+  console.log('🔧 Component mounted, running diagnostics...')
+  await testSupabaseConnection()
+  await checkAuthStatus()
   await fetchRegions()
   await nextTick()
 
-  // Load shop data if editing
   if (shopId.value) {
     await loadShopData()
   }
-
-  // Don't initialize map here - wait until step 5 is active
 })
 
-// Add a watcher to debug the selection process
 watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city]) => {
   console.log('Current selections:', {
     region: region ? regions.value.find((r) => r.code === region)?.name : 'None',
@@ -982,9 +1607,9 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title
-        ><strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong></v-toolbar-title
-      >
+      <v-toolbar-title>
+        <strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong>
+      </v-toolbar-title>
     </v-app-bar>
 
     <v-main class="pb-16">
@@ -1013,7 +1638,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               color="#3f83c7"
               height="6"
               rounded
-            ></v-progress-linear>
+            />
           </div>
         </v-card-text>
       </v-card>
@@ -1025,7 +1650,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           class="cover-photo"
           cover
         >
-          <div class="cover-overlay"></div>
+          <div class="cover-overlay" />
           <v-btn icon color="white" class="cover-upload" @click="handlePhysicalUpload">
             <v-icon color="#3f83c7">mdi-camera</v-icon>
           </v-btn>
@@ -1046,7 +1671,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
       <!-- Loading State -->
       <v-overlay :model-value="loadingShopData" class="align-center justify-center" persistent>
-        <v-progress-circular color="primary" indeterminate size="64"></v-progress-circular>
+        <v-progress-circular color="primary" indeterminate size="64" />
         <div class="text-center mt-4">
           <div class="text-h6">Loading Shop Data...</div>
           <div class="text-body-2">Please wait while we load your shop information</div>
@@ -1054,7 +1679,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       </v-overlay>
 
       <!-- Form Section -->
-      <div class="form-section pa-4" v-if="!loadingShopData">
+      <div class="form-section pa-4" v-if="!loadingShopData" :key="currentShopId">
         <!-- Step 1: Business Information -->
         <v-card v-if="currentStep === 1" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
@@ -1189,8 +1814,395 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           </v-card-actions>
         </v-card>
 
-        <!-- Step 5: Location -->
+        <!-- Step 5: Payment Options (with integrated GCash setup) - UPDATED VERSION -->
         <v-card v-if="currentStep === 5" class="mb-4 step-card" variant="outlined">
+          <v-card-title class="section-title">
+            <v-icon class="mr-2">mdi-currency-php</v-icon>
+            Payment Options
+            <v-chip v-if="currentShopId" color="primary" size="small" class="ml-2">
+              Pre-filled
+            </v-chip>
+          </v-card-title>
+
+          <v-card-text>
+            <!-- Payment Options Description -->
+            <v-alert type="info" variant="tonal" class="mb-4">
+              <template #title>
+                <strong>Select Payment Methods</strong>
+              </template>
+              <div class="text-caption">
+                Choose which payment methods you accept. Click on GCash to configure.
+              </div>
+            </v-alert>
+
+            <!-- Debug Info (visible during development) -->
+            <v-alert v-if="debugInfo" type="info" variant="tonal" class="mb-4" dense>
+              <pre class="text-caption">{{ debugInfo }}</pre>
+            </v-alert>
+
+            <!-- Error Display -->
+            <v-alert
+              v-if="gcashError"
+              type="error"
+              variant="tonal"
+              class="mb-4"
+              dismissible
+              @click:close="gcashError = ''"
+            >
+              <strong>Error:</strong> {{ gcashError }}
+            </v-alert>
+
+            <!-- Payment Method Cards -->
+            <v-row>
+              <!-- COD Option -->
+              <v-col cols="12" md="6">
+                <v-card
+                  variant="outlined"
+                  class="payment-card"
+                  :class="{ 'selected-payment': paymentOptions.includes('cod') }"
+                  @click="togglePayment('cod')"
+                >
+                  <v-card-text class="text-center">
+                    <v-icon
+                      size="48"
+                      :color="paymentOptions.includes('cod') ? 'success' : 'grey'"
+                      class="mb-2"
+                    >
+                      mdi-cash-multiple
+                    </v-icon>
+                    <div class="text-h6">Cash on Delivery</div>
+                    <div class="text-caption text-grey">Pay cash when you receive the order</div>
+                    <v-checkbox-btn
+                      :model-value="paymentOptions.includes('cod')"
+                      color="success"
+                      class="mt-2"
+                      @click.stop="togglePayment('cod')"
+                    />
+                  </v-card-text>
+                </v-card>
+              </v-col>
+
+              <!-- GCash Option -->
+              <v-col cols="12" md="6">
+                <v-card
+                  variant="outlined"
+                  class="payment-card"
+                  :class="{ 'selected-payment': paymentOptions.includes('gcash') }"
+                  @click="togglePayment('gcash')"
+                >
+                  <v-card-text class="text-center">
+                    <v-icon
+                      size="48"
+                      :color="paymentOptions.includes('gcash') ? 'success' : 'grey'"
+                      class="mb-2"
+                    >
+                      mdi-cellphone
+                    </v-icon>
+                    <div class="text-h6">GCash</div>
+                    <div class="text-caption text-grey">Mobile payment via GCash</div>
+                    <v-checkbox-btn
+                      :model-value="paymentOptions.includes('gcash')"
+                      color="success"
+                      class="mt-2"
+                      @click.stop="togglePayment('gcash')"
+                    />
+                  </v-card-text>
+                </v-card>
+              </v-col>
+            </v-row>
+
+            <!-- Selected Payment Methods Summary -->
+            <v-divider class="my-4" />
+
+            <div class="d-flex align-center justify-space-between">
+              <div>
+                <span class="text-subtitle-2">Selected Payment Methods:</span>
+                <div class="mt-1">
+                  <v-chip
+                    v-for="option in paymentOptions"
+                    :key="option"
+                    :color="option === 'gcash' ? '#0077e5' : 'success'"
+                    size="small"
+                    class="mr-1 payment-chip"
+                    closable
+                    @click:close="removePayment(option)"
+                  >
+                    <v-icon start size="16">
+                      {{ getPaymentIcon(option) }}
+                    </v-icon>
+                    {{ getPaymentLabel(option) }}
+                  </v-chip>
+                  <span v-if="paymentOptions.length === 0" class="text-caption text-grey">
+                    No payment methods selected
+                  </span>
+                </div>
+              </div>
+              <v-chip :color="paymentOptions.length > 0 ? 'success' : 'warning'" size="small">
+                {{ paymentOptions.length }} selected
+              </v-chip>
+            </div>
+
+            <!-- GCash Setup Section (expands when GCash is selected) -->
+            <v-expand-transition>
+              <div v-if="paymentOptions.includes('gcash')" class="mt-6">
+                <v-divider class="mb-4" />
+
+                <div class="d-flex align-center mb-4">
+                  <h3 class="text-subtitle-1 font-weight-bold">
+                    <v-icon color="#0077e5" class="mr-1">mdi-cellphone</v-icon>
+                    GCash / PayMongo Configuration
+                  </h3>
+                  <v-spacer />
+                  <v-chip :color="gcashEnabled ? 'success' : 'warning'" size="small">
+                    {{ gcashEnabled ? 'Connected' : 'Not Connected' }}
+                  </v-chip>
+                </div>
+
+                <!-- Connection Status Alert -->
+                <v-alert v-if="gcashEnabled" type="success" variant="tonal" class="mb-4">
+                  <div class="d-flex align-center">
+                    <v-icon left>mdi-check-circle</v-icon>
+                    <div>
+                      <strong>GCash is active!</strong> Your shop can receive GCash payments.
+                    </div>
+                  </div>
+                </v-alert>
+
+                <v-alert v-else type="info" variant="tonal" class="mb-4">
+                  <div class="d-flex align-center">
+                    <v-icon left>mdi-information</v-icon>
+                    <div>
+                      <strong>Connect your PayMongo account</strong><br />
+                      Enter your API keys to start accepting GCash payments.
+                    </div>
+                  </div>
+                </v-alert>
+
+                <!-- PayMongo Configuration Form -->
+                <v-row>
+                  <v-col cols="12">
+                    <v-text-field
+                      v-model="paymongoPublicKey"
+                      label="PayMongo Public Key"
+                      placeholder="pk_live_xxx or pk_test_xxx"
+                      outlined
+                      dense
+                      :disabled="gcashEnabled"
+                      :append-inner-icon="showPublicKey ? 'mdi-eye-off' : 'mdi-eye'"
+                      :type="showPublicKey ? 'text' : 'password'"
+                      @click:append-inner="showPublicKey = !showPublicKey"
+                      :error-messages="
+                        !paymongoPublicKey && gcashError ? 'Public key is required' : ''
+                      "
+                    />
+                  </v-col>
+
+                  <v-col cols="12">
+                    <v-text-field
+                      v-model="paymongoSecretKey"
+                      label="PayMongo Secret Key"
+                      placeholder="sk_live_xxx or sk_test_xxx"
+                      outlined
+                      dense
+                      :disabled="gcashEnabled"
+                      :append-inner-icon="showSecretKey ? 'mdi-eye-off' : 'mdi-eye'"
+                      :type="showSecretKey ? 'text' : 'password'"
+                      @click:append-inner="showSecretKey = !showSecretKey"
+                      :error-messages="
+                        !paymongoSecretKey && gcashError ? 'Secret key is required' : ''
+                      "
+                    />
+                  </v-col>
+
+                  <v-col cols="12">
+                    <v-text-field
+                      v-model="paymongoWebhookSecret"
+                      label="Webhook Secret (Optional)"
+                      placeholder="whsec_xxx"
+                      outlined
+                      dense
+                      :disabled="gcashEnabled"
+                      :append-inner-icon="showWebhookSecret ? 'mdi-eye-off' : 'mdi-eye'"
+                      :type="showWebhookSecret ? 'text' : 'password'"
+                      @click:append-inner="showWebhookSecret = !showWebhookSecret"
+                    />
+                  </v-col>
+
+                  <v-col cols="12">
+                    <v-switch
+                      v-model="testMode"
+                      label="Use Test Mode"
+                      color="warning"
+                      :disabled="gcashEnabled"
+                      hint="Use test keys for sandbox environment"
+                      persistent-hint
+                    />
+                  </v-col>
+
+                  <v-col cols="12">
+                    <v-alert v-if="testMode" type="warning" variant="tonal" class="mb-2" dense>
+                      <v-icon start small>mdi-test-tube</v-icon>
+                      <strong>Test Mode Active</strong> - Use your PayMongo test keys
+                    </v-alert>
+                  </v-col>
+
+                  <!-- Webhook URL Display -->
+                  <v-col cols="12">
+                    <span class="text-subtitle-2">Webhook URL</span>
+                    <v-text-field
+                      :model-value="webhookUrl"
+                      label="Webhook URL"
+                      outlined
+                      readonly
+                      dense
+                      hide-details
+                      class="mt-1"
+                      :append-inner-icon="copied ? 'mdi-check' : 'mdi-content-copy'"
+                      @click:append-inner="copyWebhookUrl"
+                    />
+                    <div class="text-caption text-grey mt-1">
+                      Add this URL to your PayMongo webhook settings
+                    </div>
+                  </v-col>
+
+                  <!-- Diagnostic Buttons - UPDATED with more options -->
+                  <v-col cols="12">
+                    <v-row>
+                      <v-col cols="4">
+                        <v-btn
+                          color="info"
+                          variant="outlined"
+                          @click="testSupabaseConnection"
+                          block
+                          size="x-small"
+                        >
+                          Test DB
+                        </v-btn>
+                      </v-col>
+                      <v-col cols="4">
+                        <v-btn
+                          color="info"
+                          variant="outlined"
+                          @click="checkAuthStatus"
+                          block
+                          size="x-small"
+                        >
+                          Check Auth
+                        </v-btn>
+                      </v-col>
+                      <v-col cols="4">
+                        <v-btn
+                          color="purple"
+                          variant="outlined"
+                          @click="testAuthDirectly"
+                          block
+                          size="x-small"
+                        >
+                          Test Auth
+                        </v-btn>
+                      </v-col>
+                    </v-row>
+                    <v-btn
+                      color="warning"
+                      variant="outlined"
+                      @click="testSimpleUpdate"
+                      block
+                      class="mt-2"
+                      size="small"
+                    >
+                      <v-icon left>mdi-test-tube</v-icon>
+                      Test Simple Update
+                    </v-btn>
+                  </v-col>
+
+                  <!-- Add this near your other diagnostic buttons -->
+                  <v-col cols="12">
+                    <v-btn
+                      color="info"
+                      variant="outlined"
+                      @click="diagnoseAuth"
+                      block
+                      size="small"
+                      class="mt-2"
+                    >
+                      <v-icon left>mdi-stethoscope</v-icon>
+                      Run Auth Diagnostics
+                    </v-btn>
+                  </v-col>
+                  <!-- Add this near your other diagnostic buttons in step 5 -->
+                  <v-col cols="12">
+                    <v-btn
+                      color="info"
+                      variant="outlined"
+                      @click="testRlsPolicy"
+                      block
+                      size="small"
+                      class="mt-2"
+                    >
+                      <v-icon left>mdi-shield-lock</v-icon>
+                      Test RLS Policies
+                    </v-btn>
+                  </v-col>
+                  <!-- Action Buttons -->
+                  <v-col cols="12">
+                    <div class="d-flex gap-2 mt-2">
+                      <v-btn
+                        v-if="!gcashEnabled"
+                        color="primary"
+                        :loading="savingGcash"
+                        @click="saveGcashConfig"
+                        block
+                        :disabled="!paymongoPublicKey || !paymongoSecretKey"
+                      >
+                        <v-icon left>mdi-content-save</v-icon>
+                        {{ savingGcash ? 'Saving...' : 'Save & Connect' }}
+                      </v-btn>
+
+                      <v-btn
+                        v-if="gcashEnabled"
+                        color="error"
+                        variant="outlined"
+                        :loading="savingGcash"
+                        @click="disconnectGcash"
+                        block
+                      >
+                        <v-icon left>mdi-link-off</v-icon>
+                        Disconnect GCash
+                      </v-btn>
+                    </div>
+
+                    <v-btn
+                      v-if="gcashEnabled"
+                      color="info"
+                      variant="text"
+                      :loading="testingGcash"
+                      @click="testGcashConnection"
+                      block
+                      class="mt-2"
+                    >
+                      <v-icon left>mdi-test-tube</v-icon>
+                      Test Connection
+                    </v-btn>
+                  </v-col>
+                </v-row>
+              </div>
+            </v-expand-transition>
+          </v-card-text>
+
+          <v-card-actions class="step-actions">
+            <v-btn variant="outlined" @click="prevStep" class="prev-btn">
+              <v-icon left>mdi-arrow-left</v-icon>
+              Back
+            </v-btn>
+            <v-btn color="primary" @click="nextStep" class="next-btn">
+              Next
+              <v-icon right>mdi-arrow-right</v-icon>
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+
+        <!-- Step 6: Location -->
+        <v-card v-if="currentStep === 6" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
             <v-icon class="mr-2">mdi-map-marker</v-icon>
             Location
@@ -1283,8 +2295,6 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
               <h4 class="text-center mb-2 mt-4">Please drag/tap your location in the map</h4>
 
-              <!-- Removed fullscreen button as Mapbox doesn't support built-in fullscreen -->
-
               <!-- Search Section -->
               <div class="search-section">
                 <v-text-field
@@ -1335,7 +2345,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 
           <!-- Map Container -->
           <div class="map-container">
-            <div id="map" class="map"></div>
+            <div id="map" class="map" />
             <v-btn icon @click="getLocation" class="locate-btn" title="Detect Address">
               <v-icon>mdi-crosshairs-gps</v-icon>
             </v-btn>
@@ -1354,7 +2364,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               </template>
               {{ fullAddress }}
               <div class="text-caption mt-1">
-                This address will be saved to the "detected_address" field in your shop profile.
+                This address will be saved to the "detected_address" field.
               </div>
             </v-alert>
 
@@ -1370,8 +2380,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
               <v-alert type="warning" variant="tonal" density="compact">
                 <div class="text-caption">
                   <strong>Note:</strong> After detecting your address, you can refine it using the
-                  manual address fields above if needed. The detected address will be saved to the
-                  "detected_address" column.
+                  manual address fields above if needed.
                 </div>
               </v-alert>
             </div>
@@ -1389,8 +2398,8 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
           </v-card-actions>
         </v-card>
 
-        <!-- Step 6: Valid ID Upload -->
-        <v-card v-if="currentStep === 6" class="mb-4 step-card" variant="outlined">
+        <!-- Step 7: Valid ID Upload -->
+        <v-card v-if="currentStep === 7" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
             <v-icon class="mr-2">mdi-card-account-details</v-icon>
             Valid ID Upload
@@ -1646,6 +2655,32 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 .mapboxgl-ctrl-group {
   border-radius: 8px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+/* Payment Card Styles */
+.payment-card {
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-width: 2px !important;
+  height: 100%;
+}
+
+.payment-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.1);
+}
+
+.payment-card.selected-payment {
+  border-color: #4caf50 !important;
+  background-color: rgba(76, 175, 80, 0.05);
+}
+
+.payment-card:active {
+  transform: translateY(-2px);
+}
+
+.payment-chip {
+  margin: 2px;
 }
 
 .app-bar {
@@ -1909,6 +2944,10 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   font-size: 1rem;
   height: 48px;
   background-color: #3f83c7;
+}
+
+.gap-2 {
+  gap: 8px;
 }
 
 @media (max-width: 768px) {

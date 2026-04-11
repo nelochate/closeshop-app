@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
@@ -19,6 +19,11 @@ const error = ref<string | null>(null)
 const activeTab = ref('details')
 const currentUser = ref<any>(null)
 
+// Timer state - Initialize with default values
+const timeRemaining = ref<number>(300) // Start with 5 minutes (300 seconds)
+const canCancel = ref<boolean>(true) // Start as true until we verify
+let timerInterval: number | null = null
+
 // Get current user
 const getCurrentUser = async () => {
   try {
@@ -26,6 +31,126 @@ const getCurrentUser = async () => {
     currentUser.value = user
   } catch (err) {
     console.error('Error getting current user:', err)
+  }
+}
+
+// Calculate time remaining for cancellation
+const calculateTimeRemaining = () => {
+  if (!order.value || !order.value.created_at) {
+    console.log('No order or created_at, returning default 300')
+    return 300 // Default to 5 minutes if no data
+  }
+  
+  const orderCreatedAt = new Date(order.value.created_at).getTime()
+  const currentTime = new Date().getTime()
+  const timeElapsed = (currentTime - orderCreatedAt) / 1000 // in seconds
+  const maxCancelTime = 5 * 60 // 5 minutes in seconds
+  
+  const remaining = Math.max(0, maxCancelTime - timeElapsed)
+  console.log(`Time remaining: ${remaining} seconds (elapsed: ${timeElapsed})`)
+  return Math.floor(remaining)
+}
+
+// Format time remaining as MM:SS
+const formatTimeRemaining = () => {
+  const remaining = timeRemaining.value
+  if (remaining <= 0) return '00:00'
+  
+  const minutes = Math.floor(remaining / 60)
+  const seconds = remaining % 60
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+// Start the cancellation timer
+const startCancelTimer = () => {
+  console.log('🚀 Starting cancel timer...')
+  
+  // Clear existing timer if any
+  if (timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
+  }
+  
+  // Calculate initial time remaining
+  const initialRemaining = calculateTimeRemaining()
+  timeRemaining.value = initialRemaining
+  canCancel.value = initialRemaining > 0 && order.value?.status === 'pending'
+  
+  console.log(`Initial state - Remaining: ${initialRemaining}, CanCancel: ${canCancel.value}, Status: ${order.value?.status}`)
+  
+  // Start interval to update timer
+  if (initialRemaining > 0 && order.value?.status === 'pending') {
+    timerInterval = setInterval(() => {
+      const newRemaining = calculateTimeRemaining()
+      timeRemaining.value = newRemaining
+      canCancel.value = newRemaining > 0 && order.value?.status === 'pending'
+      
+      console.log(`Timer tick - Remaining: ${newRemaining}, CanCancel: ${canCancel.value}`)
+      
+      // Stop timer when time runs out
+      if (newRemaining <= 0) {
+        if (timerInterval) {
+          clearInterval(timerInterval)
+          timerInterval = null
+        }
+        canCancel.value = false
+        console.log('⏰ Timer expired - Cancel button disabled')
+      }
+    }, 1000)
+  } else {
+    console.log('Timer not started - conditions not met:', {
+      remaining: initialRemaining,
+      status: order.value?.status
+    })
+  }
+}
+
+// Cancel order with time check
+const cancelOrder = async () => {
+  console.log('Cancel button clicked')
+  
+  // Double-check if cancellation is still allowed
+  const remaining = calculateTimeRemaining()
+  
+  if (remaining <= 0) {
+    alert('Cancellation window has expired. You can no longer cancel this order.')
+    canCancel.value = false
+    return
+  }
+  
+  // Confirm cancellation
+  const confirmed = confirm(
+    `Are you sure you want to cancel this order?\n\n` +
+    `You have ${formatTimeRemaining()} left to cancel.`
+  )
+  
+  if (!confirmed) return
+  
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString()
+      })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    
+    // Stop the timer
+    if (timerInterval) {
+      clearInterval(timerInterval)
+      timerInterval = null
+    }
+    
+    // Refresh order details
+    await fetchOrderDetails()
+    
+    alert('Order has been cancelled successfully.')
+    
+  } catch (err) {
+    console.error('Error cancelling order:', err)
+    alert('Failed to cancel order. Please try again.')
   }
 }
 
@@ -89,8 +214,25 @@ const fetchOrderDetails = async () => {
     shippingAddress.value = orderData.address
     buyer.value = orderData.buyer
 
+    console.log('Order details loaded:', {
+      status: order.value?.status,
+      created_at: order.value?.created_at,
+      user_id: order.value?.user_id,
+      current_user_id: currentUser.value?.id
+    })
+
     if (orderItems.value.length > 0 && orderItems.value[0].products?.shop_id) {
       await fetchShopAndSeller(orderItems.value[0].products.shop_id)
+    }
+    
+    // Start the cancellation timer for pending orders
+    if (order.value?.status === 'pending') {
+      console.log('Order is pending, starting timer...')
+      startCancelTimer()
+    } else {
+      console.log('Order is not pending, timer not started')
+      canCancel.value = false
+      timeRemaining.value = 0
     }
 
     console.log('✅ Order loaded:', order.value)
@@ -103,10 +245,9 @@ const fetchOrderDetails = async () => {
   }
 }
 
-// Fetch shop and seller information - FIXED QUERY
+// Fetch shop and seller information
 const fetchShopAndSeller = async (shopId: string) => {
   try {
-    // First get the shop
     const { data: shopData, error: shopError } = await supabase
       .from('shops')
       .select('*')
@@ -117,7 +258,6 @@ const fetchShopAndSeller = async (shopId: string) => {
 
     shop.value = shopData
 
-    // Then get the seller profile using the owner_id
     if (shopData.owner_id) {
       const { data: sellerData, error: sellerError } = await supabase
         .from('profiles')
@@ -172,11 +312,35 @@ const statusIcon = computed(() => {
 
 // Check user roles for action buttons
 const isBuyer = computed(() => {
-  return currentUser.value?.id === order.value?.user_id
+  const result = currentUser.value?.id === order.value?.user_id
+  console.log(`Is buyer: ${result} (Current: ${currentUser.value?.id}, Order user: ${order.value?.user_id})`)
+  return result
 })
 
 const isSeller = computed(() => {
   return currentUser.value?.id === shop.value?.owner_id
+})
+
+// Show cancel button always for pending orders, but control enabled state
+const showCancelButton = computed(() => {
+  const show = isBuyer.value && order.value?.status === 'pending'
+  console.log(`Show cancel button: ${show}`)
+  return show
+})
+
+// Check if cancel button should be disabled
+const isCancelDisabled = computed(() => {
+  const disabled = !canCancel.value || timeRemaining.value <= 0
+  console.log(`Cancel disabled: ${disabled} (canCancel: ${canCancel.value}, timeRemaining: ${timeRemaining.value})`)
+  return disabled
+})
+
+// Get cancel button text based on timer state
+const getCancelButtonText = computed(() => {
+  if (timeRemaining.value <= 0) {
+    return 'Cancellation Unavailable'
+  }
+  return `Cancel Order (${formatTimeRemaining()})`
 })
 
 // Format date
@@ -295,23 +459,17 @@ const markAsDelivered = async () => {
   }
 }
 
-const cancelOrder = async () => {
-  try {
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: 'cancelled' })
-      .eq('id', orderId)
-    
-    if (error) throw error
-    
-    await fetchOrderDetails()
-  } catch (err) {
-    console.error('Error cancelling order:', err)
+// Clean up timer on component unmount
+onUnmounted(() => {
+  if (timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
   }
-}
+})
 
 // Initialize
 onMounted(async () => {
+  console.log('Component mounted, initializing...')
   await getCurrentUser()
   await fetchOrderDetails()
 })
@@ -364,6 +522,39 @@ onMounted(async () => {
           <v-window-item value="details">
             <div class="details-content">
               
+              <!-- Cancellation Timer Alert -->
+              <v-alert
+                v-if="showCancelButton"
+                :type="timeRemaining > 0 ? 'warning' : 'error'"
+                variant="tonal"
+                class="mb-4"
+                dense
+              >
+                <v-row align="center" no-gutters>
+                  <v-col cols="auto" class="mr-3">
+                    <v-icon>{{ timeRemaining > 0 ? 'mdi-timer-sand' : 'mdi-timer-off' }}</v-icon>
+                  </v-col>
+                  <v-col>
+                    <strong>
+                      <span v-if="timeRemaining > 0">
+                        Cancel within {{ formatTimeRemaining() }}
+                      </span>
+                      <span v-else>
+                        Cancellation window has expired
+                      </span>
+                    </strong>
+                    <span class="d-block text-caption">
+                      <span v-if="timeRemaining > 0">
+                        You can only cancel this order within 5 minutes of placing it.
+                      </span>
+                      <span v-else>
+                        This order can no longer be cancelled. Please contact support if you need assistance.
+                      </span>
+                    </span>
+                  </v-col>
+                </v-row>
+              </v-alert>
+
               <!-- Order Summary -->
               <v-card class="mb-4" elevation="1">
                 <v-card-title class="section-title">
@@ -640,6 +831,19 @@ onMounted(async () => {
       <div class="action-buttons">
         <!-- Buyer Actions -->
         <template v-if="isBuyer">
+          <!-- Cancel Button - Always visible but disabled after timer expires -->
+          <v-btn
+            v-if="showCancelButton"
+            :color="isCancelDisabled ? 'grey' : 'error'"
+            :variant="isCancelDisabled ? 'outlined' : 'flat'"
+            :disabled="isCancelDisabled"
+            @click="cancelOrder"
+            :class="{ 'cancel-btn': !isCancelDisabled }"
+          >
+            <v-icon left>{{ isCancelDisabled ? 'mdi-timer-off' : 'mdi-close-circle' }}</v-icon>
+            {{ getCancelButtonText }}
+          </v-btn>
+          
           <v-btn
             v-if="order.status === 'shipped'"
             color="primary"
@@ -648,15 +852,6 @@ onMounted(async () => {
           >
             <v-icon left>mdi-check</v-icon>
             Mark as Delivered
-          </v-btn>
-          <v-btn
-            v-if="['pending', 'paid'].includes(order.status)"
-            color="error"
-            variant="outlined"
-            @click="cancelOrder"
-          >
-            <v-icon left>mdi-close</v-icon>
-            Cancel Order
           </v-btn>
         </template>
 
@@ -849,6 +1044,29 @@ onMounted(async () => {
   max-width: 800px;
   margin: 0 auto;
   justify-content: flex-end;
+}
+
+/* Cancel Button Animation - Only when active */
+.cancel-btn {
+  animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
+  }
+  70% {
+    box-shadow: 0 0 0 10px rgba(220, 53, 69, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
+  }
+}
+
+/* Disabled button style */
+.v-btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 /* Responsive Design */

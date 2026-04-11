@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { requiredValidator, emailValidator } from '@/utils/validators'
-import { onMounted } from 'vue'
+import { Browser } from '@capacitor/browser'
+import { Capacitor } from '@capacitor/core'
 
 const username = ref('')
 const password = ref('')
@@ -11,14 +12,14 @@ const showPassword = ref(false)
 const router = useRouter()
 
 // Reactive variable for error/success message
-const errorMessage = ref('') // Stores the error message
-const showError = ref(false) // Controls the visibility of the error message
-const successMessage = ref('') // Stores the success message
-const showSuccess = ref(false) // Controls the visibility of the success message
+const errorMessage = ref('')
+const showError = ref(false)
+const successMessage = ref('')
+const showSuccess = ref(false)
+const isLoading = ref(false)
 
-const isLoading = ref()
-
-
+// Check if running on native platform (Android/iOS)
+const isNative = Capacitor.isNativePlatform()
 
 // Login function using Supabase
 const login = async () => {
@@ -43,7 +44,7 @@ const login = async () => {
     const user = data.user
     console.log('Login success:', user)
 
-    // ✅ Check profile role
+    // Check profile role
     let { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id, role')
@@ -64,7 +65,7 @@ const login = async () => {
       profile = { id: user.id, role: 'customer' } // fallback
     }
 
-    // ✅ Redirect based on role
+    // Redirect based on role
     let redirectPath = '/homepage'
     if (profile?.role === 'admin') {
       redirectPath = '/admin-dashboard'
@@ -91,13 +92,74 @@ const login = async () => {
   }
 }
 
+// Google Sign-In function for both web and native
+const signInWithGoogle = async () => {
+  isLoading.value = true
 
+  try {
+    const { data, error } = await supabase.auth.signInWithOAuth({
+      provider: 'google',
+      options: {
+        redirectTo: isNative
+          ? 'closeshop.dev://auth/callback'  // Using your app ID as scheme
+          : window.location.origin + '/auth/callback',
+        queryParams: {
+          access_type: 'offline',
+          prompt: 'consent',
+        },
+      }
+    })
 
+    if (error) {
+      throw error
+    }
+
+    if (data?.url) {
+      if (isNative) {
+        // For native platforms (Android), open URL in browser plugin
+        await Browser.open({ url: data.url })
+      } else {
+        // For web, redirect normally
+        window.location.href = data.url
+      }
+    }
+  } catch (err: any) {
+    console.error('Google sign-in error:', err.message)
+    errorMessage.value = 'Failed to sign in with Google: ' + err.message
+    showError.value = true
+
+    setTimeout(() => {
+      showError.value = false
+    }, 3000)
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// Handle OAuth callback
+const handleOAuthCallback = async () => {
+  // Check if we have a hash fragment (for web OAuth)
+  if (window.location.hash) {
+    const { data, error } = await supabase.auth.getSession()
+    if (error) {
+      console.error('Error getting session:', error)
+      return
+    }
+
+    if (data.session) {
+      router.push('/homepage')
+    }
+  }
+}
 
 onMounted(async () => {
+  // Check if we're handling an OAuth callback
+  await handleOAuthCallback()
+
+  // Check if user is already logged in
   const { data: { session } } = await supabase.auth.getSession()
   if (session) {
-    router.push('/homepage') // auto redirect if already logged in
+    router.push('/homepage')
   }
 })
 </script>
@@ -136,6 +198,26 @@ onMounted(async () => {
           <v-btn type="submit" color="primary" block class="login-btn" :loading="isLoading" :disabled="isLoading"
             prepend-icon="mdi-login">
             Sign In
+          </v-btn>
+
+          <!-- Divider -->
+          <div class="divider">
+            <span class="divider-text">or</span>
+          </div>
+
+          <!-- Google Sign-In Button with colored icon -->
+          <v-btn
+            @click="signInWithGoogle"
+            block
+            class="google-btn mb-3"
+            :loading="isLoading"
+            :disabled="isLoading"
+            variant="outlined"
+          >
+            <template v-slot:prepend>
+              <v-icon class="google-icon" size="large">mdi-google</v-icon>
+            </template>
+            Sign in with Google
           </v-btn>
 
           <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
@@ -221,6 +303,43 @@ onMounted(async () => {
   font-weight: 600;
   border-radius: 10px;
   height: 45px;
+}
+
+.google-btn {
+  font-weight: 600;
+  border-radius: 10px;
+  height: 45px;
+  text-transform: none;
+  border-color: #757575;
+  color: rgba(0, 0, 0, 0.87);
+}
+
+.google-icon {
+  background: conic-gradient(from -45deg, #ea4335 110deg, #4285f4 110deg 230deg, #34a853 230deg 310deg, #fbbc05 310deg);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  font-size: 24px !important;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  text-align: center;
+  margin: 1.5rem 0;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.divider-text {
+  padding: 0 1rem;
+  color: #757575;
+  font-size: 14px;
 }
 
 .forgot-link {
