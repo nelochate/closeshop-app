@@ -1,4 +1,3 @@
-<!-- LocationToDeliver.vue -->
 <template>
   <div class="location-deliver-container">
     <div class="map-header">
@@ -22,19 +21,52 @@
     <div class="map-legend">
       <div class="legend-item">
         <div class="legend-marker rider"></div>
-        <span>Your Location</span>
+        <span>📍 Your Location (Rider)</span>
       </div>
       <div class="legend-item">
         <div class="legend-marker shop"></div>
-        <span>Shop Location</span>
+        <span>🏪 Shop Location (Pickup)</span>
       </div>
       <div class="legend-item">
         <div class="legend-marker customer"></div>
-        <span>Customer Location</span>
+        <span>🏠 Customer Location (Delivery)</span>
       </div>
       <div class="legend-item">
         <div class="legend-marker route"></div>
-        <span>Delivery Route</span>
+        <span>🛣️ Delivery Route</span>
+      </div>
+    </div>
+
+    <!-- Location Summary Panel - Shows all 3 points -->
+    <div class="location-summary-panel">
+      <div class="location-summary-header">
+        <v-icon color="#354d7c" size="20">mdi-map-marker-multiple</v-icon>
+        <span>3 Delivery Points</span>
+      </div>
+      <div class="location-summary-content">
+        <div class="location-item" :class="{ active: activePoint === 'rider' }" @click="centerOnRider">
+          <div class="location-icon rider-icon-small"></div>
+          <div class="location-details">
+            <span class="location-label">📍 Rider Location:</span>
+            <span class="location-address">{{ riderLocation?.address || 'Detecting...' }}</span>
+          </div>
+        </div>
+        <div class="location-item" :class="{ active: activePoint === 'shop' }" @click="centerOnShop">
+          <div class="location-icon shop-icon-small"></div>
+          <div class="location-details">
+            <span class="location-label">🏪 Pickup Point:</span>
+            <span class="location-address">{{ shopLocation?.name || 'Loading...' }}</span>
+            <span class="location-address-small">{{ shopLocation?.address }}</span>
+          </div>
+        </div>
+        <div class="location-item" :class="{ active: activePoint === 'customer' }" @click="centerOnCustomer">
+          <div class="location-icon customer-icon-small"></div>
+          <div class="location-details">
+            <span class="location-label">🏠 Delivery Point:</span>
+            <span class="location-address">{{ customerLocation?.name || 'Loading...' }}</span>
+            <span class="location-address-small">{{ customerLocation?.address }}</span>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -66,15 +98,15 @@
         <v-icon left size="18">mdi-fit-to-screen</v-icon>
         Fit All
       </v-btn>
-      <v-btn color="#354d7c" size="small" @click="centerOnRider" class="action-btn">
+      <v-btn color="#2196f3" size="small" @click="centerOnRider" class="action-btn">
         <v-icon left size="18">mdi-crosshairs-gps</v-icon>
         My Location
       </v-btn>
-      <v-btn color="#354d7c" size="small" @click="centerOnShop" class="action-btn">
+      <v-btn color="#ff9800" size="small" @click="centerOnShop" class="action-btn">
         <v-icon left size="18">mdi-store</v-icon>
         Shop
       </v-btn>
-      <v-btn color="#354d7c" size="small" @click="centerOnCustomer" class="action-btn">
+      <v-btn color="#4caf50" size="small" @click="centerOnCustomer" class="action-btn">
         <v-icon left size="18">mdi-home</v-icon>
         Customer
       </v-btn>
@@ -84,7 +116,7 @@
     <div class="order-summary-panel" v-if="orderData">
       <div class="summary-header">
         <v-icon color="#354d7c" size="20">mdi-receipt</v-icon>
-        <span>Order #{{ orderData.transaction_number || orderData.id.slice(-6) }}</span>
+        <span>Order #{{ orderData.transaction_number || orderData.id?.slice(-6) }}</span>
       </div>
       <div class="summary-content">
         <div class="summary-item">
@@ -137,6 +169,7 @@ const loading = ref(true)
 const showErrorDialog = ref(false)
 const errorMessage = ref('')
 const routeInfo = ref(null)
+const activePoint = ref(null)
 
 // Map instance
 let map = null
@@ -158,7 +191,7 @@ const mapContainer = ref(null)
 // Get order ID from route params
 const orderId = ref(route.params.orderId)
 
-// Helper functions
+// Helper functions for status display
 const getStatusText = (status) => {
   const statusMap = {
     pending: 'Pending',
@@ -187,7 +220,60 @@ const getStatusClass = (status) => {
   return classMap[status] || 'status-default'
 }
 
-// Fetch order details with shop and address (now with coordinates)
+// Helper function to geocode address using OpenStreetMap Nominatim
+const geocodeAddress = async (address) => {
+  try {
+    const queryParts = []
+    if (address.barangay_name) queryParts.push(address.barangay_name)
+    if (address.city_name) queryParts.push(address.city_name)
+    if (address.province_name) queryParts.push(address.province_name)
+    if (address.region_name) queryParts.push(address.region_name)
+    queryParts.push('Philippines')
+    
+    const query = queryParts.join(', ')
+    const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1`
+    
+    console.log('Geocoding address:', query)
+    
+    const response = await fetch(url)
+    const data = await response.json()
+    
+    if (data && data.length > 0) {
+      const lat = parseFloat(data[0].lat)
+      const lng = parseFloat(data[0].lon)
+      console.log('Geocoding successful:', { lat, lng })
+      return { lat, lng }
+    }
+    return null
+  } catch (error) {
+    console.error('Geocoding error:', error)
+    return null
+  }
+}
+
+// Helper function to update address with geocoded coordinates
+const updateAddressCoordinates = async (addressId, lat, lng) => {
+  try {
+    const { error } = await supabase
+      .from('addresses')
+      .update({ 
+        latitude: lat, 
+        longitude: lng,
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', addressId)
+    
+    if (error) {
+      console.error('Error updating address coordinates:', error)
+    } else {
+      console.log('Address coordinates updated successfully')
+    }
+  } catch (error) {
+    console.error('Failed to update address coordinates:', error)
+  }
+}
+
+// Fetch order details with shop and address
 const fetchOrderDetails = async () => {
   try {
     const { data, error } = await supabase
@@ -216,7 +302,8 @@ const fetchOrderDetails = async () => {
           house_no,
           barangay_name,
           city_name,
-          province_name
+          province_name,
+          region_name
         )
       `)
       .eq('id', orderId.value)
@@ -235,31 +322,67 @@ const fetchOrderDetails = async () => {
         address: formatShopAddress(data.shop),
         type: 'shop'
       }
+      console.log('✅ Shop location loaded:', shopLocation.value)
+    } else if (data.shop) {
+      console.log('Shop coordinates missing, attempting to geocode...')
+      const geocoded = await geocodeAddress({
+        barangay_name: data.shop.barangay,
+        city_name: data.shop.city,
+        province_name: data.shop.province
+      })
+      
+      if (geocoded) {
+        shopLocation.value = {
+          lat: geocoded.lat,
+          lng: geocoded.lng,
+          name: data.shop.business_name,
+          address: formatShopAddress(data.shop),
+          type: 'shop'
+        }
+        await supabase
+          .from('shops')
+          .update({ latitude: geocoded.lat, longitude: geocoded.lng })
+          .eq('id', data.shop.id)
+        console.log('✅ Shop location geocoded:', shopLocation.value)
+      } else {
+        throw new Error('Unable to locate shop address.')
+      }
     } else {
-      throw new Error('Shop location not available. Please ensure the shop has set their location coordinates.')
+      throw new Error('Shop location not available.')
     }
 
-    // Set customer location from address (now with coordinates)
-    if (data.address && data.address.latitude && data.address.longitude) {
+    // Set customer location
+    if (data.address) {
+      let customerLat = data.address.latitude
+      let customerLng = data.address.longitude
+      
+      if (!customerLat || !customerLng) {
+        console.log('Customer address missing coordinates, geocoding...')
+        const geocoded = await geocodeAddress(data.address)
+        
+        if (geocoded) {
+          customerLat = geocoded.lat
+          customerLng = geocoded.lng
+          await updateAddressCoordinates(data.address.id, customerLat, customerLng)
+          console.log('✅ Customer address geocoded successfully')
+        } else {
+          throw new Error(`Unable to locate customer address: ${data.address.barangay_name}, ${data.address.city_name}`)
+        }
+      }
+      
       customerLocation.value = {
-        lat: parseFloat(data.address.latitude),
-        lng: parseFloat(data.address.longitude),
+        lat: parseFloat(customerLat),
+        lng: parseFloat(customerLng),
         name: data.address.recipient_name || 'Customer',
         address: formatAddress(data.address),
         type: 'customer'
       }
-    } else if (data.address) {
-      // If address exists but no coordinates, show specific error
-      throw new Error('Customer location coordinates missing. Please update the delivery address with latitude and longitude.')
+      console.log('✅ Customer location loaded:', customerLocation.value)
     } else {
-      throw new Error('Customer address not found for this order.')
+      throw new Error('Customer address not found.')
     }
 
-    console.log('✅ Order details loaded successfully:', {
-      shop: shopLocation.value,
-      customer: customerLocation.value,
-      rider: riderLocation.value
-    })
+    console.log('🎯 All 3 locations loaded successfully!')
 
   } catch (error) {
     console.error('Error fetching order details:', error)
@@ -269,15 +392,14 @@ const fetchOrderDetails = async () => {
   }
 }
 
-// Get current rider location with continuous updates
+// Get current rider location
 const getRiderLocation = () => {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
-      reject(new Error('Geolocation is not supported by your browser'))
+      reject(new Error('Geolocation is not supported'))
       return
     }
 
-    // Get initial position
     navigator.geolocation.getCurrentPosition(
       (position) => {
         const location = {
@@ -288,9 +410,9 @@ const getRiderLocation = () => {
           type: 'rider'
         }
         riderLocation.value = location
+        console.log('✅ Rider location loaded:', riderLocation.value)
         resolve(location)
         
-        // Start watching position for updates
         if (watchPositionId === null) {
           watchPositionId = navigator.geolocation.watchPosition(
             (newPosition) => {
@@ -302,21 +424,13 @@ const getRiderLocation = () => {
                 type: 'rider'
               }
               riderLocation.value = updatedLocation
-              
-              // Update marker and route on map
               if (map && mapInitialized) {
                 updateRiderMarker()
                 updateRoute()
               }
             },
-            (error) => {
-              console.error('Watch position error:', error)
-            },
-            {
-              enableHighAccuracy: true,
-              maximumAge: 30000,
-              timeout: 10000
-            }
+            (error) => console.error('Watch error:', error),
+            { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 }
           )
         }
       },
@@ -324,10 +438,10 @@ const getRiderLocation = () => {
         let errorMsg = 'Unable to get your location. '
         switch (error.code) {
           case error.PERMISSION_DENIED:
-            errorMsg += 'Please enable location access in your browser settings.'
+            errorMsg += 'Please enable location access.'
             break
           case error.POSITION_UNAVAILABLE:
-            errorMsg += 'Location information is unavailable.'
+            errorMsg += 'Location unavailable.'
             break
           case error.TIMEOUT:
             errorMsg += 'Location request timed out.'
@@ -335,41 +449,23 @@ const getRiderLocation = () => {
         }
         reject(new Error(errorMsg))
       },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 0
-      }
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
     )
   })
 }
 
-// Format shop address for display
+// Format addresses
 const formatShopAddress = (shop) => {
-  const parts = [
-    shop.building,
-    shop.street,
-    shop.barangay,
-    shop.city,
-    shop.province
-  ].filter(Boolean)
+  const parts = [shop.building, shop.street, shop.barangay, shop.city, shop.province].filter(Boolean)
   return parts.join(', ') || 'Shop Address'
 }
 
-// Format customer address for display
 const formatAddress = (address) => {
-  const parts = [
-    address.house_no,
-    address.building,
-    address.street,
-    address.barangay_name,
-    address.city_name,
-    address.province_name
-  ].filter(Boolean)
+  const parts = [address.house_no, address.building, address.street, address.barangay_name, address.city_name, address.province_name].filter(Boolean)
   return parts.join(', ') || 'Delivery Address'
 }
 
-// Get route between points using Mapbox Directions API
+// Get route between all 3 points
 const getRoute = async () => {
   if (!riderLocation.value || !shopLocation.value || !customerLocation.value) {
     console.error('Missing location data for routing')
@@ -377,7 +473,6 @@ const getRoute = async () => {
   }
 
   try {
-    // Create waypoints: rider -> shop -> customer
     const waypoints = [
       `${riderLocation.value.lng},${riderLocation.value.lat}`,
       `${shopLocation.value.lng},${shopLocation.value.lat}`,
@@ -393,11 +488,9 @@ const getRoute = async () => {
       const route = data.routes[0]
       routeCoordinates.value = route.geometry.coordinates
       
-      // Calculate distance and duration
       const distanceKm = (route.distance / 1000).toFixed(1)
       const durationMin = Math.round(route.duration / 60)
       
-      // Calculate shop to customer distance separately
       const shopToCustomerUrl = `https://api.mapbox.com/directions/v5/mapbox/driving/${shopLocation.value.lng},${shopLocation.value.lat};${customerLocation.value.lng},${customerLocation.value.lat}?access_token=${MAPBOX_TOKEN}`
       const shopToCustomerResponse = await fetch(shopToCustomerUrl)
       const shopToCustomerData = await shopToCustomerResponse.json()
@@ -414,6 +507,7 @@ const getRoute = async () => {
         fromShopToCustomer: shopToCustomerDist
       }
       
+      console.log('✅ Route calculated:', routeInfo.value)
       return route
     }
     return null
@@ -423,58 +517,42 @@ const getRoute = async () => {
   }
 }
 
-// Store marker references
+// Marker references
 let riderMarker = null
 let shopMarker = null
 let customerMarker = null
 let routeSource = null
 
-// Initialize Mapbox map
+// Initialize map
 const initMap = async () => {
   if (!mapContainer.value || mapInitialized) return
 
   try {
     mapboxgl.accessToken = MAPBOX_TOKEN
 
-    // Calculate center point for initial view
     const bounds = new mapboxgl.LngLatBounds()
-    
-    if (riderLocation.value) {
-      bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
-    }
-    if (shopLocation.value) {
-      bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
-    }
-    if (customerLocation.value) {
-      bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
-    }
+    if (riderLocation.value) bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
+    if (shopLocation.value) bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
+    if (customerLocation.value) bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
 
-    // Create map instance
     map = new mapboxgl.Map({
       container: mapContainer.value,
       style: 'mapbox://styles/mapbox/streets-v12',
-      center: [shopLocation.value?.lng || 0, shopLocation.value?.lat || 0],
+      center: [shopLocation.value?.lng || 121.774, shopLocation.value?.lat || 12.8797],
       zoom: 12
     })
 
     map.on('load', () => {
       mapInitialized = true
-      
-      // Fit bounds to show all locations
-      if (bounds.isEmpty() === false) {
+      if (!bounds.isEmpty()) {
         map.fitBounds(bounds, { padding: 50 })
       }
-      
-      // Add markers
       addMarkers()
-      
-      // Add route
       addRoute()
-      
       loading.value = false
+      console.log('🎉 Map initialized with all 3 markers!')
     })
 
-    // Add navigation control
     map.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
   } catch (error) {
@@ -485,11 +563,11 @@ const initMap = async () => {
   }
 }
 
-// Add custom markers to map
+// Add markers for all 3 points
 const addMarkers = () => {
   if (!map) return
 
-  // Add rider marker (blue with pulse animation)
+  // Rider marker (Blue)
   if (riderLocation.value) {
     const el = document.createElement('div')
     el.className = 'custom-marker rider-marker'
@@ -500,12 +578,13 @@ const addMarkers = () => {
           <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
         </svg>
       </div>
+      <div class="marker-label">You are here</div>
     `
     
-    const popup = new mapboxgl.Popup({ offset: 25 })
+    const popup = new mapboxgl.Popup({ offset: 35 })
       .setHTML(`
         <div class="map-popup">
-          <strong>📍 Your Current Location</strong><br>
+          <strong>📍 Rider Location</strong><br>
           <small>${riderLocation.value.address}</small>
         </div>
       `)
@@ -516,22 +595,25 @@ const addMarkers = () => {
       .addTo(map)
   }
 
-  // Add shop marker (orange)
+  // Shop marker (Orange)
   if (shopLocation.value) {
     const el = document.createElement('div')
     el.className = 'custom-marker shop-marker'
     el.innerHTML = `
+      <div class="marker-pulse shop-pulse"></div>
       <div class="marker-icon shop-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
           <path d="M20 4H4v2h16V4zm1 4H3v2h18V8zm-2 4H5v8h14v-8z"/>
         </svg>
       </div>
+      <div class="marker-label">Pickup Point</div>
     `
     
-    const popup = new mapboxgl.Popup({ offset: 25 })
+    const popup = new mapboxgl.Popup({ offset: 35 })
       .setHTML(`
         <div class="map-popup">
-          <strong>🏪 Pickup: ${shopLocation.value.name}</strong><br>
+          <strong>🏪 Pickup Point</strong><br>
+          <small>${shopLocation.value.name}</small><br>
           <small>${shopLocation.value.address}</small>
         </div>
       `)
@@ -542,23 +624,26 @@ const addMarkers = () => {
       .addTo(map)
   }
 
-  // Add customer marker (green)
+  // Customer marker (Green)
   if (customerLocation.value) {
     const el = document.createElement('div')
     el.className = 'custom-marker customer-marker'
     el.innerHTML = `
+      <div class="marker-pulse customer-pulse"></div>
       <div class="marker-icon customer-icon">
         <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
           <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z"/>
           <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/>
         </svg>
       </div>
+      <div class="marker-label">Delivery Point</div>
     `
     
-    const popup = new mapboxgl.Popup({ offset: 25 })
+    const popup = new mapboxgl.Popup({ offset: 35 })
       .setHTML(`
         <div class="map-popup">
-          <strong>🏠 Delivery: ${customerLocation.value.name}</strong><br>
+          <strong>🏠 Delivery Point</strong><br>
+          <small>${customerLocation.value.name}</small><br>
           <small>${customerLocation.value.address}</small>
         </div>
       `)
@@ -577,60 +662,39 @@ const updateRiderMarker = () => {
   }
 }
 
-// Update route when rider moves
+// Update route
 const updateRoute = async () => {
   if (!map || !routeSource) return
-  
   await getRoute()
-  
   if (routeCoordinates.value.length > 0 && map.getSource('route')) {
     map.getSource('route').setData({
       type: 'Feature',
       properties: {},
-      geometry: {
-        type: 'LineString',
-        coordinates: routeCoordinates.value
-      }
+      geometry: { type: 'LineString', coordinates: routeCoordinates.value }
     })
   }
 }
 
-// Add route line to map
+// Add route line
 const addRoute = async () => {
   if (!map) return
-
-  // Get route from Mapbox Directions API
   await getRoute()
-
   if (routeCoordinates.value.length > 0) {
-    // Add route source and layer
     map.addSource('route', {
       type: 'geojson',
       data: {
         type: 'Feature',
         properties: {},
-        geometry: {
-          type: 'LineString',
-          coordinates: routeCoordinates.value
-        }
+        geometry: { type: 'LineString', coordinates: routeCoordinates.value }
       }
     })
-
     map.addLayer({
       id: 'route',
       type: 'line',
       source: 'route',
-      layout: {
-        'line-join': 'round',
-        'line-cap': 'round'
-      },
-      paint: {
-        'line-color': '#4caf50',
-        'line-width': 4,
-        'line-opacity': 0.8
-      }
+      layout: { 'line-join': 'round', 'line-cap': 'round' },
+      paint: { 'line-color': '#4caf50', 'line-width': 5, 'line-opacity': 0.9 }
     })
-    
     routeSource = map.getSource('route')
   }
 }
@@ -638,72 +702,43 @@ const addRoute = async () => {
 // Fit bounds to show all markers
 const fitBounds = () => {
   if (!map) return
-  
   const bounds = new mapboxgl.LngLatBounds()
-  
-  if (riderLocation.value) {
-    bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
-  }
-  if (shopLocation.value) {
-    bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
-  }
-  if (customerLocation.value) {
-    bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
-  }
-  
-  if (bounds.isEmpty() === false) {
-    map.fitBounds(bounds, { padding: 50 })
-  }
+  if (riderLocation.value) bounds.extend([riderLocation.value.lng, riderLocation.value.lat])
+  if (shopLocation.value) bounds.extend([shopLocation.value.lng, shopLocation.value.lat])
+  if (customerLocation.value) bounds.extend([customerLocation.value.lng, customerLocation.value.lat])
+  if (!bounds.isEmpty()) map.fitBounds(bounds, { padding: 50 })
 }
 
-// Center map on rider location
+// Center on specific locations
 const centerOnRider = () => {
+  activePoint.value = 'rider'
   if (map && riderLocation.value) {
-    map.flyTo({
-      center: [riderLocation.value.lng, riderLocation.value.lat],
-      zoom: 15,
-      duration: 1000
-    })
+    map.flyTo({ center: [riderLocation.value.lng, riderLocation.value.lat], zoom: 16, duration: 1000 })
   }
 }
 
-// Center map on shop location
 const centerOnShop = () => {
+  activePoint.value = 'shop'
   if (map && shopLocation.value) {
-    map.flyTo({
-      center: [shopLocation.value.lng, shopLocation.value.lat],
-      zoom: 15,
-      duration: 1000
-    })
+    map.flyTo({ center: [shopLocation.value.lng, shopLocation.value.lat], zoom: 16, duration: 1000 })
   }
 }
 
-// Center map on customer location
 const centerOnCustomer = () => {
+  activePoint.value = 'customer'
   if (map && customerLocation.value) {
-    map.flyTo({
-      center: [customerLocation.value.lng, customerLocation.value.lat],
-      zoom: 15,
-      duration: 1000
-    })
+    map.flyTo({ center: [customerLocation.value.lng, customerLocation.value.lat], zoom: 16, duration: 1000 })
   }
 }
 
-// Load all data and initialize
+// Load all data
 const loadMapData = async () => {
   loading.value = true
-  
   try {
-    // Fetch order details (includes shop and address coordinates)
     await fetchOrderDetails()
-    
-    // Get current rider location
     await getRiderLocation()
-    
-    // Initialize map with all locations
     await initMap()
-    
-    console.log('🎉 Map loaded successfully with all 3 locations!')
+    console.log('🎉 Success! All 3 points displayed on map!')
   } catch (error) {
     console.error('Error loading map data:', error)
     errorMessage.value = error.message || 'Failed to load map data'
@@ -712,7 +747,7 @@ const loadMapData = async () => {
   }
 }
 
-// Clean up map and geolocation on component unmount
+// Cleanup
 const cleanup = () => {
   if (watchPositionId !== null) {
     navigator.geolocation.clearWatch(watchPositionId)
@@ -725,14 +760,8 @@ const cleanup = () => {
   }
 }
 
-// Lifecycle hooks
-onMounted(() => {
-  loadMapData()
-})
-
-onUnmounted(() => {
-  cleanup()
-})
+onMounted(() => loadMapData())
+onUnmounted(() => cleanup())
 </script>
 
 <style scoped>
@@ -791,53 +820,140 @@ onUnmounted(() => {
 /* Custom Marker Styles */
 .custom-marker {
   cursor: pointer;
+  position: relative;
 }
 
 .marker-pulse {
   position: absolute;
-  width: 30px;
-  height: 30px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   opacity: 0.4;
   animation: pulse 1.5s infinite;
 }
 
-.rider-pulse {
-  background: #2196f3;
-}
+.rider-pulse { background: #2196f3; }
+.shop-pulse { background: #ff9800; }
+.customer-pulse { background: #4caf50; }
 
 .marker-icon {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  border: 2px solid white;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  border: 3px solid white;
+  position: relative;
+  z-index: 2;
 }
 
-.rider-icon {
-  background: #2196f3;
-}
+.rider-icon { background: #2196f3; }
+.shop-icon { background: #ff9800; }
+.customer-icon { background: #4caf50; }
 
-.shop-icon {
-  background: #ff9800;
-}
-
-.customer-icon {
-  background: #4caf50;
+.marker-label {
+  position: absolute;
+  bottom: -25px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.7);
+  color: white;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 10px;
+  white-space: nowrap;
+  font-weight: 500;
+  z-index: 3;
+  pointer-events: none;
 }
 
 @keyframes pulse {
-  0% {
-    transform: scale(0.8);
-    opacity: 0.6;
-  }
-  100% {
-    transform: scale(1.5);
-    opacity: 0;
-  }
+  0% { transform: scale(0.8); opacity: 0.6; }
+  100% { transform: scale(1.5); opacity: 0; }
+}
+
+/* Location Summary Panel */
+.location-summary-panel {
+  position: absolute;
+  bottom: 20px;
+  left: 20px;
+  background: rgba(255, 255, 255, 0.95);
+  padding: 12px 16px;
+  border-radius: 12px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  z-index: 10;
+  min-width: 280px;
+  max-width: 350px;
+}
+
+.location-summary-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #354d7c;
+  margin-bottom: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.location-summary-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.location-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.location-item:hover {
+  background: #f0f0f0;
+}
+
+.location-item.active {
+  background: #e3f2fd;
+}
+
+.location-icon {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.rider-icon-small { background: #2196f3; border: 2px solid white; box-shadow: 0 0 0 1px #2196f3; }
+.shop-icon-small { background: #ff9800; border: 2px solid white; box-shadow: 0 0 0 1px #ff9800; }
+.customer-icon-small { background: #4caf50; border: 2px solid white; box-shadow: 0 0 0 1px #4caf50; }
+
+.location-details {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.location-label {
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+.location-address {
+  color: #666;
+  font-size: 0.7rem;
+}
+
+.location-address-small {
+  color: #999;
+  font-size: 0.65rem;
 }
 
 /* Legend Styles */
@@ -845,89 +961,48 @@ onUnmounted(() => {
   position: absolute;
   bottom: 20px;
   right: 20px;
-  background: white;
+  background: rgba(255, 255, 255, 0.95);
   padding: 12px 16px;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   z-index: 10;
   font-size: 0.75rem;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.95);
+  min-width: 180px;
 }
 
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   margin-bottom: 8px;
 }
 
-.legend-item:last-child {
-  margin-bottom: 0;
-}
+.legend-item:last-child { margin-bottom: 0; }
 
 .legend-marker {
   width: 20px;
   height: 20px;
   border-radius: 50%;
-}
-
-.legend-marker.rider {
-  background: #2196f3;
   border: 2px solid white;
-  box-shadow: 0 0 0 2px #2196f3;
+  box-shadow: 0 0 0 2px;
 }
 
-.legend-marker.shop {
-  background: #ff9800;
-  border: 2px solid white;
-  box-shadow: 0 0 0 2px #ff9800;
-}
-
-.legend-marker.customer {
-  background: #4caf50;
-  border: 2px solid white;
-  box-shadow: 0 0 0 2px #4caf50;
-}
-
-.legend-marker.route {
-  width: 30px;
-  height: 4px;
-  background: #4caf50;
-  border-radius: 2px;
-  position: relative;
-  overflow: hidden;
-}
-
-.legend-marker.route::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: repeating-linear-gradient(
-    90deg,
-    transparent,
-    transparent 4px,
-    rgba(255,255,255,0.5) 4px,
-    rgba(255,255,255,0.5) 8px
-  );
-}
+.legend-marker.rider { background: #2196f3; box-shadow: 0 0 0 2px #2196f3; }
+.legend-marker.shop { background: #ff9800; box-shadow: 0 0 0 2px #ff9800; }
+.legend-marker.customer { background: #4caf50; box-shadow: 0 0 0 2px #4caf50; }
+.legend-marker.route { width: 30px; height: 4px; background: #4caf50; border-radius: 2px; box-shadow: none; }
 
 /* Route Info Panel */
 .route-info-panel {
   position: absolute;
-  bottom: 20px;
-  left: 20px;
-  background: white;
+  top: 80px;
+  right: 20px;
+  background: rgba(255, 255, 255, 0.95);
   padding: 12px 16px;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   z-index: 10;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.95);
-  min-width: 200px;
+  min-width: 180px;
 }
 
 .route-info-header {
@@ -935,7 +1010,7 @@ onUnmounted(() => {
   align-items: center;
   gap: 8px;
   font-weight: 600;
-  color: #354d7c;
+  color: #4caf50;
   margin-bottom: 8px;
   padding-bottom: 6px;
   border-bottom: 1px solid #e0e0e0;
@@ -951,7 +1026,7 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 /* Order Summary Panel */
@@ -959,13 +1034,11 @@ onUnmounted(() => {
   position: absolute;
   top: 80px;
   left: 20px;
-  background: white;
+  background: rgba(255, 255, 255, 0.95);
   padding: 12px 16px;
   border-radius: 12px;
   box-shadow: 0 2px 8px rgba(0,0,0,0.15);
   z-index: 10;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.95);
   min-width: 220px;
 }
 
@@ -989,7 +1062,7 @@ onUnmounted(() => {
 .summary-item {
   display: flex;
   justify-content: space-between;
-  font-size: 0.8rem;
+  font-size: 0.75rem;
 }
 
 .summary-item .label {
@@ -1012,16 +1085,19 @@ onUnmounted(() => {
 }
 
 .status-pending { background: #fff3e0; color: #ff9800; }
+.status-paid { background: #e8f5e9; color: #4caf50; }
 .status-accepted { background: #e3f2fd; color: #2196f3; }
 .status-picked { background: #f3e5f5; color: #9c27b0; }
+.status-shipped { background: #fff3e0; color: #ff9800; }
 .status-delivered { background: #e8f5e9; color: #4caf50; }
 .status-completed { background: #e8f5e9; color: #4caf50; }
 .status-cancelled { background: #ffebee; color: #f44336; }
+.status-default { background: #e0e0e0; color: #666; }
 
 /* Map Actions */
 .map-actions {
   position: absolute;
-  top: 80px;
+  top: 140px;
   right: 20px;
   display: flex;
   flex-direction: column;
@@ -1044,7 +1120,7 @@ onUnmounted(() => {
 /* Popup Styles */
 .map-popup {
   padding: 4px;
-  max-width: 200px;
+  max-width: 220px;
 }
 
 .map-popup strong {
@@ -1060,39 +1136,14 @@ onUnmounted(() => {
 
 /* Responsive */
 @media (max-width: 600px) {
-  .map-legend {
-    bottom: 10px;
-    right: 10px;
-    padding: 8px 12px;
-    font-size: 0.65rem;
-  }
-  
-  .route-info-panel {
-    bottom: 10px;
-    left: 10px;
-    padding: 8px 12px;
-    min-width: 170px;
-  }
-  
-  .order-summary-panel {
-    top: 70px;
-    left: 10px;
-    padding: 8px 12px;
-    min-width: 180px;
-  }
-  
-  .map-actions {
-    top: 70px;
-    right: 10px;
-  }
-  
-  .action-btn {
-    padding: 4px 8px !important;
-    font-size: 0.7rem !important;
-  }
-  
-  .summary-item .value {
-    max-width: 120px;
-  }
+  .map-legend { bottom: 10px; right: 10px; padding: 8px 12px; min-width: 150px; }
+  .location-summary-panel { bottom: 10px; left: 10px; padding: 8px 12px; min-width: 250px; }
+  .route-info-panel { top: 70px; right: 10px; padding: 8px 12px; min-width: 150px; }
+  .order-summary-panel { top: 70px; left: 10px; padding: 8px 12px; min-width: 180px; }
+  .map-actions { top: 130px; right: 10px; }
+  .action-btn { padding: 4px 8px !important; font-size: 0.7rem !important; }
+  .marker-label { font-size: 8px; bottom: -22px; }
+  .marker-icon { width: 32px; height: 32px; }
+  .marker-icon svg { width: 18px; height: 18px; }
 }
 </style>

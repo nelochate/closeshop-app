@@ -78,8 +78,7 @@ const fetchOrders = async () => {
 
     const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
-      .select(
-        `
+      .select(`
         *,
         address:addresses (
           id,
@@ -96,7 +95,14 @@ const fetchOrders = async () => {
           postal_code,
           is_default
         ),
-        user:profiles (
+        user:profiles!orders_user_id_fkey (
+          id,
+          first_name,
+          last_name,
+          avatar_url,
+          phone
+        ),
+        rider:profiles!orders_rider_id_fkey (
           id,
           first_name,
           last_name,
@@ -131,8 +137,7 @@ const fetchOrders = async () => {
           payment_date,
           method
         )
-      `,
-      )
+      `)
       .eq('shop_id', shopId.value)
       .order('created_at', { ascending: false })
 
@@ -147,7 +152,6 @@ const fetchOrders = async () => {
     loadingOrders.value = false
   }
 }
-
 // Order actions with mobile confirmation
 const approvePayment = async (orderId: string) => {
   if (!confirm('Mark this payment as approved?')) return

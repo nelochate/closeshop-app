@@ -1,5 +1,3 @@
-
-
 <script setup lang="ts">
 import { ref, onMounted, watch, nextTick, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
@@ -66,6 +64,9 @@ const address = ref({
   province: '',
   city: '',
   barangay: '',
+  // ADD COORDINATES
+  latitude: null as number | null,
+  longitude: null as number | null,
 })
 
 // --- Cleanup Function ---
@@ -209,341 +210,82 @@ const updateMapZoom = (map: mapboxgl.Map) => {
   return zoomLevel
 }
 
-// --- Watchers for Manual Input Mode ---
-watch(
-  () => address.value.region,
-  async (newRegion) => {
-    if (addressMode.value !== 'manual') return
-
-    address.value.province = ''
-    address.value.city = ''
-    address.value.barangay = ''
-    address.value.postal_code = ''
-    if (newRegion) {
-      const selectedRegion = regions.value.find((r) => r.code === newRegion)
-      if (selectedRegion) {
-        address.value.region_name = selectedRegion.name
-      }
-      await fetchProvinces(newRegion)
-      await updateManualMap()
-    }
-  },
-)
-
-watch(
-  () => address.value.province,
-  async (newProvince) => {
-    if (addressMode.value !== 'manual') return
-
-    address.value.city = ''
-    address.value.barangay = ''
-    address.value.postal_code = ''
-    if (newProvince) {
-      const selectedProvince = provinces.value.find((p) => p.code === newProvince)
-      if (selectedProvince) {
-        address.value.province_name = selectedProvince.name
-      }
-      await fetchCitiesMunicipalities(newProvince)
-      await updateManualMap()
-    }
-  },
-)
-
-watch(
-  () => address.value.city,
-  async (newCity) => {
-    if (addressMode.value !== 'manual') return
-
-    address.value.barangay = ''
-    const selectedCity = citiesMunicipalities.value.find((c) => c.code === newCity)
-    if (selectedCity) {
-      address.value.city_name = selectedCity.name
-      address.value.postal_code = selectedCity.zip_code || selectedCity.zipCode || selectedCity.postalCode || ''
-    }
-    if (newCity) {
-      await fetchBarangays(newCity)
-      await updateManualMap()
-    }
-  },
-)
-
-watch(
-  () => address.value.barangay,
-  (newBarangay) => {
-    if (addressMode.value !== 'manual') return
-    
-    if (newBarangay) {
-      const selectedBarangay = barangays.value.find((b) => b.code === newBarangay)
-      if (selectedBarangay) {
-        address.value.barangay_name = selectedBarangay.name
-      }
-      updateManualMap()
+// --- Improved Geocoding with Fallback Strategies ---
+const searchLocation = async (barangayName: string, cityName: string, provinceName: string, street: string = '', house: string = '', purok: string = '') => {
+  // Try multiple search strategies
+  let results = []
+  
+  // Strategy 1: Full address with all details
+  let query = `${house} ${street} ${purok} ${barangayName}, ${cityName}, ${provinceName}, Philippines`.trim()
+  query = query.replace(/\s+/g, ' ').trim()
+  
+  if (query && !(query === `${barangayName}, ${cityName}, ${provinceName}, Philippines` && !house && !street && !purok)) {
+    try {
+      let res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1&addressdetails=1`
+      )
+      results = await res.json()
+    } catch (err) {
+      console.error('Strategy 1 failed:', err)
     }
   }
-)
-
-// --- Get User Profile ID ---
-const getUserProfileId = async () => {
-  try {
-    const { data: userData, error: userError } = await supabase.auth.getUser()
-    if (userError || !userData?.user) throw new Error('User not authenticated')
-
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', userData.user.id)
-      .single()
-
-    if (profileError) {
-      const { data: newProfile, error: createError } = await supabase
-        .from('profiles')
-        .insert([{ id: userData.user.id }])
-        .select()
-        .single()
-
-      if (createError) throw new Error('Failed to create user profile')
-      return newProfile.id
+  
+  // Strategy 2: Barangay + City + Province (without house/street)
+  if (results.length === 0 && barangayName && cityName) {
+    query = `${barangayName}, ${cityName}, ${provinceName}, Philippines`
+    try {
+      let res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1&addressdetails=1`
+      )
+      results = await res.json()
+    } catch (err) {
+      console.error('Strategy 2 failed:', err)
     }
-
-    return profile.id
-  } catch (err) {
-    console.error('Error getting user profile:', err)
-    throw err
   }
+  
+  // Strategy 3: Just Barangay + City (broader search)
+  if (results.length === 0 && barangayName && cityName) {
+    query = `${barangayName}, ${cityName}, Philippines`
+    try {
+      let res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1&addressdetails=1`
+      )
+      results = await res.json()
+    } catch (err) {
+      console.error('Strategy 3 failed:', err)
+    }
+  }
+  
+  // Strategy 4: City + Province (fallback to city center)
+  if (results.length === 0 && cityName) {
+    query = `${cityName}, ${provinceName}, Philippines`
+    try {
+      let res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1&addressdetails=1`
+      )
+      results = await res.json()
+    } catch (err) {
+      console.error('Strategy 4 failed:', err)
+    }
+  }
+  
+  // Strategy 5: Just Province (last resort)
+  if (results.length === 0 && provinceName) {
+    query = `${provinceName}, Philippines`
+    try {
+      let res = await fetch(
+        `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1&addressdetails=1`
+      )
+      results = await res.json()
+    } catch (err) {
+      console.error('Strategy 5 failed:', err)
+    }
+  }
+  
+  return results.length > 0 ? results[0] : null
 }
 
-// --- Load Address for Edit ---
-const loadAddress = async () => {
-  try {
-    const profileId = await getUserProfileId()
-    await fetchRegions()
-
-    if (!addressId.value) return
-
-    const { data, error } = await supabase
-      .from('addresses')
-      .select('*')
-      .eq('id', addressId.value)
-      .eq('user_id', profileId)
-      .single()
-
-    if (error || !data) {
-      snackbarMessage.value = 'Error loading address'
-      showSnackbar.value = true
-      return
-    }
-
-    // Only assign the data we care about
-    address.value.recipient_name = data.recipient_name || ''
-    address.value.phone = data.phone || ''
-    address.value.street = data.street || ''
-    address.value.purok = data.purok || ''
-    address.value.building = data.building || ''
-    address.value.house_no = data.house_no || ''
-    address.value.postal_code = data.postal_code || ''
-    address.value.is_default = data.is_default || false
-    address.value.region_name = data.region_name || ''
-    address.value.province_name = data.province_name || ''
-    address.value.city_name = data.city_name || ''
-    address.value.barangay_name = data.barangay_name || ''
-
-    isEdit.value = true
-
-    // Only try to match PSGC if we have the names
-    if (data.region_name) {
-      const selectedRegion = regions.value.find((r) => r.name === data.region_name)
-      if (selectedRegion) {
-        address.value.region = selectedRegion.code
-        await fetchProvinces(selectedRegion.code)
-      }
-    }
-
-    if (data.province_name) {
-      const selectedProvince = provinces.value.find((p) => p.name === data.province_name)
-      if (selectedProvince) {
-        address.value.province = selectedProvince.code
-        await fetchCitiesMunicipalities(selectedProvince.code)
-      }
-    }
-
-    if (data.city_name) {
-      const selectedCity = citiesMunicipalities.value.find((c) => c.name === data.city_name)
-      if (selectedCity) {
-        address.value.city = selectedCity.code
-        await fetchBarangays(selectedCity.code)
-      }
-    }
-
-    if (data.barangay_name) {
-      const selectedBarangay = barangays.value.find((b) => b.name === data.barangay_name)
-      if (selectedBarangay) {
-        address.value.barangay = selectedBarangay.code
-      }
-    }
-
-    setTimeout(() => {
-      if (addressMode.value === 'manual') {
-        updateManualMap()
-      } else {
-        updateLocationMap()
-      }
-    }, 500)
-  } catch (err) {
-    console.error(err)
-    snackbarMessage.value = 'Unexpected error loading address'
-    showSnackbar.value = true
-  }
-}
-
-// --- Save Address (Only restrict PSGC and name/phone) ---
-const saveAddress = async () => {
-  try {
-    isLoading.value = true
-
-    // ONLY VALIDATE: PSGC data, name, and phone
-    if (addressMode.value === 'manual') {
-      // Validate PSGC selections (dropdowns only)
-      if (
-        !address.value.region ||
-        !address.value.province ||
-        !address.value.city ||
-        !address.value.barangay
-      ) {
-        throw new Error('Please select complete address from PSGC dropdowns')
-      }
-    } else {
-      // Location mode - validate address components
-      // FIXED: Don't require all fields, just require at least one address component
-      if (
-        !address.value.region_name &&
-        !address.value.province_name &&
-        !address.value.city_name &&
-        !address.value.barangay_name
-      ) {
-        throw new Error('Address is required. Please detect location or enter address details.')
-      }
-    }
-
-    // Validate name and phone (required fields)
-    if (!address.value.recipient_name.trim()) {
-      throw new Error('Recipient name is required')
-    }
-
-    if (!address.value.phone.trim()) {
-      throw new Error('Phone number is required')
-    }
-
-    // Optional: Add phone format validation
-    const phoneRegex = /^[0-9+\-\s()]{7,20}$/
-    if (!phoneRegex.test(address.value.phone)) {
-      throw new Error('Please enter a valid phone number (7-20 digits)')
-    }
-
-    // Optional: Add name length validation
-    if (address.value.recipient_name.trim().length < 2) {
-      throw new Error('Recipient name must be at least 2 characters')
-    }
-
-    const profileId = await getUserProfileId()
-
-    let addressData: any
-
-    if (addressMode.value === 'manual') {
-      // Get names from selected codes
-      const regionName = regions.value.find((r) => r.code === address.value.region)?.name || address.value.region_name
-      const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || address.value.province_name
-      const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || address.value.city_name
-      const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || address.value.barangay_name
-
-      addressData = {
-        user_id: profileId,
-        recipient_name: address.value.recipient_name.trim(),
-        phone: address.value.phone.trim(),
-        street: address.value.street || '',
-        purok: address.value.purok || '',
-        building: address.value.building || '',
-        house_no: address.value.house_no || '',
-        postal_code: address.value.postal_code || '',
-        is_default: address.value.is_default,
-        region_name: regionName,
-        province_name: provinceName,
-        city_name: cityName,
-        barangay_name: barangayName,
-        updated_at: new Date().toISOString(),
-      }
-    } else {
-      addressData = {
-        user_id: profileId,
-        recipient_name: address.value.recipient_name.trim(),
-        phone: address.value.phone.trim(),
-        street: address.value.street || '',
-        purok: address.value.purok || '',
-        building: address.value.building || '',
-        house_no: address.value.house_no || '',
-        postal_code: address.value.postal_code || '',
-        is_default: address.value.is_default,
-        region_name: address.value.region_name || '',
-        province_name: address.value.province_name || '',
-        city_name: address.value.city_name || '',
-        barangay_name: address.value.barangay_name || '',
-        updated_at: new Date().toISOString(),
-      }
-    }
-
-    // Handle default address setting
-    if (address.value.is_default) {
-      await supabase
-        .from('addresses')
-        .update({ is_default: false })
-        .eq('user_id', profileId)
-        .neq('id', addressId.value || '')
-    }
-
-    let result
-    if (isEdit.value && addressId.value) {
-      result = await supabase
-        .from('addresses')
-        .update(addressData)
-        .eq('id', addressId.value)
-        .eq('user_id', profileId)
-    } else {
-      result = await supabase.from('addresses').insert([
-        {
-          ...addressData,
-          user_id: profileId,
-          created_at: new Date().toISOString(),
-        },
-      ])
-    }
-
-    if (result.error) {
-      if (
-        result.error.code === '23505' &&
-        result.error.message.includes('one_default_address_per_user')
-      ) {
-        throw new Error(
-          'You can only have one default address. Please unset your current default address first.',
-        )
-      }
-      throw new Error(result.error.message)
-    }
-
-    successMessage.value = isEdit.value
-      ? 'Address updated successfully!'
-      : 'Address added successfully!'
-    showSuccess.value = true
-
-    setTimeout(() => router.replace({ name: 'my-address', query: { refreshed: Date.now() } }), 1500)
-  } catch (err: any) {
-    console.error(err)
-    snackbarMessage.value = 'Error: ' + (err.message || 'Failed to save address')
-    showSnackbar.value = true
-  } finally {
-    isLoading.value = false
-  }
-}
-
-// --- Update Map for Manual Input Mode ---
+// --- Update Map for Manual Input Mode (Improved) ---
 const updateManualMap = async () => {
   if (addressMode.value !== 'manual' || !manualMap.value) return
 
@@ -568,19 +310,17 @@ const updateManualMap = async () => {
     return
   }
 
-  const query =
-    `${house} ${street} ${purok} ${barangayName}, ${cityName}, ${provinceName}, Philippines`.trim()
-
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=ph&limit=1`,
-    )
-    const results = await res.json()
-    if (results.length > 0) {
-      const { lat, lon } = results[0]
-      const latNum = parseFloat(lat)
-      const lonNum = parseFloat(lon)
+    const location = await searchLocation(barangayName, cityName, provinceName, street, house, purok)
+    
+    if (location) {
+      const latNum = parseFloat(location.lat)
+      const lonNum = parseFloat(location.lon)
       const zoomLevel = updateMapZoom(manualMap.value)
+      
+      // SAVE COORDINATES when map updates
+      address.value.latitude = latNum
+      address.value.longitude = lonNum
 
       manualMap.value.flyTo({
         center: [lonNum, latNum],
@@ -607,6 +347,22 @@ const updateManualMap = async () => {
           reverseGeocodeManual(lngLat.lat, lngLat.lng)
         })
       }
+    } else if (cityName) {
+      // If no location found but we have city, show a helpful message
+      snackbarMessage.value = `📍 Couldn't find exact location for "${barangayName}". You can drag the marker to the correct position.`
+      showSnackbar.value = true
+      
+      // Still try to center on the city
+      const cityLocation = await searchLocation('', cityName, provinceName)
+      if (cityLocation) {
+        const latNum = parseFloat(cityLocation.lat)
+        const lonNum = parseFloat(cityLocation.lon)
+        manualMap.value.flyTo({
+          center: [lonNum, latNum],
+          zoom: 12,
+          duration: 500,
+        })
+      }
     }
   } catch (err: any) {
     console.error(err)
@@ -620,15 +376,36 @@ const reverseGeocodeManual = async (lat: number, lng: number) => {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      {
+        headers: {
+          'Accept-Language': 'en',
+        },
+      }
     )
     const result = await res.json()
     if (result.address) {
       const addr = result.address
+      
+      // SAVE COORDINATES when marker is dragged
+      address.value.latitude = lat
+      address.value.longitude = lng
+      
+      // Update address fields with reverse geocoded data
       address.value.house_no = addr.house_number || address.value.house_no
       address.value.building = addr.building || addr.specific_place || address.value.building
-      address.value.street = addr.road || address.value.street
-      address.value.purok = addr.purok || address.value.purok
+      address.value.street = addr.road || addr.street || address.value.street
+      address.value.purok = addr.purok || addr.neighbourhood || addr.suburb || address.value.purok
       address.value.postal_code = addr.postcode || address.value.postal_code
+      
+      // Update PSGC-named fields if they're empty
+      if (!address.value.region_name && addr.state) address.value.region_name = addr.state
+      if (!address.value.province_name && addr.state_district) address.value.province_name = addr.state_district
+      if (!address.value.city_name && (addr.city || addr.town || addr.municipality)) {
+        address.value.city_name = addr.city || addr.town || addr.municipality || ''
+      }
+      if (!address.value.barangay_name && (addr.village || addr.neighbourhood || addr.suburb)) {
+        address.value.barangay_name = addr.village || addr.neighbourhood || addr.suburb || ''
+      }
 
       snackbarMessage.value = '📍 Marker moved! Address details updated.'
       showSnackbar.value = true
@@ -677,6 +454,10 @@ const useCurrentLocation = async () => {
 
     const lat = coords.coords.latitude
     const lng = coords.coords.longitude
+    
+    // SAVE COORDINATES from GPS
+    address.value.latitude = lat
+    address.value.longitude = lng
 
     // Initialize or update the map
     if (locationMap.value) {
@@ -734,21 +515,38 @@ const reverseGeocodeLocationMode = async (lat: number, lng: number) => {
   try {
     const res = await fetch(
       `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+      {
+        headers: {
+          'Accept-Language': 'en',
+        },
+      }
     )
     const result = await res.json()
 
     if (result.address) {
       const addr = result.address
+      
+      // SAVE COORDINATES (already saved, but ensure they're set)
+      address.value.latitude = lat
+      address.value.longitude = lng
 
       address.value.house_no = addr.house_number || ''
       address.value.building = addr.building || addr.specific_place || ''
-      address.value.street = addr.road || ''
+      address.value.street = addr.road || addr.street || ''
       address.value.purok = addr.purok || addr.neighbourhood || addr.suburb || ''
       address.value.postal_code = addr.postcode || ''
       address.value.region_name = addr.state || addr.region || ''
       address.value.province_name = addr.state_district || addr.province || ''
       address.value.city_name = addr.city || addr.town || addr.municipality || ''
       address.value.barangay_name = addr.village || addr.neighbourhood || addr.suburb || ''
+      
+      // Show success message with location details
+      if (address.value.barangay_name || address.value.city_name) {
+        snackbarMessage.value = `📍 Location set to: ${address.value.barangay_name || ''} ${address.value.city_name || ''}`
+        setTimeout(() => {
+          if (showSnackbar.value) showSnackbar.value = false
+        }, 2000)
+      }
     }
   } catch (err) {
     console.error('Location mode reverse geocoding failed:', err)
@@ -778,16 +576,12 @@ const initializeManualMap = () => {
 
     manualMap.value.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
-    manualMap.value.addControl(
-      new mapboxgl.GeolocateControl({
-        positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: true,
-        showUserLocation: false,
-      }),
-    )
-
     manualMap.value.on('click', (e) => {
       const { lng, lat } = e.lngLat
+      
+      // SAVE COORDINATES when clicking on map
+      address.value.latitude = lat
+      address.value.longitude = lng
 
       if (manualMarker.value) {
         manualMarker.value.setLngLat([lng, lat])
@@ -819,7 +613,6 @@ const initializeManualMap = () => {
       setTimeout(() => {
         if (manualMap.value) {
           manualMap.value.resize()
-          manualMap.value.triggerRepaint()
         }
       }, 100)
     })
@@ -834,7 +627,6 @@ const initializeManualMap = () => {
     setTimeout(() => {
       if (manualMap.value) {
         manualMap.value.resize()
-        manualMap.value.triggerRepaint()
       }
     }, 300)
   }
@@ -861,16 +653,12 @@ const initializeLocationMap = () => {
 
     locationMap.value.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
-    locationMap.value.addControl(
-      new mapboxgl.GeolocateControl({
-        positionOptions: { enableHighAccuracy: true },
-        trackUserLocation: true,
-        showUserLocation: false,
-      }),
-    )
-
     locationMap.value.on('click', (e) => {
       const { lng, lat } = e.lngLat
+      
+      // SAVE COORDINATES when clicking on map
+      address.value.latitude = lat
+      address.value.longitude = lng
 
       if (locationMarker.value) {
         locationMarker.value.setLngLat([lng, lat])
@@ -903,7 +691,6 @@ const initializeLocationMap = () => {
       setTimeout(() => {
         if (locationMap.value) {
           locationMap.value.resize()
-          locationMap.value.triggerRepaint()
         }
       }, 100)
     })
@@ -918,7 +705,6 @@ const initializeLocationMap = () => {
     setTimeout(() => {
       if (locationMap.value) {
         locationMap.value.resize()
-        locationMap.value.triggerRepaint()
       }
     }, 300)
   }
@@ -1029,8 +815,349 @@ watch(
     }, 800)
   },
 )
+
+// --- Get User Profile ID ---
+const getUserProfileId = async () => {
+  try {
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    if (userError || !userData?.user) throw new Error('User not authenticated')
+
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', userData.user.id)
+      .single()
+
+    if (profileError) {
+      const { data: newProfile, error: createError } = await supabase
+        .from('profiles')
+        .insert([{ id: userData.user.id }])
+        .select()
+        .single()
+
+      if (createError) throw new Error('Failed to create user profile')
+      return newProfile.id
+    }
+
+    return profile.id
+  } catch (err) {
+    console.error('Error getting user profile:', err)
+    throw err
+  }
+}
+
+// --- Load Address for Edit ---
+const loadAddress = async () => {
+  try {
+    const profileId = await getUserProfileId()
+    await fetchRegions()
+
+    if (!addressId.value) return
+
+    const { data, error } = await supabase
+      .from('addresses')
+      .select('*')
+      .eq('id', addressId.value)
+      .eq('user_id', profileId)
+      .single()
+
+    if (error || !data) {
+      snackbarMessage.value = 'Error loading address'
+      showSnackbar.value = true
+      return
+    }
+
+    // Load all address data INCLUDING COORDINATES
+    address.value.recipient_name = data.recipient_name || ''
+    address.value.phone = data.phone || ''
+    address.value.street = data.street || ''
+    address.value.purok = data.purok || ''
+    address.value.building = data.building || ''
+    address.value.house_no = data.house_no || ''
+    address.value.postal_code = data.postal_code || ''
+    address.value.is_default = data.is_default || false
+    address.value.region_name = data.region_name || ''
+    address.value.province_name = data.province_name || ''
+    address.value.city_name = data.city_name || ''
+    address.value.barangay_name = data.barangay_name || ''
+    address.value.latitude = data.latitude || null  // LOAD COORDINATES
+    address.value.longitude = data.longitude || null // LOAD COORDINATES
+
+    isEdit.value = true
+
+    // Only try to match PSGC if we have the names
+    if (data.region_name) {
+      const selectedRegion = regions.value.find((r) => r.name === data.region_name)
+      if (selectedRegion) {
+        address.value.region = selectedRegion.code
+        await fetchProvinces(selectedRegion.code)
+      }
+    }
+
+    if (data.province_name) {
+      const selectedProvince = provinces.value.find((p) => p.name === data.province_name)
+      if (selectedProvince) {
+        address.value.province = selectedProvince.code
+        await fetchCitiesMunicipalities(selectedProvince.code)
+      }
+    }
+
+    if (data.city_name) {
+      const selectedCity = citiesMunicipalities.value.find((c) => c.name === data.city_name)
+      if (selectedCity) {
+        address.value.city = selectedCity.code
+        await fetchBarangays(selectedCity.code)
+      }
+    }
+
+    if (data.barangay_name) {
+      const selectedBarangay = barangays.value.find((b) => b.name === data.barangay_name)
+      if (selectedBarangay) {
+        address.value.barangay = selectedBarangay.code
+      }
+    }
+
+    setTimeout(() => {
+      if (addressMode.value === 'manual') {
+        updateManualMap()
+      } else {
+        updateLocationMap()
+      }
+    }, 500)
+  } catch (err) {
+    console.error(err)
+    snackbarMessage.value = 'Unexpected error loading address'
+    showSnackbar.value = true
+  }
+}
+
+// --- Save Address (NOW INCLUDES COORDINATES) ---
+const saveAddress = async () => {
+  try {
+    isLoading.value = true
+
+    // ONLY VALIDATE: PSGC data, name, and phone
+    if (addressMode.value === 'manual') {
+      // Validate PSGC selections (dropdowns only)
+      if (
+        !address.value.region ||
+        !address.value.province ||
+        !address.value.city ||
+        !address.value.barangay
+      ) {
+        throw new Error('Please select complete address from PSGC dropdowns')
+      }
+    } else {
+      // Location mode - validate address components
+      if (
+        !address.value.region_name &&
+        !address.value.province_name &&
+        !address.value.city_name &&
+        !address.value.barangay_name
+      ) {
+        throw new Error('Address is required. Please detect location or enter address details.')
+      }
+    }
+
+    // Validate name and phone (required fields)
+    if (!address.value.recipient_name.trim()) {
+      throw new Error('Recipient name is required')
+    }
+
+    if (!address.value.phone.trim()) {
+      throw new Error('Phone number is required')
+    }
+
+    // Phone format validation
+    const phoneRegex = /^[0-9+\-\s()]{7,20}$/
+    if (!phoneRegex.test(address.value.phone)) {
+      throw new Error('Please enter a valid phone number (7-20 digits)')
+    }
+
+    // Name length validation
+    if (address.value.recipient_name.trim().length < 2) {
+      throw new Error('Recipient name must be at least 2 characters')
+    }
+
+    const profileId = await getUserProfileId()
+
+    let addressData: any
+
+    if (addressMode.value === 'manual') {
+      // Get names from selected codes
+      const regionName = regions.value.find((r) => r.code === address.value.region)?.name || address.value.region_name
+      const provinceName = provinces.value.find((p) => p.code === address.value.province)?.name || address.value.province_name
+      const cityName = citiesMunicipalities.value.find((c) => c.code === address.value.city)?.name || address.value.city_name
+      const barangayName = barangays.value.find((b) => b.code === address.value.barangay)?.name || address.value.barangay_name
+
+      addressData = {
+        user_id: profileId,
+        recipient_name: address.value.recipient_name.trim(),
+        phone: address.value.phone.trim(),
+        street: address.value.street || '',
+        purok: address.value.purok || '',
+        building: address.value.building || '',
+        house_no: address.value.house_no || '',
+        postal_code: address.value.postal_code || '',
+        is_default: address.value.is_default,
+        region_name: regionName,
+        province_name: provinceName,
+        city_name: cityName,
+        barangay_name: barangayName,
+        latitude: address.value.latitude,   // ✅ SAVE COORDINATES
+        longitude: address.value.longitude, // ✅ SAVE COORDINATES
+        updated_at: new Date().toISOString(),
+      }
+    } else {
+      addressData = {
+        user_id: profileId,
+        recipient_name: address.value.recipient_name.trim(),
+        phone: address.value.phone.trim(),
+        street: address.value.street || '',
+        purok: address.value.purok || '',
+        building: address.value.building || '',
+        house_no: address.value.house_no || '',
+        postal_code: address.value.postal_code || '',
+        is_default: address.value.is_default,
+        region_name: address.value.region_name || '',
+        province_name: address.value.province_name || '',
+        city_name: address.value.city_name || '',
+        barangay_name: address.value.barangay_name || '',
+        latitude: address.value.latitude,   // ✅ SAVE COORDINATES
+        longitude: address.value.longitude, // ✅ SAVE COORDINATES
+        updated_at: new Date().toISOString(),
+      }
+    }
+
+    // Handle default address setting
+    if (address.value.is_default) {
+      await supabase
+        .from('addresses')
+        .update({ is_default: false })
+        .eq('user_id', profileId)
+        .neq('id', addressId.value || '')
+    }
+
+    let result
+    if (isEdit.value && addressId.value) {
+      result = await supabase
+        .from('addresses')
+        .update(addressData)
+        .eq('id', addressId.value)
+        .eq('user_id', profileId)
+    } else {
+      result = await supabase.from('addresses').insert([
+        {
+          ...addressData,
+          user_id: profileId,
+          created_at: new Date().toISOString(),
+        },
+      ])
+    }
+
+    if (result.error) {
+      if (
+        result.error.code === '23505' &&
+        result.error.message.includes('one_default_address_per_user')
+      ) {
+        throw new Error(
+          'You can only have one default address. Please unset your current default address first.',
+        )
+      }
+      throw new Error(result.error.message)
+    }
+
+    successMessage.value = isEdit.value
+      ? 'Address updated successfully!'
+      : 'Address added successfully!'
+    showSuccess.value = true
+
+    setTimeout(() => router.replace({ name: 'my-address', query: { refreshed: Date.now() } }), 1500)
+  } catch (err: any) {
+    console.error(err)
+    snackbarMessage.value = 'Error: ' + (err.message || 'Failed to save address')
+    showSnackbar.value = true
+  } finally {
+    isLoading.value = false
+  }
+}
+
+// --- Watchers for Manual Input Mode ---
+watch(
+  () => address.value.region,
+  async (newRegion) => {
+    if (addressMode.value !== 'manual') return
+
+    address.value.province = ''
+    address.value.city = ''
+    address.value.barangay = ''
+    address.value.postal_code = ''
+    if (newRegion) {
+      const selectedRegion = regions.value.find((r) => r.code === newRegion)
+      if (selectedRegion) {
+        address.value.region_name = selectedRegion.name
+      }
+      await fetchProvinces(newRegion)
+      await updateManualMap()
+    }
+  },
+)
+
+watch(
+  () => address.value.province,
+  async (newProvince) => {
+    if (addressMode.value !== 'manual') return
+
+    address.value.city = ''
+    address.value.barangay = ''
+    address.value.postal_code = ''
+    if (newProvince) {
+      const selectedProvince = provinces.value.find((p) => p.code === newProvince)
+      if (selectedProvince) {
+        address.value.province_name = selectedProvince.name
+      }
+      await fetchCitiesMunicipalities(newProvince)
+      await updateManualMap()
+    }
+  },
+)
+
+watch(
+  () => address.value.city,
+  async (newCity) => {
+    if (addressMode.value !== 'manual') return
+
+    address.value.barangay = ''
+    const selectedCity = citiesMunicipalities.value.find((c) => c.code === newCity)
+    if (selectedCity) {
+      address.value.city_name = selectedCity.name
+      address.value.postal_code = selectedCity.zip_code || selectedCity.zipCode || selectedCity.postalCode || ''
+    }
+    if (newCity) {
+      await fetchBarangays(newCity)
+      await updateManualMap()
+    }
+  },
+)
+
+watch(
+  () => address.value.barangay,
+  (newBarangay) => {
+    if (addressMode.value !== 'manual') return
+    
+    if (newBarangay) {
+      const selectedBarangay = barangays.value.find((b) => b.code === newBarangay)
+      if (selectedBarangay) {
+        address.value.barangay_name = selectedBarangay.name
+      }
+      updateManualMap()
+    }
+  }
+)
 </script>
+
 <template>
+  <!-- Your existing template remains exactly the same -->
   <v-app>
     <!-- App Bar -->
     <v-app-bar flat color="primary" elevation="1">
@@ -1269,7 +1396,7 @@ watch(
                     <div>
                       <span class="text-subtitle-1 font-weight-medium">Map Preview</span>
                       <span class="text-caption text-medium-emphasis ml-2">
-                        📍 Map updates as you select address
+                        📍 Drag the marker to adjust location
                       </span>
                     </div>
                     <v-btn
@@ -1286,7 +1413,7 @@ watch(
                   <div id="manual-map" class="map-wrapper rounded-lg elevation-1"></div>
                   <p class="text-caption text-medium-emphasis mt-2">
                     <v-icon size="small" color="primary" class="me-1">mdi-information</v-icon>
-                    Click on the map or drag the marker to adjust the location
+                    <strong>Tip:</strong> If the location is incorrect, simply <strong>drag the marker</strong> or <strong>click anywhere</strong> on the map to set the exact position.
                   </p>
                 </v-col>
 
@@ -1385,7 +1512,7 @@ watch(
               <div id="location-map" class="map-wrapper rounded-lg elevation-1"></div>
               <p class="text-caption text-medium-emphasis mt-2">
                 <v-icon size="small" color="success" class="me-1">mdi-information</v-icon>
-                Drag the marker to fine-tune your location
+                <strong>Tip:</strong> Drag the marker or click anywhere on the map to fine-tune your location.
               </p>
             </div>
 
@@ -1518,7 +1645,7 @@ watch(
                 class="mb-4"
               />
 
-              <!-- Submit Button - FIXED CONDITION -->
+              <!-- Submit Button -->
               <v-btn
                 color="success"
                 @click="saveAddress"
@@ -1547,9 +1674,8 @@ watch(
   </v-app>
 </template>
 
-
-
 <style scoped>
+/* Your existing styles remain exactly the same */
 .map-wrapper {
   width: 100%;
   height: 300px;
@@ -1562,9 +1688,17 @@ watch(
 
 /* Custom marker styling */
 .custom-marker {
-  cursor: move;
+  cursor: grab;
   filter: drop-shadow(0px 2px 6px rgba(0, 0, 0, 0.4));
-  animation: bounce 0.5s ease-in-out;
+  transition: transform 0.2s ease;
+}
+
+.custom-marker:active {
+  cursor: grabbing;
+}
+
+.custom-marker:hover {
+  transform: scale(1.1);
 }
 
 @keyframes bounce {
