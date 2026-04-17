@@ -36,13 +36,13 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />                
             </intent-filter>
-
-            <!-- Deep link for password reset -->
+            
+            <!-- For local development -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="closeshop" />
+                <data android:scheme="http" android:host="localhost" android:port="5173" />
             </intent-filter>
 
             <!-- OAuth Callback for Google Sign in -->

@@ -36,3 +36,6 @@ ios/App/GoogleService-Info.plist
 
 # Environment variables
 .env
+
+#vercel
+.vercel
