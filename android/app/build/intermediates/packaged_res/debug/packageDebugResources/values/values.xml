@@ -2,9 +2,15 @@
 <resources>
     <color name="closeshop_background">#2E73B8</color>
     <color name="ic_launcher_background">#FFFFFF</color>
-    <string name="app_name">CloseShop</string>
-    <string name="custom_url_scheme">closeshop.dev</string>
-    <string name="package_name">closeshop.dev</string>
+    <string name="app_name">closeshop-dev</string>
+    <string name="gcm_defaultSenderId" translatable="false">847265493</string>
+    <string name="google_android_client_id">618681645336-d1s591p0okdttm6m1pb2vjb2nukdsknl.apps.googleusercontent.com</string>
+    <string name="google_api_key" translatable="false">AIzaSyDzVnPBqAH4gAYZaLXQnLHm8drNIrMIq78</string>
+    <string name="google_app_id" translatable="false">1:847265493:android:65d160928cea304c32ec5c</string>
+    <string name="google_crash_reporting_api_key" translatable="false">AIzaSyDzVnPBqAH4gAYZaLXQnLHm8drNIrMIq78</string>
+    <string name="google_server_client_id">618681645336-0fqba348n7kfcc65qkvh90lsioo7l3ti.apps.googleusercontent.com</string>
+    <string name="google_storage_bucket" translatable="false">closeshop-f397b.firebasestorage.app</string>
+    <string name="project_id" translatable="false">closeshop-f397b</string>
     <string name="title_activity_main">closeshop-dev</string>
     <style name="AppTheme" parent="Theme.AppCompat.Light.DarkActionBar">
         

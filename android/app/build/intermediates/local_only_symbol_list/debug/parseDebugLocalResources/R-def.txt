@@ -9,8 +9,14 @@ mipmap closeshop
 mipmap closeshop_foreground
 mipmap closeshop_round
 string app_name
-string custom_url_scheme
-string package_name
+string gcm_defaultSenderId
+string google_android_client_id
+string google_api_key
+string google_app_id
+string google_crash_reporting_api_key
+string google_server_client_id
+string google_storage_bucket
+string project_id
 string title_activity_main
 style AppTheme
 style AppTheme.NoActionBar

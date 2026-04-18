@@ -33,10 +33,11 @@
     <string msgid="8875138169939072951" name="abc_shareactionprovider_share_with">"Deljenje z:"</string>
     <string msgid="9055268688411532828" name="abc_shareactionprovider_share_with_application">"Deljenje z drugimi prek aplikacije <ns1:g id="APPLICATION_NAME">%s</ns1:g>"</string>
     <string msgid="1656852541809559762" name="abc_toolbar_collapse_description">"Strnitev"</string>
+    <string msgid="8397015543330865059" name="android.credentials.TYPE_PASSWORD_CREDENTIAL">"Geslo"</string>
+    <string msgid="3929015085059320822" name="androidx.credentials.TYPE_PUBLIC_KEY_CREDENTIAL">"Ključ za dostop"</string>
     <string name="bottomsheet_action_collapse">Strnitev razdelka na dnu zaslona</string>
     <string name="bottomsheet_action_expand">Razširitev razdelka na dnu zaslona</string>
     <string name="bottomsheet_action_expand_halfway">Razširjanje na pol višine</string>
-    <string name="bottomsheet_drag_handle_clicked">Dvakrat dotaknjena ročica za vlečenje</string>
     <string name="bottomsheet_drag_handle_content_description">Ročica za vlečenje</string>
     <string msgid="881409763997275156" name="call_notification_answer_action">"Sprejmi"</string>
     <string msgid="8793775615905189152" name="call_notification_answer_video_action">"Video"</string>
@@ -66,17 +67,37 @@
     <string name="common_open_on_phone">Odpiranje v telefonu</string>
     <string name="common_signin_button_text">Prijava</string>
     <string name="common_signin_button_text_long">Prijava z računom Google</string>
+    <string msgid="5912733858573823945" name="confirm_device_credential_password">"Uporaba gesla"</string>
+    <string msgid="3260749812566568062" name="copy_toast_msg">"Povezava je kopirana v odložišče"</string>
+    <string msgid="4776854077120974966" name="default_error_msg">"Neznana napaka"</string>
     <string name="error_a11y_label">Napaka: Neveljavno</string>
     <string name="error_icon_content_description">Napaka</string>
     <string name="exposed_dropdown_menu_content_description">Prikaz spustnega menija</string>
+    <string msgid="4566929209979330987" name="fallback_menu_item_copy_link">"Kopiraj povezavo"</string>
+    <string msgid="3413186855122069269" name="fallback_menu_item_open_in_browser">"Odpri v brskalniku"</string>
+    <string msgid="7145444925855055364" name="fallback_menu_item_share_link">"Deli povezavo"</string>
+    <string msgid="1072308044213194243" name="fingerprint_dialog_touch_sensor">"Dotaknite se tipala prst. odt."</string>
+    <string msgid="8216738333501875566" name="fingerprint_error_hw_not_available">"Strojna oprema za prstne odtise ni na voljo."</string>
+    <string msgid="6306988885793029438" name="fingerprint_error_hw_not_present">"Ta naprava nima tipala prstnih odtisov"</string>
+    <string msgid="7291787166416782245" name="fingerprint_error_lockout">"Preveč poskusov. Poskusite znova pozneje."</string>
+    <string msgid="7520712796891883488" name="fingerprint_error_no_fingerprints">"Ni prijavljenih prstnih odtisov."</string>
+    <string msgid="7627716295344353987" name="fingerprint_error_user_canceled">"Dejanje s prstnim odtisom je preklical uporabnik."</string>
+    <string msgid="3873359464293253009" name="fingerprint_not_recognized">"Ni prepoznano"</string>
+    <string msgid="3791785319221634505" name="generic_error_no_device_credential">"Nastavljena ni nobena koda PIN, vzorec ali geslo."</string>
+    <string msgid="1807436368654974044" name="generic_error_no_keyguard">"Ta naprava ne podpira kode PIN, vzorca ali gesla."</string>
+    <string msgid="7309881387583143581" name="generic_error_user_canceled">"Preverjanje pristnosti je preklical uporabnik."</string>
     <string name="icon_content_description">Ikona pogovornega okna</string>
     <string name="item_view_role_description">Zavihek</string>
+    <string name="m3_loading_indicator_content_description">Nalaganje</string>
     <string name="material_clock_toggle_content_description">Izberite dopoldanski ali popoldanski čas.</string>
     <string name="material_hour_24h_suffix">%1$s h</string>
     <string name="material_hour_selection">Izberite uro</string>
     <string name="material_hour_suffix">%1$s</string>
     <string name="material_minute_selection">Izberite minute</string>
     <string name="material_minute_suffix">%1$s min</string>
+    <string name="material_slider_range_end">Konec razpona</string>
+    <string name="material_slider_range_start">Začetek razpona</string>
+    <string name="material_slider_value">Vrednost</string>
     <string name="material_timepicker_am">dop.</string>
     <string name="material_timepicker_clock_mode_description">Preklopite na način ure, da vnesete čas.</string>
     <string name="material_timepicker_hour">Ura</string>
@@ -110,10 +131,10 @@
     <string name="mtrl_picker_navigate_to_year_description">Pomik na leto %1$d</string>
     <string name="mtrl_picker_out_of_range">Zunaj razpona: %1$s</string>
     <string name="mtrl_picker_range_header_only_end_selected">Začetni datum–%1$s</string>
-    <string name="mtrl_picker_range_header_only_start_selected">%1$s–končni datum</string>
+    <string name="mtrl_picker_range_header_only_start_selected">%1$s–Končni datum</string>
     <string name="mtrl_picker_range_header_selected">%1$s–%2$s</string>
     <string name="mtrl_picker_range_header_title">Izberite obseg</string>
-    <string name="mtrl_picker_range_header_unselected">Začetni datum–končni datum</string>
+    <string name="mtrl_picker_range_header_unselected">Začetni datum–Končni datum</string>
     <string name="mtrl_picker_save">Shrani</string>
     <string name="mtrl_picker_start_date_description">Začetni datum %1$s</string>
     <string name="mtrl_picker_text_input_date_hint">Datum</string>
@@ -124,9 +145,11 @@
     <string name="mtrl_picker_text_input_year_abbr">l</string>
     <string name="mtrl_picker_today_description">Danes %1$s</string>
     <string name="mtrl_picker_toggle_to_calendar_input_mode">Preklop na način vnosa v koledar</string>
-    <string name="mtrl_picker_toggle_to_day_selection">Dotaknite se za preklop na pogled koledarja</string>
+    <string name="mtrl_picker_toggle_to_day_selection">Preklopi na pogled koledarja</string>
     <string name="mtrl_picker_toggle_to_text_input_mode">Preklop na način vnosa besedila</string>
-    <string name="mtrl_picker_toggle_to_year_selection">Dotaknite se za preklop na pogled leta</string>
+    <string name="mtrl_picker_toggle_to_year_selection">Preklopi na pogled leta</string>
+    <string name="mtrl_picker_toggled_to_day_selection">Preklopljeno na pogled koledarja</string>
+    <string name="mtrl_picker_toggled_to_year_selection">Preklopljeno na pogled leta</string>
     <string name="mtrl_timepicker_cancel">Prekliči</string>
     <string name="mtrl_timepicker_confirm">V redu</string>
     <string name="password_toggle_content_description">Prikaz gesla</string>
