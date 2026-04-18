@@ -83,13 +83,116 @@ const rateOrder = (orderId) => {
     router.push(`/rateview/${orderId}`)
   }
 }
+
+// Handle avatar image loading errors
+const handleAvatarError = (event) => {
+  console.log('Avatar failed to load, falling back to initials')
+  avatarUrl.value = null
+  // The template will automatically show initials
+}
+
+// Helper function to get Google avatar URL (handles both custom and default avatars)
+const getGoogleAvatarUrl = (userData) => {
+  if (!userData) return null
+  
+  // Check identities array first (most reliable for Google)
+  if (userData.identities && userData.identities.length > 0) {
+    const identity = userData.identities.find(i => i.provider === 'google')
+    if (identity && identity.identity_data) {
+      const identityData = identity.identity_data
+      
+      // Google provides avatar_url in identity_data
+      if (identityData.avatar_url) {
+        console.log('Found Google avatar URL:', identityData.avatar_url)
+        return identityData.avatar_url
+      }
+      
+      // Sometimes Google uses 'picture' field
+      if (identityData.picture) {
+        console.log('Found Google picture URL:', identityData.picture)
+        return identityData.picture
+      }
+    }
+  }
+  
+  // Check user_metadata as fallback
+  if (userData.user_metadata?.avatar_url) {
+    return userData.user_metadata.avatar_url
+  }
+  
+  // Check raw_user_meta_data
+  if (userData.raw_user_meta_data?.avatar_url) {
+    return userData.raw_user_meta_data.avatar_url
+  }
+  
+  return null
+}
+
+// Helper to get user initials for fallback avatar
+const getUserInitials = (fullName) => {
+  if (!fullName || fullName === 'User') return '?'
+  
+  const names = fullName.trim().split(' ')
+  if (names.length === 1) {
+    return names[0].charAt(0).toUpperCase()
+  }
+  return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase()
+}
+
+// NEW HELPER FUNCTION: Get user display name from various auth provider formats
+const getUserDisplayName = (userData) => {
+  if (!userData) return 'User'
+  
+  // Check user_metadata first
+  if (userData.user_metadata) {
+    const metadata = userData.user_metadata
+    if (metadata.full_name) return metadata.full_name
+    if (metadata.name) return metadata.name
+    if (metadata.first_name && metadata.last_name) {
+      return `${metadata.first_name} ${metadata.last_name}`.trim()
+    }
+  }
+  
+  // Check identities array (Google stores full_name here)
+  if (userData.identities && userData.identities.length > 0) {
+    const identityData = userData.identities[0].identity_data
+    if (identityData) {
+      if (identityData.full_name) return identityData.full_name
+      if (identityData.name) return identityData.name
+    }
+  }
+  
+  // Fallback to email username
+  if (userData.email) {
+    return userData.email.split('@')[0]
+  }
+  
+  return 'User'
+}
+
 // Load the user info
 const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
     user.value = authStore.userData
-    fullName.value =
-      `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
-    avatarUrl.value = authStore.profile.avatar_url || null
+    fullName.value = getUserDisplayName(authStore.userData)
+    
+    // Priority 1: Check if user has custom avatar in profiles table
+    if (authStore.profile.avatar_url && 
+        !authStore.profile.avatar_url.includes('googleusercontent.com')) {
+      avatarUrl.value = authStore.profile.avatar_url
+      console.log('Using custom profile avatar')
+    } 
+    // Priority 2: Use Google's avatar (even default ones)
+    else {
+      const googleAvatar = getGoogleAvatarUrl(authStore.userData)
+      if (googleAvatar) {
+        avatarUrl.value = googleAvatar
+        console.log('Using Google avatar (may be default):', googleAvatar)
+      } else {
+        avatarUrl.value = null // Will show initials avatar
+        console.log('No avatar found, will use initials')
+      }
+    }
   } else {
     const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
@@ -97,9 +200,22 @@ const loadUser = async () => {
       return
     }
     user.value = userData.user
-    fullName.value =
-      `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
-    avatarUrl.value = authStore.profile?.avatar_url || null
+    fullName.value = getUserDisplayName(userData.user)
+    
+    // Same avatar logic as above
+    if (authStore.profile?.avatar_url && 
+        !authStore.profile.avatar_url.includes('googleusercontent.com')) {
+      avatarUrl.value = authStore.profile.avatar_url
+    } else {
+      const googleAvatar = getGoogleAvatarUrl(userData.user)
+      avatarUrl.value = googleAvatar || null
+    }
+    
+    console.log('Avatar loading debug:', {
+      fullName: fullName.value,
+      hasGoogleAvatar: !!getGoogleAvatarUrl(userData.user),
+      avatarUrl: avatarUrl.value
+    })
   }
 }
 
@@ -540,8 +656,7 @@ watch(
   () => authStore.userData,
   (newUser) => {
     if (newUser) {
-      fullName.value =
-        `${newUser.user_metadata?.first_name || ''} ${newUser.user_metadata?.last_name || ''}`.trim()
+      fullName.value = getUserDisplayName(newUser)
     }
   },
   { immediate: true },
@@ -552,12 +667,17 @@ watch(
   () => authStore.profile,
   (newProfile) => {
     if (newProfile) {
-      fullName.value =
-        `${authStore.userData?.user_metadata?.first_name || ''} ${authStore.userData?.user_metadata?.last_name || ''}`.trim()
-      avatarUrl.value = newProfile.avatar_url || null
+      fullName.value = getUserDisplayName(authStore.userData)
+      // Profile avatar takes precedence
+      if (newProfile.avatar_url) {
+        avatarUrl.value = newProfile.avatar_url
+      } else if (authStore.userData) {
+        // Fallback to Google avatar
+        avatarUrl.value = getGoogleAvatarUrl(authStore.userData)
+      }
     }
   },
-  { immediate: true },
+  { immediate: true, deep: true }
 )
 
 // Reload user if route changes but component is reused
@@ -668,9 +788,18 @@ onBeforeRouteUpdate((to, from, next) => {
       <div class="profile-header">
         <div class="profile-inline">
           <div class="avatar-container">
-            <v-avatar size="80" color="grey-lighten-3" class="avatar-glow">
-              <v-img v-if="avatarUrl" :src="avatarUrl" cover />
-              <v-icon v-else size="40" color="white">mdi-account</v-icon>
+            <v-avatar size="80" color="primary" class="avatar-glow">
+              <!-- Show Google/Custom avatar if available -->
+              <v-img 
+                v-if="avatarUrl" 
+                :src="avatarUrl" 
+                cover
+                @error="handleAvatarError"
+              />
+              <!-- Show initials if no avatar or avatar failed to load -->
+              <div v-else class="initials-avatar">
+                {{ getUserInitials(fullName || user?.email?.split('@')[0] || 'U') }}
+              </div>
             </v-avatar>
             <v-btn
               class="edit-btn"
@@ -683,13 +812,13 @@ onBeforeRouteUpdate((to, from, next) => {
             </v-btn>
           </div>
 
-          <!-- Name above Email -->
-          <div class="info-block">
-            <h2 class="name-row">{{ fullName || 'Loading...' }}</h2>
-            <p class="email-row">{{ user?.email || '...' }}</p>
-          </div>
+        <!-- Name above Email -->
+        <div class="info-block">
+          <h2 class="name-row">{{ fullName || (user?.email?.split('@')[0]) || 'User' }}</h2>
+          <p class="email-row">{{ user?.email || '...' }}</p>
         </div>
       </div>
+    </div>
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
@@ -1111,7 +1240,7 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 .avatar-glow {
-  box-shadow: 0 0 20px rgba(255, 255, 255, 0.3);
+  box-shadow: 0 0 20px rgba(232, 232, 232, 0.15);
 }
 
 .edit-btn {
@@ -1457,6 +1586,25 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .white--text {
   color: white !important;
+}
+
+.initials-avatar {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #354d7c, #5276b0);
+  color: white;
+  font-size: 32px;
+  font-weight: 600;
+  text-transform: uppercase;
+  border-radius: 50%;
+}
+
+/*Different colors for different users */
+.initials-avatar {
+  background: linear-gradient(135deg, #354d7c, #5276b0);
 }
 
 /* Responsive styles */
