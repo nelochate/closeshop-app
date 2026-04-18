@@ -29,8 +29,6 @@ const showErrorSnackbar = computed({
   set: (val) => { if (!val) errorMessage.value = '' }
 })
 
-const isMobile = Capacitor.isNativePlatform()
-
 // Clear error after timeout
 const clearErrorAfterTimeout = () => {
   setTimeout(() => {
@@ -41,13 +39,13 @@ const clearErrorAfterTimeout = () => {
 // Password strength checker
 const getPasswordStrength = (password: string): 'weak' | 'medium' | 'strong' => {
   if (password.length < 8) return 'weak'
-  
+
   let strength = 0
   if (password.length >= 10) strength++
   if (/[a-z]/.test(password) && /[A-Z]/.test(password)) strength++
   if (/[0-9]/.test(password)) strength++
   if (/[^a-zA-Z0-9]/.test(password)) strength++
-  
+
   if (strength >= 3) return 'strong'
   if (strength >= 2) return 'medium'
   return 'weak'
@@ -75,6 +73,31 @@ const isPasswordValid = (password: string): boolean => {
          /[a-z]/.test(password) &&
          /[0-9]/.test(password) &&
          /[^a-zA-Z0-9]/.test(password)
+}
+
+// Direct fetch API to update password (bypasses Supabase lock issues)
+const updatePasswordWithFetch = async (accessToken: string, newPassword: string): Promise<any> => {
+  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
+  const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+
+  const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    method: 'PUT',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': supabaseAnonKey,
+      'Authorization': `Bearer ${accessToken}`
+    },
+    body: JSON.stringify({
+      password: newPassword
+    })
+  })
+
+  if (!response.ok) {
+    const error = await response.json()
+    throw new Error(error.msg || error.message || 'Failed to update password')
+  }
+
+  return await response.json()
 }
 
 const updatePassword = async () => {
@@ -110,32 +133,83 @@ const updatePassword = async () => {
       throw new Error('No active session found. Please request a new reset link.')
     }
 
-    // Update password
-    const { error: updateError } = await supabase.auth.updateUser({
-      password: newPassword.value
-    })
+    // Method 1: Try fetch API first (avoids Supabase lock issues)
+    let updateSuccess = false
+    let updateError = null
 
-    if (updateError) throw updateError
+    try {
+      console.log('Attempting password update with fetch API...')
+      await updatePasswordWithFetch(session.access_token, newPassword.value)
+      updateSuccess = true
+      console.log('Password updated successfully with fetch API')
+    } catch (fetchError: any) {
+      console.warn('Fetch API failed:', fetchError)
+      updateError = fetchError
 
-    // Sign out after password change
-    await supabase.auth.signOut()
+      // Method 2: Try supabase client as fallback with lock handling
+      try {
+        console.log('Attempting password update with Supabase client...')
+        const { error } = await supabase.auth.updateUser({
+          password: newPassword.value,
+        })
 
-    // Navigate to success page
-    await router.push('/reset-success')
+        if (error) {
+          throw error
+        }
+        updateSuccess = true
+        console.log('Password updated successfully with Supabase client')
+      } catch (supabaseError: any) {
+        console.error('Supabase client also failed:', supabaseError)
+        updateError = supabaseError
+      }
+    }
+
+    if (updateSuccess) {
+      // Sign out to ensure user needs to login with new password
+      await supabase.auth.signOut()
+
+      // Clear form
+      newPassword.value = ''
+      confirmPassword.value = ''
+
+      // Navigate to success page
+      await router.push('/reset-success')
+    } else {
+      throw updateError || new Error('Password update failed')
+    }
 
   } catch (error: any) {
     console.error('Update password error:', error)
-    
+
     let userMessage = ''
     const errorMessageText = error.message || ''
 
-    if (errorMessageText.toLowerCase().includes('same as the old password')) {
+    // Handle specific error types
+    if (errorMessageText.toLowerCase().includes('same as the old password') ||
+        errorMessageText.toLowerCase().includes('should be different from the old password')) {
       userMessage = 'Please choose a different password than your current one.'
     } else if (errorMessageText.toLowerCase().includes('expired')) {
       userMessage = 'Your reset link has expired. Please request a new one.'
       setTimeout(() => router.push('/forgot-password'), 3000)
+    } else if (errorMessageText.toLowerCase().includes('lock')) {
+      // Handle lock error - try to refresh session
+      console.log('Lock error detected, refreshing session...')
+      try {
+        const { data: { session }, error: refreshError } = await supabase.auth.refreshSession()
+        if (!refreshError && session) {
+          // Retry password update with new session
+          await updatePasswordWithFetch(session.access_token, newPassword.value)
+          await supabase.auth.signOut()
+          await router.push('/reset-success')
+          return
+        }
+      } catch (refreshErr) {
+        console.error('Session refresh failed:', refreshErr)
+      }
+      userMessage = 'Session issue detected. Please request a new reset link.'
+      setTimeout(() => router.push('/forgot-password'), 3000)
     } else {
-      userMessage = errorMessageText || 'Failed to update password. Please try again.'
+      userMessage = errorMessageText || 'Failed to update password. Please try again or request a new reset link.'
     }
 
     errorMessage.value = userMessage
@@ -154,112 +228,74 @@ onMounted(async () => {
   console.log('=== UpdatePasswordView mounted ===')
   console.log('Full URL:', window.location.href)
   console.log('Search params:', window.location.search)
-  console.log('Hash:', window.location.hash)
-  
-  // Method 1: Check for token in query parameters (Supabase default)
+
+  // Get token from URL query parameter
   const urlParams = new URLSearchParams(window.location.search)
-  let token = urlParams.get('token')
-  
-  if (token) {
-    console.log('✅ Found token in query params:', token.substring(0, 20) + '...')
-    
-    try {
-      // Verify the token with Supabase
-      const { data, error } = await supabase.auth.verifyOtp({
-        token_hash: token,
-        type: 'recovery'
-      })
-      
-      if (error) {
-        console.error('Error verifying token:', error)
-        errorMessage.value = error.message || 'Invalid or expired reset link.'
-        isValidLink.value = false
-        isProcessing.value = false
-        return
-      }
-      
-      console.log('✅ Token verified successfully')
-      
-      // Get the session
-      const { data: { session } } = await supabase.auth.getSession()
-      
-      if (session) {
-        console.log('✅ Session established for:', session.user?.email)
-        isValidLink.value = true
-        isProcessing.value = false
-        
-        // Clean URL
-        window.history.replaceState({}, document.title, window.location.pathname)
-      } else {
-        console.error('❌ No session after verification')
-        errorMessage.value = 'Unable to establish session. Please request a new reset link.'
-        isValidLink.value = false
-        isProcessing.value = false
-      }
-      
-    } catch (error: any) {
-      console.error('Exception verifying token:', error)
-      errorMessage.value = error.message || 'Failed to verify reset link.'
-      isValidLink.value = false
+  const token = urlParams.get('token')
+
+  if (!token) {
+    // Check for existing session (for web)
+    const { data: { session } } = await supabase.auth.getSession()
+    if (session) {
+      console.log('Existing session found')
+      isValidLink.value = true
       isProcessing.value = false
-    }
-    return
-  }
-  
-  // Method 2: Check for access_token in hash (custom format)
-  const hash = window.location.hash
-  if (hash && hash.includes('access_token')) {
-    console.log('✅ Found tokens in hash')
-    const params = new URLSearchParams(hash.substring(1))
-    const accessToken = params.get('access_token')
-    const refreshToken = params.get('refresh_token')
-    
-    if (accessToken && refreshToken) {
-      try {
-        const { data, error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken
-        })
-        
-        if (error) {
-          console.error('Error setting session:', error)
-          errorMessage.value = error.message || 'Invalid or expired reset link.'
-          isValidLink.value = false
-          isProcessing.value = false
-          return
-        }
-        
-        console.log('✅ Session set from hash tokens')
-        isValidLink.value = true
-        isProcessing.value = false
-        
-        // Clean URL
-        window.history.replaceState({}, document.title, window.location.pathname)
-        
-      } catch (error: any) {
-        console.error('Exception setting session:', error)
-        errorMessage.value = error.message || 'Failed to process reset link.'
-        isValidLink.value = false
-        isProcessing.value = false
-      }
       return
     }
-  }
-  
-  // Method 3: Check for existing session (already logged in)
-  const { data: { session } } = await supabase.auth.getSession()
-  if (session) {
-    console.log('✅ Existing session found')
-    isValidLink.value = true
+
+    console.error('❌ No token found in URL')
+    errorMessage.value = 'Invalid reset link. No token found. Please request a new password reset.'
+    isValidLink.value = false
     isProcessing.value = false
     return
   }
-  
-  // No valid tokens or session found
-  console.error('❌ No valid reset link detected')
-  errorMessage.value = 'Invalid reset link. Please request a new password reset.'
-  isValidLink.value = false
-  isProcessing.value = false
+
+  console.log('✅ Token found:', token.substring(0, 20) + '...')
+  console.log('Verifying token with Supabase...')
+
+  try {
+    // Verify the token with Supabase
+    const { data, error } = await supabase.auth.verifyOtp({
+      token_hash: token,
+      type: 'recovery'
+    })
+
+    if (error) {
+      console.error('Error verifying token:', error)
+      errorMessage.value = error.message || 'Invalid or expired reset link.'
+      isValidLink.value = false
+      isProcessing.value = false
+      return
+    }
+
+    console.log('✅ Token verified successfully')
+
+    // Small delay to ensure session is established
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    // Get the session
+    const { data: { session } } = await supabase.auth.getSession()
+
+    if (session) {
+      console.log('✅ Session established for:', session.user?.email)
+      isValidLink.value = true
+      isProcessing.value = false
+
+      // Clean URL (remove token parameter for security)
+      window.history.replaceState({}, document.title, window.location.pathname)
+    } else {
+      console.error('❌ No session after verification')
+      errorMessage.value = 'Unable to establish session. Please request a new reset link.'
+      isValidLink.value = false
+      isProcessing.value = false
+    }
+
+  } catch (error: any) {
+    console.error('Exception verifying token:', error)
+    errorMessage.value = error.message || 'Failed to verify reset link. Please request a new one.'
+    isValidLink.value = false
+    isProcessing.value = false
+  }
 })
 </script>
 
@@ -443,10 +479,10 @@ onMounted(async () => {
   pointer-events: none;
 }
 
-.circle-1 { top: -40px; right: -40px; width: 155px; height: 148px; }
-.circle-2 { bottom: -60px; left: -60px; width: 200px; height: 200px; }
-.circle-3 { top: 50%; left: -80px; width: 180px; height: 180px; transform: translateY(-50%); }
-.circle-4 { bottom: 20%; right: -50px; width: 120px; height: 120px; }
+.circle-1 { top: -40px; right: -40px; width: 155px; height: 148px; background-color: rgba(255, 255, 255, 0.15); }
+.circle-2 { bottom: -60px; left: -60px; width: 200px; height: 200px; background-color: rgba(255, 255, 255, 0.1); }
+.circle-3 { top: 50%; left: -80px; width: 180px; height: 180px; background-color: rgba(255, 255, 255, 0.08); transform: translateY(-50%); }
+.circle-4 { bottom: 20%; right: -50px; width: 120px; height: 120px; background-color: rgba(255, 255, 255, 0.06); }
 
 .v-card {
   border-radius: 16px;
