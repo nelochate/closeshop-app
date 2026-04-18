@@ -1,4 +1,4 @@
-import { createRouter, createWebHistory } from 'vue-router' // Changed to createWebHistory
+import { createRouter, createWebHistory } from 'vue-router'
 
 import LoginView from '../auth/LoginView.vue'
 import RegisterView from '@/auth/RegisterView.vue'
@@ -10,8 +10,8 @@ import ProfileView from '@/mainsite/ProfileView.vue'
 import NotificationView from '@/mainsite/NotificationView.vue'
 import ConfirmEmail from '@/common/ConfirmEmail.vue'
 import AdminDashboard from '@/mainsite/AdminDashboard.vue'
-import ForgotPasswordView from '@/mainsite/ForgotPasswordView.vue'
-import UpdatePasswordView from '@/mainsite/UpdatePasswordView.vue'
+import ForgotPasswordView from '@/mainsite/resetpass/ForgotPasswordView.vue'
+import UpdatePasswordView from '@/mainsite/resetpass/UpdatePasswordView.vue'
 import { useAuthUserStore } from '@/stores/authUser'
 import UserShop from '@/mainsite/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
@@ -19,14 +19,16 @@ import ChatView from '@/mainsite/ChatView.vue'
 import AuthCallback from '../auth/AuthCallback.vue'
 
 
+
 // ✅ Define routes
 const routes = [
-  { path: '/', name: 'login', component: LoginView },
-      {
+  {
     path: '/auth/callback',
     name: 'auth-callback',
     component: AuthCallback
   },
+
+  { path: '/', name: 'login', component: LoginView },
   { path: '/register', name: 'register', component: RegisterView },
   { path: '/homepage', name: 'homepage', component: HomepageView, meta: { requiresAuth: true } },
   { path: '/mapsearch', name: 'mapsearch', component: MapSearch, meta: { requiresAuth: true } },
@@ -81,21 +83,26 @@ const routes = [
     component: () => import('@/mainsite/AddItem.vue'),
   },
 
-  // ✅ Allow unauthenticated access to update-password
+  //----For reset password flow----//
   {
     path: '/forgot-password',
     name: 'forgot-password',
     component: ForgotPasswordView,
     meta: { requiresAuth: false },
   },
-
   {
     path: '/update-password',
     name: 'update-password',
     component: UpdatePasswordView,
     meta: { requiresAuth: false },
   },
+  {
+  path: '/reset-success',
+  name: 'reset-success',
+  component:() => import('@/mainsite/resetpass/SucccessUpdateView.vue')
+},
 
+  //----------------------------------//
   {
     path: '/edit-profile',
     name: 'edit-profile',
@@ -188,10 +195,10 @@ const routes = [
     props: true,
   },
   {
-    path: '/viewproduct/:id', // Add :id parameter
+    path: '/viewproduct/:id',
     name: 'viewproduct',
     component: () => import('@/mainsite/ViewProducts.vue'),
-    props: true, // This will pass the id as a prop to your component
+    props: true,
   },
   {
     path: '/orderdetails/:id',
@@ -205,7 +212,7 @@ const routes = [
     component: () => import('@/mainsite/OrderMapView.vue'),
     meta: {
       requiresAuth: true,
-      requiresSeller: true, // Optional: Add if you have seller-only routes
+      requiresSeller: true,
     },
   },
   {
@@ -239,11 +246,10 @@ const routes = [
   },
 ]
 
-// ✅ Use HISTORY mode instead of hash mode
-const history = createWebHistory() // Changed from createWebHashHistory()
+// ✅ Use HISTORY mode instead of
 
 const router = createRouter({
-  history, // Now using history mode
+  history: createWebHistory(),
   routes,
   scrollBehavior(to, from, savedPosition) {
     if (savedPosition) {
@@ -308,4 +314,5 @@ router.beforeEach(async (to, from, next) => {
   }
 })
 
+export { router }
 export default router
