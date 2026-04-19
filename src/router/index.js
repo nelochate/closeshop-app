@@ -103,13 +103,33 @@ const routes = [
 },
 
   //----------------------------------//
+
+  //---- Settings Contents ---/////
   {
     path: '/edit-profile',
     name: 'edit-profile',
-    component: () => import('@/mainsite/EditProfileview.vue'),
+    component: () => import('@/mainsite/settings/EditProfileview.vue'),
     meta: { requiresAuth: true },
   },
+  
+  {
+    path: '/my-address',
+    name: 'my-address',
+    component: () => import('@/mainsite/settings/MyAddressView.vue'),
+  },
+  {
+    path: '/notification-settings',
+    name: 'notification-settings',
+    component: () => import('@/mainsite/settings/NotificationSettings.vue'),
+  },
+  {
+    path: '/chat-settings',
+    name: 'chat-settings',
+    component: () => import('@/mainsite/settings/ChatSettings.vue'),
+  },
 
+
+//----------------------------------//
   {
     path: '/product/:id',
     name: 'product-detail',
@@ -151,11 +171,6 @@ const routes = [
     meta: { requiresAuth: true },
   },
 
-  {
-    path: '/my-address',
-    name: 'my-address',
-    component: () => import('@/mainsite/edit/MyAddressView.vue'),
-  },
   {
     path: '/edit-address/:id?',
     name: 'edit-address',
@@ -224,25 +239,25 @@ const routes = [
     path: '/RiderApplication',
     name: 'RiderApplication',
     component:() => import('@/mainsite/delivery/RiderApplication.vue'),
-    meta: { requiresAuth: true } 
+    meta: { requiresAuth: true }
   },
    {
     path: '/RiderDashboard',
     name: 'RiderDashboard',
     component:() => import('@/mainsite/delivery/RiderDashboard.vue'),
-    meta: { requiresAuth: true } 
+    meta: { requiresAuth: true }
   },
    {
     path: '/RiderLocation',
     name: 'RiderLocation',
     component:() => import('@/mainsite/delivery/RiderLocation.vue'),
-    meta: { requiresAuth: true } 
+    meta: { requiresAuth: true }
   },
    {
     path: '/LocationToDeliver/:orderId',
     name: 'LocationToDeliver',
     component:() => import('@/mainsite/delivery/LocationToDeliver.vue'),
-    meta: { requiresAuth: true } 
+    meta: { requiresAuth: true }
   },
 ]
 

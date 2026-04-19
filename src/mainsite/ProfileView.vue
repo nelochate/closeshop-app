@@ -720,9 +720,8 @@ onBeforeRouteUpdate((to, from, next) => {
         icon
         class="settings-btn"
         @click="router.push('/settings')"
-        elevation="1"
       >
-        <v-icon size="29">mdi-cog-outline</v-icon>
+        <v-icon size="29">mdi-cog</v-icon>
       </v-btn>
 
       <!-- Check Status Button - Top Center (NEW POSITION) -->
