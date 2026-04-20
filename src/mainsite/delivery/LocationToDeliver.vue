@@ -5,7 +5,9 @@
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <h2 class="map-title">Delivery Route Map</h2>
-      <div style="width: 40px;"></div>
+      <v-btn icon variant="text" @click="refreshAllData" class="refresh-btn" :loading="refreshing">
+        <v-icon>mdi-refresh</v-icon>
+      </v-btn>
     </div>
 
     <!-- Loading State -->
@@ -17,121 +19,136 @@
     <!-- Map Container -->
     <div ref="mapContainer" class="delivery-map"></div>
 
-    <!-- Legend -->
-    <div class="map-legend">
-      <div class="legend-item">
-        <div class="legend-marker rider"></div>
-        <span>📍 Your Location (Rider)</span>
+    <!-- Combined Master Panel -->
+    <div class="master-panel" v-if="shopLocation && customerLocation">
+      <div class="master-header" @click="toggleMasterPanel">
+        <div class="header-left">
+          <v-icon color="#354d7c" size="20">mdi-view-dashboard</v-icon>
+          <span>Delivery Details</span>
+        </div>
+        <div class="header-actions">
+          <v-btn icon size="small" variant="text" @click.stop="refreshLocations" :loading="refreshingLocations" class="refresh-icon-btn">
+            <v-icon size="18">mdi-refresh</v-icon>
+          </v-btn>
+          <v-icon size="20" class="toggle-icon">
+            {{ masterPanelCollapsed ? 'mdi-chevron-up' : 'mdi-chevron-down' }}
+          </v-icon>
+        </div>
       </div>
-      <div class="legend-item">
-        <div class="legend-marker shop"></div>
-        <span>🏪 Shop Location (Pickup)</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-marker customer"></div>
-        <span>🏠 Customer Location (Delivery)</span>
-      </div>
-      <div class="legend-item">
-        <div class="legend-marker route"></div>
-        <span>🛣️ Delivery Route</span>
-      </div>
-    </div>
-
-    <!-- Location Summary Panel - Shows all 3 points -->
-    <div class="location-summary-panel" v-if="shopLocation && customerLocation">
-      <div class="location-summary-header">
-        <v-icon color="#354d7c" size="20">mdi-map-marker-multiple</v-icon>
-        <span>3 Delivery Points</span>
-      </div>
-      <div class="location-summary-content">
-        <div class="location-item" :class="{ active: activePoint === 'rider' }" @click="centerOnRider">
-          <div class="location-icon rider-icon-small"></div>
-          <div class="location-details">
-            <span class="location-label">📍 Rider Location:</span>
-            <span class="location-address">{{ riderLocation?.address || 'Detecting...' }}</span>
+      
+      <div v-show="!masterPanelCollapsed" class="master-content">
+        <!-- Order Summary Section -->
+        <div class="section" v-if="orderData">
+          <div class="section-header">
+            <v-icon color="#354d7c" size="18">mdi-receipt</v-icon>
+            <span>Order Information</span>
+          </div>
+          <div class="section-content">
+            <div class="info-row">
+              <span class="label">Order #:</span>
+              <span class="value">{{ orderData.transaction_number || orderData.id?.slice(-6) }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Shop:</span>
+              <span class="value">{{ orderData.shop?.business_name }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Customer:</span>
+              <span class="value">{{ orderData.address?.recipient_name }}</span>
+            </div>
+            <div class="info-row">
+              <span class="label">Status:</span>
+              <span class="value status" :class="getStatusClass(orderData.status)">
+                {{ getStatusText(orderData.status) }}
+              </span>
+            </div>
           </div>
         </div>
-        <div class="location-item" :class="{ active: activePoint === 'shop' }" @click="centerOnShop">
-          <div class="location-icon shop-icon-small"></div>
-          <div class="location-details">
-            <span class="location-label">🏪 Pickup Point:</span>
-            <span class="location-address">{{ shopLocation?.name || 'Loading...' }}</span>
-            <span class="location-address-small">{{ shopLocation?.address }}</span>
+
+        <!-- Delivery Points & Legend Combined Section -->
+        <div class="section">
+          <div class="section-header">
+            <v-icon color="#354d7c" size="18">mdi-map-marker-multiple</v-icon>
+            <span>Locations & Legend</span>
+          </div>
+          <div class="section-content">
+            <!-- Delivery Points -->
+            <div class="location-item" :class="{ active: activePoint === 'rider' }" @click="handleLocationClick('rider')">
+              <div class="location-icon rider-icon-small">
+                <span>📍</span>
+              </div>
+              <div class="location-details">
+                <span class="location-label">Rider Location:</span>
+                <span class="location-address">{{ riderLocation?.address || 'Detecting...' }}</span>
+              </div>
+            </div>
+            <div class="location-item" :class="{ active: activePoint === 'shop' }" @click="handleLocationClick('shop')">
+              <div class="location-icon shop-icon-small">
+                <span>🏪</span>
+              </div>
+              <div class="location-details">
+                <span class="location-label">Pickup Point:</span>
+                <span class="location-address">{{ shopLocation?.name || 'Loading...' }}</span>
+                <span class="location-address-small">{{ shopLocation?.address }}</span>
+              </div>
+            </div>
+            <div class="location-item" :class="{ active: activePoint === 'customer' }" @click="handleLocationClick('customer')">
+              <div class="location-icon customer-icon-small">
+                <span>🏠</span>
+              </div>
+              <div class="location-details">
+                <span class="location-label">Delivery Point:</span>
+                <span class="location-address">{{ customerLocation?.name || 'Loading...' }}</span>
+                <span class="location-address-small">{{ customerLocation?.address }}</span>
+              </div>
+            </div>
+
+            <!-- Divider -->
+            <div class="legend-divider"></div>
+
+            <!-- Legend Items -->
+            <div class="legend-item">
+              <div class="legend-marker rider"></div>
+              <span>📍 Rider Location (Blue)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-marker shop"></div>
+              <span>🏪 Shop Location (Orange)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-marker customer"></div>
+              <span>🏠 Customer Location (Green)</span>
+            </div>
+            <div class="legend-item">
+              <div class="legend-marker route"></div>
+              <span>🛣️ Delivery Route (Green Line)</span>
+            </div>
           </div>
         </div>
-        <div class="location-item" :class="{ active: activePoint === 'customer' }" @click="centerOnCustomer">
-          <div class="location-icon customer-icon-small"></div>
-          <div class="location-details">
-            <span class="location-label">🏠 Delivery Point:</span>
-            <span class="location-address">{{ customerLocation?.name || 'Loading...' }}</span>
-            <span class="location-address-small">{{ customerLocation?.address }}</span>
+
+        <!-- Route Information Section -->
+        <div class="section" v-if="routeInfo">
+          <div class="section-header">
+            <v-icon color="#4caf50" size="18">mdi-information</v-icon>
+            <span>Route Information</span>
           </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- Route Info Panel -->
-    <div class="route-info-panel" v-if="routeInfo">
-      <div class="route-info-header">
-        <v-icon color="#4caf50" size="20">mdi-information</v-icon>
-        <span>Route Information</span>
-      </div>
-      <div class="route-info-content">
-        <div class="route-info-item">
-          <v-icon size="16" color="#666">mdi-map-marker-distance</v-icon>
-          <span>Total Distance: <strong>{{ routeInfo.distance }}</strong></span>
-        </div>
-        <div class="route-info-item">
-          <v-icon size="16" color="#666">mdi-clock-outline</v-icon>
-          <span>Est. Time: <strong>{{ routeInfo.duration }}</strong></span>
-        </div>
-        <div class="route-info-item" v-if="routeInfo.fromShopToCustomer">
-          <v-icon size="16" color="#666">mdi-store</v-icon>
-          <span>Shop to Customer: <strong>{{ routeInfo.fromShopToCustomer }}</strong></span>
-        </div>
-      </div>
-    </div>
-
-    <!-- Action Buttons -->
-    <div class="map-actions">
-      <v-btn color="#354d7c" size="small" @click="fitBounds" class="action-btn">
-        <v-icon left size="18">mdi-fit-to-screen</v-icon>
-        Fit All
-      </v-btn>
-      <v-btn color="#2196f3" size="small" @click="centerOnRider" class="action-btn">
-        <v-icon left size="18">mdi-crosshairs-gps</v-icon>
-        My Location
-      </v-btn>
-      <v-btn color="#ff9800" size="small" @click="centerOnShop" class="action-btn">
-        <v-icon left size="18">mdi-store</v-icon>
-        Shop
-      </v-btn>
-      <v-btn color="#4caf50" size="small" @click="centerOnCustomer" class="action-btn">
-        <v-icon left size="18">mdi-home</v-icon>
-        Customer
-      </v-btn>
-    </div>
-
-    <!-- Order Summary Panel -->
-    <div class="order-summary-panel" v-if="orderData">
-      <div class="summary-header">
-        <v-icon color="#354d7c" size="20">mdi-receipt</v-icon>
-        <span>Order #{{ orderData.transaction_number || orderData.id?.slice(-6) }}</span>
-      </div>
-      <div class="summary-content">
-        <div class="summary-item">
-          <span class="label">Shop:</span>
-          <span class="value">{{ orderData.shop?.business_name }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="label">Customer:</span>
-          <span class="value">{{ orderData.address?.recipient_name }}</span>
-        </div>
-        <div class="summary-item">
-          <span class="label">Status:</span>
-          <span class="value status" :class="getStatusClass(orderData.status)">
-            {{ getStatusText(orderData.status) }}
-          </span>
+          <div class="section-content">
+            <div class="info-row">
+              <v-icon size="14" color="#666">mdi-map-marker-distance</v-icon>
+              <span class="label">Total Distance:</span>
+              <span class="value"><strong>{{ routeInfo.distance }}</strong></span>
+            </div>
+            <div class="info-row">
+              <v-icon size="14" color="#666">mdi-clock-outline</v-icon>
+              <span class="label">Est. Time:</span>
+              <span class="value"><strong>{{ routeInfo.duration }}</strong></span>
+            </div>
+            <div class="info-row" v-if="routeInfo.fromShopToCustomer">
+              <v-icon size="14" color="#666">mdi-store</v-icon>
+              <span class="label">Shop to Customer:</span>
+              <span class="value"><strong>{{ routeInfo.fromShopToCustomer }}</strong></span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -166,10 +183,15 @@ const MAPBOX_TOKEN = "pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenF
 
 // State
 const loading = ref(true)
+const refreshing = ref(false)
+const refreshingLocations = ref(false)
 const showErrorDialog = ref(false)
 const errorMessage = ref('')
 const routeInfo = ref(null)
 const activePoint = ref(null)
+
+// Panel collapse state
+const masterPanelCollapsed = ref(false)
 
 // Map instance
 let map = null
@@ -190,6 +212,65 @@ const mapContainer = ref(null)
 
 // Get order ID from route params
 const orderId = ref(route.params.orderId)
+
+// Toggle master panel
+const toggleMasterPanel = () => {
+  masterPanelCollapsed.value = !masterPanelCollapsed.value
+}
+
+// Handle location click - minimizes panel and centers on location
+const handleLocationClick = (type) => {
+  // Minimize the panel
+  masterPanelCollapsed.value = true
+  
+  // Center on the selected location with slight delay for smooth animation
+  setTimeout(() => {
+    if (type === 'rider') {
+      centerOnRider()
+    } else if (type === 'shop') {
+      centerOnShop()
+    } else if (type === 'customer') {
+      centerOnCustomer()
+    }
+  }, 100)
+}
+
+// Refresh all data
+const refreshAllData = async () => {
+  refreshing.value = true
+  try {
+    await fetchOrderDetails()
+    await getRiderLocation()
+    if (map && mapInitialized) {
+      addMarkers()
+      await addRoute()
+      fitBounds()
+    }
+  } catch (error) {
+    console.error('Error refreshing data:', error)
+    errorMessage.value = 'Failed to refresh data'
+    showErrorDialog.value = true
+  } finally {
+    refreshing.value = false
+  }
+}
+
+// Refresh locations only
+const refreshLocations = async () => {
+  refreshingLocations.value = true
+  try {
+    await getRiderLocation()
+    if (map && mapInitialized) {
+      addMarkers()
+      await updateRoute()
+      fitBounds()
+    }
+  } catch (error) {
+    console.error('Error refreshing locations:', error)
+  } finally {
+    refreshingLocations.value = false
+  }
+}
 
 // Helper functions for status display
 const getStatusText = (status) => {
@@ -530,10 +611,8 @@ const initMap = async () => {
   try {
     mapboxgl.accessToken = MAPBOX_TOKEN
 
-    // Wait for map container to be ready
     await nextTick()
 
-    // Create map instance
     map = new mapboxgl.Map({
       container: mapContainer.value,
       style: 'mapbox://styles/mapbox/streets-v12',
@@ -541,21 +620,14 @@ const initMap = async () => {
       zoom: 11
     })
 
-    // Add navigation control
     map.addControl(new mapboxgl.NavigationControl(), 'top-right')
 
-    // Wait for map to load
     map.on('load', async () => {
       mapInitialized = true
       console.log('Map loaded, adding markers...')
       
-      // Add markers after map is loaded
       addMarkers()
-      
-      // Add route
       await addRoute()
-      
-      // Fit bounds to show all markers
       fitBounds()
       
       loading.value = false
@@ -574,7 +646,7 @@ const initMap = async () => {
   }
 }
 
-// Add markers for all 3 points
+// Add markers for all 3 points - USING EMOJIS FOR RELIABLE DISPLAY
 const addMarkers = () => {
   if (!map || !mapInitialized) {
     console.log('Map not ready for markers yet')
@@ -583,19 +655,15 @@ const addMarkers = () => {
 
   console.log('Adding markers to map...')
 
-  // Rider marker (Blue)
+  // Rider marker (Blue circle with location emoji)
   if (riderLocation.value && riderLocation.value.lat && riderLocation.value.lng) {
-    // Remove existing marker if any
     if (riderMarker) riderMarker.remove()
     
     const el = document.createElement('div')
     el.className = 'custom-marker rider-marker'
     el.innerHTML = `
-      <div class="marker-pulse rider-pulse"></div>
       <div class="marker-icon rider-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-          <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
-        </svg>
+        <span class="marker-emoji">📍</span>
       </div>
       <div class="marker-label">You are here</div>
     `
@@ -614,22 +682,17 @@ const addMarkers = () => {
       .addTo(map)
     
     console.log('✅ Rider marker added at:', riderLocation.value.lat, riderLocation.value.lng)
-  } else {
-    console.log('Rider location not available yet')
   }
 
-  // Shop marker (Orange)
+  // Shop marker (Orange circle with shop emoji)
   if (shopLocation.value && shopLocation.value.lat && shopLocation.value.lng) {
     if (shopMarker) shopMarker.remove()
     
     const el = document.createElement('div')
     el.className = 'custom-marker shop-marker'
     el.innerHTML = `
-      <div class="marker-pulse shop-pulse"></div>
       <div class="marker-icon shop-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-          <path d="M20 4H4v2h16V4zm1 4H3v2h18V8zm-2 4H5v8h14v-8z"/>
-        </svg>
+        <span class="marker-emoji">🏪</span>
       </div>
       <div class="marker-label">Pickup Point</div>
     `
@@ -649,23 +712,17 @@ const addMarkers = () => {
       .addTo(map)
     
     console.log('✅ Shop marker added at:', shopLocation.value.lat, shopLocation.value.lng)
-  } else {
-    console.log('Shop location not available yet')
   }
 
-  // Customer marker (Green)
+  // Customer marker (Green circle with home emoji)
   if (customerLocation.value && customerLocation.value.lat && customerLocation.value.lng) {
     if (customerMarker) customerMarker.remove()
     
     const el = document.createElement('div')
     el.className = 'custom-marker customer-marker'
     el.innerHTML = `
-      <div class="marker-pulse customer-pulse"></div>
       <div class="marker-icon customer-icon">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-          <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 16c-3.86 0-7-3.14-7-7s3.14-7 7-7 7 3.14 7 7-3.14 7-7 7z"/>
-          <path d="M12 8c-2.21 0-4 1.79-4 4s1.79 4 4 4 4-1.79 4-4-1.79-4-4-4z"/>
-        </svg>
+        <span class="marker-emoji">🏠</span>
       </div>
       <div class="marker-label">Delivery Point</div>
     `
@@ -685,8 +742,6 @@ const addMarkers = () => {
       .addTo(map)
     
     console.log('✅ Customer marker added at:', customerLocation.value.lat, customerLocation.value.lng)
-  } else {
-    console.log('Customer location not available yet')
   }
 }
 
@@ -718,7 +773,6 @@ const addRoute = async () => {
   await getRoute()
   
   if (routeCoordinates.value.length > 0) {
-    // Remove existing route if any
     if (map.getLayer('route')) map.removeLayer('route')
     if (map.getSource('route')) map.removeSource('route')
     
@@ -772,21 +826,36 @@ const fitBounds = () => {
 const centerOnRider = () => {
   activePoint.value = 'rider'
   if (map && riderLocation.value && riderLocation.value.lat && riderLocation.value.lng) {
-    map.flyTo({ center: [riderLocation.value.lng, riderLocation.value.lat], zoom: 16, duration: 1000 })
+    map.flyTo({ 
+      center: [riderLocation.value.lng, riderLocation.value.lat], 
+      zoom: 16, 
+      duration: 1000,
+      essential: true
+    })
   }
 }
 
 const centerOnShop = () => {
   activePoint.value = 'shop'
   if (map && shopLocation.value && shopLocation.value.lat && shopLocation.value.lng) {
-    map.flyTo({ center: [shopLocation.value.lng, shopLocation.value.lat], zoom: 16, duration: 1000 })
+    map.flyTo({ 
+      center: [shopLocation.value.lng, shopLocation.value.lat], 
+      zoom: 16, 
+      duration: 1000,
+      essential: true
+    })
   }
 }
 
 const centerOnCustomer = () => {
   activePoint.value = 'customer'
   if (map && customerLocation.value && customerLocation.value.lat && customerLocation.value.lng) {
-    map.flyTo({ center: [customerLocation.value.lng, customerLocation.value.lat], zoom: 16, duration: 1000 })
+    map.flyTo({ 
+      center: [customerLocation.value.lng, customerLocation.value.lat], 
+      zoom: 16, 
+      duration: 1000,
+      essential: true
+    })
   }
 }
 
@@ -802,15 +871,9 @@ watch([riderLocation, shopLocation, customerLocation], () => {
 const loadMapData = async () => {
   loading.value = true
   try {
-    // Fetch order details first
     await fetchOrderDetails()
-    
-    // Get rider location
     await getRiderLocation()
-    
-    // Initialize map (will add markers after load)
     await initMap()
-    
     console.log('🎉 Success! All 3 points loaded!')
   } catch (error) {
     console.error('Error loading map data:', error)
@@ -843,7 +906,6 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-/* Your existing styles remain the same */
 .location-deliver-container {
   position: fixed;
   top: 0;
@@ -867,6 +929,11 @@ onUnmounted(() => {
 }
 
 .back-btn {
+  color: white !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.refresh-btn {
   color: white !important;
   background: rgba(255, 255, 255, 0.1) !important;
 }
@@ -902,22 +969,9 @@ onUnmounted(() => {
   position: relative;
 }
 
-.marker-pulse {
-  position: absolute;
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-  opacity: 0.4;
-  animation: pulse 1.5s infinite;
-}
-
-.rider-pulse { background: #2196f3; }
-.shop-pulse { background: #ff9800; }
-.customer-pulse { background: #4caf50; }
-
 .marker-icon {
-  width: 40px;
-  height: 40px;
+  width: 44px;
+  height: 44px;
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -926,6 +980,14 @@ onUnmounted(() => {
   border: 3px solid white;
   position: relative;
   z-index: 2;
+}
+
+.marker-emoji {
+  font-size: 22px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .rider-icon { background: #2196f3; }
@@ -948,119 +1010,202 @@ onUnmounted(() => {
   pointer-events: none;
 }
 
-@keyframes pulse {
-  0% { transform: scale(0.8); opacity: 0.6; }
-  100% { transform: scale(1.5); opacity: 0; }
-}
-
-/* Location Summary Panel */
-.location-summary-panel {
+/* Master Panel */
+.master-panel {
   position: absolute;
   bottom: 20px;
   left: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  right: 20px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 16px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.15);
   z-index: 10;
-  min-width: 280px;
-  max-width: 350px;
+  max-width: 400px;
+  backdrop-filter: blur(10px);
+  transition: all 0.3s ease;
 }
 
-.location-summary-header {
+@media (min-width: 768px) {
+  .master-panel {
+    right: auto;
+    min-width: 380px;
+  }
+}
+
+.master-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px;
+  cursor: pointer;
+  user-select: none;
+  border-bottom: 1px solid #e0e0e0;
+  transition: background 0.2s;
+}
+
+.master-header:hover {
+  background: rgba(0, 0, 0, 0.02);
+}
+
+.master-header .header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  color: #354d7c;
+  font-size: 1rem;
+}
+
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.refresh-icon-btn {
+  background: rgba(0, 0, 0, 0.05) !important;
+}
+
+.master-header .toggle-icon {
+  color: #354d7c;
+  transition: transform 0.2s;
+}
+
+.master-content {
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 12px;
+}
+
+/* Sections */
+.section {
+  margin-bottom: 20px;
+}
+
+.section:last-child {
+  margin-bottom: 0;
+}
+
+.section-header {
   display: flex;
   align-items: center;
   gap: 8px;
   font-weight: 600;
   color: #354d7c;
-  margin-bottom: 10px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #e0e0e0;
+  font-size: 0.85rem;
+  padding-bottom: 8px;
+  margin-bottom: 12px;
+  border-bottom: 2px solid #f0f0f0;
 }
 
-.location-summary-content {
+.section-content {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
+/* Info Rows */
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.8rem;
+  padding: 4px 0;
+}
+
+.info-row .label {
+  color: #666;
+  font-weight: 500;
+  min-width: 110px;
+}
+
+.info-row .value {
+  color: #333;
+  font-weight: 500;
+  flex: 1;
+}
+
+/* Location Items */
 .location-item {
   display: flex;
   align-items: flex-start;
-  gap: 10px;
-  padding: 8px;
-  border-radius: 8px;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 10px;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: all 0.2s;
+  background: #fafafa;
 }
 
 .location-item:hover {
   background: #f0f0f0;
+  transform: translateX(4px);
 }
 
 .location-item.active {
   background: #e3f2fd;
+  border-left: 3px solid #2196f3;
 }
 
 .location-icon {
-  width: 24px;
-  height: 24px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 18px;
 }
 
-.rider-icon-small { background: #2196f3; border: 2px solid white; box-shadow: 0 0 0 1px #2196f3; }
-.shop-icon-small { background: #ff9800; border: 2px solid white; box-shadow: 0 0 0 1px #ff9800; }
-.customer-icon-small { background: #4caf50; border: 2px solid white; box-shadow: 0 0 0 1px #4caf50; }
+.rider-icon-small { background: #2196f3; }
+.shop-icon-small { background: #ff9800; }
+.customer-icon-small { background: #4caf50; }
 
 .location-details {
   flex: 1;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 4px;
 }
 
 .location-label {
   font-weight: 600;
-  font-size: 0.75rem;
+  font-size: 0.8rem;
+  color: #333;
 }
 
 .location-address {
   color: #666;
   font-size: 0.7rem;
+  line-height: 1.4;
 }
 
 .location-address-small {
   color: #999;
   font-size: 0.65rem;
+  margin-top: 2px;
 }
 
-/* Legend Styles */
-.map-legend {
-  position: absolute;
-  bottom: 20px;
-  right: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  z-index: 10;
-  font-size: 0.75rem;
-  min-width: 180px;
+/* Legend Divider */
+.legend-divider {
+  height: 1px;
+  background: linear-gradient(to right, #e0e0e0, transparent);
+  margin: 8px 0;
 }
 
+/* Legend Items inside panel */
 .legend-item {
   display: flex;
   align-items: center;
-  gap: 10px;
-  margin-bottom: 8px;
+  gap: 12px;
+  padding: 6px 0;
+  font-size: 0.75rem;
 }
 
-.legend-item:last-child { margin-bottom: 0; }
-
 .legend-marker {
-  width: 20px;
-  height: 20px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   border: 2px solid white;
   box-shadow: 0 0 0 2px;
@@ -1071,130 +1216,15 @@ onUnmounted(() => {
 .legend-marker.customer { background: #4caf50; box-shadow: 0 0 0 2px #4caf50; }
 .legend-marker.route { width: 30px; height: 4px; background: #4caf50; border-radius: 2px; box-shadow: none; }
 
-/* Route Info Panel */
-.route-info-panel {
-  position: absolute;
-  top: 80px;
-  right: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  z-index: 10;
-  min-width: 180px;
-}
-
-.route-info-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  color: #4caf50;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.route-info-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.route-info-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 0.75rem;
-}
-
-/* Order Summary Panel */
-.order-summary-panel {
-  position: absolute;
-  top: 80px;
-  left: 20px;
-  background: rgba(255, 255, 255, 0.95);
-  padding: 12px 16px;
-  border-radius: 12px;
-  box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  z-index: 10;
-  min-width: 220px;
-}
-
-.summary-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  color: #354d7c;
-  margin-bottom: 8px;
-  padding-bottom: 6px;
-  border-bottom: 1px solid #e0e0e0;
-}
-
-.summary-content {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.summary-item {
-  display: flex;
-  justify-content: space-between;
-  font-size: 0.75rem;
-}
-
-.summary-item .label {
-  color: #666;
-  font-weight: 500;
-}
-
-.summary-item .value {
-  color: #333;
-  font-weight: 500;
-  text-align: right;
-  max-width: 140px;
-  word-break: break-word;
-}
-
-.summary-item .value.status {
-  padding: 2px 8px;
-  border-radius: 12px;
-  font-size: 0.7rem;
-}
-
-.status-pending { background: #fff3e0; color: #ff9800; }
-.status-paid { background: #e8f5e9; color: #4caf50; }
-.status-accepted { background: #e3f2fd; color: #2196f3; }
-.status-picked { background: #f3e5f5; color: #9c27b0; }
-.status-shipped { background: #fff3e0; color: #ff9800; }
-.status-delivered { background: #e8f5e9; color: #4caf50; }
-.status-completed { background: #e8f5e9; color: #4caf50; }
-.status-cancelled { background: #ffebee; color: #f44336; }
-.status-default { background: #e0e0e0; color: #666; }
-
-/* Map Actions */
-.map-actions {
-  position: absolute;
-  top: 140px;
-  right: 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  z-index: 10;
-}
-
-.action-btn {
-  background: white !important;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  min-width: 40px !important;
-  padding: 6px 12px !important;
-}
-
-.action-btn:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
+/* Status Badges */
+.status-pending { background: #fff3e0; color: #ff9800; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-paid { background: #e8f5e9; color: #4caf50; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-accepted { background: #e3f2fd; color: #2196f3; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-picked { background: #f3e5f5; color: #9c27b0; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-shipped { background: #fff3e0; color: #ff9800; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-delivered { background: #e8f5e9; color: #4caf50; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-completed { background: #e8f5e9; color: #4caf50; padding: 2px 8px; border-radius: 12px; display: inline-block; }
+.status-cancelled { background: #ffebee; color: #f44336; padding: 2px 8px; border-radius: 12px; display: inline-block; }
 
 /* Popup Styles */
 .map-popup {
@@ -1213,17 +1243,34 @@ onUnmounted(() => {
   margin-top: 4px;
 }
 
+/* Scrollbar */
+.master-content::-webkit-scrollbar {
+  width: 6px;
+}
+
+.master-content::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.master-content::-webkit-scrollbar-thumb {
+  background: #888;
+  border-radius: 3px;
+}
+
+.master-content::-webkit-scrollbar-thumb:hover {
+  background: #555;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
-  .map-legend { bottom: 10px; right: 10px; padding: 8px 12px; min-width: 150px; }
-  .location-summary-panel { bottom: 10px; left: 10px; padding: 8px 12px; min-width: 250px; }
-  .route-info-panel { top: 70px; right: 10px; padding: 8px 12px; min-width: 150px; }
-  .order-summary-panel { top: 70px; left: 10px; padding: 8px 12px; min-width: 180px; }
-  .map-actions { top: 130px; right: 10px; }
-  .action-btn { padding: 4px 8px !important; font-size: 0.7rem !important; }
+  .master-panel { bottom: 10px; left: 10px; right: 10px; max-width: none; }
   .marker-label { font-size: 8px; bottom: -22px; }
-  .marker-icon { width: 32px; height: 32px; }
-  .marker-icon svg { width: 18px; height: 18px; }
+  .marker-icon { width: 36px; height: 36px; }
+  .marker-emoji { font-size: 18px; }
+  .section-header { font-size: 0.75rem; }
+  .info-row .label { min-width: 90px; font-size: 0.7rem; }
+  .location-label { font-size: 0.7rem; }
+  .location-icon { width: 32px; height: 32px; font-size: 16px; }
 }
 </style>
-
