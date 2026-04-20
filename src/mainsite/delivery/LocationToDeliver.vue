@@ -1226,3 +1226,4 @@ onUnmounted(() => {
   .marker-icon svg { width: 18px; height: 18px; }
 }
 </style>
+
