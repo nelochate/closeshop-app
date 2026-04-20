@@ -183,7 +183,12 @@ const rateOrder = (orderId) => {
 
 // Check if user has a shop and get its status
 const checkUserShop = async () => {
-  if (!user.value?.id) return
+  if (!user.value?.id) {
+    console.log('❌ No user ID available')
+    return
+  }
+
+  console.log('🔍 Checking shop for user:', user.value.id)
 
   try {
     const { data: shop, error } = await supabase
@@ -191,6 +196,8 @@ const checkUserShop = async () => {
       .select('id, status, business_name, approved_at, updated_at')
       .eq('owner_id', user.value.id)
       .maybeSingle()
+
+    console.log('📊 Shop query result:', { shop, error })
 
     if (error) {
       console.error('Error checking shop:', error)
@@ -204,7 +211,12 @@ const checkUserShop = async () => {
       shopData.value = shop
       hasShop.value = true
       shopCreationStatus.value = shop.status
-      console.log('✅ User has shop:', { id: shop.id, status: shop.status })
+      console.log('✅ User has shop:', { 
+        id: shop.id, 
+        status: shop.status,
+        business_name: shop.business_name,
+        isApproved: shop.status === 'approved'
+      })
       
       // Check if this is a recent approval
       checkRecentApproval()
@@ -213,6 +225,7 @@ const checkUserShop = async () => {
       shopCreationStatus.value = null
       shopData.value = null
       console.log('❌ User does not have a shop yet')
+      console.log('   User ID checked:', user.value.id)
     }
   } catch (err) {
     console.error('Error in checkUserShop:', err)
@@ -220,6 +233,21 @@ const checkUserShop = async () => {
     shopCreationStatus.value = null
     shopData.value = null
   }
+}
+
+// Debug function to check current user
+const debugCurrentUser = async () => {
+  const { data: { user }, error } = await supabase.auth.getUser()
+  console.log('Current user:', user)
+  console.log('User ID:', user?.id)
+  
+  // Check if there's a shop for this user
+  const { data: shop } = await supabase
+    .from('shops')
+    .select('*')
+    .eq('owner_id', user?.id)
+  
+  console.log('Shops found for this user:', shop)
 }
 
 // Handle avatar image loading errors
@@ -667,6 +695,7 @@ const goShopOrBuild = () => {
 onMounted(async () => {
   await loadUser()
   await loadOrderCounts()
+   await debugCurrentUser() 
   await loadSectionItems(selectedSection.value)
   setupShopRealtimeSubscription()
 })
