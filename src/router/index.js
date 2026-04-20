@@ -111,7 +111,7 @@ const routes = [
     component: () => import('@/mainsite/settings/EditProfileview.vue'),
     meta: { requiresAuth: true },
   },
-  
+
   {
     path: '/my-address',
     name: 'my-address',
@@ -235,6 +235,8 @@ const routes = [
     name: 'statusshopcreation',
     component:() => import('@/mainsite/StatusShopCreation.vue'),
   },
+
+  //---- Delivery/Rider related routes ----//
    {
     path: '/RiderApplication',
     name: 'RiderApplication',
@@ -257,6 +259,12 @@ const routes = [
     path: '/LocationToDeliver/:orderId',
     name: 'LocationToDeliver',
     component:() => import('@/mainsite/delivery/LocationToDeliver.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/order-details/:id',
+    name: 'order-details',
+    component: () => import('@/mainsite/delivery/OrderDetailsView.vue'),
     meta: { requiresAuth: true }
   },
 ]

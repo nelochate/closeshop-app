@@ -63,7 +63,7 @@ const convertTo12Hour = (time24: string) => {
   }
 }
 
-// Enhanced fetchOrders function with error handling for mobile
+// Fixed fetchOrders function - removing the incorrect rider relationship
 const fetchOrders = async () => {
   if (!shopId.value) {
     console.log('❌ No shop ID available')
@@ -96,13 +96,6 @@ const fetchOrders = async () => {
           is_default
         ),
         user:profiles!orders_user_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          phone
-        ),
-        rider:profiles!orders_rider_id_fkey (
           id,
           first_name,
           last_name,
@@ -144,7 +137,50 @@ const fetchOrders = async () => {
     if (ordersError) throw ordersError
 
     console.log('✅ Orders loaded:', ordersData?.length || 0)
-    orders.value = ordersData || []
+
+    // Process orders to add rider info separately if needed
+    const ordersWithRiderInfo = await Promise.all((ordersData || []).map(async (order) => {
+      let riderInfo = null
+
+      // If order has a rider_id, fetch rider info from Rider_Registration
+      if (order.rider_id) {
+        const { data: riderData, error: riderError } = await supabase
+          .from('Rider_Registration')
+          .select(`
+            rider_id,
+            first_name,
+            last_name,
+            email,
+            phone,
+            profile_id,
+            profiles:profile_id (
+              first_name,
+              last_name,
+              avatar_url,
+              phone
+            )
+          `)
+          .eq('rider_id', order.rider_id)
+          .maybeSingle()
+
+        if (!riderError && riderData) {
+          riderInfo = {
+            id: riderData.profile_id,
+            first_name: riderData.first_name,
+            last_name: riderData.last_name,
+            avatar_url: riderData.profiles?.avatar_url,
+            phone: riderData.phone
+          }
+        }
+      }
+
+      return {
+        ...order,
+        rider: riderInfo
+      }
+    }))
+
+    orders.value = ordersWithRiderInfo
   } catch (err) {
     console.error('❌ Error in fetchOrders:', err)
     ordersError.value = 'Error loading orders. Please try again.'
@@ -152,6 +188,7 @@ const fetchOrders = async () => {
     loadingOrders.value = false
   }
 }
+
 // Order actions with mobile confirmation
 const approvePayment = async (orderId: string) => {
   if (!confirm('Mark this payment as approved?')) return
@@ -755,13 +792,13 @@ const getTransactionNumber = (order: any): string => {
 // Function to format delivery option with meetup details - IMPROVED VERSION
 const getOrderDeliveryDisplay = (order: any): string => {
   if (!order.delivery_option) return 'Not specified'
-  
+
   // Debug log to see what's in the database
   console.log('DEBUG - Delivery option:', order.delivery_option)
-  
+
   // Normalize the delivery option
   const deliveryOption = order.delivery_option.toLowerCase().trim()
-  
+
   // List of delivery options that should show as "Meetup(place)"
   const meetupVariations = [
     'meetup',
@@ -776,18 +813,18 @@ const getOrderDeliveryDisplay = (order: any): string => {
     'store pickup',
     'in-store pickup'
   ]
-  
+
   // Check if it's a meetup variation
-  const isMeetup = meetupVariations.some(variation => 
-    deliveryOption === variation || 
+  const isMeetup = meetupVariations.some(variation =>
+    deliveryOption === variation ||
     deliveryOption.includes(variation) ||
     deliveryOption.replace(/\s+/g, '') === variation.replace(/\s+/g, '') ||
     deliveryOption.replace(/[-\s]/g, '') === variation.replace(/[-\s]/g, '')
   )
-  
+
   if (isMeetup) {
     const meetupPlace = meetupDetails.value || ''
-    
+
     if (meetupPlace) {
       if (isMobile.value && meetupPlace.length > 15) {
         return `Meetup(${meetupPlace.substring(0, 12)}...)`
@@ -796,11 +833,11 @@ const getOrderDeliveryDisplay = (order: any): string => {
     }
     return 'Meetup'
   }
-  
+
   // For non-meetup options, return the original value
   // But clean it up a bit
   const displayOption = order.delivery_option.trim()
-  
+
   // Common delivery option formatting
   const optionMap: Record<string, string> = {
     'delivery': 'Delivery',
@@ -816,13 +853,13 @@ const getOrderDeliveryDisplay = (order: any): string => {
     'door to door': 'Door-to-Door Delivery',
     'door-to-door': 'Door-to-Door Delivery'
   }
-  
+
   // Return formatted version if available, otherwise capitalize first letter
   const formattedOption = optionMap[deliveryOption]
   if (formattedOption) {
     return formattedOption
   }
-  
+
   // Capitalize first letter of each word for display
   return displayOption
     .split(' ')

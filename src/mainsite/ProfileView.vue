@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
@@ -17,15 +17,112 @@ const user = ref(null)
 const fullName = ref('')
 const hasShop = ref(false)
 const shopCreationStatus = ref(null)
-const showStatusInfo = ref(false)
-const statusLoading = ref(false)
+
+// Notification state
+const showApprovalToast = ref(false)
+const toastMessage = ref('')
+const toastColor = ref('success')
+const toastIcon = ref('mdi-check-circle')
+
+const shopData = ref(null)
 
 // Rider state
 const isRider = ref(false)
 const riderStatus = ref(null)
-const showRiderTermsDialog = ref(false)
-const agreeRiderTerms = ref(false)
 const riderApplicationId = ref(null)
+
+let shopSubscription = null
+// Set up real-time subscription for shop status
+const setupShopRealtimeSubscription = () => {
+  if (!user.value?.id) return
+  
+  // Clean up existing subscription
+  if (shopSubscription) {
+    shopSubscription.unsubscribe()
+  }
+  
+  shopSubscription = supabase
+    .channel('shop-status-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'shops',
+        filter: `owner_id=eq.${user.value.id}`
+      },
+      (payload) => {
+        console.log('Shop status changed:', payload)
+        const updatedShop = payload.new
+        const oldShop = payload.old
+        
+        if (updatedShop) {
+          const wasApproved = hasShop.value && shopCreationStatus.value === 'approved'
+          const isNowApproved = updatedShop.status === 'approved'
+          
+          // Update local state
+          hasShop.value = updatedShop.status === 'approved'
+          shopCreationStatus.value = updatedShop.status
+          
+          console.log('Updated shop status:', { 
+            hasShop: hasShop.value, 
+            status: shopCreationStatus.value 
+          })
+          
+          // Show toast notification if status changed to approved
+          if (!wasApproved && isNowApproved) {
+            showApprovalNotification()
+          }
+        }
+      }
+    )
+    .subscribe()
+}
+
+// Check if shop was recently approved (for first load after approval)
+const checkRecentApproval = () => {
+  if (!shopData || shopCreationStatus.value !== 'approved') return false
+  
+  // Check if this is the first time seeing the approved status
+  const lastApprovedShown = localStorage.getItem(`shop_approved_shown_${user.value?.id}`)
+  const now = new Date().getTime()
+  
+  // If never shown before, show notification
+  if (!lastApprovedShown) {
+    localStorage.setItem(`shop_approved_shown_${user.value?.id}`, now.toString())
+    showApprovalNotification()
+    return true
+  }
+  
+  // If shown more than 24 hours ago, show again (optional)
+  const lastShown = parseInt(lastApprovedShown)
+  const hoursSinceLastShown = (now - lastShown) / (1000 * 60 * 60)
+  
+  if (hoursSinceLastShown > 24) {
+    localStorage.setItem(`shop_approved_shown_${user.value?.id}`, now.toString())
+    showApprovalNotification()
+    return true
+  }
+  
+  return false
+}
+
+// Show approval notification
+const showApprovalNotification = () => {
+  toastMessage.value = '🎉 Congratulations! Your shop has been approved! You can now start selling.'
+  toastColor.value = 'success'
+  toastIcon.value = 'mdi-check-circle'
+  showApprovalToast.value = true
+}
+
+// Add this function to clean up subscription
+const cleanupShopSubscription = () => {
+  if (shopSubscription) {
+    shopSubscription.unsubscribe()
+    shopSubscription = null
+  }
+}
+
 //for navigation items
 const sectionItems = ref([]) // Holds items for the selected section
 const isLoadingSection = ref(false)
@@ -84,8 +181,77 @@ const rateOrder = (orderId) => {
   }
 }
 
+// Check if user has a shop and get its status
+const checkUserShop = async () => {
+  if (!user.value?.id) {
+    console.log('❌ No user ID available')
+    return
+  }
+
+  console.log('🔍 Checking shop for user:', user.value.id)
+
+  try {
+    const { data: shop, error } = await supabase
+      .from('shops')
+      .select('id, status, business_name, approved_at, updated_at')
+      .eq('owner_id', user.value.id)
+      .maybeSingle()
+
+    console.log('📊 Shop query result:', { shop, error })
+
+    if (error) {
+      console.error('Error checking shop:', error)
+      hasShop.value = false
+      shopCreationStatus.value = null
+      shopData.value = null
+      return
+    }
+
+    if (shop) {
+      shopData.value = shop
+      hasShop.value = true
+      shopCreationStatus.value = shop.status
+      console.log('✅ User has shop:', { 
+        id: shop.id, 
+        status: shop.status,
+        business_name: shop.business_name,
+        isApproved: shop.status === 'approved'
+      })
+      
+      // Check if this is a recent approval
+      checkRecentApproval()
+    } else {
+      hasShop.value = false
+      shopCreationStatus.value = null
+      shopData.value = null
+      console.log('❌ User does not have a shop yet')
+      console.log('   User ID checked:', user.value.id)
+    }
+  } catch (err) {
+    console.error('Error in checkUserShop:', err)
+    hasShop.value = false
+    shopCreationStatus.value = null
+    shopData.value = null
+  }
+}
+
+// Debug function to check current user
+const debugCurrentUser = async () => {
+  const { data: { user }, error } = await supabase.auth.getUser()
+  console.log('Current user:', user)
+  console.log('User ID:', user?.id)
+  
+  // Check if there's a shop for this user
+  const { data: shop } = await supabase
+    .from('shops')
+    .select('*')
+    .eq('owner_id', user?.id)
+  
+  console.log('Shops found for this user:', shop)
+}
+
 // Handle avatar image loading errors
-const handleAvatarError = (event) => {
+const handleAvatarError = () => {
   console.log('Avatar failed to load, falling back to initials')
   avatarUrl.value = null
   // The template will automatically show initials
@@ -94,19 +260,19 @@ const handleAvatarError = (event) => {
 // Helper function to get Google avatar URL (handles both custom and default avatars)
 const getGoogleAvatarUrl = (userData) => {
   if (!userData) return null
-  
+
   // Check identities array first (most reliable for Google)
   if (userData.identities && userData.identities.length > 0) {
     const identity = userData.identities.find(i => i.provider === 'google')
     if (identity && identity.identity_data) {
       const identityData = identity.identity_data
-      
+
       // Google provides avatar_url in identity_data
       if (identityData.avatar_url) {
         console.log('Found Google avatar URL:', identityData.avatar_url)
         return identityData.avatar_url
       }
-      
+
       // Sometimes Google uses 'picture' field
       if (identityData.picture) {
         console.log('Found Google picture URL:', identityData.picture)
@@ -114,24 +280,24 @@ const getGoogleAvatarUrl = (userData) => {
       }
     }
   }
-  
+
   // Check user_metadata as fallback
   if (userData.user_metadata?.avatar_url) {
     return userData.user_metadata.avatar_url
   }
-  
+
   // Check raw_user_meta_data
   if (userData.raw_user_meta_data?.avatar_url) {
     return userData.raw_user_meta_data.avatar_url
   }
-  
+
   return null
 }
 
 // Helper to get user initials for fallback avatar
 const getUserInitials = (fullName) => {
   if (!fullName || fullName === 'User') return '?'
-  
+
   const names = fullName.trim().split(' ')
   if (names.length === 1) {
     return names[0].charAt(0).toUpperCase()
@@ -142,7 +308,7 @@ const getUserInitials = (fullName) => {
 // NEW HELPER FUNCTION: Get user display name from various auth provider formats
 const getUserDisplayName = (userData) => {
   if (!userData) return 'User'
-  
+
   // Check user_metadata first
   if (userData.user_metadata) {
     const metadata = userData.user_metadata
@@ -152,7 +318,7 @@ const getUserDisplayName = (userData) => {
       return `${metadata.first_name} ${metadata.last_name}`.trim()
     }
   }
-  
+
   // Check identities array (Google stores full_name here)
   if (userData.identities && userData.identities.length > 0) {
     const identityData = userData.identities[0].identity_data
@@ -161,13 +327,61 @@ const getUserDisplayName = (userData) => {
       if (identityData.name) return identityData.name
     }
   }
-  
+
   // Fallback to email username
   if (userData.email) {
     return userData.email.split('@')[0]
   }
-  
+
   return 'User'
+}
+
+// Check if user is a rider
+const checkRiderStatus = async () => {
+  if (!user.value?.id) return
+
+  try {
+    // Get profile first
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('id')
+      .eq('id', user.value.id)
+      .single()
+
+    if (profileError) {
+      console.error('Error fetching profile:', profileError)
+      return
+    }
+
+    // Query Rider_Registration
+    const { data, error } = await supabase
+      .from('Rider_Registration')
+      .select('rider_id, status')
+      .eq('profile_id', profile.id)
+      .maybeSingle()
+
+    if (error && error.code !== 'PGRST116') {
+      console.error('Error checking rider status:', error.message)
+    }
+
+    isRider.value = !!data
+    riderStatus.value = data?.status || null
+    riderApplicationId.value = data?.rider_id || null
+
+    console.log('Rider status check result:', {
+      isRider: isRider.value,
+      status: riderStatus.value
+    })
+  } catch (err) {
+    console.error('Error checking rider:', err)
+  }
+}
+
+// Rider navigation - Only for approved riders
+const goToRiderDashboard = () => {
+  if (isRider.value && riderStatus.value === 'approved') {
+    router.push('/RiderDashboard')
+  }
 }
 
 // Load the user info
@@ -175,13 +389,13 @@ const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
     user.value = authStore.userData
     fullName.value = getUserDisplayName(authStore.userData)
-    
+
     // Priority 1: Check if user has custom avatar in profiles table
-    if (authStore.profile.avatar_url && 
-        !authStore.profile.avatar_url.includes('googleusercontent.com')) {
+    if (authStore.profile.avatar_url &&
+      !authStore.profile.avatar_url.includes('googleusercontent.com')) {
       avatarUrl.value = authStore.profile.avatar_url
       console.log('Using custom profile avatar')
-    } 
+    }
     // Priority 2: Use Google's avatar (even default ones)
     else {
       const googleAvatar = getGoogleAvatarUrl(authStore.userData)
@@ -193,6 +407,11 @@ const loadUser = async () => {
         console.log('No avatar found, will use initials')
       }
     }
+
+    // After loading user, check for shop status
+    await checkUserShop()
+    await checkRiderStatus()
+    setupShopRealtimeSubscription() 
   } else {
     const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
@@ -201,118 +420,28 @@ const loadUser = async () => {
     }
     user.value = userData.user
     fullName.value = getUserDisplayName(userData.user)
-    
+
     // Same avatar logic as above
-    if (authStore.profile?.avatar_url && 
-        !authStore.profile.avatar_url.includes('googleusercontent.com')) {
+    if (authStore.profile?.avatar_url &&
+      !authStore.profile.avatar_url.includes('googleusercontent.com')) {
       avatarUrl.value = authStore.profile.avatar_url
     } else {
       const googleAvatar = getGoogleAvatarUrl(userData.user)
       avatarUrl.value = googleAvatar || null
     }
-    
+
     console.log('Avatar loading debug:', {
       fullName: fullName.value,
       hasGoogleAvatar: !!getGoogleAvatarUrl(userData.user),
       avatarUrl: avatarUrl.value
     })
+
+    await checkUserShop()
+    await checkRiderStatus()
+    setupShopRealtimeSubscription() 
   }
 }
 
-// Check if user already has a shop in Supabase
-const checkUserShop = async () => {
-  if (!user.value?.id) return
-
-  try {
-    const { data, error } = await supabase
-      .from('shops')
-      .select('id, status, created_at')
-      .eq('owner_id', user.value.id)
-      .maybeSingle()
-
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error checking shop:', error.message)
-    }
-
-    hasShop.value = !!data
-    shopCreationStatus.value = data?.status || null
-    
-    console.log('Shop lookup:', data, 'hasShop:', hasShop.value)
-  } catch (err) {
-    console.error('Error checking shop:', err)
-  }
-}
-
-// Check if user is a rider - FIXED
-const checkRiderStatus = async () => {
-  if (!user.value?.id) return
-  
-  try {
-    // Get profile first
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', user.value.id)
-      .single()
-    
-    if (profileError) {
-      console.error('Error fetching profile:', profileError)
-      return
-    }
-    
-    // Query Rider_Registration
-    const { data, error } = await supabase
-      .from('Rider_Registration')
-      .select('rider_id, status')
-      .eq('profile_id', profile.id)
-      .maybeSingle()
-    
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error checking rider status:', error.message)
-    }
-    
-    isRider.value = !!data
-    riderStatus.value = data?.status || null
-    riderApplicationId.value = data?.rider_id || null
-    
-    console.log('Rider status check result:', { 
-      isRider: isRider.value, 
-      status: riderStatus.value 
-    })
-  } catch (err) {
-    console.error('Error checking rider:', err)
-  }
-}
-
-// Rider navigation
-const goToRiderPage = () => {
-  if (isRider.value && riderStatus.value === 'approved') {
-    router.push('/RiderDashboard')
-  } else if (isRider.value && riderStatus.value === 'pending') {
-    alert('Your rider application is still pending review. Please wait for approval.')
-  } else if (isRider.value && riderStatus.value === 'rejected') {
-    const confirmReapply = confirm('Your rider application was rejected. Would you like to reapply with corrected information?')
-    if (confirmReapply) {
-      showRiderTermsDialog.value = true
-      agreeRiderTerms.value = false
-    }
-  } else {
-    showRiderTermsDialog.value = true
-    agreeRiderTerms.value = false
-  }
-}
-
-// Proceed to application
-const proceedToRiderApplication = () => {
-  if (agreeRiderTerms.value) {
-    showRiderTermsDialog.value = false
-    if (riderStatus.value === 'rejected') {
-      router.push('/RiderApplication?reapply=true')
-    } else {
-      router.push('/RiderApplication')
-    }
-  }
-}
 // FIXED: Load order counts for each section with correct status mapping
 const loadOrderCounts = async () => {
   if (!user.value?.id) return
@@ -538,112 +667,48 @@ const viewOrder = (orderId) => {
   }
 }
 
-// IMPROVED: Check shop status with loading
-const checkShopStatus = async () => {
-  statusLoading.value = true
-  try {
-    if (!user.value?.id) {
-      showStatusInfo.value = false
-      return
-    }
 
-    const { data, error } = await supabase
-      .from('shops')
-      .select('id, status, business_name, created_at')
-      .eq('owner_id', user.value.id)
-      .maybeSingle()
 
-    if (error && error.code !== 'PGRST116') {
-      console.error('Error checking shop status:', error)
-      return
-    }
-
-    if (data) {
-      shopCreationStatus.value = data.status
-      hasShop.value = data.status === 'approved'
-      
-      // Show status info card if shop exists but not approved
-      if (data.status !== 'approved') {
-        showStatusInfo.value = true
-      }
-    } else {
-      shopCreationStatus.value = null
-      hasShop.value = false
-      showStatusInfo.value = false
-    }
-  } catch (err) {
-    console.error('Error checking shop status:', err)
-  } finally {
-    statusLoading.value = false
-  }
-}
-
-// IMPROVED: Get status icon and color
-const getStatusIcon = (status) => {
-  switch (status) {
-    case 'approved':
-      return { icon: 'mdi-check-circle', color: 'success' }
-    case 'pending':
-      return { icon: 'mdi-clock-outline', color: 'warning' }
-    case 'rejected':
-      return { icon: 'mdi-alert-circle', color: 'error' }
-    case 'under_review':
-      return { icon: 'mdi-magnify', color: 'info' }
-    default:
-      return { icon: 'mdi-help-circle', color: 'grey' }
-  }
-}
-
-// IMPROVED: Get status message
-const getStatusMessage = (status) => {
-  switch (status) {
-    case 'approved':
-      return 'Your shop has been approved!'
-    case 'pending':
-      return 'Your shop application is pending review.'
-    case 'rejected':
-      return 'Your shop application was rejected.'
-    case 'under_review':
-      return 'Your shop is currently under review.'
-    default:
-      return 'No shop application found.'
-  }
-}
-
-// IMPROVED: Shop button logic
 const goShopOrBuild = () => {
-  if (hasShop.value && shopCreationStatus.value === 'approved') {
-    router.push('/usershop')
+  console.log('Shop button clicked:', {
+    hasShop: hasShop.value,
+    status: shopCreationStatus.value
+  })
+
+  // If user has a shop
+  if (hasShop.value) {
+    // Check if shop is approved
+    if (shopCreationStatus.value === 'approved') {
+      // Approved shop - go to usershop
+      router.push('/usershop')
+    } else {
+      // Shop exists but not approved yet - go to status page
+      router.push('/statusshopcreation')
+    }
   } else {
+    // User doesn't have a shop, go to creation page
     router.push('/shop-build')
   }
-}
-
-// IMPROVED: Navigate to status page
-const navigateToStatusPage = () => {
-  router.push('/statusshopcreation')
-}
-
-// IMPROVED: Close status info
-const closeStatusInfo = () => {
-  showStatusInfo.value = false
 }
 
 // Run when component mounts
 onMounted(async () => {
   await loadUser()
-  await checkShopStatus()
-  await checkRiderStatus()
   await loadOrderCounts()
+   await debugCurrentUser() 
   await loadSectionItems(selectedSection.value)
+  setupShopRealtimeSubscription()
 })
 
-// Watch for user changes → re-check shop ownership
+onUnmounted(() => {
+  cleanupShopSubscription()
+})
+
+// Watch for user changes
 watch(
   () => user.value?.id,
   async (newId) => {
     if (newId) {
-      await checkShopStatus()
       await checkRiderStatus()
       await loadOrderCounts()
       await loadSectionItems(selectedSection.value)
@@ -691,97 +756,35 @@ onBeforeRouteUpdate((to, from, next) => {
   <v-app>
     <!-- Main Profile Content -->
     <v-main class="profile-main">
-      <!-- Action Buttons Container - Top Left -->
-      <div class="action-buttons-container">
-        <!-- Shop Button -->
-        <v-btn @click="goShopOrBuild" class="action-btn shop-btn" size="large" elevation="2">
-          <v-icon start size="25">mdi-storefront-outline</v-icon>
-          {{ hasShop ? 'My Shop' : 'Create Shop' }}
-        </v-btn>
-        
-        <!-- Rider/Delivery Button -->
-        <v-btn @click="goToRiderPage" class="action-btn rider-btn" size="large" elevation="2">
-          <v-icon start size="25">mdi-motorbike</v-icon>
-          <template v-if="isRider && riderStatus === 'approved'">
-            Rider Dashboard
-          </template>
-          <template v-else-if="riderStatus === 'pending'">
-            Application Pending
-          </template>
-          <template v-else>
-            Be a Rider
-          </template>
-        </v-btn>
-      </div>
 
-      <!-- Settings Icon - Top Right (ORIGINAL POSITION) -->
-      <v-btn
-        variant="text"
-        icon
-        class="settings-btn"
-        @click="router.push('/settings')"
-      >
-        <v-icon size="29">mdi-cog</v-icon>
+    <!-- Action Buttons Container -->
+    <div class="top-actions-container">
+      <!-- Shop Button - Left -->
+      <v-btn @click="goShopOrBuild" class="action-btn shop-btn" elevation="2">
+        <v-icon start size="20">mdi-storefront-outline</v-icon>
+        {{ hasShop ? 'My Shop' : 'Create Shop' }}
       </v-btn>
 
-      <!-- Check Status Button - Top Center (NEW POSITION) -->
-      <v-btn
-        @click="navigateToStatusPage"
-        class="status-btn"
-        size="small"
-        :loading="statusLoading"
-        variant="outlined"
-        :color="shopCreationStatus === 'approved' ? 'success' : 'primary'"
-      >
-        <v-icon start size="18">{{ 
-          shopCreationStatus === 'approved' ? 'mdi-check-circle' :
-          shopCreationStatus === 'pending' ? 'mdi-clock-outline' :
-          shopCreationStatus === 'rejected' ? 'mdi-alert-circle' :
-          'mdi-information'
-        }}</v-icon>
-        Check Status
-      </v-btn>
-
-      <!-- IMPROVED: Status Info Card (Shows when shop is not approved) -->
-      <v-card
-        v-if="showStatusInfo && shopCreationStatus && shopCreationStatus !== 'approved'"
-        class="status-info-card"
-        elevation="3"
-      >
-        <v-card-title class="status-card-header">
-          <div class="status-header-content">
-            <v-icon :color="getStatusIcon(shopCreationStatus).color" size="24">
-              {{ getStatusIcon(shopCreationStatus).icon }}
-            </v-icon>
-            <span class="status-title">Shop Application Status</span>
-          </div>
-          <v-btn icon size="small" @click="closeStatusInfo" variant="text">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </v-card-title>
-        <v-card-text class="status-card-content">
-          <div class="status-message">
-            {{ getStatusMessage(shopCreationStatus) }}
-          </div>
-          <div v-if="shopCreationStatus === 'pending'" class="status-hint">
-            Please wait 1-2 business days for review.
-          </div>
-          <div v-if="shopCreationStatus === 'rejected'" class="status-hint">
-            Check email for details or re-apply with corrections.
-          </div>
-        </v-card-text>
-        <v-card-actions class="status-card-actions">
+      <!-- Right Side Buttons Container -->
+        <div class="right-buttons-container">
+          <!-- Rider Dashboard Icon - Only shows for approved riders -->
           <v-btn
-            color="primary"
-            variant="flat"
-            @click="navigateToStatusPage"
-            block
-            size="small"
+            v-if="isRider && riderStatus === 'approved'"
+            variant="text"
+            icon
+            class="rider-dashboard-btn"
+            @click="goToRiderDashboard"
+            title="Rider Dashboard"
           >
-            View Details
+            <v-icon size="28">mdi-motorbike</v-icon>
           </v-btn>
-        </v-card-actions>
-      </v-card>
+
+          <!-- Settings Icon -->
+          <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
+            <v-icon size="28">mdi-cog</v-icon>
+          </v-btn>
+        </div>
+      </div>
 
       <!-- Profile Header -->
       <div class="profile-header">
@@ -789,48 +792,32 @@ onBeforeRouteUpdate((to, from, next) => {
           <div class="avatar-container">
             <v-avatar size="80" color="primary" class="avatar-glow">
               <!-- Show Google/Custom avatar if available -->
-              <v-img 
-                v-if="avatarUrl" 
-                :src="avatarUrl" 
-                cover
-                @error="handleAvatarError"
-              />
+              <v-img v-if="avatarUrl" :src="avatarUrl" cover @error="handleAvatarError" />
               <!-- Show initials if no avatar or avatar failed to load -->
               <div v-else class="initials-avatar">
                 {{ getUserInitials(fullName || user?.email?.split('@')[0] || 'U') }}
               </div>
             </v-avatar>
-            <v-btn
-              class="edit-btn"
-              color="primary"
-              icon
-              elevation="4"
-              @click="router.push('/edit-profile')"
-            >
+            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
               <v-icon class="edit-icon">mdi-pencil</v-icon>
             </v-btn>
           </div>
 
-        <!-- Name above Email -->
-        <div class="info-block">
-          <h2 class="name-row">{{ fullName || (user?.email?.split('@')[0]) || 'User' }}</h2>
-          <p class="email-row">{{ user?.email || '...' }}</p>
+          <!-- Name above Email -->
+          <div class="info-block">
+            <h2 class="name-row">{{ fullName || (user?.email?.split('@')[0]) || 'User' }}</h2>
+            <p class="email-row">{{ user?.email || '...' }}</p>
+          </div>
         </div>
       </div>
-    </div>
 
       <v-divider thickness="2" class="my-4"></v-divider>
 
       <!-- Enhanced Icon Navigation -->
       <div class="shopee-nav-section">
         <div class="nav-grid">
-          <div
-            v-for="item in navItems"
-            :key="item.id"
-            class="nav-item"
-            :class="{ active: selectedSection === item.id }"
-            @click="handleNavClick(item.id)"
-          >
+          <div v-for="item in navItems" :key="item.id" class="nav-item" :class="{ active: selectedSection === item.id }"
+            @click="handleNavClick(item.id)">
             <div class="nav-icon-container">
               <div class="nav-icon-wrapper" :class="{ active: selectedSection === item.id }">
                 <v-icon :color="selectedSection === item.id ? 'white' : item.color" size="24">
@@ -855,14 +842,10 @@ onBeforeRouteUpdate((to, from, next) => {
           </div>
 
           <div v-else class="section-content">
+
             <!-- Enhanced Order Cards -->
             <div v-if="sectionItems.length > 0" class="orders-container">
-              <v-card
-                v-for="order in sectionItems"
-                :key="order.id"
-                class="order-card elevation-2"
-                rounded="lg"
-              >
+              <v-card v-for="order in sectionItems" :key="order.id" class="order-card elevation-2" rounded="lg">
                 <v-card-title class="order-header">
                   <div class="order-info">
                     <div class="order-number">Order #{{ order.transaction_number }}</div>
@@ -875,17 +858,22 @@ onBeforeRouteUpdate((to, from, next) => {
 
                 <v-divider></v-divider>
 
-                <!-- Order Items -->
+                <!-- Order Items with Fixed Image Container -->
                 <div class="order-items">
                   <div v-for="item in order.items" :key="item.id" class="order-item">
-                    <v-img
-                      :src="item.product_img || '/placeholder-product.png'"
-                      height="80"
-                      width="80"
-                      cover
-                      class="product-image"
-                      @click="viewProduct(item.product_id)"
-                    />
+                    <!-- Fixed Image Container -->
+                    <div class="product-image-container">
+                      <v-img :src="item.product_img || '/placeholder-product.png'"
+                        :lazy-src="'/placeholder-product.png'" cover class="product-image"
+                        @click="viewProduct(item.product_id)" aspect-ratio="1">
+                        <template v-slot:placeholder>
+                          <v-row class="fill-height ma-0" align="center" justify="center">
+                            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+                          </v-row>
+                        </template>
+                      </v-img>
+                    </div>
+
                     <div class="item-details">
                       <h4 class="product-name" @click="viewProduct(item.product_id)">
                         {{ item.product_name || 'Product' }}
@@ -913,33 +901,17 @@ onBeforeRouteUpdate((to, from, next) => {
                     <strong>Total: ₱{{ order.total_amount?.toLocaleString() }}</strong>
                   </div>
                   <div class="action-buttons">
-                    <v-btn
-                      color="primary"
-                      variant="outlined"
-                      size="small"
-                      @click="viewOrder(order.id)"
-                    >
+                    <v-btn color="primary" variant="outlined" size="small" @click="viewOrder(order.id)">
                       <v-icon left small>mdi-receipt</v-icon>
                       Details
                     </v-btn>
-                    <v-btn
-                      v-if="
-                        order.payment_status === 'paid' && order.delivery_status !== 'delivered'
-                      "
-                      color="success"
-                      variant="flat"
-                      size="small"
-                    >
+                    <v-btn v-if="order.payment_status === 'paid' && order.delivery_status !== 'delivered'"
+                      color="success" variant="flat" size="small">
                       <v-icon left small>mdi-truck</v-icon>
                       Track
                     </v-btn>
-                    <v-btn
-                      v-if="order.delivery_status === 'delivered'"
-                      color="secondary"
-                      variant="flat"
-                      size="small"
-                      @click="rateOrder(order.id)"
-                    >
+                    <v-btn v-if="order.delivery_status === 'delivered'" color="secondary" variant="flat" size="small"
+                      @click="rateOrder(order.id)">
                       <v-icon left small>mdi-star</v-icon>
                       Review
                     </v-btn>
@@ -962,13 +934,8 @@ onBeforeRouteUpdate((to, from, next) => {
                 }}
               </p>
 
-              <v-btn
-                v-if="selectedSection === 'my-purchases'"
-                color="primary"
-                class="empty-action-btn"
-                @click="router.push('/')"
-                size="large"
-              >
+              <v-btn v-if="selectedSection === 'my-purchases'" color="primary" class="empty-action-btn"
+                @click="router.push('/')" size="large">
                 <v-icon left>mdi-shopping</v-icon>
                 Start Shopping
               </v-btn>
@@ -978,71 +945,22 @@ onBeforeRouteUpdate((to, from, next) => {
       </div>
     </v-main>
 
-    <!-- Rider Terms and Conditions Dialog -->
-    <v-dialog v-model="showRiderTermsDialog" max-width="600" persistent>
-      <v-card>
-        <v-card-title class="text-h5 primary-bg white--text">
-          Terms and Conditions for Riders
-        </v-card-title>
-        <v-card-text class="mt-4">
-          <div class="terms-content">
-            <h4>1. Eligibility</h4>
-            <p>You must be at least 18 years old and possess a valid driver's license to become a rider.</p>
-            
-            <h4>2. Vehicle Requirements</h4>
-            <p>Your vehicle must be properly registered, insured, and in good working condition.</p>
-            
-            <h4>3. Background Check</h4>
-            <p>We reserve the right to conduct background checks and verify all submitted documents.</p>
-            
-            <h4>4. Code of Conduct</h4>
-            <p>Riders must maintain professional conduct, follow traffic rules, and provide excellent service.</p>
-            
-            <h4>5. Fees and Commissions</h4>
-            <p>A commission fee will be deducted from each successful delivery. Rates are subject to change with notice.</p>
-            
-            <h4>6. Delivery Responsibilities</h4>
-            <p>You are responsible for ensuring timely and safe delivery of orders. Any damages or delays may affect your rider status.</p>
-            
-            <h4>7. Account Termination</h4>
-            <p>Violation of terms may result in immediate termination of rider status and account suspension.</p>
-            
-            <h4>8. Data Privacy</h4>
-            <p>Your personal information will be handled in accordance with our Privacy Policy.</p>
-          </div>
-          
-          <v-checkbox
-            v-model="agreeRiderTerms"
-            class="mt-4"
-          >
-            <template v-slot:label>
-              <span>
-                I have read and agree to the 
-                <strong>Terms and Conditions</strong> for becoming a rider.
-              </span>
-            </template>
-          </v-checkbox>
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn 
-            color="grey" 
-            variant="text" 
-            @click="showRiderTermsDialog = false"
-          >
-            Cancel
-          </v-btn>
-          <v-btn 
-            color="primary" 
-            @click="proceedToRiderApplication"
-            :disabled="!agreeRiderTerms"
-          >
-            I Agree & Proceed
-            <v-icon right>mdi-arrow-right</v-icon>
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <!-- Success Toast Notification -->
+    <v-snackbar v-model="showApprovalToast" :color="toastColor" :timeout="6000" location="top" rounded="lg"
+      elevation="24">
+      <template v-slot:activator="{ props }">
+        <!-- This is just for the snackbar itself -->
+      </template>
+
+      <div class="d-flex align-center">
+        <v-icon :icon="toastIcon" size="28" class="mr-3" color="white"></v-icon>
+        <div class="flex-grow-1">
+          <strong class="text-white">Shop Approved!</strong>
+          <div class="text-white text-caption">{{ toastMessage }}</div>
+        </div>
+        <v-btn variant="text" icon="mdi-close" color="white" @click="showApprovalToast = false" size="small"></v-btn>
+      </div>
+    </v-snackbar>
 
     <!-- Reusable BottomNav -->
     <BottomNav v-model="activeTab" />
@@ -1089,125 +1007,86 @@ onBeforeRouteUpdate((to, from, next) => {
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
 }
 
-/* Shop Button specific styles */
-.shop-btn {
-  background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
-  color: #464749 !important;
-  margin-left: -14px;
-}
-
-/* Rider Button specific styles */
-.rider-btn {
-  background: linear-gradient(135deg, #ff6b35, #ff8c5a) !important;
-  color: white !important;
-  margin-left: -14px;
-}
-
-.rider-btn:hover {
-  background: linear-gradient(135deg, #ff5a22, #ff7a46) !important;
-}
-
-/* Settings Button - Top Right */
-.settings-btn {
-  margin-top: 23px;
+/*Top buttons */
+/* Top Actions Container - Single row with flex */
+.top-actions-container {
   position: absolute;
-  top: 20px;
-  right: 16px;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 1200;
-  color: #ffffff;
-  width: 40px;
-  height: 40px;
-}
-
-/* Check Status Button - Top Center */
-.status-btn {
-  position: absolute;
-  top: 27px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 1200;
-  text-transform: none;
-  border-radius: 20px !important;
-  font-weight: 600;
-  font-size: 0.85rem;
-  padding: 4px 16px;
-  height: 30px !important;
-  border-width: 2px !important;
-  transition: all 0.3s ease;
-  backdrop-filter: blur(10px);
-  background: rgba(255, 255, 255, 0.9) !important;
-  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1) !important;
-  white-space: nowrap;
-  margin-top: 22px !important;
-  margin-left: 15px;
-}
-
-.status-btn:hover {
-  transform: translateX(-50%) translateY(-2px);
-  box-shadow: 0 6px 15px rgba(0, 0, 0, 0.2) !important;
-}
-
-/* IMPROVED: Status Info Card */
-.status-info-card {
-  margin: 90px 16px 16px;
-  border-radius: 16px;
-  overflow: hidden;
-  animation: slideDown 0.4s ease-out;
-  border: 2px solid #e3f2fd;
-  background: linear-gradient(135deg, #ffffff, #f8fafc);
-}
-
-@keyframes slideDown {
-  from {
-    opacity: 0;
-    transform: translateY(-20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.status-card-header {
-  padding: 16px;
-  background: linear-gradient(135deg, #e3f2fd, #bbdefb);
   display: flex;
   justify-content: space-between;
   align-items: center;
+  padding: max(16px, env(safe-area-inset-top)) 16px 0 max(16px, env(safe-area-inset-left));
+  width: 100%;
+  background: transparent;
+
+  /* For devices with notches, add extra padding */
+  padding-top: max(20px, env(safe-area-inset-top));
+  padding-left: max(16px, env(safe-area-inset-left));
+  padding-right: max(16px, env(safe-area-inset-right));
 }
 
-.status-header-content {
+/* Shop Button - Left side */
+.shop-btn {
+  text-transform: none;
+  border-top-right-radius: 20px !important;
+  transition: all 0.3s ease;
+  font-weight: 600;
+  font-size: 0.9rem;
+  padding: 6px 18px;
+  height: 38px !important;
+  min-width: 130px;
+  justify-content: center;
+  background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
+  color: #464749 !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
+  /* Ensure button doesn't get clipped by notches */
+  margin-left: 0;
+}
+
+.shop-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
+}
+
+/* Right side buttons container */
+.right-buttons-container {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
 }
 
-.status-title {
-  font-weight: 700;
-  color: #354d7c;
-  font-size: 1rem;
+/* Rider Dashboard Button */
+.rider-dashboard-btn {
+  color: #ffffff;
+  width: 38px;
+  height: 38px;
+  backdrop-filter: blur(8px);
+  border-radius: 50%;
+  transition: all 0.3s ease;
 }
 
-.status-card-content {
-  padding: 20px 16px;
+.rider-dashboard-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: scale(1.05);
 }
 
-.status-message {
-  font-weight: 600;
-  color: #333;
-  margin-bottom: 8px;
-  font-size: 0.95rem;
+/* Update settings-btn for consistent sizing */
+.settings-btn {
+  color: #ffffff;
+  width: 38px;
+  height: 38px;
+  backdrop-filter: blur(8px);
+  border-radius: 50%;
+  transition: all 0.3s ease;
+  margin-right: 0;
 }
 
-.status-hint {
-  font-size: 0.85rem;
-  color: #666;
-  font-style: italic;
-}
-
-.status-card-actions {
-  padding: 12px 16px;
-  background: #f5f7fa;
+.settings-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+  transform: rotate(90deg);
 }
 
 /* Profile Header */
@@ -1449,6 +1328,7 @@ onBeforeRouteUpdate((to, from, next) => {
   color: #666;
 }
 
+/* Order Items Container */
 .order-items {
   padding: 16px 20px;
 }
@@ -1464,14 +1344,34 @@ onBeforeRouteUpdate((to, from, next) => {
   border-bottom: none;
 }
 
-.product-image {
+/* Fixed Image Container - prevents cutting */
+.product-image-container {
+  flex-shrink: 0;
+  width: 80px;
+  height: 80px;
   border-radius: 8px;
+  overflow: hidden;
+  background-color: #f5f5f5;
+  position: relative;
+}
+
+.product-image {
+  width: 100% !important;
+  height: 100% !important;
   cursor: pointer;
-  transition: transform 0.2s ease;
+  transition: transform 0.3s ease;
+  object-fit: cover;
 }
 
 .product-image:hover {
   transform: scale(1.05);
+}
+
+/* Fallback for when v-img doesn't maintain aspect ratio properly */
+.product-image :deep(img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .item-details {
@@ -1479,6 +1379,7 @@ onBeforeRouteUpdate((to, from, next) => {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  min-width: 0; /* Prevents text overflow */
 }
 
 .product-name {
@@ -1488,6 +1389,12 @@ onBeforeRouteUpdate((to, from, next) => {
   transition: color 0.2s ease;
   margin: 0;
   font-size: 1rem;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .product-name:hover {
@@ -1499,12 +1406,18 @@ onBeforeRouteUpdate((to, from, next) => {
   gap: 16px;
   font-size: 0.9rem;
   color: #666;
+  flex-wrap: wrap;
+}
+
+.quantity, .price {
+  font-size: 0.85rem;
 }
 
 .variants {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  margin-top: 4px;
 }
 
 .order-actions {
@@ -1614,8 +1527,35 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 768px) {
+ .top-actions-container {
+    padding-top: max(16px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .shop-btn {
+    padding: 5px 14px;
+    font-size: 0.85rem;
+    height: 35px !important;
+    min-width: 115px;
+  }
+
+  .rider-dashboard-btn {
+    width: 35px;
+    height: 35px;
+  }
+
+  .rider-dashboard-btn .v-icon {
+    font-size: 24px !important;
+  }
+
+  .settings-btn {
+    width: 35px;
+    height: 35px;
+  }
+
   .profile-header {
-    padding: 140px 20px 24px !important;
+    padding: 100px 20px 24px !important;
   }
 
   .action-buttons-container {
@@ -1623,7 +1563,7 @@ onBeforeRouteUpdate((to, from, next) => {
     left: 12px;
     gap: 8px;
   }
-  
+
   .action-btn {
     padding: 6px 16px;
     font-size: 0.85rem;
@@ -1633,13 +1573,6 @@ onBeforeRouteUpdate((to, from, next) => {
 
   .status-info-card {
     margin: 120px 12px 12px;
-  }
-
-  .settings-btn {
-    top: 16px;
-    right: 12px;
-    width: 36px;
-    height: 36px;
   }
 
   .status-btn {
@@ -1666,26 +1599,50 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 600px) {
+ .top-actions-container {
+    padding-top: max(12px, env(safe-area-inset-top));
+    padding-left: max(12px, env(safe-area-inset-left));
+    padding-right: max(12px, env(safe-area-inset-right));
+  }
+
+  .shop-btn {
+    padding: 4px 12px;
+    font-size: 0.8rem;
+    height: 32px !important;
+    min-width: 105px;
+  }
+
+  .right-buttons-container {
+    gap: 6px;
+  }
+
+  .rider-dashboard-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .rider-dashboard-btn .v-icon {
+    font-size: 22px !important;
+  }
+
+  .settings-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .settings-btn .v-icon {
+    font-size: 24px !important;
+  }
+
   .action-btn {
     padding: 5px 14px;
     font-size: 0.8rem;
     height: 34px !important;
     min-width: 110px;
   }
-  
-  .shop-btn, .rider-btn {
-    margin-left: -12px;
-  }
-
-  .settings-btn {
-    top: 16px;
-    right: 12px;
-    width: 36px;
-    height: 36px;
-  }
 
   .profile-header {
-    padding: 140px 16px 20px !important;
+    padding: 100px 16px 20px !important;
     border-bottom-right-radius: 20px;
   }
 
@@ -1734,22 +1691,56 @@ onBeforeRouteUpdate((to, from, next) => {
     gap: 12px;
     align-items: flex-start;
   }
+
+  .order-items {
+    padding: 12px 16px;
+  }
+
+  .product-image-container {
+    width: 70px;
+    height: 70px;
+  }
+
+  .item-specs {
+    font-size: 0.8rem;
+    gap: 12px;
+  }
+
+  .product-name {
+    font-size: 0.9rem;
+  }
 }
 
 @media (max-width: 480px) {
-  .action-buttons-container {
-    gap: 6px;
+ .top-actions-container {
+    padding-top: max(10px, env(safe-area-inset-top));
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
   }
-  
-  .action-btn {
-    padding: 4px 12px;
+
+  .shop-btn {
+    padding: 3px 10px;
     font-size: 0.75rem;
-    height: 32px !important;
-    min-width: 100px;
+    height: 30px !important;
+    min-width: 95px;
   }
-  
-  .shop-btn, .rider-btn {
-    margin-left: -10px;
+
+  .right-buttons-container {
+    gap: 5px;
+  }
+
+  .rider-dashboard-btn {
+    width: 30px;
+    height: 30px;
+  }
+
+  .rider-dashboard-btn .v-icon {
+    font-size: 20px !important;
+  }
+
+  .settings-btn {
+    width: 30px;
+    height: 30px;
   }
 
   .status-btn {
@@ -1763,6 +1754,27 @@ onBeforeRouteUpdate((to, from, next) => {
 
   .nav-title {
     font-size: 0.65rem;
+  }
+
+   .order-item {
+    gap: 12px;
+  }
+
+  .product-image-container {
+    width: 60px;
+    height: 60px;
+  }
+
+  .item-details {
+    gap: 6px;
+  }
+
+  .product-name {
+    font-size: 0.85rem;
+  }
+
+  .quantity, .price {
+    font-size: 0.75rem;
   }
 }
 
