@@ -532,13 +532,22 @@ const viewOrder = (orderId) => {
 
 
 
-// IMPROVED: Shop button logic
 const goShopOrBuild = () => {
-  console.log('Shop button clicked:', { hasShop: hasShop.value, status: shopCreationStatus.value })
+  console.log('Shop button clicked:', { 
+    hasShop: hasShop.value, 
+    status: shopCreationStatus.value 
+  })
 
+  // If user has a shop
   if (hasShop.value) {
-    // User has a shop, redirect to their shop
-    router.push('/usershop')
+    // Check if shop is approved
+    if (shopCreationStatus.value === 'approved') {
+      // Approved shop - go to usershop
+      router.push('/usershop')
+    } else {
+      // Shop exists but not approved yet - go to status page
+      router.push('/statusshopcreation')
+    }
   } else {
     // User doesn't have a shop, go to creation page
     router.push('/shop-build')
