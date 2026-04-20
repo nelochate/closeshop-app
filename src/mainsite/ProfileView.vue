@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
@@ -18,10 +18,110 @@ const fullName = ref('')
 const hasShop = ref(false)
 const shopCreationStatus = ref(null)
 
+// Notification state
+const showApprovalToast = ref(false)
+const toastMessage = ref('')
+const toastColor = ref('success')
+const toastIcon = ref('mdi-check-circle')
+
+const shopData = ref(null)
+
 // Rider state
 const isRider = ref(false)
 const riderStatus = ref(null)
 const riderApplicationId = ref(null)
+
+let shopSubscription = null
+// Set up real-time subscription for shop status
+const setupShopRealtimeSubscription = () => {
+  if (!user.value?.id) return
+  
+  // Clean up existing subscription
+  if (shopSubscription) {
+    shopSubscription.unsubscribe()
+  }
+  
+  shopSubscription = supabase
+    .channel('shop-status-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'shops',
+        filter: `owner_id=eq.${user.value.id}`
+      },
+      (payload) => {
+        console.log('Shop status changed:', payload)
+        const updatedShop = payload.new
+        const oldShop = payload.old
+        
+        if (updatedShop) {
+          const wasApproved = hasShop.value && shopCreationStatus.value === 'approved'
+          const isNowApproved = updatedShop.status === 'approved'
+          
+          // Update local state
+          hasShop.value = updatedShop.status === 'approved'
+          shopCreationStatus.value = updatedShop.status
+          
+          console.log('Updated shop status:', { 
+            hasShop: hasShop.value, 
+            status: shopCreationStatus.value 
+          })
+          
+          // Show toast notification if status changed to approved
+          if (!wasApproved && isNowApproved) {
+            showApprovalNotification()
+          }
+        }
+      }
+    )
+    .subscribe()
+}
+
+// Check if shop was recently approved (for first load after approval)
+const checkRecentApproval = () => {
+  if (!shopData || shopCreationStatus.value !== 'approved') return false
+  
+  // Check if this is the first time seeing the approved status
+  const lastApprovedShown = localStorage.getItem(`shop_approved_shown_${user.value?.id}`)
+  const now = new Date().getTime()
+  
+  // If never shown before, show notification
+  if (!lastApprovedShown) {
+    localStorage.setItem(`shop_approved_shown_${user.value?.id}`, now.toString())
+    showApprovalNotification()
+    return true
+  }
+  
+  // If shown more than 24 hours ago, show again (optional)
+  const lastShown = parseInt(lastApprovedShown)
+  const hoursSinceLastShown = (now - lastShown) / (1000 * 60 * 60)
+  
+  if (hoursSinceLastShown > 24) {
+    localStorage.setItem(`shop_approved_shown_${user.value?.id}`, now.toString())
+    showApprovalNotification()
+    return true
+  }
+  
+  return false
+}
+
+// Show approval notification
+const showApprovalNotification = () => {
+  toastMessage.value = '🎉 Congratulations! Your shop has been approved! You can now start selling.'
+  toastColor.value = 'success'
+  toastIcon.value = 'mdi-check-circle'
+  showApprovalToast.value = true
+}
+
+// Add this function to clean up subscription
+const cleanupShopSubscription = () => {
+  if (shopSubscription) {
+    shopSubscription.unsubscribe()
+    shopSubscription = null
+  }
+}
 
 //for navigation items
 const sectionItems = ref([]) // Holds items for the selected section
@@ -88,30 +188,37 @@ const checkUserShop = async () => {
   try {
     const { data: shop, error } = await supabase
       .from('shops')
-      .select('id, status')
+      .select('id, status, business_name, approved_at, updated_at')
       .eq('owner_id', user.value.id)
-      .maybeSingle() // Use maybeSingle to avoid 406 error
+      .maybeSingle()
 
     if (error) {
       console.error('Error checking shop:', error)
       hasShop.value = false
       shopCreationStatus.value = null
+      shopData.value = null
       return
     }
 
     if (shop) {
+      shopData.value = shop
       hasShop.value = true
       shopCreationStatus.value = shop.status
       console.log('✅ User has shop:', { id: shop.id, status: shop.status })
+      
+      // Check if this is a recent approval
+      checkRecentApproval()
     } else {
       hasShop.value = false
       shopCreationStatus.value = null
+      shopData.value = null
       console.log('❌ User does not have a shop yet')
     }
   } catch (err) {
     console.error('Error in checkUserShop:', err)
     hasShop.value = false
     shopCreationStatus.value = null
+    shopData.value = null
   }
 }
 
@@ -276,6 +383,7 @@ const loadUser = async () => {
     // After loading user, check for shop status
     await checkUserShop()
     await checkRiderStatus()
+    setupShopRealtimeSubscription() 
   } else {
     const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
@@ -302,6 +410,7 @@ const loadUser = async () => {
 
     await checkUserShop()
     await checkRiderStatus()
+    setupShopRealtimeSubscription() 
   }
 }
 
@@ -533,9 +642,9 @@ const viewOrder = (orderId) => {
 
 
 const goShopOrBuild = () => {
-  console.log('Shop button clicked:', { 
-    hasShop: hasShop.value, 
-    status: shopCreationStatus.value 
+  console.log('Shop button clicked:', {
+    hasShop: hasShop.value,
+    status: shopCreationStatus.value
   })
 
   // If user has a shop
@@ -559,6 +668,11 @@ onMounted(async () => {
   await loadUser()
   await loadOrderCounts()
   await loadSectionItems(selectedSection.value)
+  setupShopRealtimeSubscription()
+})
+
+onUnmounted(() => {
+  cleanupShopSubscription()
 })
 
 // Watch for user changes
@@ -801,6 +915,23 @@ onBeforeRouteUpdate((to, from, next) => {
         </v-expand-transition>
       </div>
     </v-main>
+
+    <!-- Success Toast Notification -->
+    <v-snackbar v-model="showApprovalToast" :color="toastColor" :timeout="6000" location="top" rounded="lg"
+      elevation="24">
+      <template v-slot:activator="{ props }">
+        <!-- This is just for the snackbar itself -->
+      </template>
+
+      <div class="d-flex align-center">
+        <v-icon :icon="toastIcon" size="28" class="mr-3" color="white"></v-icon>
+        <div class="flex-grow-1">
+          <strong class="text-white">Shop Approved!</strong>
+          <div class="text-white text-caption">{{ toastMessage }}</div>
+        </div>
+        <v-btn variant="text" icon="mdi-close" color="white" @click="showApprovalToast = false" size="small"></v-btn>
+      </div>
+    </v-snackbar>
 
     <!-- Reusable BottomNav -->
     <BottomNav v-model="activeTab" />

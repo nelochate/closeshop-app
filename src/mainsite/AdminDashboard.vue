@@ -47,11 +47,11 @@ const selectedRiderDocType = ref<string>('')
 // Helper function to get full storage URL
 const getFullStorageUrl = (path: string, bucket: string = 'rider_info') => {
   if (!path) return null
-  
+
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return path
   }
-  
+
   const { data: { publicUrl } } = supabase.storage.from(bucket).getPublicUrl(path)
   return publicUrl
 }
@@ -87,16 +87,16 @@ const fetchOwnerProfile = async (ownerId: string) => {
   if (ownerProfiles.value.has(ownerId)) {
     return ownerProfiles.value.get(ownerId)
   }
-  
+
   try {
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
       .eq('id', ownerId)
       .single()
-    
+
     if (error) throw error
-    
+
     if (data) {
       ownerProfiles.value.set(ownerId, data)
     }
@@ -196,28 +196,28 @@ const checkAdminStatus = async () => {
 // Debug function to check table data
 const checkTableData = async () => {
   console.log('=== CHECKING TABLE DATA ===')
-  
+
   const { data: shopsData, count: shopsCount } = await supabase
     .from('shops')
     .select('*', { count: 'exact' })
-  
+
   const { data: ridersData, count: ridersCount } = await supabase
     .from('Rider_Registration')
     .select('*', { count: 'exact' })
-  
+
   let debugMsg = ''
   if (!shopsCount || shopsCount === 0) {
     debugMsg += '⚠️ No shops found in database! Create a shop first.\n'
   } else {
     debugMsg += `✅ Found ${shopsCount} shops in database.\n`
   }
-  
+
   if (!ridersCount || ridersCount === 0) {
     debugMsg += '⚠️ No rider registrations found in database! Submit a rider application first.\n'
   } else {
     debugMsg += `✅ Found ${ridersCount} rider registrations in database.\n`
   }
-  
+
   debugInfo.value = debugMsg
 }
 
@@ -231,6 +231,12 @@ const fetchShopsByStatus = async (status: string) => {
       .order('created_at', { ascending: false })
 
     if (error) throw error
+    
+    // Log the IDs to verify format
+    if (data && data.length > 0) {
+      console.log(`First ${status} shop ID:`, data[0].id)
+      console.log(`ID type:`, typeof data[0].id)
+    }
     
     // Fetch owner profiles for each shop
     if (data && data.length > 0) {
@@ -291,7 +297,7 @@ const fetchShops = async () => {
     pendingShops.value = pendingData
     approvedShops.value = approvedData
     revokedShops.value = revokedData
-    
+
     if (pendingData.length === 0 && approvedData.length === 0 && revokedData.length === 0) {
       debugInfo.value += '\n📝 No shops found. Please register a shop first.'
     }
@@ -319,7 +325,7 @@ const fetchRiders = async () => {
     pendingRiders.value = pendingData
     approvedRiders.value = approvedData
     rejectedRiders.value = rejectedData
-    
+
     if (pendingData.length === 0 && approvedData.length === 0 && rejectedData.length === 0) {
       debugInfo.value += '\n📝 No rider applications found. Please submit a rider application first.'
     }
@@ -431,7 +437,7 @@ const previewRiderDocument = (url: string, docType: string) => {
   }
 
   const fullUrl = getFullStorageUrl(url, 'rider_info')
-  
+
   if (!fullUrl) {
     alert(`Could not load ${docType} document.`)
     return
@@ -443,7 +449,6 @@ const previewRiderDocument = (url: string, docType: string) => {
   riderDocPreviewDialog.value = true
 }
 
-// Update shop status
 const updateShopStatus = async (id: string, status: 'approved' | 'declined') => {
   if (!isAdmin.value) {
     errorMessage.value = 'Admin privileges required.'
@@ -457,47 +462,35 @@ const updateShopStatus = async (id: string, status: 'approved' | 'declined') => 
   try {
     errorMessage.value = ''
 
-    let shopToMove: any = null
-    let sourceArray: any[] = []
-    let targetArray: any[] = []
+    console.log('Updating shop ID:', id, 'to status:', status)
 
-    if (status === 'approved') {
-      shopToMove = pendingShops.value.find((s) => s.id === id)
-      sourceArray = pendingShops
-      targetArray = approvedShops
-    } else if (status === 'declined') {
-      shopToMove = approvedShops.value.find((s) => s.id === id)
-      sourceArray = approvedShops
-      targetArray = revokedShops
-    }
-
-    if (!shopToMove) {
-      throw new Error('Shop not found')
-    }
-
-    const { data, error } = await supabase
+    // Perform update WITHOUT .select() - just update
+    const { error } = await supabase
       .from('shops')
       .update({
-        status,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', id)
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Supabase error:', error)
-      throw error
-    }
-
-    if (data) {
-      targetArray.value.unshift({
-        ...shopToMove,
         status: status,
         updated_at: new Date().toISOString(),
       })
-      sourceArray.value = sourceArray.value.filter((shop) => shop.id !== id)
+      .eq('id', id)
+
+    if (error) {
+      console.error('Supabase update error:', error)
+      throw error
     }
+
+    console.log('Update successful, refreshing data...')
+    
+    // Force refresh all shops from database
+    await fetchShops()
+    
+    // Verify the update by checking the shop directly
+    const { data: verifiedShop } = await supabase
+      .from('shops')
+      .select('id, status')
+      .eq('id', id)
+      .single()
+    
+    console.log('Verified shop status after update:', verifiedShop)
 
     alert(`Shop ${status} successfully!`)
   } catch (err: any) {
@@ -521,47 +514,24 @@ const updateRiderStatus = async (id: string, status: 'approved' | 'rejected') =>
   try {
     errorMessage.value = ''
 
-    let riderToMove: any = null
-    let sourceArray: any[] = []
-    let targetArray: any[] = []
+    console.log('Updating rider ID:', id, 'to status:', status)
 
-    if (status === 'approved') {
-      riderToMove = pendingRiders.value.find((r) => r.rider_id === id)
-      sourceArray = pendingRiders
-      targetArray = approvedRiders
-    } else if (status === 'rejected') {
-      riderToMove = pendingRiders.value.find((r) => r.rider_id === id)
-      sourceArray = pendingRiders
-      targetArray = rejectedRiders
-    }
-
-    if (!riderToMove) {
-      throw new Error('Rider application not found')
-    }
-
-    const { data, error } = await supabase
+    // Remove .select() - just update
+    const { error } = await supabase
       .from('Rider_Registration')
       .update({
-        status,
+        status: status,
         updated_at: new Date().toISOString(),
       })
       .eq('rider_id', id)
-      .select()
-      .single()
 
     if (error) {
       console.error('Supabase error:', error)
       throw error
     }
 
-    if (data) {
-      targetArray.value.unshift({
-        ...riderToMove,
-        status: status,
-        updated_at: new Date().toISOString(),
-      })
-      sourceArray.value = sourceArray.value.filter((rider) => rider.rider_id !== id)
-    }
+    console.log('Rider update successful, refreshing...')
+    await fetchRiders()
 
     alert(`Rider application ${status} successfully!`)
   } catch (err: any) {
@@ -584,11 +554,9 @@ const revokeApproval = async (id: string) => {
   try {
     errorMessage.value = ''
 
-    const shopToMove = approvedShops.value.find((s) => s.id === id)
-    if (!shopToMove) {
-      throw new Error('Shop not found')
-    }
+    console.log('Revoking approval for shop:', id)
 
+    // Remove .select() - just update
     const { error } = await supabase
       .from('shops')
       .update({
@@ -599,12 +567,8 @@ const revokeApproval = async (id: string) => {
 
     if (error) throw error
 
-    revokedShops.value.unshift({
-      ...shopToMove,
-      status: 'declined',
-      updated_at: new Date().toISOString(),
-    })
-    approvedShops.value = approvedShops.value.filter((shop) => shop.id !== id)
+    console.log('Revoke successful, refreshing...')
+    await fetchShops()
 
     alert('Shop approval revoked successfully!')
   } catch (err: any) {
@@ -627,11 +591,9 @@ const restoreShop = async (id: string) => {
   try {
     errorMessage.value = ''
 
-    const shopToMove = revokedShops.value.find((s) => s.id === id)
-    if (!shopToMove) {
-      throw new Error('Shop not found')
-    }
+    console.log('Restoring shop:', id)
 
+    // Remove .select() - just update
     const { error } = await supabase
       .from('shops')
       .update({
@@ -642,12 +604,8 @@ const restoreShop = async (id: string) => {
 
     if (error) throw error
 
-    approvedShops.value.unshift({
-      ...shopToMove,
-      status: 'approved',
-      updated_at: new Date().toISOString(),
-    })
-    revokedShops.value = revokedShops.value.filter((shop) => shop.id !== id)
+    console.log('Restore successful, refreshing...')
+    await fetchShops()
 
     alert('Shop restored successfully!')
   } catch (err: any) {
@@ -1801,16 +1759,16 @@ onMounted(() => {
   .touch-target {
     min-height: 48px !important;
   }
-  
+
   .detail-row {
     flex-direction: column;
   }
-  
+
   .detail-label {
     width: 100%;
     margin-bottom: 4px;
   }
-  
+
   .detail-value {
     margin-bottom: 8px;
   }
