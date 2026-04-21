@@ -568,7 +568,7 @@ onMounted(async () => {
     </v-snackbar>
 
     <!-- Top Nav -->
-    <v-app-bar class="app-bar" color="#438fda" dark flat>
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn icon @click="$router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -827,7 +827,7 @@ onMounted(async () => {
             <v-card-text>
               <!-- Product Info -->
               <div class="mb-4 d-flex align-center">
-                <v-avatar size="80" class="mr-3">
+                <v-avatar size="10" class="mr-3">
                   <v-img :src="mainImage(product.main_img_urls)" />
                 </v-avatar>
                 <div>
@@ -1134,7 +1134,7 @@ onMounted(async () => {
     </v-main>
 
     <!-- Bottom Nav -->
-    <v-bottom-navigation class="bottom-nav" height="65" fixed>
+    <v-bottom-navigation class="bottom-nav" fixed>
       <v-row class="w-full pa-0 ma-0" no-gutters>
         <template v-if="isOwner">
           <v-col cols="12" class="pa-0">
@@ -1186,208 +1186,320 @@ onMounted(async () => {
   </v-app>
 </template>
 
-
 <style scoped>
-.app-bar {
-  padding-top: 20px;
+/* ===============================
+   GLOBAL LAYOUT
+================================= */
+.v-application {
+  background: #f6f8fb;
 }
 
 .product-page {
-  padding: 0;
-  margin: 0;
-  background-color: #f5f7fa;
+  background: #f6f8fb;
   min-height: 100vh;
-  padding-bottom: 70px;
-  padding-top: 60px;
-}
-
-/* Selection styles */
-.option-card {
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: 2px solid transparent;
-}
-
-.option-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.option-card--selected {
-  border-color: #438fda !important;
-  background-color: #e8f3ff;
-}
-
-.option-card:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.varieties-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-  gap: 12px;
-}
-
-.variety-card {
-  cursor: pointer;
-  transition: all 0.3s ease;
-  border: 2px solid transparent;
-}
-
-.variety-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.variety-card--selected {
-  border-color: #438fda !important;
-  background-color: #e8f3ff;
-}
-
-.variety-card:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Dialog styles */
-.option-selected {
-  border-color: #438fda !important;
-  background-color: #e8f3ff;
-}
-
-.total-price,
-.selection-summary {
-  border-left: 4px solid #438fda;
-}
-
-/* Animation styles */
-.fly-to-cart {
-  position: fixed;
-  z-index: 10000;
-  pointer-events: none;
-  border-radius: 8px;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
-  transition: all 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55);
-}
-
-.cart-bounce {
-  animation: cartBounce 0.4s ease;
-}
-
-@keyframes cartBounce {
-  0% { transform: scale(1); }
-  30% { transform: scale(1.3); }
-  60% { transform: scale(0.9); }
-  100% { transform: scale(1); }
-}
-
-/* Rest of styles */
-.top-text {
-  font-size: 16px;
-  font-weight: 400;
-  margin-left: -5px;
+  padding-bottom: 90px;
 }
 
 .product-sheet {
   width: 100%;
-  max-width: 900px;
-  margin: 0 auto;
-  border-radius: 0;
-  box-shadow: none;
+  max-width: 1180px;
+  margin: auto;
+  padding: 20px;
 }
 
-.product-img {
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
+:root {
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
+}
+
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 30px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
+
+/* ===============================
+   PRODUCT IMAGE SECTION
+================================= */
+.product-images {
   width: 100%;
-  border-radius: 8px;
-  object-fit: contain;
-  margin: 16px 0;
+  display: flex;
+  justify-content: center;
+  margin-bottom: 24px;
 }
 
+.product-img,
+.product-images :deep(.v-carousel),
+.product-images :deep(.v-window),
+.product-images :deep(.v-carousel-item) {
+  width: 100%;
+  max-width: 620px;
+  height: 420px !important;
+  border-radius: 18px;
+  overflow: hidden;
+  background: white;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+}
+
+.product-img :deep(img),
+.product-images :deep(img) {
+  object-fit: contain !important;
+  padding: 18px;
+}
+
+/* ===============================
+   PRODUCT INFO
+================================= */
 .product-info {
-  padding: 0 16px;
+  background: white;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.05);
 }
 
 .product-title {
-  font-size: 1.2rem;
+  font-size: 1.7rem;
   font-weight: 700;
-  color: #111827;
+  color: #1e293b;
+  line-height: 1.35;
+  margin-bottom: 8px;
 }
 
 .product-price {
-  font-size: 1.1rem;
-  font-weight: 700;
-  color: #da2121;
+  font-size: 2rem;
+  font-weight: 800;
+  color: #e53935;
+  margin-bottom: 16px;
 }
 
 .product-description {
-  font-size: 0.9rem;
-  color: #4b5563;
+  font-size: 0.96rem;
+  color: #475569;
+  line-height: 1.7;
+  margin-top: 16px;
 }
 
 .product-meta {
-  font-size: 0.85rem;
-  color: #6b7280;
+  margin-top: 12px;
+  color: #64748b;
+  font-size: 0.9rem;
 }
 
+/* ===============================
+   OPTION / VARIETY CARDS
+================================= */
+.option-card,
+.variety-card {
+  border-radius: 16px !important;
+  border: 1px solid #e5e7eb;
+  transition: 0.25s ease;
+}
+
+.option-card:hover,
+.variety-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 18px rgba(0,0,0,0.06);
+}
+
+.option-card--selected,
+.variety-card--selected {
+  border: 2px solid #3f83c7 !important;
+  background: #eef6ff;
+}
+
+.varieties-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 14px;
+}
+
+/* ===============================
+   SHOP CARD
+================================= */
 .shop-card {
-  margin: 0 16px;
-  border-radius: 8px;
-  background: #fff;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  border-radius: 18px;
+  background: white;
+  box-shadow: 0 5px 14px rgba(0,0,0,0.05);
+  margin-top: 20px;
 }
 
 .shop-name {
-  font-weight: 600;
+  font-weight: 700;
   font-size: 1rem;
 }
 
+/* ===============================
+   BOTTOM NAV
+================================= */
 .bottom-nav {
-  position: fixed !important;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  background-color: #ffffff !important;
-  box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.1);
-  border-top: 1px solid #eee;
+  border-top: 1px solid #e5e7eb;
+  background: rgba(255,255,255,0.96) !important;
+  backdrop-filter: blur(12px);
 }
 
 .bottom-btn {
-  height: 65px !important;
+  height: 64px !important;
+  font-weight: 700;
+  text-transform: none !important;
   border-radius: 0 !important;
+  font-size: 14px;
 }
 
-.bottom-btn:hover {
-  transform: scale(1.03);
+.chat-now-btn {
+  background: #43a047 !important;
+  color: white !important;
 }
 
-.chat-now-btn,
 .cart-btn {
-  background-color: #4caf50;
-  color: white;
-  font-size: 12px;
+  background: #fb8c00 !important;
+  color: white !important;
 }
 
 .buy-now-btn {
-  background-color: #438fda;
-  color: white;
-  font-size: 13px;
+  background: #3f83c7 !important;
+  color: white !important;
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  .varieties-grid {
-    grid-template-columns: 1fr;
+/* ===============================
+   TABLET
+================================= */
+@media (max-width: 1024px) {
+  .product-sheet {
+    padding: 16px;
+  }
+
+  .product-img,
+  .product-images :deep(.v-carousel),
+  .product-images :deep(.v-window),
+  .product-images :deep(.v-carousel-item) {
+    max-width: 100%;
+    height: 360px !important;
+  }
+
+  .product-title {
+    font-size: 1.45rem;
+  }
+
+  .product-price {
+    font-size: 1.7rem;
   }
 }
 
-@media (max-width: 600px) {
-  .product-title { font-size: 1rem; }
-  .product-price { font-size: 0.95rem; }
-  .product-description { font-size: 0.8rem; }
-  .product-meta { font-size: 0.7rem; }
-  .shop-name { font-size: 0.9rem; }
-  .bottom-btn { font-size: 0.8rem; }
+/* ===============================
+   MOBILE
+================================= */
+@media (max-width: 768px) {
+  .product-sheet {
+    padding: 12px;
+  }
+
+  .product-info {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .product-img,
+  .product-images :deep(.v-carousel),
+  .product-images :deep(.v-window),
+  .product-images :deep(.v-carousel-item) {
+    height: 260px !important;
+    border-radius: 16px;
+  }
+
+  .product-img :deep(img),
+  .product-images :deep(img) {
+    padding: 12px;
+  }
+
+  .product-title {
+    font-size: 1.15rem;
+  }
+
+  .product-price {
+    font-size: 1.45rem;
+  }
+
+  .product-description {
+    font-size: 0.9rem;
+  }
+
+  .varieties-grid {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
+  .bottom-btn {
+    height: 58px !important;
+    font-size: 11px;
+  }
+}
+
+/* ===============================
+   SMALL MOBILE
+================================= */
+@media (max-width: 480px) {
+  .product-img,
+  .product-images :deep(.v-carousel),
+  .product-images :deep(.v-window),
+  .product-images :deep(.v-carousel-item) {
+    height: 220px !important;
+  }
+
+  .product-title {
+    font-size: 1rem;
+  }
+
+  .product-price {
+    font-size: 1.25rem;
+  }
+
+  .bottom-btn {
+    font-size: 10px;
+  }
+}
+
+/* ===============================
+   DIALOG
+================================= */
+:deep(.v-dialog .v-card) {
+  border-radius: 18px !important;
+}
+
+/* ===============================
+   SCROLL
+================================= */
+html {
+  scroll-behavior: smooth;
 }
 </style>

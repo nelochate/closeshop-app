@@ -19,6 +19,9 @@ const fullName = ref('')
 const hasShop = ref(false)
 const shopCreationStatus = ref(null)
 
+const unreadNotifications = ref(0)
+const notificationSubscription = ref(null)
+
 // Notification state
 const showApprovalToast = ref(false)
 const toastMessage = ref('')
@@ -397,7 +400,29 @@ const goToRiderDashboard = () => {
   }
 }
 
-// Load the user info
+const getSupabaseAuthAvatar = async () => {
+  try {
+    const { data: { user }, error } = await supabase.auth.getUser()
+    if (error) throw error
+
+    // Check in user_metadata
+    if (user?.user_metadata?.avatar_url) {
+      return user.user_metadata.avatar_url
+    }
+
+    // Check raw_app_meta_data
+    if (user?.raw_app_meta_data?.avatar_url) {
+      return user.raw_app_meta_data.avatar_url
+    }
+
+    return null
+  } catch (err) {
+    console.error('Error getting avatar from Supabase auth:', err)
+    return null
+  }
+}
+
+// Updated loadUser function
 const loadUser = async () => {
   if (authStore.userData && authStore.profile) {
     user.value = authStore.userData
@@ -409,15 +434,23 @@ const loadUser = async () => {
       avatarUrl.value = authStore.profile.avatar_url
       console.log('Using custom profile avatar')
     }
-    // Priority 2: Use Google's avatar (even default ones)
+    // Priority 2: Check Supabase auth user_metadata
     else {
-      const googleAvatar = getGoogleAvatarUrl(authStore.userData)
-      if (googleAvatar) {
-        avatarUrl.value = googleAvatar
-        console.log('Using Google avatar (may be default):', googleAvatar)
-      } else {
-        avatarUrl.value = null // Will show initials avatar
-        console.log('No avatar found, will use initials')
+      const supabaseAvatar = await getSupabaseAuthAvatar()
+      if (supabaseAvatar) {
+        avatarUrl.value = supabaseAvatar
+        console.log('Using avatar from Supabase auth:', supabaseAvatar)
+      }
+      // Priority 3: Use Google's avatar (even default ones)
+      else {
+        const googleAvatar = getGoogleAvatarUrl(authStore.userData)
+        if (googleAvatar) {
+          avatarUrl.value = googleAvatar
+          console.log('Using Google avatar (may be default):', googleAvatar)
+        } else {
+          avatarUrl.value = null // Will show initials avatar
+          console.log('No avatar found, will use initials')
+        }
       }
     }
 
@@ -439,8 +472,14 @@ const loadUser = async () => {
       !authStore.profile.avatar_url.includes('googleusercontent.com')) {
       avatarUrl.value = authStore.profile.avatar_url
     } else {
-      const googleAvatar = getGoogleAvatarUrl(userData.user)
-      avatarUrl.value = googleAvatar || null
+      const supabaseAvatar = await getSupabaseAuthAvatar()
+      if (supabaseAvatar) {
+        avatarUrl.value = supabaseAvatar
+        console.log('Using avatar from Supabase auth:', supabaseAvatar)
+      } else {
+        const googleAvatar = getGoogleAvatarUrl(userData.user)
+        avatarUrl.value = googleAvatar || null
+      }
     }
 
     console.log('Avatar loading debug:', {
@@ -454,7 +493,6 @@ const loadUser = async () => {
     setupShopRealtimeSubscription()
   }
 }
-
 // FIXED: Load order counts for each section with correct status mapping
 const loadOrderCounts = async () => {
   if (!user.value?.id) return
@@ -704,6 +742,79 @@ const goShopOrBuild = () => {
   }
 }
 
+const setupNotificationListener = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
+
+  // Fetch initial unread count
+  await fetchUnreadNotificationCount()
+
+  // Subscribe to real-time notifications
+  notificationSubscription.value = supabase
+    .channel('user-notifications-profile')
+    .on(
+      'postgres_changes',
+      {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      },
+      (payload) => {
+        console.log('New notification received in profile:', payload)
+        unreadNotifications.value++
+
+        // Show native notification if enabled
+        if (Notification.permission === 'granted') {
+          new Notification('CloseShop', {
+            body: payload.new.message,
+            icon: '/icon.png',
+          })
+        }
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'notifications',
+        filter: `user_id=eq.${user.id}`,
+      },
+      (payload) => {
+        // If notification is marked as read, decrease count
+        if (payload.new.is_read && !payload.old.is_read) {
+          unreadNotifications.value = Math.max(0, unreadNotifications.value - 1)
+        }
+      },
+    )
+    .subscribe()
+}
+
+const fetchUnreadNotificationCount = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  if (!user) return
+
+  const { count, error } = await supabase
+    .from('notifications')
+    .select('*', { count: 'exact', head: true })
+    .eq('user_id', user.id)
+    .eq('is_read', false)
+
+  if (!error && count !== null) {
+    unreadNotifications.value = count
+  }
+}
+
+// Add goNotifications function
+const goNotifications = () => {
+  router.push('/notificationview')
+}
+
 // Run when component mounts
 onMounted(async () => {
   await loadUser()
@@ -711,10 +822,14 @@ onMounted(async () => {
    await debugCurrentUser()
   await loadSectionItems(selectedSection.value)
   setupShopRealtimeSubscription()
+  await setupNotificationListener()
 })
 
 onUnmounted(() => {
   cleanupShopSubscription()
+  if (notificationSubscription.value) {
+    notificationSubscription.value.unsubscribe()
+  }
 })
 
 // Watch for user changes
@@ -779,25 +894,40 @@ onBeforeRouteUpdate((to, from, next) => {
         {{ hasShop ? 'My Shop' : 'Create Shop' }}
       </v-btn>
 
-      <!-- Right Side Buttons Container -->
-        <div class="right-buttons-container">
-          <!-- Rider Dashboard Icon - Only shows for approved riders -->
-          <v-btn
-            v-if="isRider && riderStatus === 'approved'"
-            variant="text"
-            icon
-            class="rider-dashboard-btn"
-            @click="goToRiderDashboard"
-            title="Rider Dashboard"
-          >
-            <v-icon size="28">mdi-motorbike</v-icon>
-          </v-btn>
+    <!-- Right Side Buttons Container -->
+    <div class="right-buttons-container">
+      <!-- Rider Dashboard Icon - Only shows for approved riders -->
+      <v-btn
+        v-if="isRider && riderStatus === 'approved'"
+        variant="text"
+        icon
+        class="rider-dashboard-btn"
+        @click="goToRiderDashboard"
+        title="Rider Dashboard"
+      >
+        <v-icon size="28">mdi-motorbike</v-icon>
+      </v-btn>
 
-          <!-- Settings Icon -->
-          <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
-            <v-icon size="28">mdi-cog</v-icon>
-          </v-btn>
+      <!-- Notification Button with Badge -->
+      <div class="notification-wrapper-profile">
+        <v-btn class="notif2-btn" @click="goNotifications">
+          <v-icon size="22">mdi-bell-outline</v-icon>
+        </v-btn>
+        <!-- Badge -->
+        <div
+          v-if="unreadNotifications > 0"
+          class="notification-badge-profile"
+          :class="{ 'badge-large-profile': unreadNotifications > 9 }"
+        >
+          {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}
         </div>
+      </div>
+
+  <!-- Settings Icon -->
+  <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
+    <v-icon size="28">mdi-cog</v-icon>
+  </v-btn>
+</div>
       </div>
 
       <!-- Profile Header -->
@@ -1089,6 +1219,68 @@ onBeforeRouteUpdate((to, from, next) => {
   background: rgba(255, 255, 255, 0.25);
   transform: scale(1.05);
 }
+
+/* Notification Wrapper and Badge Styles for Profile */
+.notification-wrapper-profile {
+  position: relative;
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.notif2-btn {
+  color:white;
+  background: transparent !important;
+  border-radius: 0 !important;
+  box-shadow: none !important;
+  width: 38px;
+  height: 38px;
+  min-width: 38px;
+  transition: all 0.3s ease;
+}
+
+.notification-badge-profile {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  background: linear-gradient(135deg, #ff4444, #ff6666);
+  color: white;
+  border-radius: 20px;
+  min-width: 20px;
+  height: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 2px solid white;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  animation: pulseProfile 2s infinite;
+  padding: 0 5px;
+}
+
+.badge-large-profile {
+  min-width: 24px;
+  height: 24px;
+  font-size: 10px;
+  top: -6px;
+  right: -6px;
+}
+
+@keyframes pulseProfile {
+  0% {
+    transform: scale(1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  }
+  100% {
+    transform: scale(1);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+}
+
 
 /* Update settings-btn for consistent sizing */
 .settings-btn {
@@ -1543,6 +1735,22 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 768px) {
+  .notification-badge-profile {
+    min-width: 18px;
+    height: 18px;
+    font-size: 10px;
+    top: -3px;
+    right: -3px;
+  }
+
+  .badge-large-profile {
+    min-width: 22px;
+    height: 22px;
+    font-size: 9px;
+    top: -5px;
+    right: -5px;
+  }
+
     .profile-inline {
     margin-top: -20px !important;
     gap: 16px;
@@ -1620,8 +1828,24 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 600px) {
+   .notification-badge-profile {
+    min-width: 16px;
+    height: 16px;
+    font-size: 9px;
+    top: -2px;
+    right: -2px;
+  }
+
+  .badge-large-profile {
+    min-width: 20px;
+    height: 20px;
+    font-size: 8px;
+    top: -4px;
+    right: -4px;
+  }
+
     .profile-inline {
-    margin-top: -15px !important; 
+    margin-top: -15px !important;
     gap: 14px;
   }
   .top-actions-container {

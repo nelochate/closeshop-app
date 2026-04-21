@@ -591,7 +591,6 @@ setInterval(fetchConversations, 30000)
 .messages-view {
   margin-top: calc(56px + var(--sat, 0px));  
   min-height: calc(100vh - 56px - var(--sat, 0px));
-  background-color: #f8fafc;
   padding-bottom: 80px;
 }
 

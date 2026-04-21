@@ -399,18 +399,18 @@ const hasValidCoordinates = computed(() => {
 <template>
   <v-app>
     <!-- Top Nav -->
-    <v-app-bar color="#438fda" dark flat>
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title class="top-text"><strong>Shop Details</strong></v-toolbar-title>
+        <v-toolbar-title><strong>Shop Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn
         icon
         v-if="userLoaded && !isOwner && shop?.owner_id"
         @click="router.push({ name: 'chatview', params: { id: shop.owner_id } })"
       >
-        <v-icon>mdi-message-text</v-icon>
+        <v-icon>mdi-chat-outline</v-icon>
       </v-btn>
 
       <v-btn icon @click="shareProduct">
@@ -552,11 +552,47 @@ const hasValidCoordinates = computed(() => {
 </template>
 
 <style scoped>
-.top-text {
-  font-size: 19px;
-  font-weight: 400;
-  margin-left: -2px;
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
+:root {
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
+
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
+
 .cover-photo {
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
@@ -579,39 +615,235 @@ const hasValidCoordinates = computed(() => {
   background: #f5f5f5;
   position: relative;
 }
+/* Product Grid Container */
 .product-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 16px;
+  margin-top: 12px;
+  padding: 0 4px;
 }
+
+/* Product Card */
 .product-card {
-  background: #fff;
-  border-radius: 8px;
+  background: #ffffff;
+  border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  transition: all 0.25s ease;
   cursor: pointer;
-  transition: transform 0.2s;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
 }
+
 .product-card:hover {
-  transform: translateY(-2px);
+  transform: translateY(-4px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
 }
+
+.product-card:active {
+  transform: translateY(0);
+}
+
+/* Product Image - Fixed aspect ratio to prevent cutting */
+.product-card :deep(.v-img) {
+  background-color: #f5f5f5;
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1 / 1; /* Square aspect ratio */
+  overflow: hidden;
+}
+
+.product-card :deep(.v-img img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover; /* Ensures image covers area without distortion */
+  object-position: center;
+}
+
+/* Product Info Section */
 .product-info {
-  padding: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
 }
+
+/* Product Title */
 .product-title {
-  font-size: 13px;
-  font-weight: 500;
-  color: #111827;
-  margin-bottom: 2px;
-}
-.product-price {
   font-size: 14px;
+  font-weight: 500;
+  color: #1f2937;
+  line-height: 1.3;
+  height: 36px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
+}
+
+/* Product Price */
+.product-price {
+  font-size: 16px;
   font-weight: 700;
   color: #e53935;
+  margin-top: 4px;
 }
+
+/* Product Sold Count */
 .product-sold {
   font-size: 12px;
   color: #6b7280;
+  margin-top: 2px;
+}
+
+/* Empty State Styles */
+.empty-card {
+  background: #ffffff;
+  border-radius: 16px;
+  padding: 48px 24px;
+  text-align: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.04);
+}
+
+.empty-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.empty-sub {
+  font-size: 14px;
+  color: #6b7280;
+}
+
+/* Section Header */
+.text-h6 {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin-bottom: 16px;
+  padding-left: 4px;
+}
+
+/* =========================================
+   RESPONSIVE STYLES
+========================================= */
+
+/* Tablet Devices */
+@media (min-width: 768px) and (max-width: 1024px) {
+  .product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 20px;
+  }
+  
+  .product-title {
+    font-size: 15px;
+    height: 40px;
+  }
+  
+  .product-price {
+    font-size: 17px;
+  }
+}
+
+/* Mobile Devices */
+@media (max-width: 768px) {
+  .product-grid {
+    gap: 12px;
+  }
+  
+  .product-info {
+    padding: 10px;
+  }
+  
+  .product-title {
+    font-size: 13px;
+    height: 34px;
+  }
+  
+  .product-price {
+    font-size: 15px;
+  }
+  
+  .product-sold {
+    font-size: 11px;
+  }
+}
+
+/* Small Mobile Devices (iPhone SE, etc.) */
+@media (max-width: 480px) {
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
+  }
+  
+  .product-info {
+    padding: 8px;
+  }
+  
+  .product-title {
+    font-size: 12px;
+    height: 32px;
+    -webkit-line-clamp: 2;
+  }
+  
+  .product-price {
+    font-size: 14px;
+  }
+  
+  .product-sold {
+    font-size: 10px;
+  }
+  
+  .text-h6 {
+    font-size: 16px;
+    margin-bottom: 12px;
+  }
+}
+
+/* Extra Small Devices */
+@media (max-width: 380px) {
+  .product-grid {
+    gap: 8px;
+  }
+  
+  .product-info {
+    padding: 6px;
+  }
+  
+  .product-title {
+    font-size: 11px;
+    height: 28px;
+  }
+  
+  .product-price {
+    font-size: 13px;
+  }
+  
+  .product-sold {
+    font-size: 9px;
+  }
+}
+
+/* Landscape Mode on Mobile */
+@media (max-width: 768px) and (orientation: landscape) {
+  .product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  }
+  
+  .product-card :deep(.v-img) {
+    aspect-ratio: 16 / 9; /* Wider aspect ratio for landscape */
+  }
+}
+
+/* Loading skeleton styles */
+.v-skeleton-loader {
+  border-radius: 12px;
 }
 .empty-card {
   background: #f9fafb;
@@ -665,5 +897,14 @@ const hasValidCoordinates = computed(() => {
 :deep(.mapboxgl-popup-close-button) {
   font-size: 20px !important;
   padding: 8px !important;
+}
+
+/* =========================================
+   EXTRA SMALL DEVICES / IPHONE MINI / NOTCH
+========================================= */
+@media (max-width: 390px) {
+  .app-bar :deep(.v-toolbar-title) {
+    font-size: 0.96rem;
+  }
 }
 </style>

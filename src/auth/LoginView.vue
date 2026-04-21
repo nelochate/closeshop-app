@@ -16,6 +16,7 @@ const showError = ref(false)
 const successMessage = ref('')
 const showSuccess = ref(false)
 const isLoading = ref(false)
+const isLoading2 = ref(false)
 
 const isNative = Capacitor.isNativePlatform()
 const isWeb = Capacitor.getPlatform() === 'web'
@@ -178,7 +179,7 @@ const processGoogleSignInResult = async (result: any) => {
 
 // Google Sign-In handler
 const signInWithGoogle = async () => {
-  isLoading.value = true
+  isLoading2.value = true
   
   try {
     if (isNative) {
@@ -239,7 +240,7 @@ const signInWithGoogle = async () => {
       showError.value = false
     }, 3000)
   } finally {
-    isLoading.value = false
+    isLoading2.value = false
   }
 }
 
@@ -347,8 +348,8 @@ onMounted(async () => {
             @click="signInWithGoogle"
             block
             class="google-btn mb-3"
-            :loading="isLoading"
-            :disabled="isLoading"
+            :loading="isLoading2"
+            :disabled="isLoading2"
             variant="outlined"
           >
             <template v-slot:prepend>
