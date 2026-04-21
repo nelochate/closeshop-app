@@ -550,16 +550,9 @@ setInterval(fetchConversations, 30000)
 
 /* Top Navigation Bar - Fixed for notches */
 .top-nav {
-  background-color: #3f83c7;
-  position: fixed !important;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  padding-top: var(--sat, 0px);
-  height: calc(56px + var(--sat, 0px)) !important;
-  min-height: calc(56px + var(--sat, 0px)) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
 /* For iOS devices with dynamic island */
@@ -584,18 +577,32 @@ setInterval(fetchConversations, 30000)
   padding-top: 0 !important;
 }
 
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
 /* Main content area - accounts for the fixed header */
 .messages-view {
- 
+  margin-top: calc(56px + var(--sat, 0px));  
   min-height: calc(100vh - 56px - var(--sat, 0px));
   background-color: #f8fafc;
   padding-bottom: 80px;
 }
 
 /* iOS support for margin-top */
-@supports (margin-top: env(safe-area-inset-top)) {
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+  
   .messages-view {
-   
+    margin-top: calc(56px + env(safe-area-inset-top));
   }
 }
 
@@ -631,6 +638,7 @@ setInterval(fetchConversations, 30000)
 }
 
 .conversations-list {
+  margin-top: -55px;
   background: white;
   padding: 0;
 }

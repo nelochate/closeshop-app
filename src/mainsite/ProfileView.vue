@@ -1543,6 +1543,10 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 768px) {
+    .profile-inline {
+    margin-top: -20px !important;
+    gap: 16px;
+  }
   .top-actions-container {
     padding-top: max(16px, env(safe-area-inset-top));
     padding-left: 0;  /* Added: no left padding on mobile */
@@ -1616,6 +1620,10 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 600px) {
+    .profile-inline {
+    margin-top: -15px !important; 
+    gap: 14px;
+  }
   .top-actions-container {
     padding-top: max(12px, env(safe-area-inset-top));
     padding-left: 0;  /* Added: no left padding */
@@ -1730,6 +1738,10 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 480px) {
+    .profile-inline {
+    margin-top: -10px !important;
+    gap: 12px;
+  }
   .top-actions-container {
     padding-top: max(10px, env(safe-area-inset-top));
     padding-left: 0;  /* Added: no left padding */
