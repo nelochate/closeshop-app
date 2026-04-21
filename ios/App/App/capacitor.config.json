@@ -3,13 +3,25 @@
 	"appName": "closeshop-dev",
 	"webDir": "dist",
 	"bundledWebRuntime": false,
+	"server": {
+		"androidScheme": "https",
+		"cleartext": true
+	},
+	"plugins": {
+		"CapacitorHttp": {
+			"enabled": true
+		}
+	},
 	"packageClassList": [
 		"AppPlugin",
+		"AppLauncherPlugin",
+		"CAPBrowserPlugin",
 		"CAPCameraPlugin",
 		"GeolocationPlugin",
 		"HapticsPlugin",
 		"KeyboardPlugin",
 		"CAPNetworkPlugin",
-		"StatusBarPlugin"
+		"StatusBarPlugin",
+		"GoogleSignInPlugin"
 	]
 }

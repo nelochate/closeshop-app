@@ -7,6 +7,7 @@ import { Capacitor } from '@capacitor/core'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'  
 
 // Import Mapbox - use dynamic import to avoid SSR issues
 let mapboxgl: any = null
@@ -47,6 +48,7 @@ const boundaryLoading = ref(false)
 const hasValidLocation = ref(false)
 const selectedShopId = ref<string | null>(null)
 const showBoundary = ref(true)
+const heroPaddingTop = ref('env(safe-area-inset-top)')
 
 /* -------------------- ROUTE TYPE SELECTOR -------------------- */
 type RouteType = 'driving' | 'walking' | 'cycling'
@@ -75,6 +77,37 @@ const routeConfig = {
     color: '#f59e0b',
     activeColor: '#d97706',
   },
+}
+
+/* -------------------- PULL TO REFRESH HANDLER -------------------- */
+const handleRefresh = async () => {
+  console.log('🔄 Pull-to-refresh triggered - Refreshing map data...')
+  
+  try {
+    // Clear any existing errors
+    errorMsg.value = null
+    
+    // Refresh shops data
+    await doFetchShops()
+    
+    // Refresh boundary if we have location
+    if (latitude.value && longitude.value) {
+      await highlightUserCityBoundary(latitude.value, longitude.value)
+    }
+    
+    // Refresh route if there's a selected shop
+    if (selectedShopId.value) {
+      const shop = shops.value.find(s => s.id === selectedShopId.value)
+      if (shop && shop.latitude && shop.longitude) {
+        await focusOnShopMarker(selectedShopId.value)
+      }
+    }
+    
+    console.log('✅ Map page refresh complete!')
+  } catch (error) {
+    console.error('❌ Refresh failed:', error)
+    errorMsg.value = 'Failed to refresh data'
+  }
 }
 
 /* -------------------- GEOLOCATION -------------------- */
@@ -1735,8 +1768,9 @@ onUnmounted(() => {
 
 <template>
   <v-app>
+    <PullToRefreshWrapper :on-refresh="handleRefresh">
     <!-- Hero Section - Fixed positioning -->
-    <v-sheet class="hero">
+    <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
       <div class="hero-row">
         <v-text-field
           v-model="search"
@@ -2217,6 +2251,7 @@ onUnmounted(() => {
     </v-navigation-drawer>
 
     <BottomNav v-model="activeTab" />
+  </PullToRefreshWrapper>
   </v-app>
 </template>
 
@@ -2244,16 +2279,23 @@ onUnmounted(() => {
 }
 
 /* Hero section - UPDATED for Android spacing */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding: calc(20px + env(safe-area-inset-top)) 16px 16px 16px; /* Increased top padding */
   margin: 0;
   width: 100%;
   position: relative;
-  z-index: 1000; /* Increased z-index */
-  min-height: calc(80px + env(safe-area-inset-top)); /* Increased minimum height */
+  z-index: 1000;
   box-sizing: border-box;
+  padding: calc(20px + var(--sat, 0px)) 16px 16px 16px;
+  min-height: calc(80px + var(--sat, 0px));
 }
 
 .hero-row {
