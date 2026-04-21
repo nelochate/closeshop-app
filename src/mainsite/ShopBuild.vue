@@ -1603,8 +1603,8 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
-      <v-btn icon @click="goBack">
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable" :style="{ paddingTop: safeAreaTop }">
+      <v-btn icon @click="goBack" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title>
@@ -2609,6 +2609,12 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 </template>
 
 <style scoped>
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
 /* Add these Mapbox-specific styles */
 .map-container {
   position: relative;
@@ -2684,12 +2690,21 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 }
 
 .app-bar {
-  padding-top: 22px;
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding-top: var(--sat, 0px);
+  height: calc(56px + var(--sat, 0px)) !important;
+  min-height: calc(56px + var(--sat, 0px)) !important;
 }
 
 .pb-16 {
-  padding-top: 75px !important;
+  padding-top: calc(75px + env(safe-area-inset-top, 0px)) !important;
 }
+
+/* Steps Card Styles */
 .steps-card {
   border-radius: 0;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);

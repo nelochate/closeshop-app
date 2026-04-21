@@ -3,6 +3,8 @@ import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
+
 const router = useRouter()
 const notifications = ref([])
 const unreadCount = ref(0)
@@ -11,21 +13,27 @@ const showDeleteDialog = ref(false)
 const notificationToDelete = ref(null)
 const showDeleteAllDialog = ref(false)
 const deleting = ref(false)
-
+const deleteOption = ref('read')
 let notificationSubscription
 
 // Computed for unread notifications
-const unreadNotifications = computed(() => notifications.value.filter((n) => !n.is_read))
+const unreadNotifications = computed(() => 
+  notifications.value.filter((n) => !n.is_read)
+)
 
-onMounted(() => {
-  setupNotificationListener()
-  fetchNotifications()
-  requestNotificationPermission()
-})
-
-onUnmounted(() => {
-  notificationSubscription?.unsubscribe()
-})
+const handleRefresh = async () => {
+  console.log('🔄 Pull-to-refresh triggered - Refreshing notifications...')
+  
+  try {
+    loading.value = true
+    await fetchNotifications()
+    console.log('✅ Notifications refresh complete!')
+  } catch (err) {
+    console.error('❌ Refresh failed:', err)
+  } finally {
+    loading.value = false
+  }
+}
 
 // Request browser notification permission
 async function requestNotificationPermission() {
@@ -528,12 +536,24 @@ function getPriorityColor(priority) {
   }
   return colors[priority] || 'blue'
 }
+
+onMounted(() => {
+  setupNotificationListener()
+  fetchNotifications()
+  requestNotificationPermission()
+})
+
+onUnmounted(() => {
+  notificationSubscription?.unsubscribe()
+})
 </script>
 
 <template>
   <v-app>
+    <PullToRefreshWrapper :on-refresh="handleRefresh">
     <v-main>
-      <v-app-bar color="primary" density="compact">
+      <!-- Top App Bar with Safe Area Support -->
+      <v-app-bar color="primary" density="compact" class="notification-app-bar">
         <v-app-bar-nav-icon @click="router.back()">
           <v-icon>mdi-arrow-left</v-icon>
         </v-app-bar-nav-icon>
@@ -646,6 +666,11 @@ function getPriorityColor(priority) {
 
                   <template #append>
                     <div class="notification-actions">
+                        <!-- Add time display using formatTime -->
+                        <div class="notification-time text-caption text-grey mb-1">
+                          {{ formatTime(notification.created_at) }}
+                        </div>
+ 
                       <v-menu location="bottom">
                         <template v-slot:activator="{ props }">
                           <v-btn icon size="small" variant="text" v-bind="props" @click.stop>
@@ -786,16 +811,82 @@ function getPriorityColor(priority) {
         </v-card>
       </v-dialog>
     </v-main>
+  </PullToRefreshWrapper>
   </v-app>
 </template>
 
 <style scoped>
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Notification App Bar with Safe Area Support */
+.notification-app-bar {
+  position: fixed !important;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  padding-top: var(--sat, 0px);
+  height: calc(64px + var(--sat, 0px)) !important;
+  min-height: calc(64px + var(--sat, 0px)) !important;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .notification-app-bar {
+    padding-top: env(safe-area-inset-top);
+    height: calc(64px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .notification-app-bar {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(64px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.notification-app-bar :deep(.v-toolbar__content) {
+  height: 64px !important;
+  padding-top: 0 !important;
+}
+
+/* Main content area - accounts for the fixed header */
 .notification-view {
   max-width: 800px;
   margin: 0 auto;
+  padding-top: calc(64px + var(--sat, 0px));
   padding-bottom: 80px;
 }
 
+/* iOS support for padding-top */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .notification-view {
+    padding-top: calc(64px + env(safe-area-inset-top));
+  }
+}
+
+/* Landscape mode adjustment */
+@media (orientation: landscape) and (max-height: 500px) {
+  .notification-app-bar {
+    height: 64px !important;
+    padding-top: 0 !important;
+  }
+  
+  .notification-view {
+    padding-top: 64px;
+  }
+}
+
+/* Rest of your existing styles */
 .notification-item {
   border-bottom: 1px solid #e0e0e0;
   transition: background-color 0.2s ease;
@@ -823,6 +914,21 @@ function getPriorityColor(priority) {
   font-weight: 600;
 }
 
+/* Time display styling */
+.notification-time {
+  font-size: 0.7rem;
+  color: #999;
+  white-space: nowrap;
+}
+
+/* Group header styling */
+.v-subheader {
+  background-color: #f8fafc;
+  font-size: 0.85rem;
+  font-weight: 600;
+  padding: 8px 16px;
+}
+
 .notification-actions {
   opacity: 0;
   transition: opacity 0.2s ease;
@@ -838,7 +944,7 @@ function getPriorityColor(priority) {
 }
 
 .stats-summary {
-  margin-top: 16px;
+  margin-top: -40px;
 }
 
 .stats-summary .v-card {

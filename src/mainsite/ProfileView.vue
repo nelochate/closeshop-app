@@ -4,6 +4,7 @@ import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import BottomNav from '@/common/layout/BottomNav.vue'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const activeTab = ref('account')
 
@@ -31,16 +32,28 @@ const isRider = ref(false)
 const riderStatus = ref(null)
 const riderApplicationId = ref(null)
 
+const handleRefresh = async () => {
+  console.log('🔄 Refreshing profile...')
+
+  await loadUser()
+  await loadOrderCounts()
+  await loadSectionItems(selectedSection.value)
+  await checkUserShop()
+  await checkRiderStatus()
+
+  console.log('✅ Profile refresh complete!')
+}
+
 let shopSubscription = null
 // Set up real-time subscription for shop status
 const setupShopRealtimeSubscription = () => {
   if (!user.value?.id) return
-  
+
   // Clean up existing subscription
   if (shopSubscription) {
     shopSubscription.unsubscribe()
   }
-  
+
   shopSubscription = supabase
     .channel('shop-status-changes')
     .on(
@@ -55,20 +68,20 @@ const setupShopRealtimeSubscription = () => {
         console.log('Shop status changed:', payload)
         const updatedShop = payload.new
         const oldShop = payload.old
-        
+
         if (updatedShop) {
           const wasApproved = hasShop.value && shopCreationStatus.value === 'approved'
           const isNowApproved = updatedShop.status === 'approved'
-          
+
           // Update local state
           hasShop.value = updatedShop.status === 'approved'
           shopCreationStatus.value = updatedShop.status
-          
-          console.log('Updated shop status:', { 
-            hasShop: hasShop.value, 
-            status: shopCreationStatus.value 
+
+          console.log('Updated shop status:', {
+            hasShop: hasShop.value,
+            status: shopCreationStatus.value
           })
-          
+
           // Show toast notification if status changed to approved
           if (!wasApproved && isNowApproved) {
             showApprovalNotification()
@@ -82,28 +95,28 @@ const setupShopRealtimeSubscription = () => {
 // Check if shop was recently approved (for first load after approval)
 const checkRecentApproval = () => {
   if (!shopData || shopCreationStatus.value !== 'approved') return false
-  
+
   // Check if this is the first time seeing the approved status
   const lastApprovedShown = localStorage.getItem(`shop_approved_shown_${user.value?.id}`)
   const now = new Date().getTime()
-  
+
   // If never shown before, show notification
   if (!lastApprovedShown) {
     localStorage.setItem(`shop_approved_shown_${user.value?.id}`, now.toString())
     showApprovalNotification()
     return true
   }
-  
+
   // If shown more than 24 hours ago, show again (optional)
   const lastShown = parseInt(lastApprovedShown)
   const hoursSinceLastShown = (now - lastShown) / (1000 * 60 * 60)
-  
+
   if (hoursSinceLastShown > 24) {
     localStorage.setItem(`shop_approved_shown_${user.value?.id}`, now.toString())
     showApprovalNotification()
     return true
   }
-  
+
   return false
 }
 
@@ -211,13 +224,13 @@ const checkUserShop = async () => {
       shopData.value = shop
       hasShop.value = true
       shopCreationStatus.value = shop.status
-      console.log('✅ User has shop:', { 
-        id: shop.id, 
+      console.log('✅ User has shop:', {
+        id: shop.id,
         status: shop.status,
         business_name: shop.business_name,
         isApproved: shop.status === 'approved'
       })
-      
+
       // Check if this is a recent approval
       checkRecentApproval()
     } else {
@@ -240,13 +253,13 @@ const debugCurrentUser = async () => {
   const { data: { user }, error } = await supabase.auth.getUser()
   console.log('Current user:', user)
   console.log('User ID:', user?.id)
-  
+
   // Check if there's a shop for this user
   const { data: shop } = await supabase
     .from('shops')
     .select('*')
     .eq('owner_id', user?.id)
-  
+
   console.log('Shops found for this user:', shop)
 }
 
@@ -411,7 +424,7 @@ const loadUser = async () => {
     // After loading user, check for shop status
     await checkUserShop()
     await checkRiderStatus()
-    setupShopRealtimeSubscription() 
+    setupShopRealtimeSubscription()
   } else {
     const { data: userData, error } = await supabase.auth.getUser()
     if (error || !userData?.user) {
@@ -438,7 +451,7 @@ const loadUser = async () => {
 
     await checkUserShop()
     await checkRiderStatus()
-    setupShopRealtimeSubscription() 
+    setupShopRealtimeSubscription()
   }
 }
 
@@ -695,7 +708,7 @@ const goShopOrBuild = () => {
 onMounted(async () => {
   await loadUser()
   await loadOrderCounts()
-   await debugCurrentUser() 
+   await debugCurrentUser()
   await loadSectionItems(selectedSection.value)
   setupShopRealtimeSubscription()
 })
@@ -754,6 +767,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 <template>
   <v-app>
+    <PullToRefreshWrapper :on-refresh="handleRefresh">
     <!-- Main Profile Content -->
     <v-main class="profile-main">
 
@@ -964,6 +978,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
     <!-- Reusable BottomNav -->
     <BottomNav v-model="activeTab" />
+  </PullToRefreshWrapper>
   </v-app>
 </template>
 
@@ -1018,20 +1033,20 @@ onBeforeRouteUpdate((to, from, next) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: max(16px, env(safe-area-inset-top)) 16px 0 max(16px, env(safe-area-inset-left));
+  padding: max(16px, env(safe-area-inset-top)) 16px 0 0;  /* Changed: removed left padding */
   width: 100%;
   background: transparent;
 
   /* For devices with notches, add extra padding */
   padding-top: max(20px, env(safe-area-inset-top));
-  padding-left: max(16px, env(safe-area-inset-left));
   padding-right: max(16px, env(safe-area-inset-right));
+  padding-left: 0;  /* Added: no left padding */
 }
 
 /* Shop Button - Left side */
 .shop-btn {
   text-transform: none;
-  border-top-right-radius: 20px !important;
+  border-radius: 0 20px 20px 0 !important;  /* Changed: only top-right and bottom-right rounded */
   transition: all 0.3s ease;
   font-weight: 600;
   font-size: 0.9rem;
@@ -1042,8 +1057,10 @@ onBeforeRouteUpdate((to, from, next) => {
   background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
   color: #464749 !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-  /* Ensure button doesn't get clipped by notches */
-  margin-left: 0;
+  margin-left: 0;  /* Ensure no margin */
+  margin-right: 0;
+  position: relative;
+  box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
 
 .shop-btn:hover {
@@ -1099,7 +1116,6 @@ onBeforeRouteUpdate((to, from, next) => {
   background: linear-gradient(135deg, #354d7c, #5276b0, #354d7c);
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.12);
   color: #fff;
-  margin-top: -32px !important;
   border-bottom-right-radius: 24px;
 }
 
@@ -1108,7 +1124,7 @@ onBeforeRouteUpdate((to, from, next) => {
   align-items: center;
   gap: 20px;
   flex-wrap: nowrap;
-  margin-top: 10px;
+  margin-top: -30px !important;
 }
 
 .avatar-container {
@@ -1527,9 +1543,13 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 768px) {
- .top-actions-container {
+    .profile-inline {
+    margin-top: -20px !important;
+    gap: 16px;
+  }
+  .top-actions-container {
     padding-top: max(16px, env(safe-area-inset-top));
-    padding-left: max(12px, env(safe-area-inset-left));
+    padding-left: 0;  /* Added: no left padding on mobile */
     padding-right: max(12px, env(safe-area-inset-right));
   }
 
@@ -1538,6 +1558,7 @@ onBeforeRouteUpdate((to, from, next) => {
     font-size: 0.85rem;
     height: 35px !important;
     min-width: 115px;
+    border-radius: 0 16px 16px 0 !important;  /* Smaller radius on mobile */
   }
 
   .rider-dashboard-btn {
@@ -1599,9 +1620,13 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 600px) {
- .top-actions-container {
+    .profile-inline {
+    margin-top: -15px !important; 
+    gap: 14px;
+  }
+  .top-actions-container {
     padding-top: max(12px, env(safe-area-inset-top));
-    padding-left: max(12px, env(safe-area-inset-left));
+    padding-left: 0;  /* Added: no left padding */
     padding-right: max(12px, env(safe-area-inset-right));
   }
 
@@ -1610,6 +1635,7 @@ onBeforeRouteUpdate((to, from, next) => {
     font-size: 0.8rem;
     height: 32px !important;
     min-width: 105px;
+    border-radius: 0 14px 14px 0 !important;
   }
 
   .right-buttons-container {
@@ -1642,7 +1668,7 @@ onBeforeRouteUpdate((to, from, next) => {
   }
 
   .profile-header {
-    padding: 100px 16px 20px !important;
+    padding: 100px 16px 25px !important;
     border-bottom-right-radius: 20px;
   }
 
@@ -1712,9 +1738,13 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 480px) {
- .top-actions-container {
+    .profile-inline {
+    margin-top: -10px !important;
+    gap: 12px;
+  }
+  .top-actions-container {
     padding-top: max(10px, env(safe-area-inset-top));
-    padding-left: max(10px, env(safe-area-inset-left));
+    padding-left: 0;  /* Added: no left padding */
     padding-right: max(10px, env(safe-area-inset-right));
   }
 
@@ -1723,6 +1753,7 @@ onBeforeRouteUpdate((to, from, next) => {
     font-size: 0.75rem;
     height: 30px !important;
     min-width: 95px;
+    border-radius: 0 12px 12px 0 !important;
   }
 
   .right-buttons-container {

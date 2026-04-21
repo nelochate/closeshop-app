@@ -334,7 +334,7 @@ const showEmptyState = computed(() =>
 /* 🛍️ PRODUCT GRID */
 .product-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  grid-template-columns: repeat(2, 1fr);
   gap: 14px;
 }
 
@@ -487,10 +487,18 @@ const showEmptyState = computed(() =>
   color: #6b7280;
 }
 
+@media (min-width: 768px) {
+  .product-grid {
+    grid-template-columns: repeat(2, 1fr);
+    gap: 16px;
+  }
+}
+
 /* 📱 MOBILE OPTIMIZATION */
 @media (max-width: 480px) {
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
 
   .product-img {
@@ -527,7 +535,8 @@ const showEmptyState = computed(() =>
 
 @media (max-width: 360px) {
   .product-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 10px;
   }
 }
 </style>

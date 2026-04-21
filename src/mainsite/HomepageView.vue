@@ -8,6 +8,8 @@ import { Geolocation } from '@capacitor/geolocation'
 import { Network } from '@capacitor/network'
 import { Capacitor } from '@capacitor/core'
 
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue' 
+
 const router = useRouter()
 const activeTab = ref('home')
 const products = ref([])
@@ -20,6 +22,55 @@ const unreadNotifications = ref(0)
 const notificationSubscription = ref(null)
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
+
+// Safe area insets for notches and camera cutouts
+const heroPaddingTop = ref('env(safe-area-inset-top)')
+
+// Refresh handler function
+const handleRefresh = async () => {
+  console.log('🔄 Pull-to-refresh triggered - Refreshing home page...')
+  
+  try {
+    // Refresh shops
+    await fetchShops()
+    
+    // Refresh products
+    await fetchProducts()
+    
+    // Refresh notification count
+    await fetchUnreadNotificationCount()
+    
+    console.log('✅ Home page refresh complete!')
+  } catch (error) {
+    console.error('❌ Refresh failed:', error)
+    errorMsg.value = 'Failed to refresh data'
+  }
+}
+
+// Function to get safe area insets dynamically
+const updateSafeAreaInsets = () => {
+  const computedStyle = getComputedStyle(document.documentElement)
+  const topInset = computedStyle.getPropertyValue('env(safe-area-inset-top)')
+  
+  console.log('Safe area top inset:', topInset)
+  
+  // Set padding values based on safe area
+  if (topInset && topInset !== '0px') {
+    heroPaddingTop.value = `calc(12px + ${topInset})`
+  } else {
+    // Fallback for devices without notch detection
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    const isAndroid = /Android/.test(navigator.userAgent)
+    
+    if (isIOS) {
+      heroPaddingTop.value = 'calc(12px + 44px)' // iOS status bar height
+    } else if (isAndroid) {
+      heroPaddingTop.value = 'calc(12px + 24px)' // Android status bar height
+    } else {
+      heroPaddingTop.value = '12px'
+    }
+  }
+}
 
 //Search Functionality
 const searchQuery = ref('')
@@ -427,6 +478,12 @@ async function fetchUnreadNotificationCount() {
 
 /* 🚀 Main Lifecycle */
 onMounted(async () => {
+  updateSafeAreaInsets()
+  
+  // Listen for orientation changes
+  window.addEventListener('resize', updateSafeAreaInsets)
+  window.addEventListener('orientationchange', updateSafeAreaInsets)
+
   try {
     loading.value = true
     errorMsg.value = ''
@@ -474,6 +531,9 @@ onMounted(async () => {
 
 // Cleanup subscription - ✅ FIXED: Now properly imported
 onUnmounted(() => {
+  window.removeEventListener('resize', updateSafeAreaInsets)
+  window.removeEventListener('orientationchange', updateSafeAreaInsets)
+
   if (notificationSubscription.value) {
     notificationSubscription.value.unsubscribe()
   }
@@ -541,9 +601,9 @@ onMounted(() => {
 
 <template>
   <v-app>
+  <PullToRefreshWrapper :on-refresh="handleRefresh">
     <v-main class="page">
-      <!-- 🔎 Search + Notification -->
-      <v-sheet class="hero">
+      <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
         <div class="hero-row">
           <v-text-field
             v-model="searchQuery"
@@ -723,6 +783,7 @@ onMounted(() => {
     </v-dialog>
 
     <BottomNav v-model="activeTab" />
+  </PullToRefreshWrapper>
   </v-app>
 </template>
 
@@ -730,81 +791,150 @@ onMounted(() => {
 .page {
   background: #f5f7fa;
   padding-bottom: 96px;
+  min-height: 100vh;
 }
 
+/* Add spacing after the sticky header */
+.v-container {
+  padding-top: 8px;
+}
+
+/* For the first section after hero */
+.section-header.mt-6 {
+  margin-top: 16px !important;
+}
+
+@media (max-width: 480px) {
+  .section-header.mt-6 {
+    margin-top: 12px !important;
+  }
+}
+
+/* Hero Section with Safe Area Support - COMPLETELY REWRITTEN */
 .hero {
   background: #3f83c7;
   border-radius: 0;
-  padding: 41px 16px calc(12px + env(safe-area-inset-top)) 16px;
   margin: 0;
   width: 100%;
   position: sticky;
   top: 0;
-  z-index: 10;
-  padding-bottom: 18px;
+  z-index: 100;
+  box-sizing: border-box;
+  /* Dynamic padding - will be overridden by inline style */
+  padding: 12px 16px 16px 16px;
+  /* Fallback padding */
+  padding-top: 12px;
+  /* Add a subtle shadow for depth */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* For devices with notches/cutouts - CSS only fallback */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .hero {
+    padding-top: calc(12px + env(safe-area-inset-top));
+  }
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .hero {
+    padding-top: calc(12px + constant(safe-area-inset-top));
+  }
 }
 
 .hero-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
 }
 
+/* Search Field - Responsive */
 .search-field {
   flex: 1;
+  min-width: 0; /* Prevents overflow */
+  transition: all 0.3s ease;
 }
 
 .search-field :deep(.v-field) {
   background: #fff !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  border-radius: 9999px !important;
+  transition: all 0.3s ease;
+}
+
+.search-field :deep(.v-field:hover) {
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  transform: translateY(-1px);
 }
 
 .search-field :deep(input) {
   font-size: 14px;
+  padding: 12px 0;
 }
 
+.search-field :deep(.v-field__append-inner) {
+  cursor: pointer;
+}
+
+/* Notification Button */
 .notification-wrapper {
   position: relative;
   display: inline-block;
+  flex-shrink: 0;
 }
 
 .notif-btn {
-  width: 44px;
-  height: 44px;
-  min-width: 44px;
-  border-radius: 9999px;
+  width: 48px;
+  height: 48px;
+  min-width: 48px;
+  border-radius: 50%;
   background: #fff !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.06);
-  position: relative;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+}
+
+.notif-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.notif-btn:active {
+  transform: translateY(0);
 }
 
 .notif-btn :deep(.v-icon) {
   color: #111827;
+  font-size: 22px;
 }
 
+/* Notification Badge */
 .notification-badge {
   position: absolute;
   top: -4px;
   right: -4px;
-  background: #ff4444;
+  background: linear-gradient(135deg, #ff4444, #ff6666);
   color: white;
-  border-radius: 10px;
-  min-width: 18px;
-  height: 18px;
-  font-size: 10px;
+  border-radius: 20px;
+  min-width: 20px;
+  height: 20px;
+  font-size: 11px;
   font-weight: 700;
   display: flex;
   align-items: center;
   justify-content: center;
   border: 2px solid white;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   animation: pulse 2s infinite;
+  padding: 0 5px;
 }
 
 .badge-large {
-  min-width: 22px;
-  height: 22px;
-  font-size: 9px;
+  min-width: 24px;
+  height: 24px;
+  font-size: 10px;
   top: -6px;
   right: -6px;
 }
@@ -812,15 +942,258 @@ onMounted(() => {
 @keyframes pulse {
   0% {
     transform: scale(1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   }
   50% {
     transform: scale(1.05);
-    box-shadow: 0 3px 6px rgba(0, 0, 0, 0.3);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
   }
   100% {
     transform: scale(1);
-    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+  }
+}
+
+/* Responsive Design - Mobile First */
+@media (max-width: 768px) {
+  .hero {
+    padding: 12px 12px 14px 12px;
+  }
+  
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .hero {
+      padding-top: calc(12px + env(safe-area-inset-top));
+    }
+  }
+  
+  .hero-row {
+    gap: 10px;
+  }
+  
+  .search-field :deep(input) {
+    font-size: 13px;
+    padding: 10px 0;
+  }
+  
+  .notif-btn {
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+  }
+  
+  .notif-btn :deep(.v-icon) {
+    font-size: 20px;
+  }
+  
+  .notification-badge {
+    min-width: 18px;
+    height: 18px;
+    font-size: 10px;
+    top: -3px;
+    right: -3px;
+  }
+  
+  .badge-large {
+    min-width: 22px;
+    height: 22px;
+    font-size: 9px;
+    top: -5px;
+    right: -5px;
+  }
+}
+
+/* Extra Small Devices (phones, 480px and down) */
+@media (max-width: 480px) {
+  .hero {
+    padding: 10px 10px 12px 10px;
+  }
+  
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .hero {
+      padding-top: calc(10px + env(safe-area-inset-top));
+    }
+  }
+  
+  .hero-row {
+    gap: 8px;
+  }
+  
+  .search-field :deep(input) {
+    font-size: 12px;
+    padding: 8px 0;
+  }
+  
+  .search-field :deep(.v-field__prepend-inner) {
+    padding-left: 8px;
+  }
+  
+  .search-field :deep(.v-field__append-inner) {
+    padding-right: 8px;
+  }
+  
+  .notif-btn {
+    width: 40px;
+    height: 40px;
+    min-width: 40px;
+  }
+  
+  .notif-btn :deep(.v-icon) {
+    font-size: 18px;
+  }
+  
+  .notification-badge {
+    min-width: 16px;
+    height: 16px;
+    font-size: 9px;
+    top: -2px;
+    right: -2px;
+  }
+  
+  .badge-large {
+    min-width: 20px;
+    height: 20px;
+    font-size: 8px;
+    top: -4px;
+    right: -4px;
+  }
+}
+
+/* Landscape Mode */
+@media (max-height: 600px) and (orientation: landscape) {
+  .hero {
+    padding: 8px 12px 10px 12px;
+  }
+  
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .hero {
+      padding-top: calc(8px + env(safe-area-inset-top));
+    }
+  }
+  
+  .hero-row {
+    gap: 10px;
+  }
+  
+  .search-field :deep(input) {
+    padding: 8px 0;
+  }
+  
+  .notif-btn {
+    width: 38px;
+    height: 38px;
+    min-width: 38px;
+  }
+  
+  .notif-btn :deep(.v-icon) {
+    font-size: 18px;
+  }
+}
+
+/* Tablet Devices (768px to 1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .hero {
+    padding: 14px 20px 18px 20px;
+  }
+  
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .hero {
+      padding-top: calc(14px + env(safe-area-inset-top));
+    }
+  }
+  
+  .hero-row {
+    max-width: 800px;
+    gap: 14px;
+  }
+  
+  .search-field :deep(input) {
+    font-size: 15px;
+  }
+  
+  .notif-btn {
+    width: 52px;
+    height: 52px;
+    min-width: 52px;
+  }
+  
+  .notif-btn :deep(.v-icon) {
+    font-size: 24px;
+  }
+}
+
+/* Desktop Devices (1024px and up) */
+@media (min-width: 1025px) {
+  .hero {
+    padding: 16px 24px 20px 24px;
+  }
+  
+  @supports (padding-top: env(safe-area-inset-top)) {
+    .hero {
+      padding-top: calc(16px + env(safe-area-inset-top));
+    }
+  }
+  
+  .hero-row {
+    max-width: 1200px;
+    gap: 16px;
+  }
+  
+  .search-field :deep(input) {
+    font-size: 16px;
+    padding: 14px 0;
+  }
+  
+  .notif-btn {
+    width: 56px;
+    height: 56px;
+    min-width: 56px;
+  }
+  
+  .notif-btn :deep(.v-icon) {
+    font-size: 26px;
+  }
+}
+
+/* iOS-specific adjustments for notch */
+@supports (-webkit-touch-callout: none) {
+  .hero {
+    padding-top: calc(12px + constant(safe-area-inset-top)) !important;
+    padding-top: calc(12px + env(safe-area-inset-top)) !important;
+  }
+  
+  @media (max-width: 480px) {
+    .hero {
+      padding-top: calc(10px + constant(safe-area-inset-top)) !important;
+      padding-top: calc(10px + env(safe-area-inset-top)) !important;
+    }
+  }
+}
+
+/* Android specific adjustments */
+@media (display-notch) {
+  .hero {
+    padding-top: calc(12px + 24px);
+  }
+  
+  @media (max-width: 480px) {
+    .hero {
+      padding-top: calc(10px + 24px);
+    }
+  }
+}
+
+/* Ensure the search field doesn't overflow on very small screens */
+@media (max-width: 360px) {
+  .hero-row {
+    gap: 6px;
+  }
+  
+  .search-field :deep(.v-field__prepend-inner) {
+    padding-left: 6px;
+  }
+  
+  .search-field :deep(.v-field__append-inner) {
+    padding-right: 6px;
   }
 }
 

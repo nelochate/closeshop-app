@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue' 
 
 const activeTab = ref('chat')
 const router = useRouter()
@@ -15,6 +16,24 @@ const error = ref<string | null>(null)
 const showDeleteDialog = ref(false)
 const conversationToDelete = ref<any>(null)
 const deleting = ref(false)
+
+const handleRefresh = async () => {
+  console.log('🔄 Pull-to-refresh triggered - Refreshing conversations...')
+  
+  try {
+    // Clear any existing errors
+    error.value = null
+    
+    // Refresh conversations
+    await fetchConversations()
+    
+    console.log('✅ Conversations refresh complete!')
+  } catch (err) {
+    console.error('❌ Refresh failed:', err)
+    error.value = 'Failed to refresh conversations'
+  }
+}
+
 
 // Fetch conversations with proper user matching
 const fetchConversations = async () => {
@@ -358,188 +377,248 @@ setInterval(fetchConversations, 30000)
 
 <template>
   <v-app>
-    <!-- Top App Bar -->
-    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
-      <v-btn variant="text" icon @click="goBack">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
-      <v-toolbar-title class="font-bold">
-        <strong>Messages</strong>
-      </v-toolbar-title>
-      <v-spacer />
-      <v-btn icon @click="fetchConversations" :loading="loading">
-        <v-icon>mdi-refresh</v-icon>
-      </v-btn>
-      <!-- <v-btn icon @click="startNewConversation">
-        <v-icon>mdi-plus</v-icon>
-      </v-btn> -->
-    </v-app-bar>
+    <PullToRefreshWrapper :on-refresh="handleRefresh">
+      <!-- Top App Bar -->
+      <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+        <v-btn variant="text" icon @click="goBack" class="back-btn">
+          <v-icon>mdi-arrow-left</v-icon>
+        </v-btn>
+        <v-toolbar-title class="font-bold">
+          <strong>Messages</strong>
+        </v-toolbar-title>
+        <v-spacer />
+      </v-app-bar>
 
-    <v-divider />
+      <v-divider />
 
-    <v-main>
-      <div class="messages-view">
-        <!-- Loading State -->
-        <div v-if="loading" class="loading-container">
-          <v-progress-circular indeterminate color="primary" />
-          <p class="text-caption mt-2">Loading conversations...</p>
-        </div>
+      <v-main>
+        <div class="messages-view">
+          <!-- Loading State -->
+          <div v-if="loading" class="loading-container">
+            <v-progress-circular indeterminate color="primary" />
+            <p class="text-caption mt-2">Loading conversations...</p>
+          </div>
 
-        <!-- Error State -->
-        <v-alert
-          v-else-if="error"
-          type="error"
-          border="start"
-          class="mx-4 mt-4"
-          @click="fetchConversations"
-          style="cursor: pointer"
-        >
-          {{ error }} - Tap to retry
-        </v-alert>
-
-        <!-- Empty State -->
-        <div v-else-if="conversations.length === 0" class="empty-state">
-          <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-forum-outline</v-icon>
-          <h3 class="text-h6 mb-2">No conversations yet</h3>
-          <p class="text-caption text-grey">Start a conversation by contacting a seller or buyer.</p>
-          <!-- <v-btn color="primary" class="mt-4" @click="startNewConversation">
-            Start New Conversation
-          </v-btn> -->
-        </div>
-
-        <!-- Conversations List -->
-        <v-list v-else class="conversations-list">
-          <v-list-item
-            v-for="conversation in conversations"
-            :key="conversation.id"
-            class="conversation-item"
-            :class="{ 'unread-item': conversation.unread }"
-            @click="openChat(conversation)"
+          <!-- Error State -->
+          <v-alert
+            v-else-if="error"
+            type="error"
+            border="start"
+            class="mx-4 mt-4"
+            @click="fetchConversations"
+            style="cursor: pointer"
           >
-            <template #prepend>
-              <div class="avatar-container">
-                <v-avatar size="56" class="conversation-avatar">
-                  <v-img
-                    :src="conversation.avatar"
-                    :alt="conversation.otherUserName"
-                    cover
-                  />
-                </v-avatar>
-                <v-badge
-                  v-if="conversation.unreadCount > 0"
-                  dot
-                  color="error"
-                  location="bottom end"
-                  class="unread-badge"
-                />
-              </div>
-            </template>
+            {{ error }} - Tap to retry
+          </v-alert>
 
-            <v-list-item-title class="conversation-title">
-              <strong>{{ conversation.otherUserName }}</strong>
-              <v-badge
-                v-if="conversation.unreadCount > 1"
-                :content="conversation.unreadCount"
-                color="error"
-                inline
-                class="ml-2"
-              />
-            </v-list-item-title>
+          <!-- Empty State -->
+          <div v-else-if="conversations.length === 0" class="empty-state">
+            <v-icon size="64" color="grey-lighten-1" class="mb-4">mdi-forum-outline</v-icon>
+            <h3 class="text-h6 mb-2">No conversations yet</h3>
+            <p class="text-caption text-grey">Start a conversation by contacting a seller or buyer.</p>
+          </div>
 
-            <v-list-item-subtitle
-              class="conversation-preview"
-              :class="{ 'unread-message': conversation.unread }"
+          <!-- Conversations List -->
+          <v-list v-else class="conversations-list">
+            <v-list-item
+              v-for="conversation in conversations"
+              :key="conversation.id"
+              class="conversation-item"
+              :class="{ 'unread-item': conversation.unread }"
+              @click="openChat(conversation)"
             >
-              <span v-if="conversation.sender" class="sender-name">
-                {{ conversation.sender }}:
-              </span>
-              {{ conversation.lastMessage }}
-            </v-list-item-subtitle>
-
-            <template #append>
-              <div class="conversation-meta">
-                <div
-                  class="message-time"
-                  :class="{ 'unread-time': conversation.unread }"
-                >
-                  {{ conversation.time }}
-                </div>
-                <div class="action-buttons">
-                  <v-icon
-                    v-if="conversation.unread"
-                    color="primary"
-                    size="16"
-                    class="mt-1 mr-1"
-                  >
-                    mdi-circle-medium
-                  </v-icon>
-                  <v-btn
-                    icon
-                    size="x-small"
-                    variant="text"
+              <template #prepend>
+                <div class="avatar-container">
+                  <v-avatar size="56" class="conversation-avatar">
+                    <v-img
+                      :src="conversation.avatar"
+                      :alt="conversation.otherUserName"
+                      cover
+                    />
+                  </v-avatar>
+                  <v-badge
+                    v-if="conversation.unreadCount > 0"
+                    dot
                     color="error"
-                    @click.stop="confirmDelete(conversation)"
-                    class="delete-btn"
-                  >
-                    <v-icon size="18">mdi-delete-outline</v-icon>
-                  </v-btn>
+                    location="bottom end"
+                    class="unread-badge"
+                  />
                 </div>
-              </div>
-            </template>
-          </v-list-item>
-        </v-list>
-      </div>
-    </v-main>
+              </template>
 
-    <!-- Delete Confirmation Dialog -->
-    <v-dialog v-model="showDeleteDialog" max-width="400" persistent>
-      <v-card>
-        <v-card-title class="text-h6">
-          Delete Conversation?
-        </v-card-title>
-        <v-card-text>
-          Are you sure you want to delete this conversation with
-          <strong>{{ conversationToDelete?.otherUserName }}</strong>?
-          This action cannot be undone and will delete all messages in this conversation.
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer></v-spacer>
-          <v-btn
-            text
-            @click="cancelDelete"
-            :disabled="deleting"
-          >
-            Cancel
-          </v-btn>
-          <v-btn
-            color="error"
-            variant="flat"
-            @click="deleteConversation(conversationToDelete?.id)"
-            :loading="deleting"
-          >
-            Delete
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+              <v-list-item-title class="conversation-title">
+                <strong>{{ conversation.otherUserName }}</strong>
+                <v-badge
+                  v-if="conversation.unreadCount > 1"
+                  :content="conversation.unreadCount"
+                  color="error"
+                  inline
+                  class="ml-2"
+                />
+              </v-list-item-title>
 
-    <!-- Reusable BottomNav -->
-    <BottomNav v-model="activeTab" />
+              <v-list-item-subtitle
+                class="conversation-preview"
+                :class="{ 'unread-message': conversation.unread }"
+              >
+                <span v-if="conversation.sender" class="sender-name">
+                  {{ conversation.sender }}:
+                </span>
+                {{ conversation.lastMessage }}
+              </v-list-item-subtitle>
+
+              <template #append>
+                <div class="conversation-meta">
+                  <div
+                    class="message-time"
+                    :class="{ 'unread-time': conversation.unread }"
+                  >
+                    {{ conversation.time }}
+                  </div>
+                  <div class="action-buttons">
+                    <v-icon
+                      v-if="conversation.unread"
+                      color="primary"
+                      size="16"
+                      class="mt-1 mr-1"
+                    >
+                      mdi-circle-medium
+                    </v-icon>
+                    <v-btn
+                      icon
+                      size="x-small"
+                      variant="text"
+                      color="error"
+                      @click.stop="confirmDelete(conversation)"
+                      class="delete-btn"
+                    >
+                      <v-icon size="18">mdi-delete-outline</v-icon>
+                    </v-btn>
+                  </div>
+                </div>
+              </template>
+            </v-list-item>
+          </v-list>
+        </div>
+      </v-main>
+
+      <!-- Delete Confirmation Dialog -->
+      <v-dialog v-model="showDeleteDialog" max-width="400" persistent>
+        <v-card>
+          <v-card-title class="text-h6">
+            Delete Conversation?
+          </v-card-title>
+          <v-card-text>
+            Are you sure you want to delete this conversation with
+            <strong>{{ conversationToDelete?.otherUserName }}</strong>?
+            This action cannot be undone and will delete all messages in this conversation.
+          </v-card-text>
+          <v-card-actions>
+            <v-spacer></v-spacer>
+            <v-btn
+              text
+              @click="cancelDelete"
+              :disabled="deleting"
+            >
+              Cancel
+            </v-btn>
+            <v-btn
+              color="error"
+              variant="flat"
+              @click="deleteConversation(conversationToDelete?.id)"
+              :loading="deleting"
+            >
+              Delete
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-dialog>
+
+      <BottomNav v-model="activeTab" />
+    </PullToRefreshWrapper>
   </v-app>
 </template>
 
 <style scoped>
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Top Navigation Bar - Fixed for notches */
 .top-nav {
-  background-color: #3f83c7;
-  padding-top: 20px;
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
+/* Main content area - accounts for the fixed header */
 .messages-view {
-  min-height: calc(100vh - 120px);
+  margin-top: calc(56px + var(--sat, 0px));  
+  min-height: calc(100vh - 56px - var(--sat, 0px));
   background-color: #f8fafc;
-  margin-top: 32px;
+  padding-bottom: 80px;
 }
 
+/* iOS support for margin-top */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .messages-view {
+    margin-top: calc(56px + env(safe-area-inset-top));
+  }
+}
+
+/* Landscape mode adjustment */
+@media (orientation: landscape) and (max-height: 500px) {
+  .top-nav {
+    height: 56px !important;
+    padding-top: 0 !important;
+  }
+  
+  .messages-view {
+    margin-top: 56px;
+  }
+}
+
+/* Rest of your existing styles remain exactly the same */
 .loading-container {
   display: flex;
   flex-direction: column;
@@ -559,6 +638,7 @@ setInterval(fetchConversations, 30000)
 }
 
 .conversations-list {
+  margin-top: -55px;
   background: white;
   padding: 0;
 }
