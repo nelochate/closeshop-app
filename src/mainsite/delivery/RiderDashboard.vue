@@ -2,30 +2,17 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { useAuthUserStore } from '@/stores/authUser'
 
 const router = useRouter()
-const authStore = useAuthUserStore()
 
 // State
 const loading = ref(false)
 const activeFilter = ref('available')
-const showAcceptDialog = ref(false)
-const showUpdateDialog = ref(false)
-const accepting = ref(false)
-const updating = ref(false)
-const selectedOrder = ref(null)
-const pendingStatusUpdate = ref(null)
 
 // Location state
 const currentLocation = ref(null)
 const locationLoading = ref(false)
 const locationWatchId = ref(null)
-
-// Image view
-const showImageDialog = ref(false)
-const selectedImage = ref(null)
-const selectedProductName = ref('')
 
 // Orders data
 const orders = ref([])
@@ -44,7 +31,7 @@ const loadingProfile = ref(true)
 const acceptedOrders = computed(() => {
   return orders.value
     .filter((order) =>
-      order.status === 'accepted' &&
+      order.status === 'accepted_by_rider' &&
       order.rider_id === currentRiderNumericId.value
     )
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
@@ -53,11 +40,10 @@ const acceptedOrders = computed(() => {
 const availableOrders = computed(() => {
   return orders.value
     .filter((order) => {
+      // Only show orders that are waiting_for_rider AND have no rider assigned
       const hasNoRider = !order.rider_id || order.rider_id === null
-      const isPending = order.status === 'pending'
-      const isReadyForPickup = order.status === 'ready_for_pickup'
-      const isMeetupAvailable = order.delivery_option === 'meetup' && isPending
-      return hasNoRider && (isPending || isReadyForPickup || isMeetupAvailable)
+      const isWaitingForRider = order.status === 'waiting_for_rider'
+      return hasNoRider && isWaitingForRider
     })
     .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
 })
@@ -125,24 +111,6 @@ const formatDateTime = (dateString) => {
   })
 }
 
-const formatNumber = (num) => {
-  if (!num) return '0'
-  return num.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
-
-const getStatusText = (status) => {
-  const statusMap = {
-    pending: 'Pending',
-    paid: 'Paid',
-    accepted: 'Accepted',
-    picked_up: 'Picked Up',
-    shipped: 'Shipped',
-    delivered: 'Delivered',
-    completed: 'Completed',
-    cancelled: 'Cancelled',
-  }
-  return statusMap[status] || status
-}
 
 // Check rider approval status
 const checkRiderApproval = async () => {
@@ -346,7 +314,7 @@ const fetchOrders = async () => {
           province_name
         )
       `)
-      .or(`and(status.eq.pending,rider_id.is.null),rider_id.eq.${currentRiderNumericId.value}`)
+      .or(`and(status.eq.waiting_for_rider,rider_id.is.null),rider_id.eq.${currentRiderNumericId.value}`)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -437,7 +405,7 @@ const subscribeToOrders = () => {
         event: 'INSERT',
         schema: 'public',
         table: 'orders',
-        filter: 'status=eq.pending',
+        filter: 'status=eq.waiting_for_rider', 
       },
       () => {
         fetchOrders()
@@ -669,6 +637,7 @@ onUnmounted(() => {
 
         
         <div v-else class="orders-list">
+
           <!-- Click Instruction Banner -->
           <div class="instruction-banner mx-4 mb-3">
             <div class="instruction-content">
@@ -710,7 +679,7 @@ onUnmounted(() => {
                 Products:
               </div>
               <div class="products-list">
-                <div v-for="(item, index) in order.items.slice(0, 3)" :key="item.id" class="product-item">
+                <div v-for="(item) in order.items.slice(0, 3)" :key="item.id" class="product-item">
                   <div class="product-image-wrapper">
                     <v-img v-if="item.image" :src="item.image" :alt="item.name" width="32" height="32"
                       class="product-img" cover @error="handleImageError">

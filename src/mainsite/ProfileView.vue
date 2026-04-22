@@ -690,7 +690,7 @@ const getStatusText = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
   if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'Completed'
   if (order.payment_status === 'paid') return 'Appproved - To Receive'
-  if (order.payment_status === 'pending') return 'Pending Payment Method'
+  if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
   return 'Processing'
 }

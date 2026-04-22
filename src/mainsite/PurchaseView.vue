@@ -197,11 +197,11 @@ const loadShopData = async () => {
 
     // Parse payment options
     let paymentOptions = ['cod'] // Default to COD only
-    
+
     if (shop.payment_options && Array.isArray(shop.payment_options) && shop.payment_options.length > 0) {
       paymentOptions = shop.payment_options
       console.log('✅ Using shop payment options:', paymentOptions)
-      
+
       // Set default payment method to the first available option
       if (!paymentMethod.value && paymentOptions.length > 0) {
         paymentMethod.value = paymentOptions[0]
@@ -266,7 +266,7 @@ const debugItems = () => {
       image: item.image, // Check if this is populated
       directImage: item.image, // Check direct image property
     })
-    
+
     // Test the getMainImage function
     const testImage = getMainImage(item.image || item.product?.main_img_urls, item.varietyData)
     console.log(`Test getMainImage result:`, testImage)
@@ -343,7 +343,7 @@ const fetchCartItemsDirect = async (itemIds: string[]) => {
         finalPrice = cartItem.variety_data.price || product.price || 0
         itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
         varietyData = cartItem.variety_data
-        
+
         // Try to get variety image
         if (varietyData?.images && varietyData.images.length > 0) {
           itemImage = varietyData.images[0]
@@ -428,7 +428,7 @@ const fetchProductFromId = async (productId: string) => {
           finalPrice = variety.price || product.price
           itemName = `${product.prod_name} - ${variety.name}`
           varietyData = variety
-          
+
           // Try to get variety image
           if (variety.images && variety.images.length > 0) {
             itemImage = variety.images[0]
@@ -514,7 +514,7 @@ onMounted(async () => {
 
   // Debug first
   debugState()
-  
+
   // Generate transaction number
   if (!transactionNumber.value) {
     transactionNumber.value = await generateUniqueTransactionNumber()
@@ -522,7 +522,7 @@ onMounted(async () => {
 
   // Load items FIRST (this sets cartItemIds if needed)
   await loadItems()
-  
+
   // Debug items
   debugItems() // Add this line
 
@@ -690,7 +690,7 @@ const fetchCartItemsByIDs = async (ids: string[]) => {
         finalPrice = cartItem.variety_data.price || product.price || 0
         itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
         varietyData = cartItem.variety_data
-        
+
         // Try to get variety image
         if (varietyData?.images && varietyData.images.length > 0) {
           itemImage = varietyData.images[0]
@@ -767,7 +767,7 @@ const fetchAllCartItems = async () => {
           finalPrice = cartItem.variety_data.price || product.price || 0
           itemName = `${product.prod_name || 'Product'} - ${cartItem.variety_data.name || 'Variety'}`
           varietyData = cartItem.variety_data
-          
+
           // Try to get variety image
           if (varietyData?.images && varietyData.images.length > 0) {
             itemImage = varietyData.images[0]
@@ -1511,29 +1511,29 @@ const copyToClipboard = async () => {
     await navigator.clipboard.writeText(transactionNumber.value)
     copyButtonText.value = 'Copied!'
     showCopySuccess.value = true
-    
+
     // Reset button text after 2 seconds
     setTimeout(() => {
       copyButtonText.value = 'Copy'
       showCopySuccess.value = false
     }, 2000)
-    
+
     console.log('✅ Transaction number copied to clipboard')
   } catch (err) {
     console.error('❌ Failed to copy:', err)
     copyButtonText.value = 'Copy Failed'
-    
+
     // Fallback for older browsers
     const textArea = document.createElement('textarea')
     textArea.value = transactionNumber.value
     document.body.appendChild(textArea)
     textArea.select()
-    
+
     try {
       document.execCommand('copy')
       copyButtonText.value = 'Copied!'
       showCopySuccess.value = true
-      
+
       setTimeout(() => {
         copyButtonText.value = 'Copy'
         showCopySuccess.value = false
@@ -1542,14 +1542,14 @@ const copyToClipboard = async () => {
       console.error('❌ Fallback copy failed:', fallbackErr)
       copyButtonText.value = 'Failed'
     }
-    
+
     document.body.removeChild(textArea)
   }
 }
 // 📋 FORMAT TRANSACTION NUMBER FOR DISPLAY
 const formattedTransactionNumber = computed(() => {
   if (!transactionNumber.value) return 'Loading...'
-  
+
   // Format as: TX-ABCDEF-12345-67890
   const parts = transactionNumber.value.split('-')
   if (parts.length >= 4) {
@@ -1628,7 +1628,7 @@ const getMainImage = (imgUrls: any, varietyData: any = null): string => {
   // Third priority: Use product main image URLs
   if (imgUrls) {
     let imageArray = imgUrls
-    
+
     // If it's a string, try to parse it as JSON
     if (typeof imgUrls === 'string') {
       try {
@@ -1645,12 +1645,12 @@ const getMainImage = (imgUrls: any, varietyData: any = null): string => {
         }
       }
     }
-    
+
     // If it's an array, get the first valid image
     if (Array.isArray(imageArray) && imageArray.length > 0) {
-      const validImage = imageArray.find(img => 
-        img && 
-        img !== '/placeholder.png' && 
+      const validImage = imageArray.find(img =>
+        img &&
+        img !== '/placeholder.png' &&
         img.trim() !== '' &&
         (img.startsWith('http') || img.startsWith('/') || img.startsWith('data:'))
       )
@@ -1710,7 +1710,7 @@ const deliveryOptionsDisplay = computed(() =>
 // 💳 PAYMENT OPTIONS - UPDATED TO USE SHOP'S PAYMENT OPTIONS
 const paymentOptionsDisplay = computed(() => {
   const options = []
-  
+
   if (shopSchedule.value.paymentOptions.includes('cod')) {
     options.push({
       label: 'Cash on Delivery',
@@ -1719,7 +1719,7 @@ const paymentOptionsDisplay = computed(() => {
       description: 'Pay cash when you receive the order'
     })
   }
-  
+
   if (shopSchedule.value.paymentOptions.includes('gcash')) {
     options.push({
       label: 'GCash',
@@ -1728,7 +1728,7 @@ const paymentOptionsDisplay = computed(() => {
       description: 'Pay via GCash mobile wallet'
     })
   }
-  
+
   return options
 })
 
@@ -1793,7 +1793,7 @@ const handleCheckout = async () => {
         user_id: buyer.value.id,
         address_id: address.value.id,
         total_amount: totalPrice.value,
-        status: 'pending',
+        status: 'pending_approval',
         payment_method: paymentMethod.value,
         transaction_number: transactionNumber.value,
         delivery_option: deliveryOption.value,
@@ -2175,7 +2175,7 @@ watch(
           <strong>Checkout</strong>
         </v-toolbar-title>
         <v-spacer></v-spacer>
-      
+
       </v-app-bar>
 
       <v-container fluid class="px-3 py-4 main-container">
@@ -2189,9 +2189,9 @@ watch(
                   ₱{{ totalPrice.toLocaleString() }}
                 </div>
               </div>
-             
+
             </div>
-            
+
             <!-- Transaction Number Section -->
             <div class="transaction-section mb-4">
               <div class="d-flex align-center justify-space-between mb-2">
@@ -2216,7 +2216,7 @@ watch(
                   <span>{{ showCopySuccess ? 'Copied!' : 'Copy to clipboard' }}</span>
                 </v-tooltip>
               </div>
-              
+
               <div class="transaction-number-display pa-3 rounded-lg" @click="copyToClipboard">
                 <div class="d-flex align-center justify-center">
                   <v-icon color="primary" size="small" class="mr-2">mdi-receipt-text</v-icon>
@@ -2224,7 +2224,7 @@ watch(
                     {{ formattedTransactionNumber }}
                   </div>
                 </div>
-                
+
                 <!-- Success Message -->
                 <v-slide-y-transition>
                   <div v-if="showCopySuccess" class="copy-success-message mt-2">
@@ -2241,7 +2241,7 @@ watch(
                 </v-slide-y-transition>
               </div>
             </div>
-            
+
             <!-- Progress Steps -->
             <div class="progress-steps">
               <div class="d-flex justify-space-between align-center">
@@ -2287,7 +2287,7 @@ watch(
             <v-icon color="primary" class="mr-2" size="small">mdi-truck-fast</v-icon>
             Delivery Details
           </v-card-title>
-          
+
           <v-card-text>
             <!-- Buyer Info Section -->
             <div class="info-section mb-4">
@@ -2303,7 +2303,7 @@ watch(
                   <v-icon size="small">mdi-pencil</v-icon>
                 </v-btn>
               </div>
-              
+
               <v-list density="compact" class="info-list">
                 <v-list-item class="px-0">
                   <template #prepend>
@@ -2313,12 +2313,12 @@ watch(
                     {{ buyer?.first_name || 'Loading...' }} {{ buyer?.last_name }}
                   </v-list-item-title>
                 </v-list-item>
-                
+
                 <v-list-item class="px-0">
                   <template #prepend>
                     <v-icon size="small" color="grey-darken-1">mdi-phone</v-icon>
                   </template>
-                  <v-list-item-title 
+                  <v-list-item-title
                     class="text-body-2"
                     :class="{ 'text-warning': !contactPhone }"
                   >
@@ -2342,15 +2342,15 @@ watch(
                   <v-icon size="small">mdi-pencil</v-icon>
                 </v-btn>
               </div>
-              
-              <div 
+
+              <div
                 class="address-box pa-3 rounded-lg"
                 :class="{ 'border-warning': !address }"
                 @click="showAddressDialog = true"
               >
                 <div class="d-flex align-start">
-                  <v-icon 
-                    size="small" 
+                  <v-icon
+                    size="small"
                     :color="address ? 'success' : 'warning'"
                     class="mr-2 mt-1"
                   >
@@ -2384,15 +2384,15 @@ watch(
                   <v-icon size="small">mdi-pencil</v-icon>
                 </v-btn>
               </div>
-              
-              <div 
+
+              <div
                 class="schedule-box pa-3 rounded-lg"
                 :class="{ 'border-warning': !deliveryTime }"
                 @click="showDateTimePicker = true"
               >
                 <div class="d-flex align-center">
-                  <v-icon 
-                    size="small" 
+                  <v-icon
+                    size="small"
                     :color="deliveryTime ? 'success' : 'warning'"
                     class="mr-2"
                   >
@@ -2420,7 +2420,7 @@ watch(
             <v-icon color="primary" class="mr-2" size="small">mdi-package-variant</v-icon>
             Order Items ({{ items.length }})
           </v-card-title>
-          
+
           <v-list class="items-list">
             <v-list-item
               v-for="(item, index) in items"
@@ -2458,7 +2458,7 @@ watch(
                     {{ item.selectedVariety }}
                   </v-chip>
                 </div>
-                
+
                 <div class="d-flex align-center flex-wrap gap-1 mb-1">
                   <div class="text-body-2 text-primary font-weight-bold">
                     ₱{{ (item.price * item.quantity).toLocaleString() }}
@@ -2467,7 +2467,7 @@ watch(
                     (₱{{ item.price.toLocaleString() }} × {{ item.quantity }})
                   </div>
                 </div>
-                
+
                 <div v-if="item.selectedSize" class="text-caption text-grey">
                   <v-icon size="x-small" class="mr-1">mdi-ruler</v-icon>
                   Size: {{ item.selectedSize }}
@@ -2487,11 +2487,11 @@ watch(
                   >
                     <v-icon>mdi-minus</v-icon>
                   </v-btn>
-                  
+
                   <div class="quantity-value">
                     {{ item.quantity }}
                   </div>
-                  
+
                   <v-btn
                     size="x-small"
                     icon
@@ -2506,9 +2506,9 @@ watch(
               </template>
             </v-list-item>
           </v-list>
-          
+
           <v-divider></v-divider>
-          
+
           <v-card-text class="total-section">
             <div class="d-flex justify-space-between align-center">
               <div class="text-subtitle-1 font-weight-medium">Total Amount</div>
@@ -2548,12 +2548,12 @@ watch(
                 <v-icon color="primary" size="small" class="mr-2">mdi-credit-card-outline</v-icon>
                 <div class="text-subtitle-2 font-weight-medium">Payment Method</div>
               </div>
-              
+
               <!-- Show loading state if no payment options -->
               <div v-if="paymentOptionsDisplay.length === 0" class="text-caption text-grey py-2">
                 Loading payment options...
               </div>
-              
+
               <!-- Display payment options from shop -->
               <v-radio-group v-else v-model="paymentMethod" hide-details class="option-radio">
                 <v-radio
@@ -2655,7 +2655,7 @@ watch(
               <div>Select Delivery Address</div>
             </div>
           </v-card-title>
-          
+
           <v-card-text class="dialog-content">
             <!-- Empty State -->
             <div v-if="addresses.length === 0" class="empty-state text-center py-8">
@@ -2707,7 +2707,7 @@ watch(
                         </v-chip>
                       </div>
                     </v-list-item-title>
-                    
+
                     <v-list-item-subtitle>
                       <div class="text-body-2 mb-1">{{ formatAddress(addr) }}</div>
                       <div v-if="addr.phone" class="text-caption text-grey">
@@ -2730,7 +2730,7 @@ watch(
               </div>
 
               <v-divider class="my-4"></v-divider>
-              
+
               <v-btn
                 color="primary"
                 variant="outlined"
@@ -2742,7 +2742,7 @@ watch(
               </v-btn>
             </div>
           </v-card-text>
-          
+
           <v-card-actions class="dialog-actions">
             <v-btn
               variant="text"
@@ -2776,7 +2776,7 @@ watch(
               Butuan City
             </v-chip>
           </v-card-title>
-          
+
           <v-card-text class="dialog-content">
             <!-- Date Picker -->
             <div class="date-section mb-4">
@@ -2797,7 +2797,7 @@ watch(
             <!-- Time Picker -->
             <div class="time-section">
               <div class="text-subtitle-2 font-weight-medium mb-3">Select Time</div>
-              
+
               <div class="time-picker">
                 <div class="time-wheel-container">
                   <div class="time-wheel">
@@ -2814,11 +2814,11 @@ watch(
                       </template>
                     </v-virtual-scroll>
                   </div>
-                  
+
                   <div class="time-separator">
                     <v-icon>mdi-clock</v-icon>
                   </div>
-                  
+
                   <div class="time-wheel">
                     <div class="wheel-label">Minute</div>
                     <v-virtual-scroll :items="minutes" height="160" item-height="48">
@@ -2865,7 +2865,7 @@ watch(
                       <div class="text-caption text-grey">{{ formattedDate }}</div>
                     </div>
                   </div>
-                  
+
                   <!-- Validation Feedback -->
                   <div v-if="deliveryDate && deliveryTime" class="mt-3">
                     <v-alert
@@ -2893,7 +2893,7 @@ watch(
               </div>
             </div>
           </v-card-text>
-          
+
           <v-card-actions class="dialog-actions">
             <v-btn
               variant="text"
@@ -2924,7 +2924,7 @@ watch(
               <div>Contact Information</div>
             </div>
           </v-card-title>
-          
+
           <v-card-text class="dialog-content">
             <div class="contact-form">
               <v-alert
@@ -2957,7 +2957,7 @@ watch(
               </div>
             </div>
           </v-card-text>
-          
+
           <v-card-actions class="dialog-actions">
             <v-btn
               variant="text"
@@ -3365,23 +3365,23 @@ watch(
     padding-left: 12px !important;
     padding-right: 12px !important;
   }
-  
+
   .options-grid {
     grid-template-columns: 1fr;
   }
-  
+
   .time-wheel-container {
     gap: 12px;
   }
-  
+
   .time-wheel {
     width: 70px;
   }
-  
+
   .step-label {
     font-size: 0.7rem;
   }
-  
+
   .checkout-btn {
     min-width: 140px;
     padding: 8px 16px;
@@ -3393,36 +3393,36 @@ watch(
     font-size: 0.9rem;
     padding: 12px 16px 6px;
   }
-  
+
   .item-row {
     padding: 12px 16px;
   }
-  
+
   .item-image {
     width: 48px !important;
     height: 48px !important;
     min-width: 48px !important;
   }
-  
+
   .quantity-control {
     gap: 4px;
   }
-  
+
   .qty-btn {
     width: 24px;
     height: 24px;
     min-width: 24px;
   }
-  
+
   .time-wheel {
     width: 60px;
   }
-  
+
   .time-option {
     height: 40px;
     line-height: 40px;
   }
-  
+
   .time-separator {
     padding-top: 40px;
   }
@@ -3624,20 +3624,20 @@ watch(
   .transaction-number-display .text-h6 {
     font-size: 1rem;
   }
-  
+
   .copy-btn {
     font-size: 0.7rem;
     padding: 3px 8px;
   }
-  
+
   .transaction-section {
     padding: 8px;
   }
-  
+
   .step-label {
     font-size: 0.65rem;
   }
-  
+
   .copy-toast {
     margin-top: 56px;
   }
@@ -3648,15 +3648,15 @@ watch(
     font-size: 0.9rem;
     letter-spacing: 0.5px;
   }
-  
+
   .step-label {
     font-size: 0.6rem;
   }
-  
+
   .step-icon {
     padding: 6px;
   }
-  
+
   .transaction-chip .v-chip__content {
     font-size: 0.7rem;
   }

@@ -23,6 +23,8 @@ const selectedImage = ref(null)
 const selectedProductName = ref('')
 const currentRiderNumericId = ref(null)
 
+const currentRider = ref(null)
+
 // Helper functions
 const formatNumber = (num) => {
   if (!num) return '0'
@@ -43,11 +45,10 @@ const formatDateTime = (dateString) => {
 
 const getStatusText = (status) => {
   const statusMap = {
-    pending: 'Pending',
-    paid: 'Paid',
-    accepted: 'Accepted',
+    pending_approval: 'Pending Seller Approval',
+    waiting_for_rider: 'Available for Pickup',
+    accepted_by_rider: 'Accepted by Rider',
     picked_up: 'Picked Up',
-    shipped: 'Shipped',
     delivered: 'Delivered',
     completed: 'Completed',
     cancelled: 'Cancelled',
@@ -97,18 +98,18 @@ const getCurrentRider = async () => {
 
     const { data, error } = await supabase
       .from('Rider_Registration')
-      .select('rider_id')
+      .select('rider_id, first_name, last_name, email, phone')
       .eq('profile_id', user.id)
       .single()
 
     if (!error && data) {
       currentRiderNumericId.value = data.rider_id
+      currentRider.value = data
     }
   } catch (error) {
     console.error('Error getting rider:', error)
   }
 }
-
 // Fetch order details
 const fetchOrderDetails = async () => {
   loading.value = true
@@ -241,13 +242,13 @@ const confirmAcceptOrder = async () => {
     const { data, error } = await supabase
       .from('orders')
       .update({
-        status: 'accepted',
+        status: 'accepted_by_rider',
         rider_id: currentRiderNumericId.value,
         accepted_at: new Date().toISOString(),
       })
       .eq('id', orderId)
       .is('rider_id', null)
-      .eq('status', 'pending')
+      .eq('status', 'waiting_for_rider') 
       .select('id')
 
     if (error) throw error
@@ -332,7 +333,7 @@ const isMyOrder = computed(() => {
 
 // Determine if order is available for acceptance
 const isAvailableForAcceptance = computed(() => {
-  return order.value?.status === 'pending' && !order.value?.rider_id
+  return order.value?.status === 'waiting_for_rider' && !order.value?.rider_id
 })
 
 onMounted(async () => {
@@ -500,62 +501,46 @@ onMounted(async () => {
 
           <!-- Action Buttons -->
           <div class="action-buttons">
-            <!-- Accept Button (for available orders) -->
-            <v-btn
-              v-if="isAvailableForAcceptance"
-              color="success"
-              size="large"
-              block
-              @click="acceptOrder"
-              :loading="accepting"
-            >
+            <!-- Accept Button (for waiting_for_rider orders) -->
+            <v-btn v-if="isAvailableForAcceptance" color="success" size="large" block @click="acceptOrder"
+              :loading="accepting">
               <v-icon left>mdi-check-circle</v-icon>
               Accept Order
             </v-btn>
 
-            <!-- Picked Up Button (for accepted orders) -->
-            <v-btn
-              v-else-if="order.status === 'accepted' && isMyOrder"
-              color="warning"
-              size="large"
-              block
-              @click="updateOrderStatus('picked_up')"
-            >
+            <!-- Picked Up Button (for accepted_by_rider orders) -->
+            <v-btn v-else-if="order.status === 'accepted_by_rider' && isMyOrder" color="warning" size="large" block
+              @click="updateOrderStatus('picked_up')">
               <v-icon left>mdi-truck</v-icon>
               Mark as Picked Up
             </v-btn>
 
-            <!-- Delivered Button (for picked up orders) -->
-            <v-btn
-              v-else-if="order.status === 'picked_up' && isMyOrder"
-              color="success"
-              size="large"
-              block
-              @click="updateOrderStatus('delivered')"
-            >
+            <!-- Delivered Button (for picked_up orders) -->
+            <v-btn v-else-if="order.status === 'picked_up' && isMyOrder" color="success" size="large" block
+              @click="updateOrderStatus('delivered')">
               <v-icon left>mdi-check-circle</v-icon>
               Mark as Delivered
             </v-btn>
 
             <!-- Message for completed orders -->
-            <v-alert
-              v-else-if="order.status === 'delivered' || order.status === 'completed'"
-              type="success"
-              variant="tonal"
-              class="mb-0"
-            >
+            <v-alert v-else-if="order.status === 'delivered' || order.status === 'completed'" type="success"
+              variant="tonal" class="mb-0">
               <div class="d-flex align-center">
                 <span>This order has been completed. Thank you for your delivery!</span>
               </div>
             </v-alert>
 
+            <!-- Message for orders waiting for seller approval -->
+            <v-alert v-else-if="order.status === 'pending_approval'" type="info" variant="tonal" class="mb-0">
+              <div class="d-flex align-center">
+                <v-icon left class="mr-2">mdi-clock-outline</v-icon>
+                <span>This order is waiting for seller approval.</span>
+              </div>
+            </v-alert>
+
             <!-- Message for orders assigned to other riders -->
-            <v-alert
-              v-else-if="order.rider_id && !isMyOrder"
-              type="warning"
-              variant="tonal"
-              class="mb-0"
-            >
+            <v-alert v-else-if="order.rider_id && !isMyOrder && order.status !== 'delivered'" type="warning"
+              variant="tonal" class="mb-0">
               <div class="d-flex align-center">
                 <v-icon left class="mr-2">mdi-alert</v-icon>
                 <span>This order has been accepted by another rider.</span>
