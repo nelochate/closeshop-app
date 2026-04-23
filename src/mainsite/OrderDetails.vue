@@ -18,140 +18,145 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const activeTab = ref('details')
 const currentUser = ref<any>(null)
+const riderDetails = ref<any>(null)
+const userRole = ref<'buyer' | 'seller' | 'rider' | null>(null)
 
-// Timer state - Initialize with default values
-const timeRemaining = ref<number>(300) // Start with 5 minutes (300 seconds)
-const canCancel = ref<boolean>(true) // Start as true until we verify
+// Timer state
+const timeRemaining = ref<number>(300)
+const canCancel = ref<boolean>(true)
 let timerInterval: number | null = null
+let statusSubscription: any = null
 
-// Get current user
-const getCurrentUser = async () => {
+// Get current user and determine role
+const getCurrentUserAndRole = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser()
     currentUser.value = user
+    
+    if (!user) return
+    
+    // Check if user is buyer (order owner)
+    if (order.value && user.id === order.value.user_id) {
+      userRole.value = 'buyer'
+    }
+    // Check if user is seller
+    else if (shop.value && user.id === shop.value.owner_id) {
+      userRole.value = 'seller'
+    }
+    // Check if user is rider
+    else if (order.value && user.id === order.value.rider_id) {
+      userRole.value = 'rider'
+    }
+    
+    console.log('User role:', userRole.value)
   } catch (err) {
-    console.error('Error getting current user:', err)
+    console.error('Error getting user role:', err)
+  }
+}
+
+// Fetch rider details
+const fetchRiderDetails = async () => {
+  if (!order.value?.rider_id) return
+  
+  try {
+    const { data, error } = await supabase
+      .from('Rider_Registration')
+      .select('first_name, last_name, phone, email, rider_id')
+      .eq('rider_id', order.value.rider_id)
+      .single()
+    
+    if (!error && data) {
+      riderDetails.value = data
+    }
+  } catch (err) {
+    console.error('Error fetching rider details:', err)
   }
 }
 
 // Calculate time remaining for cancellation
 const calculateTimeRemaining = () => {
-  if (!order.value || !order.value.created_at) {
-    console.log('No order or created_at, returning default 300')
-    return 300 // Default to 5 minutes if no data
-  }
+  if (!order.value || !order.value.created_at) return 300
+  if (order.value.status !== 'pending_approval') return 0
   
   const orderCreatedAt = new Date(order.value.created_at).getTime()
   const currentTime = new Date().getTime()
-  const timeElapsed = (currentTime - orderCreatedAt) / 1000 // in seconds
-  const maxCancelTime = 5 * 60 // 5 minutes in seconds
+  const timeElapsed = (currentTime - orderCreatedAt) / 1000
+  const maxCancelTime = 5 * 60
   
-  const remaining = Math.max(0, maxCancelTime - timeElapsed)
-  console.log(`Time remaining: ${remaining} seconds (elapsed: ${timeElapsed})`)
-  return Math.floor(remaining)
+  return Math.max(0, maxCancelTime - timeElapsed)
 }
 
-// Format time remaining as MM:SS
 const formatTimeRemaining = () => {
   const remaining = timeRemaining.value
   if (remaining <= 0) return '00:00'
-  
   const minutes = Math.floor(remaining / 60)
   const seconds = remaining % 60
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
 }
 
-// Start the cancellation timer
 const startCancelTimer = () => {
-  console.log('🚀 Starting cancel timer...')
+  if (timerInterval) clearInterval(timerInterval)
   
-  // Clear existing timer if any
-  if (timerInterval) {
-    clearInterval(timerInterval)
-    timerInterval = null
-  }
-  
-  // Calculate initial time remaining
   const initialRemaining = calculateTimeRemaining()
   timeRemaining.value = initialRemaining
-  canCancel.value = initialRemaining > 0 && order.value?.status === 'pending'
+  canCancel.value = initialRemaining > 0 && order.value?.status === 'pending_approval'
   
-  console.log(`Initial state - Remaining: ${initialRemaining}, CanCancel: ${canCancel.value}, Status: ${order.value?.status}`)
-  
-  // Start interval to update timer
-  if (initialRemaining > 0 && order.value?.status === 'pending') {
+  if (initialRemaining > 0 && order.value?.status === 'pending_approval') {
     timerInterval = setInterval(() => {
       const newRemaining = calculateTimeRemaining()
       timeRemaining.value = newRemaining
-      canCancel.value = newRemaining > 0 && order.value?.status === 'pending'
-      
-      console.log(`Timer tick - Remaining: ${newRemaining}, CanCancel: ${canCancel.value}`)
-      
-      // Stop timer when time runs out
-      if (newRemaining <= 0) {
-        if (timerInterval) {
-          clearInterval(timerInterval)
-          timerInterval = null
-        }
+      canCancel.value = newRemaining > 0 && order.value?.status === 'pending_approval'
+      if (newRemaining <= 0 && timerInterval) {
+        clearInterval(timerInterval)
+        timerInterval = null
         canCancel.value = false
-        console.log('⏰ Timer expired - Cancel button disabled')
       }
     }, 1000)
-  } else {
-    console.log('Timer not started - conditions not met:', {
-      remaining: initialRemaining,
-      status: order.value?.status
-    })
   }
 }
 
-// Cancel order with time check
 const cancelOrder = async () => {
-  console.log('Cancel button clicked')
-  
-  // Double-check if cancellation is still allowed
   const remaining = calculateTimeRemaining()
-  
   if (remaining <= 0) {
-    alert('Cancellation window has expired. You can no longer cancel this order.')
-    canCancel.value = false
+    alert('Cancellation window has expired.')
     return
   }
   
-  // Confirm cancellation
-  const confirmed = confirm(
-    `Are you sure you want to cancel this order?\n\n` +
-    `You have ${formatTimeRemaining()} left to cancel.`
-  )
-  
-  if (!confirmed) return
+  if (!confirm(`Cancel this order? You have ${formatTimeRemaining()} left.`)) return
   
   try {
     const { error } = await supabase
       .from('orders')
-      .update({ 
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString()
-      })
+      .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
       .eq('id', orderId)
     
     if (error) throw error
-    
-    // Stop the timer
-    if (timerInterval) {
-      clearInterval(timerInterval)
-      timerInterval = null
-    }
-    
-    // Refresh order details
+    if (timerInterval) clearInterval(timerInterval)
     await fetchOrderDetails()
-    
-    alert('Order has been cancelled successfully.')
-    
+    alert('Order cancelled successfully.')
   } catch (err) {
     console.error('Error cancelling order:', err)
-    alert('Failed to cancel order. Please try again.')
+    alert('Failed to cancel order.')
   }
+}
+
+// Subscribe to real-time updates
+const subscribeToOrderUpdates = () => {
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
+  
+  statusSubscription = supabase
+    .channel(`order-${orderId}`)
+    .on('postgres_changes', {
+      event: 'UPDATE',
+      schema: 'public',
+      table: 'orders',
+      filter: `id=eq.${orderId}`
+    }, (payload) => {
+      console.log('Order update:', payload.new.status)
+      order.value = { ...order.value, ...payload.new }
+      fetchRiderDetails()
+    })
+    .subscribe()
 }
 
 // Fetch order details
@@ -160,47 +165,18 @@ const fetchOrderDetails = async () => {
     loading.value = true
     error.value = null
 
-    console.log('📦 Fetching order:', orderId)
-
     const { data: orderData, error: orderError } = await supabase
       .from('orders')
       .select(`
         *,
         order_items (
-          id,
-          product_id,
-          quantity,
-          price,
-          selected_size,
-          selected_variety,
-          products (
-            id,
-            prod_name,
-            main_img_urls,
-            description,
-            shop_id
-          )
+          id, product_id, quantity, price, selected_size, selected_variety,
+          products (id, prod_name, main_img_urls, description, shop_id)
         ),
-        buyer:profiles!orders_user_id_fkey (
-          id,
-          first_name,
-          last_name,
-          avatar_url,
-          phone
-        ),
+        buyer:profiles!orders_user_id_fkey (id, first_name, last_name, avatar_url, phone),
         address:addresses!orders_address_id_fkey (
-          id,
-          recipient_name,
-          phone,
-          street,
-          postal_code,
-          purok,
-          building,
-          house_no,
-          region_name,
-          province_name,
-          city_name,
-          barangay_name
+          id, recipient_name, phone, street, postal_code, purok, building, 
+          house_no, region_name, province_name, city_name, barangay_name
         )
       `)
       .eq('id', orderId)
@@ -214,66 +190,46 @@ const fetchOrderDetails = async () => {
     shippingAddress.value = orderData.address
     buyer.value = orderData.buyer
 
-    console.log('Order details loaded:', {
-      status: order.value?.status,
-      created_at: order.value?.created_at,
-      user_id: order.value?.user_id,
-      current_user_id: currentUser.value?.id
-    })
+    await fetchRiderDetails()
 
     if (orderItems.value.length > 0 && orderItems.value[0].products?.shop_id) {
       await fetchShopAndSeller(orderItems.value[0].products.shop_id)
     }
     
-    // Start the cancellation timer for pending orders
-    if (order.value?.status === 'pending') {
-      console.log('Order is pending, starting timer...')
-      startCancelTimer()
-    } else {
-      console.log('Order is not pending, timer not started')
-      canCancel.value = false
-      timeRemaining.value = 0
-    }
-
-    console.log('✅ Order loaded:', order.value)
-
+    await getCurrentUserAndRole()
+    
+    if (order.value?.status === 'pending_approval') startCancelTimer()
+    else { canCancel.value = false; timeRemaining.value = 0 }
+    
+    subscribeToOrderUpdates()
   } catch (err: any) {
-    console.error('❌ Error fetching order:', err)
+    console.error('Error:', err)
     error.value = err.message || 'Failed to load order details'
   } finally {
     loading.value = false
   }
 }
 
-// Fetch shop and seller information
+// Fetch shop and seller
 const fetchShopAndSeller = async (shopId: string) => {
   try {
-    const { data: shopData, error: shopError } = await supabase
+    const { data: shopData } = await supabase
       .from('shops')
       .select('*')
       .eq('id', shopId)
       .single()
-
-    if (shopError) throw shopError
-
-    shop.value = shopData
-
-    if (shopData.owner_id) {
-      const { data: sellerData, error: sellerError } = await supabase
+    
+    if (shopData) {
+      shop.value = shopData
+      const { data: sellerData } = await supabase
         .from('profiles')
         .select('id, first_name, last_name, avatar_url, phone')
         .eq('id', shopData.owner_id)
         .single()
-
-      if (sellerError) {
-        console.error('Error fetching seller profile:', sellerError)
-      } else {
-        seller.value = sellerData
-      }
+      if (sellerData) seller.value = sellerData
     }
-
   } catch (err) {
-    console.error('❌ Error fetching shop/seller:', err)
+    console.error('Error fetching shop:', err)
   }
 }
 
@@ -282,238 +238,375 @@ const subtotal = computed(() => {
   return orderItems.value.reduce((sum, item) => sum + (item.price * item.quantity), 0)
 })
 
-const totalAmount = computed(() => {
-  return order.value?.total_amount || subtotal.value
-})
+const totalAmount = computed(() => order.value?.total_amount || subtotal.value)
 
 const statusColor = computed(() => {
   const status = order.value?.status
-  switch (status) {
-    case 'pending': return 'warning'
-    case 'paid': return 'info'
-    case 'shipped': return 'primary'
-    case 'delivered': return 'success'
-    case 'cancelled': return 'error'
-    default: return 'grey'
+  const colors: Record<string, string> = {
+    pending_approval: 'warning',
+    waiting_for_rider: 'info',
+    accepted_by_rider: 'primary',
+    picked_up: 'purple',
+    delivered: 'success',
+    cancelled: 'error'
   }
+  return colors[status] || 'grey'
 })
 
 const statusIcon = computed(() => {
   const status = order.value?.status
-  switch (status) {
-    case 'pending': return 'mdi-clock-outline'
-    case 'paid': return 'mdi-credit-card-check'
-    case 'shipped': return 'mdi-truck-delivery'
-    case 'delivered': return 'mdi-check-circle'
-    case 'cancelled': return 'mdi-close-circle'
-    default: return 'mdi-help-circle'
+  const icons: Record<string, string> = {
+    pending_approval: 'mdi-clock-outline',
+    waiting_for_rider: 'mdi-bike-fast',
+    accepted_by_rider: 'mdi-check-circle',
+    picked_up: 'mdi-truck-delivery',
+    delivered: 'mdi-check-circle',
+    cancelled: 'mdi-close-circle'
   }
+  return icons[status] || 'mdi-help-circle'
 })
 
-// Check user roles for action buttons
-const isBuyer = computed(() => {
-  const result = currentUser.value?.id === order.value?.user_id
-  console.log(`Is buyer: ${result} (Current: ${currentUser.value?.id}, Order user: ${order.value?.user_id})`)
-  return result
+const statusDisplayText = computed(() => {
+  const status = order.value?.status
+  const texts: Record<string, string> = {
+    pending_approval: 'Pending Approval',
+    waiting_for_rider: 'Waiting for Rider',
+    accepted_by_rider: 'Rider Accepted',
+    picked_up: 'Picked Up',
+    delivered: 'Delivered',
+    cancelled: 'Cancelled'
+  }
+  return texts[status] || status
 })
 
-const isSeller = computed(() => {
-  return currentUser.value?.id === shop.value?.owner_id
-})
+const isBuyer = computed(() => userRole.value === 'buyer')
+const isSeller = computed(() => userRole.value === 'seller')
+const isRider = computed(() => userRole.value === 'rider')
 
-// Show cancel button always for pending orders, but control enabled state
-const showCancelButton = computed(() => {
-  const show = isBuyer.value && order.value?.status === 'pending'
-  console.log(`Show cancel button: ${show}`)
-  return show
-})
-
-// Check if cancel button should be disabled
-const isCancelDisabled = computed(() => {
-  const disabled = !canCancel.value || timeRemaining.value <= 0
-  console.log(`Cancel disabled: ${disabled} (canCancel: ${canCancel.value}, timeRemaining: ${timeRemaining.value})`)
-  return disabled
-})
-
-// Get cancel button text based on timer state
+const showCancelButton = computed(() => isBuyer.value && order.value?.status === 'pending_approval')
+const isCancelDisabled = computed(() => !canCancel.value || timeRemaining.value <= 0)
 const getCancelButtonText = computed(() => {
-  if (timeRemaining.value <= 0) {
-    return 'Cancellation Unavailable'
-  }
+  if (timeRemaining.value <= 0) return 'Cancellation Unavailable'
   return `Cancel Order (${formatTimeRemaining()})`
 })
 
-// Format date
-const formatDate = (dateString: string) => {
-  if (!dateString) return 'Not set'
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
+// Timeline steps based on order status
+const timelineSteps = computed(() => {
+  const currentStatus = order.value?.status
+  
+  const steps = [
+    {
+      key: 'order_placed',
+      title: 'Order Placed',
+      description: 'Your order has been placed and is waiting for seller approval',
+      status: 'completed',
+      timestamp: order.value?.created_at,
+      icon: 'mdi-cart-check',
+      date: order.value?.created_at,
+      actor: 'Customer'
+    },
+    {
+      key: 'approved',
+      title: 'Order Approved',
+      description: 'Seller has approved your order and is looking for a rider',
+      status: getStepStatus('approved'),
+      timestamp: order.value?.approved_at,
+      icon: 'mdi-store-check',
+      date: order.value?.approved_at,
+      actor: 'Seller'
+    },
+    {
+      key: 'rider_assigned',
+      title: 'Rider Assigned',
+      description: 'A rider has accepted your order and is on the way',
+      status: getStepStatus('rider_assigned'),
+      timestamp: order.value?.accepted_at,
+      icon: 'mdi-motorbike',
+      date: order.value?.accepted_at,
+      actor: 'Rider'
+    },
+    {
+      key: 'picked_up',
+      title: 'Order Picked Up',
+      description: 'Rider has picked up your order and is heading to you',
+      status: getStepStatus('picked_up'),
+      timestamp: order.value?.picked_up_at,
+      icon: 'mdi-package-up',
+      date: order.value?.picked_up_at,
+      actor: 'Rider'
+    },
+    {
+      key: 'delivered',
+      title: 'Order Delivered',
+      description: 'Your order has been successfully delivered',
+      status: getStepStatus('delivered'),
+      timestamp: order.value?.delivered_at,
+      icon: 'mdi-home-check',
+      date: order.value?.delivered_at,
+      actor: 'Rider'
+    }
+  ]
+  
+  // If cancelled, mark steps appropriately
+  if (currentStatus === 'cancelled') {
+    const cancelledDate = order.value?.cancelled_at
+    steps.forEach(step => {
+      if (step.date && new Date(step.date) <= new Date(cancelledDate)) {
+        step.status = 'completed'
+      } else if (step.status !== 'completed') {
+        step.status = 'cancelled'
+      }
+    })
+  }
+  
+  return steps
+})
+
+const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | 'cancelled' => {
+  const currentStatus = order.value?.status
+  if (currentStatus === 'cancelled') return 'cancelled'
+  
+  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered']
+  const currentIndex = statusOrder.indexOf(currentStatus)
+  
+  const stepMap: Record<string, number> = {
+    order_placed: -1,
+    approved: 0,
+    rider_assigned: 1,
+    picked_up: 2,
+    delivered: 3
+  }
+  
+  const stepIndex = stepMap[stepKey]
+  
+  if (stepIndex < currentIndex) return 'completed'
+  if (stepIndex === currentIndex) return 'current'
+  return 'pending'
 }
 
-// Format time
-const formatTime = (timeString: string) => {
-  if (!timeString) return 'Not set'
+const timelineProgress = computed(() => {
+  const currentStatus = order.value?.status
+  if (currentStatus === 'cancelled') return 0
+  if (currentStatus === 'delivered') return 100
+  
+  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered']
+  const currentIndex = statusOrder.indexOf(currentStatus)
+  if (currentIndex === -1) return 0
+  return ((currentIndex + 1) / statusOrder.length) * 100
+})
+
+// Action functions based on role
+const approveOrder = async () => {
+  if (!isSeller.value) return
+  if (!confirm('Approve this order? It will be made available for riders.')) return
+  
   try {
-    const [hours, minutes] = timeString.split(':')
-    const hour = parseInt(hours)
-    const period = hour >= 12 ? 'PM' : 'AM'
-    const hour12 = hour % 12 || 12
-    return `${hour12}:${minutes} ${period}`
-  } catch {
-    return timeString
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        status: 'waiting_for_rider',
+        approved_at: new Date().toISOString()
+      })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    alert('Order approved! Riders can now accept it.')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error approving order:', err)
+    alert('Failed to approve order.')
   }
 }
 
-// Format currency
-const formatCurrency = (amount: number) => {
-  return `₱${amount?.toFixed(2) || '0.00'}`
+const rejectOrder = async () => {
+  if (!isSeller.value) return
+  if (!confirm('Reject this order? This cannot be undone.')) return
+  
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString()
+      })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    alert('Order rejected.')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error rejecting order:', err)
+    alert('Failed to reject order.')
+  }
 }
 
-// Get product image
+const acceptOrderAsRider = async () => {
+  if (!isRider.value) return
+  if (!confirm('Accept this order for delivery?')) return
+  
+  try {
+    const { data: { user } } = await supabase.auth.getUser()
+    const riderData = await supabase
+      .from('Rider_Registration')
+      .select('rider_id')
+      .eq('profile_id', user?.id)
+      .single()
+    
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        status: 'accepted_by_rider',
+        accepted_at: new Date().toISOString(),
+        rider_id: riderData.data?.rider_id
+      })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    alert('Order accepted! Head to the store to pick it up.')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error accepting order:', err)
+    alert('Failed to accept order.')
+  }
+}
+
+const markAsPickedUp = async () => {
+  if (!isRider.value) return
+  if (!confirm('Mark this order as picked up?')) return
+  
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        status: 'picked_up',
+        picked_up_at: new Date().toISOString()
+      })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    alert('Order marked as picked up. Deliver to customer.')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error marking as picked up:', err)
+    alert('Failed to update status.')
+  }
+}
+
+const markAsDelivered = async () => {
+  if (!isRider.value && !isSeller.value) return
+  if (!confirm('Mark this order as delivered?')) return
+  
+  try {
+    const { error } = await supabase
+      .from('orders')
+      .update({ 
+        status: 'delivered',
+        delivered_at: new Date().toISOString()
+      })
+      .eq('id', orderId)
+    
+    if (error) throw error
+    alert('Order marked as delivered!')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error marking as delivered:', err)
+    alert('Failed to update status.')
+  }
+}
+
+// Format functions
+const formatDate = (dateString: string) => {
+  if (!dateString) return 'Not set'
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric', month: 'long', day: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  })
+}
+
+const formatCurrency = (amount: number) => `₱${amount?.toFixed(2) || '0.00'}`
+
 const getProductImage = (product: any) => {
   if (!product?.main_img_urls) return '/placeholder.png'
-  
   try {
     if (typeof product.main_img_urls === 'string') {
       const parsed = JSON.parse(product.main_img_urls)
       return Array.isArray(parsed) ? parsed[0] : parsed
     }
-    if (Array.isArray(product.main_img_urls)) {
-      return product.main_img_urls[0]
-    }
+    if (Array.isArray(product.main_img_urls)) return product.main_img_urls[0]
     return '/placeholder.png'
-  } catch {
-    return '/placeholder.png'
-  }
+  } catch { return '/placeholder.png' }
 }
 
-// Build full address from address object
 const buildFullAddress = computed(() => {
-  if (!shippingAddress.value) return 'No shipping address provided'
-  
-  const address = shippingAddress.value
+  if (!shippingAddress.value) return 'No shipping address'
   const parts = [
-    address.house_no,
-    address.building,
-    address.street,
-    address.purok,
-    address.barangay_name,
-    address.city_name,
-    address.province_name,
-    address.region_name,
-    address.postal_code
+    shippingAddress.value.house_no,
+    shippingAddress.value.building,
+    shippingAddress.value.street,
+    shippingAddress.value.purok,
+    shippingAddress.value.barangay_name,
+    shippingAddress.value.city_name,
+    shippingAddress.value.province_name
   ].filter(Boolean)
-  
   return parts.join(', ')
 })
 
-// Navigation functions
 const goBack = () => router.back()
-const viewProduct = (productId: string) => {
-  router.push(`/viewproduct/${productId}`)
-}
-const contactSeller = () => {
-  if (shop.value?.owner_id) {
-    router.push(`/chat/${shop.value.owner_id}`)
-  }
-}
-const contactBuyer = () => {
-  if (buyer.value?.id) {
-    router.push(`/chat/${buyer.value.id}`)
-  }
-}
+const viewProduct = (productId: string) => router.push(`/viewproduct/${productId}`)
+const contactSeller = () => shop.value?.owner_id && router.push(`/chat/${shop.value.owner_id}`)
+const contactBuyer = () => buyer.value?.id && router.push(`/chat/${buyer.value.id}`)
+const contactRider = () => riderDetails.value?.phone && (window.location.href = `tel:${riderDetails.value.phone}`)
 
-// Action functions
-const markAsShipped = async () => {
-  try {
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: 'shipped' })
-      .eq('id', orderId)
-    
-    if (error) throw error
-    
-    await fetchOrderDetails()
-  } catch (err) {
-    console.error('Error marking as shipped:', err)
-  }
-}
-
-const markAsDelivered = async () => {
-  try {
-    const { error } = await supabase
-      .from('orders')
-      .update({ status: 'delivered' })
-      .eq('id', orderId)
-    
-    if (error) throw error
-    
-    await fetchOrderDetails()
-  } catch (err) {
-    console.error('Error marking as delivered:', err)
-  }
-}
-
-// Clean up timer on component unmount
+// Cleanup
 onUnmounted(() => {
-  if (timerInterval) {
-    clearInterval(timerInterval)
-    timerInterval = null
-  }
+  if (timerInterval) clearInterval(timerInterval)
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
 })
 
-// Initialize
 onMounted(async () => {
-  console.log('Component mounted, initializing...')
-  await getCurrentUser()
   await fetchOrderDetails()
 })
 </script>
 
 <template>
   <v-app>
-    <!-- Header -->
     <v-app-bar flat color="white" elevation="1">
-      <v-btn icon @click="goBack">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
+      <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title class="font-weight-bold">Order Details</v-toolbar-title>
       <v-spacer />
-      <v-chip v-if="order?.status" :color="statusColor" variant="flat" class="mr-2">
+      <v-chip v-if="order?.status" :color="statusColor" variant="flat">
         <v-icon start small>{{ statusIcon }}</v-icon>
-        {{ order.status.toUpperCase() }}
+        {{ statusDisplayText }}
       </v-chip>
     </v-app-bar>
 
     <v-main>
-      <!-- Loading State -->
       <div v-if="loading" class="loading-container">
         <v-progress-circular indeterminate color="primary" size="64" />
-        <p class="text-h6 mt-4">Loading order details...</p>
+        <p>Loading order details...</p>
       </div>
 
-      <!-- Error State -->
       <div v-else-if="error" class="error-container">
         <v-icon color="error" size="64">mdi-alert-circle-outline</v-icon>
-        <p class="text-h6 mt-4">{{ error }}</p>
-        <v-btn color="primary" class="mt-4" @click="fetchOrderDetails">
-          Try Again
-        </v-btn>
-        <v-btn variant="outlined" class="mt-2" @click="goBack">
-          Go Back
-        </v-btn>
+        <p>{{ error }}</p>
+        <v-btn color="primary" @click="fetchOrderDetails">Try Again</v-btn>
       </div>
 
-      <!-- Order Content -->
       <div v-else-if="order" class="order-content">
-        <!-- Tabs -->
+        <!-- Progress Bar -->
+        <div class="progress-section" v-if="order.status !== 'cancelled'">
+          <v-progress-linear :model-value="timelineProgress" height="6" color="primary" rounded />
+          <div class="progress-text">
+            <span v-if="order.status === 'delivered'">🎉 Order Delivered!</span>
+            <span v-else-if="order.status === 'picked_up'">🚚 Out for Delivery</span>
+            <span v-else-if="order.status === 'accepted_by_rider'">🏍️ Rider on the way</span>
+            <span v-else-if="order.status === 'waiting_for_rider'">⏳ Looking for a rider</span>
+            <span v-else-if="order.status === 'pending_approval'">📝 Waiting for seller approval</span>
+          </div>
+        </div>
+
         <v-tabs v-model="activeTab" color="primary" class="tabs-container">
-          <v-tab value="details">Details</v-tab>
+          <v-tab value="details">Order Details</v-tab>
           <v-tab value="timeline">Timeline</v-tab>
         </v-tabs>
 
@@ -521,120 +614,66 @@ onMounted(async () => {
           <!-- Details Tab -->
           <v-window-item value="details">
             <div class="details-content">
-              
-              <!-- Cancellation Timer Alert -->
-              <v-alert
-                v-if="showCancelButton"
-                :type="timeRemaining > 0 ? 'warning' : 'error'"
-                variant="tonal"
-                class="mb-4"
-                dense
-              >
+              <!-- Cancellation Alert -->
+              <v-alert v-if="showCancelButton" :type="timeRemaining > 0 ? 'warning' : 'error'" variant="tonal" class="mb-4">
                 <v-row align="center" no-gutters>
                   <v-col cols="auto" class="mr-3">
                     <v-icon>{{ timeRemaining > 0 ? 'mdi-timer-sand' : 'mdi-timer-off' }}</v-icon>
                   </v-col>
                   <v-col>
-                    <strong>
-                      <span v-if="timeRemaining > 0">
-                        Cancel within {{ formatTimeRemaining() }}
-                      </span>
-                      <span v-else>
-                        Cancellation window has expired
-                      </span>
-                    </strong>
-                    <span class="d-block text-caption">
-                      <span v-if="timeRemaining > 0">
-                        You can only cancel this order within 5 minutes of placing it.
-                      </span>
-                      <span v-else>
-                        This order can no longer be cancelled. Please contact support if you need assistance.
-                      </span>
-                    </span>
+                    <strong v-if="timeRemaining > 0">Cancel within {{ formatTimeRemaining() }}</strong>
+                    <strong v-else>Cancellation window expired</strong>
                   </v-col>
                 </v-row>
               </v-alert>
 
               <!-- Order Summary -->
-              <v-card class="mb-4" elevation="1">
-                <v-card-title class="section-title">
-                  <v-icon left>mdi-receipt</v-icon>
-                  Order Summary
-                </v-card-title>
+              <v-card class="mb-4">
+                <v-card-title class="section-title"><v-icon left>mdi-receipt</v-icon>Order Summary</v-card-title>
                 <v-card-text>
                   <v-row>
                     <v-col cols="6">
-                      <div class="info-item">
-                        <span class="label">Order ID:</span>
-                        <span class="value">{{ order.id }}</span>
-                      </div>
-                      <div class="info-item">
-                        <span class="label">Transaction #:</span>
-                        <span class="value">{{ order.transaction_number || 'N/A' }}</span>
-                      </div>
+                      <div class="info-item"><span class="label">Order ID:</span><span class="value">{{ order.id.slice(0,8) }}...</span></div>
+                      <div class="info-item"><span class="label">Order Date:</span><span class="value">{{ formatDate(order.created_at) }}</span></div>
                     </v-col>
                     <v-col cols="6">
-                      <div class="info-item">
-                        <span class="label">Order Date:</span>
-                        <span class="value">{{ formatDate(order.created_at) }}</span>
-                      </div>
-                      <div class="info-item">
-                        <span class="label">Delivery Option:</span>
-                        <span class="value">{{ order.delivery_option || 'Standard' }}</span>
-                      </div>
-                    </v-col>
-                    <v-col cols="6">
-                      <div class="info-item">
-                        <span class="label">Payment Method:</span>
-                        <span class="value">{{ order.payment_method || 'Cash on Delivery' }}</span>
-                      </div>
-                    </v-col>
-                    <v-col cols="6">
-                      <div class="info-item">
-                        <span class="label">Delivery Date/Time:</span>
-                        <span class="value">
-                          <span v-if="order.delivery_date">{{ formatDate(order.delivery_date) }}</span>
-                          <span v-if="order.delivery_time"> at {{ formatTime(order.delivery_time) }}</span>
-                          <span v-if="!order.delivery_date && !order.delivery_time">Not scheduled</span>
-                        </span>
-                      </div>
+                      <div class="info-item"><span class="label">Delivery:</span><span class="value">{{ order.delivery_option || 'Standard' }}</span></div>
+                      <div class="info-item"><span class="label">Payment:</span><span class="value">{{ order.payment_method || 'Cash' }}</span></div>
                     </v-col>
                     <v-col cols="12" v-if="order.note">
-                      <div class="info-item">
-                        <span class="label">Order Note:</span>
-                        <span class="value">{{ order.note }}</span>
-                      </div>
+                      <div class="info-item"><span class="label">Note:</span><span class="value">{{ order.note }}</span></div>
                     </v-col>
                   </v-row>
                 </v-card-text>
               </v-card>
 
+              <!-- Rider Info -->
+              <v-card class="mb-4" v-if="riderDetails && order.status !== 'pending_approval'">
+                <v-card-title class="section-title"><v-icon left>mdi-motorbike</v-icon>Rider Information</v-card-title>
+                <v-card-text>
+                  <div class="info-item"><span class="label">Name:</span><span class="value">{{ riderDetails.first_name }} {{ riderDetails.last_name }}</span></div>
+                  <div class="info-item"><span class="label">Phone:</span><span class="value">{{ riderDetails.phone || 'Not provided' }}</span></div>
+                  <v-btn color="primary" variant="outlined" size="small" @click="contactRider" :disabled="!riderDetails?.phone">
+                    <v-icon left small>mdi-phone</v-icon>Contact Rider
+                  </v-btn>
+                </v-card-text>
+              </v-card>
+
               <!-- Products -->
-              <v-card class="mb-4" elevation="1">
-                <v-card-title class="section-title">
-                  <v-icon left>mdi-package-variant</v-icon>
-                  Products ({{ orderItems.length }})
-                </v-card-title>
+              <v-card class="mb-4">
+                <v-card-title class="section-title"><v-icon left>mdi-package-variant</v-icon>Products ({{ orderItems.length }})</v-card-title>
                 <v-card-text>
                   <div v-for="item in orderItems" :key="item.id" class="product-item">
                     <v-row align="center">
                       <v-col cols="auto">
-                        <v-img
-                          :src="getProductImage(item.products)"
-                          :alt="item.products?.prod_name"
-                          width="60"
-                          height="60"
-                          class="product-image"
-                          @click="viewProduct(item.product_id)"
-                          style="cursor: pointer;"
-                        />
+                        <v-img :src="getProductImage(item.products)" width="60" height="60" class="product-image" @click="viewProduct(item.product_id)" style="cursor:pointer"/>
                       </v-col>
                       <v-col>
                         <div class="product-name">{{ item.products?.prod_name }}</div>
                         <div class="product-details">
-                          <span class="quantity">Qty: {{ item.quantity }}</span>
-                          <span v-if="item.selected_size" class="size">Size: {{ item.selected_size }}</span>
-                          <span v-if="item.selected_variety" class="variety">Variety: {{ item.selected_variety }}</span>
+                          <span>Qty: {{ item.quantity }}</span>
+                          <span v-if="item.selected_size">Size: {{ item.selected_size }}</span>
+                          <span v-if="item.selected_variety">Variety: {{ item.selected_variety }}</span>
                         </div>
                         <div class="product-price">{{ formatCurrency(item.price) }} each</div>
                       </v-col>
@@ -646,179 +685,68 @@ onMounted(async () => {
                 </v-card-text>
               </v-card>
 
-              <!-- Buyer Information -->
-              <v-card class="mb-4" elevation="1">
-                <v-card-title class="section-title">
-                  <v-icon left>mdi-account-outline</v-icon>
-                  Buyer Information
-                </v-card-title>
-                <v-card-text>
-                  <v-row>
-                    <v-col cols="12" sm="6">
-                      <div class="info-item">
-                        <span class="label">Name:</span>
-                        <span class="value">{{ buyer?.first_name }} {{ buyer?.last_name }}</span>
-                      </div>
-                      <div class="info-item">
-                        <span class="label">Phone:</span>
-                        <span class="value">{{ buyer?.phone || 'Not provided' }}</span>
-                      </div>
-                    </v-col>
-                    <v-col cols="12" sm="6">
-                      <v-btn 
-                        color="primary" 
-                        variant="outlined" 
-                        size="small" 
-                        class="mt-2"
-                        @click="contactBuyer"
-                        :disabled="!buyer?.id"
-                      >
-                        <v-icon left small>mdi-message</v-icon>
-                        Contact Buyer
-                      </v-btn>
-                    </v-col>
-                  </v-row>
-                </v-card-text>
-              </v-card>
-
-              <!-- Seller Information -->
-              <v-card class="mb-4" elevation="1" v-if="shop">
-                <v-card-title class="section-title">
-                  <v-icon left>mdi-store</v-icon>
-                  Seller Information
-                </v-card-title>
-                <v-card-text>
-                  <v-row>
-                    <v-col cols="12" sm="6">
-                      <div class="info-item">
-                        <span class="label">Shop Name:</span>
-                        <span class="value">{{ shop.business_name }}</span>
-                      </div>
-                      <div class="info-item" v-if="seller">
-                        <span class="label">Seller:</span>
-                        <span class="value">{{ seller.first_name }} {{ seller.last_name }}</span>
-                      </div>
-                    </v-col>
-                    <v-col cols="12" sm="6">
-                      <div class="info-item" v-if="seller">
-                        <span class="label">Phone:</span>
-                        <span class="value">{{ seller.phone || 'Not provided' }}</span>
-                      </div>
-                      <v-btn 
-                        color="primary" 
-                        variant="outlined" 
-                        size="small" 
-                        class="mt-2"
-                        @click="contactSeller"
-                        :disabled="!shop?.owner_id"
-                      >
-                        <v-icon left small>mdi-message</v-icon>
-                        Contact Seller
-                      </v-btn>
-                    </v-col>
-                  </v-row>
-                </v-card-text>
-              </v-card>
-
-              <!-- Shipping Address -->
-              <v-card class="mb-4" elevation="1" v-if="shippingAddress">
-                <v-card-title class="section-title">
-                  <v-icon left>mdi-map-marker</v-icon>
-                  Shipping Address
-                </v-card-title>
-                <v-card-text>
-                  <div class="address-content">
-                    <div class="recipient-info">
-                      <strong>{{ shippingAddress.recipient_name }}</strong>
-                      <span v-if="shippingAddress.phone"> • {{ shippingAddress.phone }}</span>
-                    </div>
-                    <div class="address-details">
-                      {{ buildFullAddress }}
-                    </div>
-                  </div>
-                </v-card-text>
-              </v-card>
-
               <!-- Price Breakdown -->
-              <v-card class="mb-4" elevation="1">
-                <v-card-title class="section-title">
-                  <v-icon left>mdi-cash</v-icon>
-                  Price Breakdown
-                </v-card-title>
+              <v-card class="mb-4">
+                <v-card-title class="section-title"><v-icon left>mdi-cash</v-icon>Price Breakdown</v-card-title>
                 <v-card-text>
                   <div class="price-breakdown">
-                    <div class="price-item">
-                      <span class="label">Subtotal:</span>
-                      <span class="value">{{ formatCurrency(subtotal) }}</span>
-                    </div>
-                    <v-divider class="my-2" />
-                    <div class="price-item total">
-                      <span class="label">Total Amount:</span>
-                      <span class="value">{{ formatCurrency(totalAmount) }}</span>
-                    </div>
+                    <div class="price-item"><span>Subtotal:</span><span>{{ formatCurrency(subtotal) }}</span></div>
+                    <div class="price-item total"><span>Total:</span><span>{{ formatCurrency(totalAmount) }}</span></div>
                   </div>
                 </v-card-text>
               </v-card>
 
+              <!-- Delivery Address -->
+              <v-card class="mb-4" v-if="shippingAddress">
+                <v-card-title class="section-title"><v-icon left>mdi-map-marker</v-icon>Delivery Address</v-card-title>
+                <v-card-text>
+                  <div class="address-content">
+                    <strong>{{ shippingAddress.recipient_name }}</strong>
+                    <span v-if="shippingAddress.phone"> • {{ shippingAddress.phone }}</span>
+                    <div class="address-details">{{ buildFullAddress }}</div>
+                  </div>
+                </v-card-text>
+              </v-card>
             </div>
           </v-window-item>
 
           <!-- Timeline Tab -->
           <v-window-item value="timeline">
-            <v-card elevation="1">
-              <v-card-title class="section-title">
-                <v-icon left>mdi-timeline</v-icon>
-                Order Timeline
-              </v-card-title>
+            <v-card>
+              <v-card-title class="section-title"><v-icon left>mdi-timeline</v-icon>Order Timeline</v-card-title>
               <v-card-text>
-                <v-timeline align="start" side="end">
-                  <v-timeline-item dot-color="primary" size="small">
-                    <div class="timeline-content">
-                      <div class="timeline-title">Order Placed</div>
-                      <div class="timeline-date">{{ formatDate(order.created_at) }}</div>
-                      <div class="timeline-description">Order has been successfully placed</div>
+                <div class="timeline-container">
+                  <div v-for="step in timelineSteps" :key="step.key" class="timeline-item"
+                    :class="{
+                      'timeline-completed': step.status === 'completed',
+                      'timeline-current': step.status === 'current',
+                      'timeline-pending': step.status === 'pending',
+                      'timeline-cancelled': step.status === 'cancelled'
+                    }">
+                    <div class="timeline-icon">
+                      <v-icon :color="step.status === 'completed' ? '#4caf50' : step.status === 'current' ? '#2196f3' : step.status === 'cancelled' ? '#f44336' : '#9e9e9e'">
+                        {{ step.icon }}
+                      </v-icon>
                     </div>
-                  </v-timeline-item>
-
-                  <v-timeline-item 
-                    :dot-color="['paid', 'shipped', 'delivered'].includes(order.status) ? 'primary' : 'grey'" 
-                    size="small"
-                  >
                     <div class="timeline-content">
-                      <div class="timeline-title">Payment Confirmed</div>
-                      <div class="timeline-date">
-                        {{ order.status !== 'pending' ? 'Confirmed' : 'Pending' }}
+                      <div class="timeline-header">
+                        <h4>{{ step.title }}</h4>
+                        <span class="timeline-date">{{ formatDate(step.date) }}</span>
                       </div>
-                      <div class="timeline-description">Payment has been verified</div>
+                      <p>{{ step.description }}</p>
+                      <v-chip v-if="step.actor" size="x-small" variant="tonal" class="mt-1">
+                        {{ step.actor }}
+                      </v-chip>
                     </div>
-                  </v-timeline-item>
+                  </div>
+                </div>
 
-                  <v-timeline-item 
-                    :dot-color="['shipped', 'delivered'].includes(order.status) ? 'primary' : 'grey'" 
-                    size="small"
-                  >
-                    <div class="timeline-content">
-                      <div class="timeline-title">Order Shipped</div>
-                      <div class="timeline-date">
-                        {{ order.status === 'shipped' || order.status === 'delivered' ? 'Shipped' : 'Processing' }}
-                      </div>
-                      <div class="timeline-description">Order has been shipped to buyer</div>
-                    </div>
-                  </v-timeline-item>
-
-                  <v-timeline-item 
-                    :dot-color="order.status === 'delivered' ? 'success' : 'grey'" 
-                    size="small"
-                  >
-                    <div class="timeline-content">
-                      <div class="timeline-title">Order Delivered</div>
-                      <div class="timeline-date">
-                        {{ order.status === 'delivered' ? 'Delivered' : 'In Transit' }}
-                      </div>
-                      <div class="timeline-description">Order has been delivered to buyer</div>
-                    </div>
-                  </v-timeline-item>
-                </v-timeline>
+                <div class="timeline-legend">
+                  <div class="legend-item"><div class="legend-dot completed"></div><span>Completed</span></div>
+                  <div class="legend-item"><div class="legend-dot current"></div><span>Current</span></div>
+                  <div class="legend-item"><div class="legend-dot pending"></div><span>Pending</span></div>
+                  <div v-if="order.status === 'cancelled'" class="legend-item"><div class="legend-dot cancelled"></div><span>Cancelled</span></div>
+                </div>
               </v-card-text>
             </v-card>
           </v-window-item>
@@ -826,59 +754,50 @@ onMounted(async () => {
       </div>
     </v-main>
 
-    <!-- Action Buttons -->
-    <v-footer app class="action-footer pa-3" color="white" elevation="6" v-if="order">
+    <!-- Action Buttons Footer -->
+    <v-footer app class="action-footer pa-3" color="white" elevation="6" v-if="order && !loading">
       <div class="action-buttons">
         <!-- Buyer Actions -->
         <template v-if="isBuyer">
-          <!-- Cancel Button - Always visible but disabled after timer expires -->
-          <v-btn
-            v-if="showCancelButton"
-            :color="isCancelDisabled ? 'grey' : 'error'"
-            :variant="isCancelDisabled ? 'outlined' : 'flat'"
-            :disabled="isCancelDisabled"
-            @click="cancelOrder"
-            :class="{ 'cancel-btn': !isCancelDisabled }"
-          >
-            <v-icon left>{{ isCancelDisabled ? 'mdi-timer-off' : 'mdi-close-circle' }}</v-icon>
-            {{ getCancelButtonText }}
-          </v-btn>
-          
-          <v-btn
-            v-if="order.status === 'shipped'"
-            color="primary"
-            variant="flat"
-            @click="markAsDelivered"
-          >
-            <v-icon left>mdi-check</v-icon>
-            Mark as Delivered
+          <v-btn v-if="showCancelButton" :color="isCancelDisabled ? 'grey' : 'error'" :disabled="isCancelDisabled" @click="cancelOrder">
+            <v-icon left>mdi-close-circle</v-icon>{{ getCancelButtonText }}
           </v-btn>
         </template>
 
         <!-- Seller Actions -->
         <template v-else-if="isSeller">
-          <v-btn
-            v-if="order.status === 'paid'"
-            color="primary"
-            variant="flat"
-            @click="markAsShipped"
-          >
-            <v-icon left>mdi-truck</v-icon>
-            Mark as Shipped
+          <v-btn v-if="order.status === 'pending_approval'" color="success" @click="approveOrder">
+            <v-icon left>mdi-check-circle</v-icon>Approve Order
+          </v-btn>
+          <v-btn v-if="order.status === 'pending_approval'" color="error" variant="outlined" @click="rejectOrder">
+            <v-icon left>mdi-close-circle</v-icon>Reject Order
+          </v-btn>
+          <v-btn v-if="order.status === 'picked_up'" color="success" @click="markAsDelivered">
+            <v-icon left>mdi-check</v-icon>Mark Delivered
           </v-btn>
         </template>
 
-        <v-btn variant="outlined" @click="goBack">
-          Close
-        </v-btn>
+        <!-- Rider Actions -->
+        <template v-else-if="isRider">
+          <v-btn v-if="order.status === 'waiting_for_rider'" color="primary" @click="acceptOrderAsRider">
+            <v-icon left>mdi-check-circle</v-icon>Accept Order
+          </v-btn>
+          <v-btn v-if="order.status === 'accepted_by_rider'" color="warning" @click="markAsPickedUp">
+            <v-icon left>mdi-package-up</v-icon>Mark as Picked Up
+          </v-btn>
+          <v-btn v-if="order.status === 'picked_up'" color="success" @click="markAsDelivered">
+            <v-icon left>mdi-check</v-icon>Mark Delivered
+          </v-btn>
+        </template>
+
+        <v-btn variant="outlined" @click="goBack">Close</v-btn>
       </div>
     </v-footer>
   </v-app>
 </template>
 
 <style scoped>
-.loading-container,
-.error-container {
+.loading-container, .error-container {
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -889,6 +808,20 @@ onMounted(async () => {
 
 .order-content {
   padding-bottom: 80px;
+}
+
+.progress-section {
+  padding: 16px;
+  background: white;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.progress-text {
+  text-align: center;
+  margin-top: 8px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: #354d7c;
 }
 
 .tabs-container {
@@ -910,23 +843,16 @@ onMounted(async () => {
 .section-title {
   font-size: 1.1rem;
   font-weight: 600;
-  color: #333;
   padding: 16px;
 }
 
-/* Product Items */
 .product-item {
   padding: 12px 0;
   border-bottom: 1px solid #f0f0f0;
 }
 
-.product-item:last-child {
-  border-bottom: none;
-}
-
 .product-name {
   font-weight: 600;
-  color: #333;
   margin-bottom: 4px;
 }
 
@@ -936,6 +862,7 @@ onMounted(async () => {
   font-size: 0.85rem;
   color: #666;
   margin-bottom: 4px;
+  flex-wrap: wrap;
 }
 
 .product-price {
@@ -945,7 +872,6 @@ onMounted(async () => {
 
 .item-total {
   font-weight: 600;
-  color: #333;
   font-size: 1rem;
 }
 
@@ -954,11 +880,9 @@ onMounted(async () => {
   border: 1px solid #f0f0f0;
 }
 
-/* Info Items */
 .info-item {
   display: flex;
   justify-content: space-between;
-  margin-bottom: 8px;
   padding: 8px 0;
 }
 
@@ -972,7 +896,6 @@ onMounted(async () => {
   text-align: right;
 }
 
-/* Price Breakdown */
 .price-breakdown {
   max-width: 300px;
   margin: 0 auto;
@@ -992,7 +915,6 @@ onMounted(async () => {
   font-size: 1.1rem;
 }
 
-/* Address */
 .address-content {
   padding: 12px;
   background: #f8f9fa;
@@ -1001,38 +923,149 @@ onMounted(async () => {
   line-height: 1.5;
 }
 
-.recipient-info {
-  margin-bottom: 8px;
-  font-size: 1rem;
-}
-
 .address-details {
   color: #666;
+  margin-top: 8px;
 }
 
-/* Timeline */
+/* Timeline Styles */
+.timeline-container {
+  position: relative;
+  padding-left: 40px;
+}
+
+.timeline-item {
+  position: relative;
+  padding-bottom: 32px;
+  display: flex;
+  gap: 16px;
+}
+
+.timeline-item:last-child {
+  padding-bottom: 0;
+}
+
+.timeline-icon {
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  background: white;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  z-index: 2;
+  border: 2px solid #e0e0e0;
+}
+
+.timeline-completed .timeline-icon {
+  border-color: #4caf50;
+  background: #e8f5e9;
+}
+
+.timeline-current .timeline-icon {
+  border-color: #2196f3;
+  background: #e3f2fd;
+  animation: pulse 2s infinite;
+}
+
+.timeline-pending .timeline-icon {
+  border-color: #e0e0e0;
+  background: #f5f5f5;
+}
+
+.timeline-cancelled .timeline-icon {
+  border-color: #f44336;
+  background: #ffebee;
+}
+
 .timeline-content {
-  padding-left: 16px;
+  flex: 1;
 }
 
-.timeline-title {
+.timeline-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.timeline-header h4 {
+  font-size: 1rem;
   font-weight: 600;
-  color: #333;
-  margin-bottom: 4px;
+  margin: 0;
 }
 
 .timeline-date {
+  font-size: 0.75rem;
+  color: #999;
+}
+
+.timeline-content p {
   font-size: 0.85rem;
   color: #666;
-  margin-bottom: 4px;
+  margin: 0;
 }
 
-.timeline-description {
-  font-size: 0.9rem;
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 19px;
+  top: 40px;
+  bottom: 0;
+  width: 2px;
+  background: #e0e0e0;
+}
+
+.timeline-item:last-child::before {
+  display: none;
+}
+
+.timeline-completed::before {
+  background: #4caf50;
+}
+
+.timeline-current::before {
+  background: linear-gradient(to bottom, #4caf50 0%, #2196f3 100%);
+}
+
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
+  70% { box-shadow: 0 0 0 6px rgba(33, 150, 243, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0); }
+}
+
+.timeline-legend {
+  display: flex;
+  justify-content: center;
+  gap: 24px;
+  margin-top: 32px;
+  padding-top: 16px;
+  border-top: 1px solid #e0e0e0;
+}
+
+.legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
   color: #666;
 }
 
-/* Action Footer */
+.legend-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.legend-dot.completed { background: #4caf50; border: 2px solid #4caf50; }
+.legend-dot.current { background: #2196f3; border: 2px solid #2196f3; animation: pulse 2s infinite; }
+.legend-dot.pending { background: #e0e0e0; border: 2px solid #e0e0e0; }
+.legend-dot.cancelled { background: #f44336; border: 2px solid #f44336; }
+
 .action-footer {
   border-top: 1px solid #e0e0e0;
 }
@@ -1046,66 +1079,15 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
-/* Cancel Button Animation - Only when active */
-.cancel-btn {
-  animation: pulse 2s infinite;
-}
-
-@keyframes pulse {
-  0% {
-    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0.4);
-  }
-  70% {
-    box-shadow: 0 0 0 10px rgba(220, 53, 69, 0);
-  }
-  100% {
-    box-shadow: 0 0 0 0 rgba(220, 53, 69, 0);
-  }
-}
-
-/* Disabled button style */
-.v-btn[disabled] {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-/* Responsive Design */
 @media (max-width: 768px) {
-  .window-container {
-    padding: 12px;
-  }
-  
-  .section-title {
-    padding: 12px;
-    font-size: 1rem;
-  }
-  
-  .info-item {
-    flex-direction: column;
-    gap: 4px;
-  }
-  
-  .value {
-    text-align: left;
-  }
-  
-  .action-buttons {
-    flex-direction: column;
-  }
-  
-  .product-details {
-    flex-direction: column;
-    gap: 4px;
-  }
-}
-
-@media (max-width: 480px) {
-  .order-content {
-    padding-bottom: 120px;
-  }
-  
-  .action-buttons {
-    gap: 8px;
-  }
+  .window-container { padding: 12px; }
+  .section-title { padding: 12px; font-size: 1rem; }
+  .info-item { flex-direction: column; gap: 4px; }
+  .value { text-align: left; }
+  .action-buttons { flex-direction: column; }
+  .timeline-container { padding-left: 20px; }
+  .timeline-icon { width: 32px; height: 32px; }
+  .timeline-item::before { left: 15px; top: 32px; }
+  .timeline-header { flex-direction: column; gap: 4px; }
 }
 </style>
