@@ -1,8 +1,441 @@
+<template>
+  <v-app>
+    <v-main class="order-details-page">
+      <div class="header-section">
+        <v-btn icon variant="text" class="back-btn" @click="goBack">
+          <v-icon size="28">mdi-arrow-left</v-icon>
+        </v-btn>
+        <h1 class="page-title">Order Details</h1>
+        <div style="width: 40px"></div>
+      </div>
+
+      <v-container class="pa-4">
+        <!-- Loading State -->
+        <div v-if="loading" class="text-center pa-8">
+          <v-progress-circular indeterminate color="#354d7c" size="64"></v-progress-circular>
+          <p class="mt-4">Loading order details...</p>
+        </div>
+
+        <!-- Error State -->
+        <div v-else-if="error" class="text-center pa-8">
+          <v-icon size="80" color="error">mdi-alert-circle</v-icon>
+          <h3 class="mt-4">Error Loading Order</h3>
+          <p class="text-grey">{{ error }}</p>
+          <v-btn color="primary" @click="goBack">Go Back</v-btn>
+        </div>
+
+        <!-- Order Details -->
+        <div v-else-if="order" class="order-details-container">
+          <!-- Order Status -->
+          <div class="order-status-section">
+            <div class="status-chip" :class="getStatusClass(order.status)">
+              {{ getStatusText(order.status) }}
+            </div>
+          </div>
+
+          <!-- Route Information -->
+          <v-card class="info-card mb-4" rounded="lg">
+            <v-card-title class="info-title">
+              <v-icon size="20" color="#354d7c">mdi-map-marker-path</v-icon>
+              <span>Route Information</span>
+            </v-card-title>
+            <v-divider></v-divider>
+            <v-card-text class="pa-4">
+              <div class="route-info">
+                <div class="route-point">
+                  <div class="point-marker pickup">P</div>
+                  <div class="point-details">
+                    <div class="point-label">Pickup Location</div>
+                    <div class="point-address">{{ order.pickup_address }}</div>
+                    <div class="point-label">Shop: {{ order.shop_name }}</div>
+                  </div>
+                </div>
+
+                <div class="route-line"></div>
+
+                <div class="route-point">
+                  <div class="point-marker delivery">D</div>
+                  <div class="point-details">
+                    <div class="point-label">Delivery Location</div>
+                    <div class="point-address">{{ order.delivery_address }}</div>
+                    <div class="point-label">Customer: {{ order.customer_name }}</div>
+                    <div class="point-label">Phone: {{ order.customer_phone }}</div>
+                  </div>
+                </div>
+              </div>
+              <v-btn color="primary" block class="mt-3" @click="goToLocationToDeliver">
+                <v-icon left>mdi-map</v-icon>
+                See on Map
+              </v-btn>
+            </v-card-text>
+          </v-card>
+
+          <!-- Order Items -->
+          <v-card class="info-card mb-4" rounded="lg">
+            <v-card-title class="info-title">
+              <v-icon size="20" color="#354d7c">mdi-shopping-bag</v-icon>
+              <span>Order Items</span>
+            </v-card-title>
+            <v-divider></v-divider>
+            <v-card-text class="pa-0">
+              <v-table density="compact">
+                <thead>
+                  <tr>
+                    <th>Image</th>
+                    <th>Item</th>
+                    <th class="text-center">Qty</th>
+                    <th class="text-right">Price</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr v-for="item in order.items" :key="item.id">
+                    <td style="width: 50px">
+                      <div @click="viewFullImage(item.image, item.name)" style="cursor: pointer">
+                        <v-img
+                          v-if="item.image"
+                          :src="item.image"
+                          width="40"
+                          height="40"
+                          class="rounded"
+                          cover
+                          @error="handleImageError"
+                        >
+                          <template #placeholder>
+                            <v-icon>mdi-package</v-icon>
+                          </template>
+                        </v-img>
+                        <v-icon v-else>mdi-package</v-icon>
+                      </div>
+                    </td>
+                    <td>{{ item.name }}</td>
+                    <td class="text-center">x{{ item.quantity }}</td>
+                    <td class="text-right">₱{{ formatNumber(item.price * item.quantity) }}</td>
+                  </tr>
+                  <tr class="subtotal-row">
+                    <td colspan="3" class="text-right font-weight-bold">Subtotal:</td>
+                    <td class="text-right">₱{{ formatNumber(order.subtotal) }}</td>
+                  </tr>
+                  <tr>
+                    <td colspan="3" class="text-right">Delivery Fee:</td>
+                    <td class="text-right">₱{{ formatNumber(order.delivery_fee) }}</td>
+                  </tr>
+                  <tr class="total-row">
+                    <td colspan="3" class="text-right font-weight-bold">Total:</td>
+                    <td class="text-right font-weight-bold">
+                      ₱{{ formatNumber(order.total_amount) }}
+                    </td>
+                  </tr>
+                </tbody>
+              </v-table>
+            </v-card-text>
+          </v-card>
+
+          <!-- Payment Information -->
+          <v-card class="info-card mb-4" rounded="lg">
+            <v-card-title class="info-title">
+              <v-icon size="20" color="#354d7c">mdi-credit-card</v-icon>
+              <span>Payment Information</span>
+            </v-card-title>
+            <v-divider></v-divider>
+            <v-card-text class="pa-4">
+              <div class="payment-info">
+                <div class="payment-field">
+                  <span class="field-label">Method:</span>
+                  <span class="field-value">{{ order.payment_method || 'Cash' }}</span>
+                </div>
+                <div class="payment-field">
+                  <span class="field-label">Delivery Option:</span>
+                  <span class="field-value">{{ order.delivery_option || 'Standard' }}</span>
+                </div>
+                <div class="payment-field" v-if="order.created_at">
+                  <span class="field-label">Order Date:</span>
+                  <span class="field-value">{{ formatDateTime(order.created_at) }}</span>
+                </div>
+              </div>
+            </v-card-text>
+          </v-card>
+
+          <!-- Proof of Delivery Section - Only show for delivered/completed orders -->
+          <v-card v-if="order.status === 'delivered' || order.status === 'completed'" class="info-card mb-4" rounded="lg">
+            <v-card-title class="info-title">
+              <v-icon size="20" color="#4caf50">mdi-camera</v-icon>
+              <span>Proof of Delivery</span>
+            </v-card-title>
+            <v-divider></v-divider>
+            <v-card-text class="pa-4">
+              <div v-if="order.delivery_proof_url" class="proof-container">
+                <div class="proof-image-wrapper" @click="viewFullImage(order.delivery_proof_url, 'Proof of Delivery')">
+                  <v-img
+                    :src="order.delivery_proof_url"
+                    height="200"
+                    cover
+                    class="rounded proof-image"
+                  >
+                    <template #placeholder>
+                      <div class="d-flex align-center justify-center" style="height: 200px">
+                        <v-progress-circular indeterminate color="primary"></v-progress-circular>
+                      </div>
+                    </template>
+                  </v-img>
+                </div>
+                <div class="text-center mt-3">
+                  <v-btn
+                    size="small"
+                    color="primary"
+                    variant="text"
+                    @click="viewFullImage(order.delivery_proof_url, 'Proof of Delivery')"
+                  >
+                    <v-icon left size="small">mdi-magnify</v-icon>
+                    View Full Size
+                  </v-btn>
+                </div>
+                <div class="proof-info mt-3">
+                  <div class="proof-field">
+                    <v-icon size="16" color="success" class="mr-1">mdi-check-circle</v-icon>
+                    <span class="proof-label">Delivery completed on:</span>
+                    <span class="proof-value">{{ formatDateTime(order.delivered_at || order.completed_at) }}</span>
+                  </div>
+                </div>
+              </div>
+              <div v-else class="text-center py-4">
+                <v-icon size="48" color="grey-lighten-1">mdi-image-off</v-icon>
+                <p class="mt-2 text-grey">No proof of delivery image available</p>
+              </div>
+            </v-card-text>
+          </v-card>
+
+          <!-- Action Buttons -->
+          <div class="action-buttons">
+            <!-- Accept Button (for waiting_for_rider orders) -->
+            <v-btn v-if="isAvailableForAcceptance" color="success" size="large" block @click="acceptOrder"
+              :loading="accepting">
+              <v-icon left>mdi-check-circle</v-icon>
+              Accept Order
+            </v-btn>
+
+            <!-- Picked Up Button (for accepted_by_rider orders) -->
+            <v-btn v-else-if="order.status === 'accepted_by_rider' && isMyOrder" color="warning" size="large" block
+              @click="updateOrderStatus('picked_up')">
+              <v-icon left>mdi-truck</v-icon>
+              Mark as Picked Up
+            </v-btn>
+
+            <!-- Delivered Button (for picked_up orders) -->
+            <v-btn v-else-if="order.status === 'picked_up' && isMyOrder" color="success" size="large" block
+              @click="openProofDialog()">
+              <v-icon left>mdi-check-circle</v-icon>
+              Mark as Delivered
+            </v-btn>
+
+            <!-- Message for completed orders -->
+            <v-alert v-else-if="order.status === 'delivered' || order.status === 'completed'" type="success"
+              variant="tonal" class="mb-0">
+              <div class="d-flex align-center">
+                <span>This order has been completed. Thank you for your delivery!</span>
+              </div>
+            </v-alert>
+
+            <!-- Message for orders waiting for seller approval -->
+            <v-alert v-else-if="order.status === 'pending_approval'" type="info" variant="tonal" class="mb-0">
+              <div class="d-flex align-center">
+                <v-icon left class="mr-2">mdi-clock-outline</v-icon>
+                <span>This order is waiting for seller approval.</span>
+              </div>
+            </v-alert>
+
+            <!-- Message for orders assigned to other riders -->
+            <v-alert v-else-if="order.rider_id && !isMyOrder && order.status !== 'delivered'" type="warning"
+              variant="tonal" class="mb-0">
+              <div class="d-flex align-center">
+                <v-icon left class="mr-2">mdi-alert</v-icon>
+                <span>This order has been accepted by another rider.</span>
+              </div>
+            </v-alert>
+          </div>
+        </div>
+      </v-container>
+    </v-main>
+
+    <!-- Accept Order Dialog -->
+    <v-dialog v-model="showAcceptDialog" max-width="400">
+      <v-card>
+        <v-card-title class="text-h6">Accept Order</v-card-title>
+        <v-card-text>
+          <p>Are you sure you want to accept this order?</p>
+          <p class="text-caption text-grey">You will have 30 minutes to pick up the order.</p>
+          <p class="text-caption text-grey">
+            Note: If the order is not picked up or delivered, it will be automatically cancelled and
+            you may receive a penalty. Please make sure you can fulfill the order before accepting.
+          </p>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" @click="showAcceptDialog = false">Cancel</v-btn>
+          <v-spacer></v-spacer>
+          <v-btn color="primary" :loading="accepting" @click="confirmAcceptOrder">Confirm</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Update Status Dialog (for picked up) -->
+    <v-dialog v-model="showUpdateDialog" max-width="400">
+      <v-card>
+        <v-card-title class="text-h6">Update Order Status</v-card-title>
+        <v-card-text>
+          <p>
+            Are you sure you want to mark this order as <strong>{{ updateStatusText }}</strong>?
+          </p>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" @click="showUpdateDialog = false">Cancel</v-btn>
+          <v-spacer></v-spacer>
+          <v-btn color="primary" :loading="updating" @click="confirmUpdateStatus">Confirm</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Proof of Delivery Dialog with Capacitor Camera - FIXED VERSION -->
+    <v-dialog v-model="showProofDialog" max-width="500">
+      <v-card>
+        <v-card-title class="text-h6">
+          <v-icon left color="success">mdi-camera</v-icon>
+          Proof of Delivery
+        </v-card-title>
+        <v-divider></v-divider>
+        
+        <v-card-text class="pa-4">
+          <div class="text-center mb-4">
+            <p class="font-weight-medium">Take a photo as proof of delivery</p>
+            <p class="text-caption text-grey">Take a clear photo of the delivered package at the customer's location</p>
+          </div>
+
+          <!-- Image Preview -->
+          <div v-if="proofImagePreview" class="proof-preview mb-4">
+            <v-img
+              :src="proofImagePreview"
+              height="250"
+              cover
+              class="rounded"
+              style="cursor: pointer"
+              @click="takePhoto"
+            >
+              <template #placeholder>
+                <div class="d-flex align-center justify-center" style="height: 250px">
+                  <v-progress-circular indeterminate color="primary"></v-progress-circular>
+                </div>
+              </template>
+            </v-img>
+            <div class="text-center mt-3">
+              <v-btn size="small" variant="text" @click="takePhoto">
+                <v-icon size="small" left>mdi-camera-retake</v-icon>
+                Retake Photo
+              </v-btn>
+              <v-btn size="small" variant="text" @click="chooseFromGallery" class="ml-2">
+                <v-icon size="small" left>mdi-folder-image</v-icon>
+                Choose from Gallery
+              </v-btn>
+            </div>
+          </div>
+
+          <!-- Camera Options -->
+          <div v-else class="camera-options">
+            <div class="d-flex flex-column gap-3">
+              <v-btn
+                color="primary"
+                size="large"
+                block
+                @click="takePhoto"
+                class="mb-2"
+                height="56"
+              >
+                <v-icon left size="28">mdi-camera</v-icon>
+                Take Photo
+              </v-btn>
+              
+              <v-btn
+                size="large"
+                block
+                variant="outlined"
+                @click="chooseFromGallery"
+                height="56"
+              >
+                <v-icon left size="28">mdi-folder-image</v-icon>
+                Choose from Gallery
+              </v-btn>
+            </div>
+            <p class="text-caption text-grey mt-3 text-center">
+              Use camera to take a photo or select from gallery
+            </p>
+          </div>
+
+          <v-alert v-if="!proofImagePreview" type="info" variant="tonal" class="mt-4">
+            <div class="d-flex align-center">
+              <v-icon left class="mr-2">mdi-information</v-icon>
+              <span>Please take a clear photo showing the delivered package at the customer's location.</span>
+            </div>
+          </v-alert>
+        </v-card-text>
+        
+        <v-card-actions class="pa-4">
+          <v-btn variant="text" @click="showProofDialog = false">Cancel</v-btn>
+          <v-spacer></v-spacer>
+          <v-btn 
+            color="success" 
+            :disabled="!proofImagePreview || uploadingProof"
+            :loading="uploadingProof"
+            @click="confirmUpdateStatus"
+          >
+            <v-icon left>mdi-check</v-icon>
+            Confirm Delivery
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <!-- Full Screen Image Preview Dialog -->
+    <v-dialog v-model="showImageDialog" max-width="90vw" @click:outside="showImageDialog = false">
+      <v-card class="image-preview-dialog">
+        <v-card-title class="dialog-header d-flex justify-space-between align-center">
+          <span class="text-h6">{{ selectedProductName }}</span>
+          <v-btn icon @click="showImageDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </v-card-title>
+        <v-divider></v-divider>
+        <v-card-text class="text-center pa-4">
+          <v-img
+            v-if="selectedImage"
+            :src="selectedImage"
+            :alt="selectedProductName"
+            max-height="70vh"
+            max-width="100%"
+            contain
+            class="mx-auto"
+          >
+            <template #placeholder>
+              <div class="d-flex align-center justify-center" style="height: 300px">
+                <v-progress-circular indeterminate color="primary"></v-progress-circular>
+              </div>
+            </template>
+          </v-img>
+          <div v-else class="text-center pa-8">
+            <v-icon size="64" color="grey">mdi-image-off</v-icon>
+            <p class="mt-2">No image available</p>
+          </div>
+        </v-card-text>
+        <v-card-actions class="dialog-actions">
+          <v-btn color="primary" @click="showImageDialog = false">Close</v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+  </v-app>
+</template>
+
 <script setup>
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 
 const router = useRouter()
 const route = useRoute()
@@ -22,8 +455,13 @@ const showImageDialog = ref(false)
 const selectedImage = ref(null)
 const selectedProductName = ref('')
 const currentRiderNumericId = ref(null)
-
 const currentRider = ref(null)
+
+// State for proof of delivery with Capacitor Camera
+const showProofDialog = ref(false)
+const proofImage = ref(null)
+const proofImagePreview = ref(null)
+const uploadingProof = ref(false)
 
 // Helper functions
 const formatNumber = (num) => {
@@ -58,11 +496,10 @@ const getStatusText = (status) => {
 
 const getStatusClass = (status) => {
   const classMap = {
-    pending: 'status-pending',
-    paid: 'status-paid',
-    accepted: 'status-accepted',
+    pending_approval: 'status-pending',
+    waiting_for_rider: 'status-waiting',
+    accepted_by_rider: 'status-accepted',
     picked_up: 'status-picked',
-    shipped: 'status-shipped',
     delivered: 'status-delivered',
     completed: 'status-completed',
     cancelled: 'status-cancelled',
@@ -110,6 +547,7 @@ const getCurrentRider = async () => {
     console.error('Error getting rider:', error)
   }
 }
+
 // Fetch order details
 const fetchOrderDetails = async () => {
   loading.value = true
@@ -272,16 +710,172 @@ const confirmAcceptOrder = async () => {
   }
 }
 
-// Update order status
+// Update order status (for picked up)
 const updateOrderStatus = (status) => {
   pendingStatusUpdate.value = status
   showUpdateDialog.value = true
 }
 
-const confirmUpdateStatus = async () => {
-  updating.value = true
+// Open proof of delivery dialog
+const openProofDialog = () => {
+  pendingStatusUpdate.value = 'delivered'
+  showProofDialog.value = true
+}
+
+// Take photo with Capacitor Camera - FIXED VERSION
+const takePhoto = async () => {
   try {
-    const updateData = { status: pendingStatusUpdate.value }
+    // Close the dialog first
+    showProofDialog.value = false
+    
+    // Small delay to ensure dialog is closed
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
+    const photo = await Camera.getPhoto({
+      resultType: CameraResultType.DataUrl,
+      source: CameraSource.Camera,
+      quality: 90,
+      allowEditing: false,
+      saveToGallery: false,
+    })
+    
+    if (photo && photo.dataUrl) {
+      // Convert dataUrl to file
+      const response = await fetch(photo.dataUrl)
+      const blob = await response.blob()
+      const file = new File([blob], `delivery_proof_${Date.now()}.jpg`, { type: 'image/jpeg' })
+      
+      proofImagePreview.value = photo.dataUrl
+      proofImage.value = file
+      
+      // Re-open dialog after photo is taken
+      showProofDialog.value = true
+    } else {
+      // No photo taken, re-open dialog
+      showProofDialog.value = true
+    }
+  } catch (error) {
+    // Re-open dialog on error
+    showProofDialog.value = true
+    
+    // Check if user cancelled
+    if (error.message === 'User cancelled photos app') {
+      console.log('User cancelled photo selection')
+      return
+    }
+    
+    console.error('Error taking photo:', error)
+    alert('Failed to take photo. Please check camera permissions.')
+  }
+}
+
+// Choose from gallery with Capacitor Camera - FIXED VERSION
+const chooseFromGallery = async () => {
+  try {
+    // Close the dialog first
+    showProofDialog.value = false
+    
+    // Small delay to ensure dialog is closed
+    await new Promise(resolve => setTimeout(resolve, 100))
+    
+    const photo = await Camera.getPhoto({
+      resultType: CameraResultType.DataUrl,
+      source: CameraSource.Photos,
+      quality: 90,
+      allowEditing: false,
+    })
+    
+    if (photo && photo.dataUrl) {
+      // Convert dataUrl to file
+      const response = await fetch(photo.dataUrl)
+      const blob = await response.blob()
+      const file = new File([blob], `delivery_proof_${Date.now()}.jpg`, { type: 'image/jpeg' })
+      
+      proofImagePreview.value = photo.dataUrl
+      proofImage.value = file
+      
+      // Re-open dialog after photo is selected
+      showProofDialog.value = true
+    } else {
+      // No photo selected, re-open dialog
+      showProofDialog.value = true
+    }
+  } catch (error) {
+    // Re-open dialog on error
+    showProofDialog.value = true
+    
+    // Check if user cancelled
+    if (error.message === 'User cancelled photos app') {
+      console.log('User cancelled photo selection')
+      return
+    }
+    
+    console.error('Error choosing from gallery:', error)
+    alert('Failed to load image from gallery.')
+  }
+}
+
+// Upload proof image to Supabase Storage - FIXED VERSION
+const uploadProofImage = async () => {
+  if (!proofImage.value) return null
+
+  const fileExt = proofImage.value.name.split('.').pop()
+  const fileName = `proof_${orderId}_${Date.now()}.${fileExt}`
+  const filePath = `delivery_proofs/${fileName}`
+
+  try {
+    console.log('Uploading proof image...')
+    
+    const { data, error } = await supabase.storage
+      .from('order-proofs')
+      .upload(filePath, proofImage.value, {
+        cacheControl: '3600',
+        upsert: false,
+        contentType: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`
+      })
+
+    if (error) {
+      console.error('Upload error details:', error)
+      throw error
+    }
+
+    // Get public URL
+    const { data: { publicUrl } } = supabase.storage
+      .from('order-proofs')
+      .getPublicUrl(filePath)
+
+    console.log('Upload successful, public URL:', publicUrl)
+    return publicUrl
+  } catch (error) {
+    console.error('Error uploading proof image:', error)
+    throw new Error(`Failed to upload proof image: ${error.message}`)
+  }
+}
+
+// Update order status with proof image - FIXED VERSION
+const confirmUpdateStatus = async () => {
+  if (pendingStatusUpdate.value === 'delivered' && !proofImage.value) {
+    alert('Please take a photo as proof of delivery')
+    return
+  }
+
+  uploadingProof.value = true
+  try {
+    let proofImageUrl = null
+
+    // Upload proof image if this is a delivery
+    if (pendingStatusUpdate.value === 'delivered' && proofImage.value) {
+      proofImageUrl = await uploadProofImage()
+    }
+
+    const updateData = { 
+      status: pendingStatusUpdate.value
+    }
+    
+    // Add delivery_proof_url if it exists
+    if (proofImageUrl) {
+      updateData.delivery_proof_url = proofImageUrl
+    }
 
     if (pendingStatusUpdate.value === 'picked_up') {
       updateData.picked_up_at = new Date().toISOString()
@@ -298,7 +892,12 @@ const confirmUpdateStatus = async () => {
 
     if (error) throw error
 
+    showProofDialog.value = false
     showUpdateDialog.value = false
+    // Reset proof data
+    proofImage.value = null
+    proofImagePreview.value = null
+    
     await fetchOrderDetails()
     alert(`Order marked as ${pendingStatusUpdate.value.replace('_', ' ')}!`)
     
@@ -312,7 +911,7 @@ const confirmUpdateStatus = async () => {
     console.error('Error updating order:', error)
     alert('Failed to update order status. Please try again.')
   } finally {
-    updating.value = false
+    uploadingProof.value = false
     pendingStatusUpdate.value = null
   }
 }
@@ -341,291 +940,6 @@ onMounted(async () => {
   await fetchOrderDetails()
 })
 </script>
-
-<template>
-  <v-app>
-    <v-main class="order-details-page">
-      <div class="header-section">
-        <v-btn icon variant="text" class="back-btn" @click="goBack">
-          <v-icon size="28">mdi-arrow-left</v-icon>
-        </v-btn>
-        <h1 class="page-title">Order Details</h1>
-        <div style="width: 40px"></div>
-      </div>
-
-      <v-container class="pa-4">
-        <!-- Loading State -->
-        <div v-if="loading" class="text-center pa-8">
-          <v-progress-circular indeterminate color="#354d7c" size="64"></v-progress-circular>
-          <p class="mt-4">Loading order details...</p>
-        </div>
-
-        <!-- Error State -->
-        <div v-else-if="error" class="text-center pa-8">
-          <v-icon size="80" color="error">mdi-alert-circle</v-icon>
-          <h3 class="mt-4">Error Loading Order</h3>
-          <p class="text-grey">{{ error }}</p>
-          <v-btn color="primary" @click="goBack">Go Back</v-btn>
-        </div>
-
-        <!-- Order Details -->
-        <div v-else-if="order" class="order-details-container">
-          <!-- Order Status -->
-          <div class="order-status-section">
-            <div class="status-chip" :class="getStatusClass(order.status)">
-              {{ getStatusText(order.status) }}
-            </div>
-          </div>
-
-          <!-- Route Information -->
-          <v-card class="info-card mb-4" rounded="lg">
-            <v-card-title class="info-title">
-              <v-icon size="20" color="#354d7c">mdi-map-marker-path</v-icon>
-              <span>Route Information</span>
-            </v-card-title>
-            <v-divider></v-divider>
-            <v-card-text class="pa-4">
-              <div class="route-info">
-                <div class="route-point">
-                  <div class="point-marker pickup">P</div>
-                  <div class="point-details">
-                    <div class="point-label">Pickup Location</div>
-                    <div class="point-address">{{ order.pickup_address }}</div>
-                    <div class="point-label">Shop: {{ order.shop_name }}</div>
-                  </div>
-                </div>
-
-                <div class="route-line"></div>
-
-                <div class="route-point">
-                  <div class="point-marker delivery">D</div>
-                  <div class="point-details">
-                    <div class="point-label">Delivery Location</div>
-                    <div class="point-address">{{ order.delivery_address }}</div>
-                    <div class="point-label">Customer: {{ order.customer_name }}</div>
-                    <div class="point-label">Phone: {{ order.customer_phone }}</div>
-                  </div>
-                </div>
-              </div>
-              <v-btn color="primary" block class="mt-3" @click="goToLocationToDeliver">
-                <v-icon left>mdi-map</v-icon>
-                See on Map
-              </v-btn>
-            </v-card-text>
-          </v-card>
-
-          <!-- Order Items -->
-          <v-card class="info-card mb-4" rounded="lg">
-            <v-card-title class="info-title">
-              <v-icon size="20" color="#354d7c">mdi-shopping-bag</v-icon>
-              <span>Order Items</span>
-            </v-card-title>
-            <v-divider></v-divider>
-            <v-card-text class="pa-0">
-              <v-table density="compact">
-                <thead>
-                  <tr>
-                    <th>Image</th>
-                    <th>Item</th>
-                    <th class="text-center">Qty</th>
-                    <th class="text-right">Price</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  <tr v-for="item in order.items" :key="item.id">
-                    <td style="width: 50px">
-                      <div @click="viewFullImage(item.image, item.name)" style="cursor: pointer">
-                        <v-img
-                          v-if="item.image"
-                          :src="item.image"
-                          width="40"
-                          height="40"
-                          class="rounded"
-                          cover
-                          @error="handleImageError"
-                        >
-                          <template #placeholder>
-                            <v-icon>mdi-package</v-icon>
-                          </template>
-                        </v-img>
-                        <v-icon v-else>mdi-package</v-icon>
-                      </div>
-                    </td>
-                    <td>{{ item.name }}</td>
-                    <td class="text-center">x{{ item.quantity }}</td>
-                    <td class="text-right">₱{{ formatNumber(item.price * item.quantity) }}</td>
-                  </tr>
-                  <tr class="subtotal-row">
-                    <td colspan="3" class="text-right font-weight-bold">Subtotal:</td>
-                    <td class="text-right">₱{{ formatNumber(order.subtotal) }}</td>
-                  </tr>
-                  <tr>
-                    <td colspan="3" class="text-right">Delivery Fee:</td>
-                    <td class="text-right">₱{{ formatNumber(order.delivery_fee) }}</td>
-                  </tr>
-                  <tr class="total-row">
-                    <td colspan="3" class="text-right font-weight-bold">Total:</td>
-                    <td class="text-right font-weight-bold">
-                      ₱{{ formatNumber(order.total_amount) }}
-                    </td>
-                  </tr>
-                </tbody>
-              </v-table>
-            </v-card-text>
-          </v-card>
-
-          <!-- Payment Information -->
-          <v-card class="info-card mb-4" rounded="lg">
-            <v-card-title class="info-title">
-              <v-icon size="20" color="#354d7c">mdi-credit-card</v-icon>
-              <span>Payment Information</span>
-            </v-card-title>
-            <v-divider></v-divider>
-            <v-card-text class="pa-4">
-              <div class="payment-info">
-                <div class="payment-field">
-                  <span class="field-label">Method:</span>
-                  <span class="field-value">{{ order.payment_method || 'Cash' }}</span>
-                </div>
-                <div class="payment-field">
-                  <span class="field-label">Delivery Option:</span>
-                  <span class="field-value">{{ order.delivery_option || 'Standard' }}</span>
-                </div>
-                <div class="payment-field" v-if="order.created_at">
-                  <span class="field-label">Order Date:</span>
-                  <span class="field-value">{{ formatDateTime(order.created_at) }}</span>
-                </div>
-              </div>
-            </v-card-text>
-          </v-card>
-
-          <!-- Action Buttons -->
-          <div class="action-buttons">
-            <!-- Accept Button (for waiting_for_rider orders) -->
-            <v-btn v-if="isAvailableForAcceptance" color="success" size="large" block @click="acceptOrder"
-              :loading="accepting">
-              <v-icon left>mdi-check-circle</v-icon>
-              Accept Order
-            </v-btn>
-
-            <!-- Picked Up Button (for accepted_by_rider orders) -->
-            <v-btn v-else-if="order.status === 'accepted_by_rider' && isMyOrder" color="warning" size="large" block
-              @click="updateOrderStatus('picked_up')">
-              <v-icon left>mdi-truck</v-icon>
-              Mark as Picked Up
-            </v-btn>
-
-            <!-- Delivered Button (for picked_up orders) -->
-            <v-btn v-else-if="order.status === 'picked_up' && isMyOrder" color="success" size="large" block
-              @click="updateOrderStatus('delivered')">
-              <v-icon left>mdi-check-circle</v-icon>
-              Mark as Delivered
-            </v-btn>
-
-            <!-- Message for completed orders -->
-            <v-alert v-else-if="order.status === 'delivered' || order.status === 'completed'" type="success"
-              variant="tonal" class="mb-0">
-              <div class="d-flex align-center">
-                <span>This order has been completed. Thank you for your delivery!</span>
-              </div>
-            </v-alert>
-
-            <!-- Message for orders waiting for seller approval -->
-            <v-alert v-else-if="order.status === 'pending_approval'" type="info" variant="tonal" class="mb-0">
-              <div class="d-flex align-center">
-                <v-icon left class="mr-2">mdi-clock-outline</v-icon>
-                <span>This order is waiting for seller approval.</span>
-              </div>
-            </v-alert>
-
-            <!-- Message for orders assigned to other riders -->
-            <v-alert v-else-if="order.rider_id && !isMyOrder && order.status !== 'delivered'" type="warning"
-              variant="tonal" class="mb-0">
-              <div class="d-flex align-center">
-                <v-icon left class="mr-2">mdi-alert</v-icon>
-                <span>This order has been accepted by another rider.</span>
-              </div>
-            </v-alert>
-          </div>
-        </div>
-      </v-container>
-    </v-main>
-
-    <!-- Accept Order Dialog -->
-    <v-dialog v-model="showAcceptDialog" max-width="400">
-      <v-card>
-        <v-card-title class="text-h6">Accept Order</v-card-title>
-        <v-card-text>
-          <p>Are you sure you want to accept this order?</p>
-          <p class="text-caption text-grey">You will have 30 minutes to pick up the order.</p>
-          <p class="text-caption text-grey">
-            Note: If the order is not picked up or delivered, it will be automatically cancelled and
-            you may receive a penalty. Please make sure you can fulfill the order before accepting.
-          </p>
-        </v-card-text>
-        <v-card-actions>
-          <v-btn variant="text" @click="showAcceptDialog = false">Cancel</v-btn>
-          <v-spacer></v-spacer>
-          <v-btn color="primary" :loading="accepting" @click="confirmAcceptOrder">Confirm</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- Update Status Dialog -->
-    <v-dialog v-model="showUpdateDialog" max-width="400">
-      <v-card>
-        <v-card-title class="text-h6">Update Order Status</v-card-title>
-        <v-card-text>
-          <p>
-            Are you sure you want to mark this order as <strong>{{ updateStatusText }}</strong>?
-          </p>
-        </v-card-text>
-        <v-card-actions>
-          <v-btn variant="text" @click="showUpdateDialog = false">Cancel</v-btn>
-          <v-spacer></v-spacer>
-          <v-btn color="primary" :loading="updating" @click="confirmUpdateStatus">Confirm</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-
-    <!-- Full Screen Image Preview Dialog -->
-    <v-dialog v-model="showImageDialog" max-width="90vw" @click:outside="showImageDialog = false">
-      <v-card class="image-preview-dialog">
-        <v-card-title class="dialog-header d-flex justify-space-between align-center">
-          <span class="text-h6">{{ selectedProductName }}</span>
-          <v-btn icon @click="showImageDialog = false">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </v-card-title>
-        <v-divider></v-divider>
-        <v-card-text class="text-center pa-4">
-          <v-img
-            v-if="selectedImage"
-            :src="selectedImage"
-            :alt="selectedProductName"
-            max-height="70vh"
-            max-width="100%"
-            contain
-            class="mx-auto"
-          >
-            <template #placeholder>
-              <div class="d-flex align-center justify-center" style="height: 300px">
-                <v-progress-circular indeterminate color="primary"></v-progress-circular>
-              </div>
-            </template>
-          </v-img>
-          <div v-else class="text-center pa-8">
-            <v-icon size="64" color="grey">mdi-image-off</v-icon>
-            <p class="mt-2">No image available</p>
-          </div>
-        </v-card-text>
-        <v-card-actions class="dialog-actions">
-          <v-btn color="primary" @click="showImageDialog = false">Close</v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
-  </v-app>
-</template>
 
 <style scoped>
 .order-details-page {
@@ -674,9 +988,14 @@ onMounted(async () => {
   color: #ff9800;
 }
 
-.status-accepted {
+.status-waiting {
   background: #e3f2fd;
   color: #2196f3;
+}
+
+.status-accepted {
+  background: #e8eaf6;
+  color: #3f51b5;
 }
 
 .status-picked {
@@ -688,6 +1007,11 @@ onMounted(async () => {
 .status-completed {
   background: #e8f5e9;
   color: #4caf50;
+}
+
+.status-cancelled {
+  background: #ffebee;
+  color: #f44336;
 }
 
 .info-card {
@@ -784,6 +1108,53 @@ onMounted(async () => {
   color: #333;
 }
 
+/* Proof of Delivery Styles */
+.proof-container {
+  text-align: center;
+}
+
+.proof-image-wrapper {
+  cursor: pointer;
+  border-radius: 12px;
+  overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.proof-image-wrapper:hover {
+  transform: scale(1.02);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.proof-image {
+  transition: all 0.3s ease;
+}
+
+.proof-info {
+  background: #f5f5f5;
+  padding: 12px;
+  border-radius: 8px;
+  display: inline-block;
+  width: 100%;
+}
+
+.proof-field {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 0.85rem;
+}
+
+.proof-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.proof-value {
+  color: #333;
+  font-weight: 600;
+}
+
 .action-buttons {
   margin-top: 16px;
   margin-bottom: 32px;
@@ -807,6 +1178,14 @@ onMounted(async () => {
   overflow: hidden;
 }
 
+.proof-preview {
+  cursor: pointer;
+}
+
+.gap-3 {
+  gap: 12px;
+}
+
 @media (max-width: 600px) {
   .page-title {
     font-size: 1.2rem;
@@ -823,6 +1202,11 @@ onMounted(async () => {
 
   .point-address {
     font-size: 0.75rem;
+  }
+  
+  .proof-field {
+    flex-direction: column;
+    gap: 4px;
   }
 }
 </style>
