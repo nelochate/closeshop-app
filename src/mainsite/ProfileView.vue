@@ -493,7 +493,7 @@ const loadUser = async () => {
     setupShopRealtimeSubscription()
   }
 }
-// FIXED: Load order counts for each section with correct status mapping
+
 const loadOrderCounts = async () => {
   if (!user.value?.id) return
 
@@ -514,47 +514,46 @@ const loadOrderCounts = async () => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
+          // Show ALL orders regardless of status
           count = orders.filter(
-            (o) =>
-              o.payment_status === 'pending' &&
-              o.delivery_status !== 'delivered' &&
-              o.status !== 'cancelled',
+            (o) => o.status !== 'cancelled'
           ).length
           break
         case 'to-receive':
-          // Orders that are paid but not delivered yet
+          // Orders that are approved by seller (waiting_for_rider) or accepted by rider
           count = orders.filter(
             (o) =>
-              o.payment_status === 'paid' &&
+              (o.status === 'waiting_for_rider' || 
+              o.status === 'accepted_by_rider' ||
+              (o.payment_status === 'paid' && o.delivery_status !== 'delivered')) &&
               o.delivery_status !== 'delivered' &&
-              o.status !== 'cancelled',
+              o.status !== 'cancelled' &&
+              o.status !== 'delivered'
           ).length
           break
         case 'reviews':
-          // Orders that are delivered but not reviewed (you might need a reviews table to check this)
           count = orders.filter(
-            (o) => o.delivery_status === 'delivered' && o.status !== 'cancelled',
+            (o) => 
+              (o.delivery_status === 'delivered' || o.status === 'delivered') && 
+              o.status !== 'cancelled'
           ).length
           break
         case 'completed':
-          // Orders that are both paid and delivered
           count = orders.filter(
-            (o) => o.payment_status === 'paid' && o.delivery_status === 'delivered',
+            (o) => o.status === 'delivered' || o.status === 'completed'
           ).length
           break
         case 'cancelled':
-          // Orders that are cancelled
           count = orders.filter(
-            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled',
+            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled'
           ).length
           break
         case 'failed':
-          // Failed transactions (unpaid, rejected, or failed payments)
           count = orders.filter(
             (o) =>
               o.payment_status === 'failed' ||
               o.status === 'failed' ||
-              (o.payment_status === 'rejected' && o.status !== 'cancelled'),
+              (o.payment_status === 'rejected' && o.status !== 'cancelled')
           ).length
           break
         default:
@@ -567,7 +566,6 @@ const loadOrderCounts = async () => {
     console.error('Error loading order counts:', err)
   }
 }
-
 // Navigation handler
 const handleNavClick = async (itemId) => {
   selectedSection.value = itemId
@@ -612,15 +610,22 @@ const loadSectionItems = async (sectionId) => {
     switch (sectionId) {
       case 'to-receive':
         query = query
-          .eq('payment_status', 'paid')
+          .or(`status.eq.waiting_for_rider,status.eq.accepted_by_rider,payment_status.eq.paid`)
           .neq('delivery_status', 'delivered')
           .neq('status', 'cancelled')
+          .neq('status', 'delivered')
         break
       case 'reviews':
-        query = query.eq('delivery_status', 'delivered').neq('status', 'cancelled')
+        // Look for delivered orders (either by delivery_status OR status)
+        query = query
+          .or(`delivery_status.eq.delivered,status.eq.delivered`)
+          .neq('status', 'cancelled')
         break
       case 'completed':
-        query = query.eq('payment_status', 'paid').eq('delivery_status', 'delivered')
+        // Look for delivered/completed orders
+        query = query
+          .or(`status.eq.delivered,status.eq.completed,payment_status.eq.paid,delivery_status.eq.delivered`)
+          .neq('status', 'cancelled')
         break
       case 'cancelled':
         query = query.or('status.eq.cancelled,payment_status.eq.cancelled')
@@ -678,8 +683,13 @@ const loadSectionItems = async (sectionId) => {
 // Helper function to get status color
 const getStatusColor = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
+  if (order.status === 'delivered' || order.status === 'completed') return 'success'
+  if (order.status === 'waiting_for_rider') return 'warning'     // Orange/Yellow
+  if (order.status === 'accepted_by_rider') return 'info'        // Blue
+  if (order.status === 'picked_up') return 'warning'             // Orange/Yellow
   if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'success'
   if (order.payment_status === 'paid') return 'primary'
+  if (order.status === 'pending_approval') return 'warning'      // Orange/Yellow
   if (order.payment_status === 'pending') return 'warning'
   if (order.payment_status === 'failed') return 'error'
   return 'grey'
@@ -688,11 +698,41 @@ const getStatusColor = (order) => {
 // Helper function to get status text
 const getStatusText = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'Completed'
-  if (order.payment_status === 'paid') return 'Appproved - To Receive'
+  if (order.status === 'delivered' || order.status === 'completed') return 'Completed'
+  if (order.status === 'waiting_for_rider') return 'Waiting for Rider'  // Added
+  if (order.status === 'accepted_by_rider') return 'Rider Accepted'     // Added
+  if (order.status === 'picked_up') return 'Picked Up'                  // Added
+  if (order.payment_status === 'paid' && order.delivery_status !== 'delivered') return 'To Receive'
+  if (order.status === 'pending_approval') return 'Pending Approval'    // Added
   if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
   return 'Processing'
+}
+
+// Function to subscribe to order status changes
+const setupOrderSubscription = () => {
+  if (!user.value?.id) return
+
+  const orderChannel = supabase
+    .channel('customer-orders')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `user_id=eq.${user.value.id}`,
+      },
+      async (payload) => {
+        console.log('Order status changed:', payload)
+        // Refresh counts and current section
+        await loadOrderCounts()
+        await loadSectionItems(selectedSection.value)
+      }
+    )
+    .subscribe()
+
+  return orderChannel
 }
 
 // Format date
@@ -823,6 +863,7 @@ onMounted(async () => {
   await loadSectionItems(selectedSection.value)
   setupShopRealtimeSubscription()
   await setupNotificationListener()
+  setupOrderSubscription()
 })
 
 onUnmounted(() => {
