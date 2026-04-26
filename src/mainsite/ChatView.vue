@@ -13,6 +13,7 @@ const messages = ref<any[]>([])
 const newMessage = ref('')
 const otherUserProfile = ref<any>(null)
 const shopInfo = ref<any>(null)
+const currentUserHasShop = ref(false)
 const loading = ref(true)
 const sending = ref(false)
 const sendError = ref<string | null>(null)
@@ -45,9 +46,26 @@ const scrollToBottom = async () => {
   if (el) el.scrollTop = el.scrollHeight
 }
 
+const getProfileDisplayName = (profile: any) => {
+  return [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
+}
+
 // ✅ Fetch other user's profile and shop info
 const fetchOtherUserInfo = async () => {
   try {
+    const currentUserId = await checkAuth()
+    if (currentUserId) {
+      userId.value = currentUserId
+
+      const { data: currentUserShop } = await supabase
+        .from('shops')
+        .select('id')
+        .eq('owner_id', currentUserId)
+        .maybeSingle()
+
+      currentUserHasShop.value = !!currentUserShop
+    }
+
     const { data: profile } = await supabase
       .from('profiles')
       .select('*')
@@ -199,16 +217,28 @@ const extractProductNameFromOrder = (content: string): string | null => {
   return null
 }
 
+const extractOrderIdFromContent = (content: string): string | null => {
+  const patterns = [/Order ID:\s*([a-f0-9-]{36})/i, /Transaction #:\s*([a-f0-9-]{36})/i]
+
+  for (const pattern of patterns) {
+    const match = content.match(pattern)
+    if (match?.[1]) {
+      return match[1]
+    }
+  }
+
+  return null
+}
+
 // ✅ NEW: Get product ID from order items table (MOST RELIABLE METHOD)
 const getProductIdFromOrderItems = async (orderContent: string): Promise<string | null> => {
   try {
-    const orderIdMatch = orderContent.match(/Transaction #:\s*([a-f0-9-]{36})/i)
-    if (!orderIdMatch) {
+    const orderId = extractOrderIdFromContent(orderContent)
+    if (!orderId) {
       console.log('❌ No order ID found in message')
       return null
     }
 
-    const orderId = orderIdMatch[1]
     console.log('🔍 Found order ID:', orderId)
 
     const { data: orderItems, error } = await supabase
@@ -747,22 +777,29 @@ const getProductImage = (product: any) => {
 
 // ✅ Check if message is an order notification
 const isOrderNotification = (content: string) => {
-  return content.includes('New Order Received!') || content.includes('Transaction #:')
+  return content.includes('New Order Received!') || content.includes('Order ID:') || content.includes('Transaction #:')
 }
 
 // ✅ Get user display name
 const userDisplayName = computed(() => {
-  if (shopInfo.value?.business_name) return shopInfo.value.business_name
-  if (otherUserProfile.value?.first_name) {
-    return `${otherUserProfile.value.first_name} ${otherUserProfile.value.last_name || ''}`.trim()
+  const profileName = getProfileDisplayName(otherUserProfile.value)
+
+  if (currentUserHasShop.value) {
+    return profileName || shopInfo.value?.business_name || 'User'
   }
-  return 'User'
+
+  return shopInfo.value?.business_name || profileName || 'User'
 })
 
 // ✅ Get user avatar
 const userAvatar = computed(() => {
-  if (shopInfo.value?.logo_url) return shopInfo.value.logo_url
-  if (otherUserProfile.value?.avatar_url) return otherUserProfile.value.avatar_url
+  if (currentUserHasShop.value) {
+    if (otherUserProfile.value?.avatar_url) return otherUserProfile.value.avatar_url
+    if (shopInfo.value?.logo_url) return shopInfo.value.logo_url
+  } else {
+    if (shopInfo.value?.logo_url) return shopInfo.value.logo_url
+    if (otherUserProfile.value?.avatar_url) return otherUserProfile.value.avatar_url
+  }
   return `https://ui-avatars.com/api/?name=${encodeURIComponent(userDisplayName.value)}&background=random`
 })
 

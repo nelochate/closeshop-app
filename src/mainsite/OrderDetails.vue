@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
 
 const route = useRoute()
 const router = useRouter()
@@ -475,15 +476,32 @@ const markAsPickedUp = async () => {
   if (!confirm('Mark this order as picked up?')) return
   
   try {
+    const pickedUpAt = new Date().toISOString()
+
     const { error } = await supabase
       .from('orders')
       .update({ 
         status: 'picked_up',
-        picked_up_at: new Date().toISOString()
+        picked_up_at: pickedUpAt
       })
       .eq('id', orderId)
     
     if (error) throw error
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: 'picked_up',
+        createdAt: pickedUpAt,
+        orderData: {
+          ...order.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about picked up status:', notificationError)
+    }
+
     alert('Order marked as picked up. Deliver to customer.')
     await fetchOrderDetails()
   } catch (err) {
@@ -497,15 +515,32 @@ const markAsDelivered = async () => {
   if (!confirm('Mark this order as delivered?')) return
   
   try {
+    const deliveredAt = new Date().toISOString()
+
     const { error } = await supabase
       .from('orders')
       .update({ 
         status: 'delivered',
-        delivered_at: new Date().toISOString()
+        delivered_at: deliveredAt
       })
       .eq('id', orderId)
     
     if (error) throw error
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: 'delivered',
+        createdAt: deliveredAt,
+        orderData: {
+          ...order.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about delivered status:', notificationError)
+    }
+
     alert('Order marked as delivered!')
     await fetchOrderDetails()
   } catch (err) {

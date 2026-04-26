@@ -17,6 +17,36 @@ const showDeleteDialog = ref(false)
 const conversationToDelete = ref<any>(null)
 const deleting = ref(false)
 
+const getProfileDisplayName = (profile: any) => {
+  return [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
+}
+
+const resolveConversationIdentity = ({
+  profile,
+  shop,
+  preferPersonalName = false,
+}: {
+  profile: any
+  shop: any
+  preferPersonalName?: boolean
+}) => {
+  const profileName = getProfileDisplayName(profile)
+  const displayName = preferPersonalName
+    ? profileName || shop?.business_name || 'User'
+    : shop?.business_name || profileName || 'User'
+
+  const avatar = preferPersonalName
+    ? profile?.avatar_url || shop?.logo_url
+    : shop?.logo_url || profile?.avatar_url
+
+  return {
+    displayName,
+    avatar:
+      avatar ||
+      `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`,
+  }
+}
+
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing conversations...')
   
@@ -64,6 +94,14 @@ const fetchConversations = async () => {
     }
 
     console.log('📋 Current profile:', currentProfile)
+
+    const { data: currentUserShop } = await supabase
+      .from('shops')
+      .select('id')
+      .eq('owner_id', currentProfile.id)
+      .maybeSingle()
+
+    const preferPersonalNames = !!currentUserShop
 
     // First, fetch conversations without messages to avoid the relationship conflict
     const { data: conversationsData, error: convError } = await supabase
@@ -149,16 +187,11 @@ const fetchConversations = async () => {
         console.log('🏪 Shop data:', shop)
 
         // Determine display name and avatar
-        let displayName = 'User'
-        let avatar = `https://ui-avatars.com/api/?name=User&background=random`
-
-        if (shop?.business_name) {
-          displayName = shop.business_name
-          avatar = shop.logo_url || avatar
-        } else if (otherProfile?.first_name) {
-          displayName = `${otherProfile.first_name} ${otherProfile.last_name || ''}`.trim()
-          avatar = otherProfile.avatar_url || avatar
-        }
+        const { displayName, avatar } = resolveConversationIdentity({
+          profile: otherProfile,
+          shop,
+          preferPersonalName: preferPersonalNames,
+        })
 
         // Determine last message preview
         let lastMessagePreview = '(No messages yet)'
@@ -168,7 +201,7 @@ const fetchConversations = async () => {
 
         if (latestMessage) {
           const isFromCurrentUser = latestMessage.sender_id === user.id
-          senderName = isFromCurrentUser ? 'You' : (otherProfile?.first_name || 'User')
+          senderName = isFromCurrentUser ? 'You' : getProfileDisplayName(otherProfile) || displayName
           lastMessagePreview = latestMessage.content
           messageTime = new Date(latestMessage.created_at).toLocaleTimeString([], {
             hour: '2-digit',

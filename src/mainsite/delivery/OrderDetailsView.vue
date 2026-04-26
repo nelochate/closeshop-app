@@ -434,6 +434,7 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
 import { useAuthUserStore } from '@/stores/authUser'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 
@@ -860,16 +861,18 @@ const confirmUpdateStatus = async () => {
   }
 
   uploadingProof.value = true
+  const statusToApply = pendingStatusUpdate.value
+  const statusTimestamp = new Date().toISOString()
   try {
     let proofImageUrl = null
 
     // Upload proof image if this is a delivery
-    if (pendingStatusUpdate.value === 'delivered' && proofImage.value) {
+    if (statusToApply === 'delivered' && proofImage.value) {
       proofImageUrl = await uploadProofImage()
     }
 
     const updateData = { 
-      status: pendingStatusUpdate.value
+      status: statusToApply
     }
     
     // Add delivery_proof_url if it exists
@@ -877,11 +880,11 @@ const confirmUpdateStatus = async () => {
       updateData.delivery_proof_url = proofImageUrl
     }
 
-    if (pendingStatusUpdate.value === 'picked_up') {
-      updateData.picked_up_at = new Date().toISOString()
-    } else if (pendingStatusUpdate.value === 'delivered') {
-      updateData.delivered_at = new Date().toISOString()
-      updateData.completed_at = new Date().toISOString()
+    if (statusToApply === 'picked_up') {
+      updateData.picked_up_at = statusTimestamp
+    } else if (statusToApply === 'delivered') {
+      updateData.delivered_at = statusTimestamp
+      updateData.completed_at = statusTimestamp
       updateData.rider_earnings = Math.round((order.value.delivery_fee || 0) * 0.8)
     }
 
@@ -892,6 +895,17 @@ const confirmUpdateStatus = async () => {
 
     if (error) throw error
 
+    try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: statusToApply,
+        createdAt: statusTimestamp,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about order status update:', notificationError)
+    }
+
     showProofDialog.value = false
     showUpdateDialog.value = false
     // Reset proof data
@@ -899,10 +913,10 @@ const confirmUpdateStatus = async () => {
     proofImagePreview.value = null
     
     await fetchOrderDetails()
-    alert(`Order marked as ${pendingStatusUpdate.value.replace('_', ' ')}!`)
+    alert(`Order marked as ${statusToApply.replace('_', ' ')}!`)
     
     // If delivered, go back to dashboard
-    if (pendingStatusUpdate.value === 'delivered') {
+    if (statusToApply === 'delivered') {
       setTimeout(() => {
         router.push('/RiderDashboard')
       }, 1500)

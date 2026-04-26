@@ -1897,6 +1897,52 @@ const handleCheckout = async () => {
   }
 }
 
+const getProfileDisplayName = (profile: any) => {
+  return [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
+}
+
+const getBuyerDisplayName = (profile: any = buyer.value) => {
+  return getProfileDisplayName(profile) || address.value?.recipient_name || 'Customer'
+}
+
+const updateConversationActivity = async (targetConversationId: string) => {
+  const { error } = await supabase
+    .from('conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', targetConversationId)
+
+  if (error) {
+    console.warn('⚠️ Could not update conversation timestamp:', error)
+  }
+}
+
+const createSellerOrderNotification = async ({
+  sellerUserId,
+  customerName,
+  shopName,
+  orderId,
+}: {
+  sellerUserId: string
+  customerName: string
+  shopName: string
+  orderId: string
+}) => {
+  const { error } = await supabase.from('notifications').insert({
+    user_id: sellerUserId,
+    type: 'order_placed',
+    title: `New order from ${customerName}`,
+    message: `${customerName} placed a new order at ${shopName}.`,
+    related_id: orderId,
+    related_type: 'order',
+    is_read: false,
+    created_at: new Date().toISOString(),
+  })
+
+  if (error) {
+    console.warn('⚠️ Could not create seller notification:', error)
+  }
+}
+
 // 💬 SEND ORDER MESSAGE TO SELLER
 const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopItems: any[]) => {
   try {
@@ -1972,11 +2018,28 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
 
       if (convCreateError) {
         console.error('❌ Error creating conversation:', convCreateError)
-        return
+
+        if (convCreateError.code === '23505') {
+          const { data: retryConversation } = await supabase
+            .from('conversations')
+            .select('id')
+            .or(
+              `and(user1.eq.${buyerProfile.id},user2.eq.${sellerProfile.id}),and(user1.eq.${sellerProfile.id},user2.eq.${buyerProfile.id})`,
+            )
+            .maybeSingle()
+
+          conversationId = retryConversation?.id
+        }
+
+        if (!conversationId) {
+          return
+        }
       }
 
-      conversationId = newConversation?.id
-      console.log('✅ Conversation created:', conversationId)
+      if (!conversationId) {
+        conversationId = newConversation?.id
+        console.log('✅ Conversation created:', conversationId)
+      }
     } else {
       console.log('✅ Existing conversation found:', conversationId)
     }
@@ -2004,8 +2067,10 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
 
     // Format payment method for display
     const paymentMethodDisplay = paymentMethod.value === 'cod' ? 'Cash on Delivery' : 'GCash'
+    const customerName = getBuyerDisplayName(buyerProfile)
+    const shopTotal = shopItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
 
-    const orderMessage = `🛍️ New Order Received!\n\nShop: ${shopName}\nTransaction #: ${transactionNumber.value}\nTotal Amount: ₱${shopItems.reduce((sum, item) => sum + item.price * item.quantity, 0).toFixed(2)}\n\nItems:\n${itemsSummary}\n\nDelivery: ${deliveryOption.value}\nPayment: ${paymentMethodDisplay}\nSchedule: ${formattedDate.value} at ${deliveryTime.value}\n\nNote: ${note.value || 'No message'}`
+    const orderMessage = `🛍️ New Order Received!\n\nCustomer: ${customerName}\nShop: ${shopName}\nOrder ID: ${orderId}\nTransaction #: ${transactionNumber.value}\nTotal Amount: ₱${shopTotal.toFixed(2)}\n\nItems:\n${itemsSummary}\n\nDelivery: ${deliveryOption.value}\nPayment: ${paymentMethodDisplay}\nSchedule: ${formattedDate.value} at ${deliveryTime.value}\n\nNote: ${note.value || 'No message'}`
 
     console.log(`💌 Sending order message to shop ${shopName}:`, conversationId)
 
@@ -2022,6 +2087,14 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       console.error('❌ Error sending order message:', msgError)
       throw msgError
     }
+
+    await updateConversationActivity(conversationId)
+    await createSellerOrderNotification({
+      sellerUserId,
+      customerName,
+      shopName,
+      orderId,
+    })
 
     console.log(`✅ Order message sent to ${shopName} successfully!`)
   } catch (err) {
