@@ -3,6 +3,7 @@ import {
   resolveConversationViewerRole,
   resolveCounterpartyIdentity,
 } from '@/utils/chatIdentity'
+import { parseAppTimestamp } from '@/utils/dateTime'
 
 const ORDER_MESSAGE_MARKERS = ['New Order Received!', 'Order ID:', 'Transaction #:']
 
@@ -181,8 +182,13 @@ const findRecentMessageNotifications = async ({
   messageCreatedAt,
   lookbackMs = 15000,
 }: RecentMessageNotificationParams) => {
-  const earliestCreatedAt = messageCreatedAt
-  const latestCreatedAt = new Date(new Date(messageCreatedAt).getTime() + lookbackMs).toISOString()
+  const messageDate = parseAppTimestamp(messageCreatedAt)
+  if (!messageDate) {
+    return []
+  }
+
+  const earliestCreatedAt = messageDate.toISOString()
+  const latestCreatedAt = new Date(messageDate.getTime() + lookbackMs).toISOString()
   const relatedId = conversationId || senderUserId
 
   if (!relatedId) {
@@ -319,8 +325,14 @@ const findNotificationSourceMessage = async (notification?: NotificationRecord |
     return null
   }
 
+  const notificationDate = parseAppTimestamp(notification.created_at)
+  if (!notificationDate) {
+    return null
+  }
+
+  const notificationCreatedAt = notificationDate.toISOString()
   const earliestCreatedAt = new Date(
-    new Date(notification.created_at).getTime() - ORDER_MESSAGE_NOTIFICATION_MATCH_WINDOW_MS,
+    notificationDate.getTime() - ORDER_MESSAGE_NOTIFICATION_MATCH_WINDOW_MS,
   ).toISOString()
 
   const { data, error } = await supabase
@@ -329,7 +341,7 @@ const findNotificationSourceMessage = async (notification?: NotificationRecord |
     .eq('conversation_id', notification.related_id)
     .eq('receiver_id', notification.user_id)
     .gte('created_at', earliestCreatedAt)
-    .lte('created_at', notification.created_at)
+    .lte('created_at', notificationCreatedAt)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -349,7 +361,7 @@ const findNotificationSourceMessage = async (notification?: NotificationRecord |
     .eq('sender_id', notification.related_id)
     .eq('receiver_id', notification.user_id)
     .gte('created_at', earliestCreatedAt)
-    .lte('created_at', notification.created_at)
+    .lte('created_at', notificationCreatedAt)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()

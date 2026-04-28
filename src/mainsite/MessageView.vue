@@ -4,7 +4,7 @@ import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
-import { formatLiveTimestamp } from '@/utils/dateTime'
+import { formatLiveTimestamp, parseAppTimestamp } from '@/utils/dateTime'
 import { resolveConversationViewerRole, resolveCounterpartyIdentity } from '@/utils/chatIdentity'
 
 const activeTab = ref('chat')
@@ -205,7 +205,11 @@ const fetchConversations = async () => {
     )
 
     // Sort by update time (most recent first)
-    conversations.value.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    conversations.value.sort((a, b) => {
+      const rightTime = parseAppTimestamp(b.updatedAt)?.getTime() || 0
+      const leftTime = parseAppTimestamp(a.updatedAt)?.getTime() || 0
+      return rightTime - leftTime
+    })
 
     console.log('🎉 Final conversations:', conversations.value)
 
