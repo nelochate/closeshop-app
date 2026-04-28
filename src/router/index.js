@@ -210,16 +210,11 @@ const routes = [
     props: true,
   },
   {
-    path: '/viewproduct/:id',
-    name: 'viewproduct',
-    component: () => import('@/mainsite/ViewProducts.vue'),
-    props: true,
-  },
-  {
     path: '/orderdetails/:id',
-    name: 'orderdetails',
-    component: () => import('@/mainsite/OrderDetails.vue'),
-    props: true,
+    redirect: (to) => ({
+      name: 'order-details',
+      params: { id: to.params.id },
+    }),
   },
   {
     path: '/ordermap/:id',
@@ -264,6 +259,13 @@ const routes = [
   {
     path: '/order-details/:id',
     name: 'order-details',
+    component: () => import('@/mainsite/OrderDetails.vue'),
+    props: true,
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/rider-order-details/:id',
+    name: 'rider-order-details',
     component: () => import('@/mainsite/delivery/OrderDetailsView.vue'),
     meta: { requiresAuth: true }
   },

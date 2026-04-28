@@ -21,6 +21,8 @@ const activeTab = ref('details')
 const currentUser = ref<any>(null)
 const riderDetails = ref<any>(null)
 const userRole = ref<'buyer' | 'seller' | 'rider' | null>(null)
+const currentRiderId = ref<number | null>(null)
+const currentRiderProfile = ref<any>(null)
 
 // Timer state
 const timeRemaining = ref<number>(300)
@@ -28,13 +30,40 @@ const canCancel = ref<boolean>(true)
 let timerInterval: number | null = null
 let statusSubscription: any = null
 
+const fetchCurrentRiderProfile = async (profileId: string) => {
+  try {
+    const { data, error } = await supabase
+      .from('Rider_Registration')
+      .select('rider_id, first_name, last_name, phone, email')
+      .eq('profile_id', profileId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error fetching current rider profile:', error)
+      currentRiderId.value = null
+      currentRiderProfile.value = null
+      return
+    }
+
+    currentRiderId.value = data?.rider_id ?? null
+    currentRiderProfile.value = data ?? null
+  } catch (err) {
+    console.error('Unexpected error fetching current rider profile:', err)
+    currentRiderId.value = null
+    currentRiderProfile.value = null
+  }
+}
+
 // Get current user and determine role
 const getCurrentUserAndRole = async () => {
   try {
     const { data: { user } } = await supabase.auth.getUser()
     currentUser.value = user
+    userRole.value = null
     
     if (!user) return
+
+    await fetchCurrentRiderProfile(user.id)
     
     // Check if user is buyer (order owner)
     if (order.value && user.id === order.value.user_id) {
@@ -45,7 +74,12 @@ const getCurrentUserAndRole = async () => {
       userRole.value = 'seller'
     }
     // Check if user is rider
-    else if (order.value && user.id === order.value.rider_id) {
+    else if (
+      currentRiderId.value &&
+      order.value &&
+      (order.value.rider_id === currentRiderId.value ||
+        (!order.value.rider_id && order.value.status === 'waiting_for_rider'))
+    ) {
       userRole.value = 'rider'
     }
     
@@ -57,7 +91,15 @@ const getCurrentUserAndRole = async () => {
 
 // Fetch rider details
 const fetchRiderDetails = async () => {
-  if (!order.value?.rider_id) return
+  if (!order.value?.rider_id) {
+    riderDetails.value = null
+    return
+  }
+
+  if (currentRiderId.value && order.value.rider_id === currentRiderId.value && currentRiderProfile.value) {
+    riderDetails.value = currentRiderProfile.value
+    return
+  }
   
   try {
     const { data, error } = await supabase
@@ -156,6 +198,7 @@ const subscribeToOrderUpdates = () => {
       console.log('Order update:', payload.new.status)
       order.value = { ...order.value, ...payload.new }
       fetchRiderDetails()
+      getCurrentUserAndRole()
     })
     .subscribe()
 }
@@ -193,11 +236,25 @@ const fetchOrderDetails = async () => {
 
     await fetchRiderDetails()
 
-    if (orderItems.value.length > 0 && orderItems.value[0].products?.shop_id) {
-      await fetchShopAndSeller(orderItems.value[0].products.shop_id)
+    const resolvedShopId = orderData.shop_id || orderItems.value[0]?.products?.shop_id
+
+    if (resolvedShopId) {
+      await fetchShopAndSeller(resolvedShopId)
     }
     
     await getCurrentUserAndRole()
+
+    if (!userRole.value) {
+      order.value = null
+      orderItems.value = []
+      buyer.value = null
+      seller.value = null
+      shop.value = null
+      shippingAddress.value = null
+      riderDetails.value = null
+      error.value = 'You do not have access to this order.'
+      return
+    }
     
     if (order.value?.status === 'pending_approval') startCancelTimer()
     else { canCancel.value = false; timeRemaining.value = 0 }
@@ -239,7 +296,40 @@ const subtotal = computed(() => {
   return orderItems.value.reduce((sum, item) => sum + (item.price * item.quantity), 0)
 })
 
+const deliveryFee = computed(() => {
+  const total = Number(order.value?.total_amount ?? subtotal.value)
+  return Math.max(0, total - subtotal.value)
+})
+
 const totalAmount = computed(() => order.value?.total_amount || subtotal.value)
+
+const shopDisplayName = computed(() => shop.value?.business_name || 'Shop unavailable')
+
+const sellerDisplayName = computed(() => {
+  if (!seller.value) return 'Seller unavailable'
+  return [seller.value.first_name, seller.value.last_name].filter(Boolean).join(' ') || 'Seller unavailable'
+})
+
+const buyerDisplayName = computed(() => {
+  if (!buyer.value) return 'Customer unavailable'
+  return [buyer.value.first_name, buyer.value.last_name].filter(Boolean).join(' ') || 'Customer unavailable'
+})
+
+const shopAddress = computed(() => {
+  if (!shop.value) return 'Shop address unavailable'
+
+  const parts = [
+    shop.value.house_no,
+    shop.value.building,
+    shop.value.street,
+    shop.value.barangay,
+    shop.value.city,
+    shop.value.province,
+    shop.value.postal,
+  ].filter(Boolean)
+
+  return parts.join(', ') || shop.value.detected_address || 'Shop address unavailable'
+})
 
 const statusColor = computed(() => {
   const status = order.value?.status
@@ -249,6 +339,7 @@ const statusColor = computed(() => {
     accepted_by_rider: 'primary',
     picked_up: 'purple',
     delivered: 'success',
+    completed: 'success',
     cancelled: 'error'
   }
   return colors[status] || 'grey'
@@ -262,6 +353,7 @@ const statusIcon = computed(() => {
     accepted_by_rider: 'mdi-check-circle',
     picked_up: 'mdi-truck-delivery',
     delivered: 'mdi-check-circle',
+    completed: 'mdi-check-decagram',
     cancelled: 'mdi-close-circle'
   }
   return icons[status] || 'mdi-help-circle'
@@ -275,6 +367,7 @@ const statusDisplayText = computed(() => {
     accepted_by_rider: 'Rider Accepted',
     picked_up: 'Picked Up',
     delivered: 'Delivered',
+    completed: 'Completed',
     cancelled: 'Cancelled'
   }
   return texts[status] || status
@@ -364,7 +457,7 @@ const timelineSteps = computed(() => {
 })
 
 const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | 'cancelled' => {
-  const currentStatus = order.value?.status
+  const currentStatus = order.value?.status === 'completed' ? 'delivered' : order.value?.status
   if (currentStatus === 'cancelled') return 'cancelled'
   
   const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered']
@@ -386,7 +479,7 @@ const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | '
 }
 
 const timelineProgress = computed(() => {
-  const currentStatus = order.value?.status
+  const currentStatus = order.value?.status === 'completed' ? 'delivered' : order.value?.status
   if (currentStatus === 'cancelled') return 0
   if (currentStatus === 'delivered') return 100
   
@@ -446,19 +539,17 @@ const acceptOrderAsRider = async () => {
   if (!confirm('Accept this order for delivery?')) return
   
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    const riderData = await supabase
-      .from('Rider_Registration')
-      .select('rider_id')
-      .eq('profile_id', user?.id)
-      .single()
+    if (!currentRiderId.value) {
+      alert('Rider profile not found.')
+      return
+    }
     
     const { error } = await supabase
       .from('orders')
       .update({ 
         status: 'accepted_by_rider',
         accepted_at: new Date().toISOString(),
-        rider_id: riderData.data?.rider_id
+        rider_id: currentRiderId.value
       })
       .eq('id', orderId)
     
@@ -587,9 +678,11 @@ const buildFullAddress = computed(() => {
 })
 
 const goBack = () => router.back()
-const viewProduct = (productId: string) => router.push(`/viewproduct/${productId}`)
-const contactSeller = () => shop.value?.owner_id && router.push(`/chat/${shop.value.owner_id}`)
-const contactBuyer = () => buyer.value?.id && router.push(`/chat/${buyer.value.id}`)
+const viewProduct = (productId: string) => router.push({ name: 'product-detail', params: { id: productId } })
+const contactSeller = () =>
+  shop.value?.owner_id && router.push({ name: 'chatview', params: { id: shop.value.owner_id } })
+const contactBuyer = () =>
+  buyer.value?.id && router.push({ name: 'chatview', params: { id: buyer.value.id } })
 const contactRider = () => riderDetails.value?.phone && (window.location.href = `tel:${riderDetails.value.phone}`)
 
 // Cleanup
@@ -632,6 +725,7 @@ onMounted(async () => {
         <div class="progress-section" v-if="order.status !== 'cancelled'">
           <v-progress-linear :model-value="timelineProgress" height="6" color="primary" rounded />
           <div class="progress-text">
+            <span v-if="order.status === 'completed'">Order Completed!</span>
             <span v-if="order.status === 'delivered'">🎉 Order Delivered!</span>
             <span v-else-if="order.status === 'picked_up'">🚚 Out for Delivery</span>
             <span v-else-if="order.status === 'accepted_by_rider'">🏍️ Rider on the way</span>
@@ -670,8 +764,10 @@ onMounted(async () => {
                     <v-col cols="6">
                       <div class="info-item"><span class="label">Order ID:</span><span class="value">{{ order.id.slice(0,8) }}...</span></div>
                       <div class="info-item"><span class="label">Order Date:</span><span class="value">{{ formatDate(order.created_at) }}</span></div>
+                      <div class="info-item" v-if="order.transaction_number"><span class="label">Transaction #:</span><span class="value">{{ order.transaction_number }}</span></div>
                     </v-col>
                     <v-col cols="6">
+                      <div class="info-item"><span class="label">Status:</span><span class="value">{{ statusDisplayText }}</span></div>
                       <div class="info-item"><span class="label">Delivery:</span><span class="value">{{ order.delivery_option || 'Standard' }}</span></div>
                       <div class="info-item"><span class="label">Payment:</span><span class="value">{{ order.payment_method || 'Cash' }}</span></div>
                     </v-col>
@@ -679,6 +775,49 @@ onMounted(async () => {
                       <div class="info-item"><span class="label">Note:</span><span class="value">{{ order.note }}</span></div>
                     </v-col>
                   </v-row>
+                </v-card-text>
+              </v-card>
+
+              <!-- Fulfillment Details -->
+              <v-card class="mb-4" v-if="shop || seller || buyer">
+                <v-card-title class="section-title"><v-icon left>mdi-storefront-outline</v-icon>Fulfillment Details</v-card-title>
+                <v-card-text>
+                  <div class="info-item" v-if="shop">
+                    <span class="label">Shop:</span>
+                    <span class="value">{{ shopDisplayName }}</span>
+                  </div>
+                  <div class="info-item" v-if="seller">
+                    <span class="label">Seller:</span>
+                    <span class="value">{{ sellerDisplayName }}</span>
+                  </div>
+                  <div class="info-item" v-if="shop">
+                    <span class="label">Pickup Address:</span>
+                    <span class="value">{{ shopAddress }}</span>
+                  </div>
+                  <div class="info-item" v-if="buyer">
+                    <span class="label">Customer:</span>
+                    <span class="value">{{ buyerDisplayName }}</span>
+                  </div>
+                  <div class="detail-actions">
+                    <v-btn
+                      v-if="shop?.owner_id && !isSeller"
+                      color="primary"
+                      variant="outlined"
+                      size="small"
+                      @click="contactSeller"
+                    >
+                      <v-icon left small>mdi-chat-outline</v-icon>Contact Seller
+                    </v-btn>
+                    <v-btn
+                      v-if="buyer?.id && !isBuyer"
+                      color="primary"
+                      variant="outlined"
+                      size="small"
+                      @click="contactBuyer"
+                    >
+                      <v-icon left small>mdi-chat-outline</v-icon>Contact Customer
+                    </v-btn>
+                  </div>
                 </v-card-text>
               </v-card>
 
@@ -726,6 +865,7 @@ onMounted(async () => {
                 <v-card-text>
                   <div class="price-breakdown">
                     <div class="price-item"><span>Subtotal:</span><span>{{ formatCurrency(subtotal) }}</span></div>
+                    <div class="price-item"><span>Delivery Fee:</span><span>{{ formatCurrency(deliveryFee) }}</span></div>
                     <div class="price-item total"><span>Total:</span><span>{{ formatCurrency(totalAmount) }}</span></div>
                   </div>
                 </v-card-text>
@@ -929,6 +1069,13 @@ onMounted(async () => {
 .value {
   color: #333;
   text-align: right;
+}
+
+.detail-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 12px;
 }
 
 .price-breakdown {

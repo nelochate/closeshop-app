@@ -433,7 +433,7 @@ const refreshOrders = () => {
 
 // Navigate to order details
 const viewOrderDetails = (order) => {
-  router.push(`/order-details/${order.id}`)
+  router.push({ name: 'rider-order-details', params: { id: order.id } })
 }
 
 const goToRiderLocation = () => {

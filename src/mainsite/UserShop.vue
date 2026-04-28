@@ -130,7 +130,7 @@ const rejectOrder = async (order) => {
 }
 
 const viewOrderDetails = (orderId) => {
-  router.push(`/orderdetails/${orderId}`)
+  router.push({ name: 'order-details', params: { id: orderId } })
 }
 
 // Update mobile state on resize
@@ -1659,10 +1659,10 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                       <!-- View Details Button -->
                       <v-btn color="primary" :size="isMobile ? 'x-small' : 'small'" variant="outlined"
-                        @click="$router.push(`/orderdetails/${order.id}`)" :rounded="isMobile ? 'sm' : 'lg'"
+                        @click="$router.push({ name: 'order-details', params: { id: order.id } })" :rounded="isMobile ? 'sm' : 'lg'"
                         class="action-button flex-grow-1" :block="isMobile">
                         <v-icon :start="!isMobile" :size="isMobile ? 12 : 14">mdi-eye</v-icon>
-                        <span class="ml-1">Details</span>
+                        <span class="ml-1">View Order</span>
                       </v-btn>
                     </div>
                   </div>

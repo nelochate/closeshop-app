@@ -423,7 +423,7 @@ async function navigateToNotificationTarget(notification) {
     case 'order_cancelled':
     case 'shipping_update':
       if (related_id) {
-        router.push({ name: 'orderdetails', params: { id: related_id } })
+        router.push({ name: 'order-details', params: { id: related_id } })
       } else {
         router.push({ name: 'profileview' }) // Fallback to profile/orders
       }
@@ -473,7 +473,7 @@ async function navigateToNotificationTarget(notification) {
     case 'payment_successful':
       if (related_id) {
         // If payment is related to an order
-        router.push({ name: 'orderdetails', params: { id: related_id } })
+        router.push({ name: 'order-details', params: { id: related_id } })
       } else {
         router.push({ name: 'profileview' })
       }
