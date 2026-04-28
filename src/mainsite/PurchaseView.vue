@@ -2,6 +2,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { removeRecentMessageNotification } from '@/utils/chatNotifications'
 
 const route = useRoute()
 const router = useRouter()
@@ -2074,6 +2075,8 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
 
     console.log(`💌 Sending order message to shop ${shopName}:`, conversationId)
 
+    const messageCreatedAt = new Date().toISOString()
+
     // Send message
     const { error: msgError } = await supabase.from('messages').insert({
       conversation_id: conversationId,
@@ -2081,6 +2084,7 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       receiver_id: sellerUserId,
       content: orderMessage,
       is_read: false,
+      created_at: messageCreatedAt,
     })
 
     if (msgError) {
@@ -2094,6 +2098,14 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       customerName,
       shopName,
       orderId,
+    })
+    await removeRecentMessageNotification({
+      receiverUserId: sellerUserId,
+      conversationId,
+      messageCreatedAt,
+      lookbackMs: 60000,
+      maxAttempts: 12,
+      retryDelayMs: 500,
     })
 
     console.log(`✅ Order message sent to ${shopName} successfully!`)

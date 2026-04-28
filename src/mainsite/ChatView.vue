@@ -2,42 +2,50 @@
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import {
+  isOrderChatMessage,
+  removeRecentMessageNotification,
+  shouldRetainMessageNotification,
+} from '@/utils/chatNotifications'
+import { formatLiveTimestamp } from '@/utils/dateTime'
+import {
+  resolveConversationViewerRole,
+  resolveCounterpartyIdentity,
+  type CounterpartyViewerRole,
+} from '@/utils/chatIdentity'
 
 const router = useRouter()
 const route = useRoute()
 
 const userId = ref<string | null>(null)
-const otherUserId = route.params.id as string
+const routeTargetId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''))
+const requestedConversationId = computed(() =>
+  typeof route.query.conversationId === 'string' ? route.query.conversationId : null,
+)
+const otherUserId = ref<string | null>(routeTargetId.value || null)
 const conversationId = ref<string | null>(null)
 const messages = ref<any[]>([])
 const newMessage = ref('')
 const otherUserProfile = ref<any>(null)
 const shopInfo = ref<any>(null)
-const currentUserHasShop = ref(false)
+const viewerConversationRole = ref<CounterpartyViewerRole | null>(null)
 const loading = ref(true)
 const sending = ref(false)
 const sendError = ref<string | null>(null)
+const currentTime = ref(Date.now())
 
 let subscription: any = null
 let timeUpdateInterval: any = null
 
-// Real-time time formatting
 const formatMessageTime = (timestamp: string) => {
-  const now = new Date()
-  const messageTime = new Date(timestamp)
-  const diffInMinutes = Math.floor((now.getTime() - messageTime.getTime()) / (1000 * 60))
-
-  if (diffInMinutes < 1) return 'now'
-  if (diffInMinutes < 60) return `${diffInMinutes}m`
-  if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h`
-  return messageTime.toLocaleDateString()
+  return formatLiveTimestamp(timestamp, currentTime.value)
 }
 
-// Update times every minute
 const startTimeUpdates = () => {
+  currentTime.value = Date.now()
   timeUpdateInterval = setInterval(() => {
-    messages.value = [...messages.value]
-  }, 60000)
+    currentTime.value = Date.now()
+  }, 30000)
 }
 
 const scrollToBottom = async () => {
@@ -46,9 +54,13 @@ const scrollToBottom = async () => {
   if (el) el.scrollTop = el.scrollHeight
 }
 
-const getProfileDisplayName = (profile: any) => {
-  return [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
-}
+const otherUserIdentity = computed(() =>
+  resolveCounterpartyIdentity({
+    viewerRole: viewerConversationRole.value,
+    profile: otherUserProfile.value,
+    shop: shopInfo.value,
+  }),
+)
 
 // ✅ Fetch other user's profile and shop info
 const fetchOtherUserInfo = async () => {
@@ -56,28 +68,104 @@ const fetchOtherUserInfo = async () => {
     const currentUserId = await checkAuth()
     if (currentUserId) {
       userId.value = currentUserId
-
-      const { data: currentUserShop } = await supabase
-        .from('shops')
-        .select('id')
-        .eq('owner_id', currentUserId)
-        .maybeSingle()
-
-      currentUserHasShop.value = !!currentUserShop
     }
 
-    const { data: profile } = await supabase
+    const conversationLookupId = requestedConversationId.value || routeTargetId.value
+    if (conversationLookupId) {
+      const { data: existingConversation, error: conversationError } = await supabase
+        .from('conversations')
+        .select('id, user1, user2')
+        .eq('id', conversationLookupId)
+        .maybeSingle()
+
+      if (conversationError) {
+        console.error('Conversation context fetch error:', conversationError)
+      } else if (
+        existingConversation &&
+        currentUserId &&
+        [existingConversation.user1, existingConversation.user2].includes(currentUserId)
+      ) {
+        conversationId.value = existingConversation.id
+        otherUserId.value =
+          existingConversation.user1 === currentUserId
+            ? existingConversation.user2
+            : existingConversation.user1
+        viewerConversationRole.value = resolveConversationViewerRole({
+          currentUserId,
+          customerUserId: existingConversation.user1,
+          sellerUserId: existingConversation.user2,
+        })
+      }
+    }
+
+    if (!otherUserId.value) {
+      otherUserId.value = routeTargetId.value || null
+    }
+
+    if (!otherUserId.value) {
+      console.warn('No valid chat participant could be resolved from the route.')
+      otherUserProfile.value = null
+      shopInfo.value = null
+      return
+    }
+
+    const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', otherUserId)
-      .single()
-    otherUserProfile.value = profile
+      .eq('id', otherUserId.value)
+      .maybeSingle()
 
-    const { data: shop } = await supabase
+    if (profileError) {
+      console.error('Error fetching other user profile:', profileError)
+    }
+
+    let resolvedProfile = profile
+
+    if (!resolvedProfile && conversationId.value && currentUserId) {
+      const { data: conversationWithProfiles, error: conversationProfileError } = await supabase
+        .from('conversations')
+        .select(`
+          id,
+          user1,
+          user2,
+          user1_profile:profiles!conversations_user1_fkey (
+            id,
+            first_name,
+            last_name,
+            avatar_url
+          ),
+          user2_profile:profiles!conversations_user2_fkey (
+            id,
+            first_name,
+            last_name,
+            avatar_url
+          )
+        `)
+        .eq('id', conversationId.value)
+        .maybeSingle()
+
+      if (conversationProfileError) {
+        console.error('Error fetching conversation profile fallback:', conversationProfileError)
+      } else if (conversationWithProfiles) {
+        resolvedProfile =
+          conversationWithProfiles.user1 === currentUserId
+            ? conversationWithProfiles.user2_profile
+            : conversationWithProfiles.user1_profile
+      }
+    }
+
+    otherUserProfile.value = resolvedProfile
+
+    const { data: shop, error: shopError } = await supabase
       .from('shops')
       .select('*')
-      .eq('owner_id', otherUserId)
+      .eq('owner_id', otherUserId.value)
       .maybeSingle()
+
+    if (shopError) {
+      console.error('Error fetching other user shop info:', shopError)
+    }
+
     shopInfo.value = shop
   } catch (error) {
     console.error('Error fetching user info:', error)
@@ -100,6 +188,87 @@ const checkAuth = async (): Promise<string | null> => {
 }
 
 // ✅ Fetch or create a conversation with better error handling
+const updateConversationActivity = async (targetConversationId: string) => {
+  const { error } = await supabase
+    .from('conversations')
+    .update({ updated_at: new Date().toISOString() })
+    .eq('id', targetConversationId)
+
+  if (error) {
+    console.warn('Could not update conversation timestamp:', error)
+  }
+}
+
+const appendMessage = (message: any) => {
+  if (messages.value.some((existingMessage) => existingMessage.id === message.id)) {
+    return
+  }
+
+  messages.value.push(message)
+}
+
+const markConversationMessagesAsRead = async () => {
+  if (!conversationId.value || !userId.value) return
+
+  try {
+    const { error } = await supabase
+      .from('messages')
+      .update({ is_read: true })
+      .eq('conversation_id', conversationId.value)
+      .eq('receiver_id', userId.value)
+      .eq('is_read', false)
+
+    if (error) {
+      console.error('Error marking conversation messages as read:', error)
+    }
+  } catch (error) {
+    console.error('Unexpected error marking conversation messages as read:', error)
+  }
+}
+
+const syncMessageNotificationAfterSend = async ({
+  senderId,
+  receiverId,
+  createdAt,
+  content,
+  isOrderMessage,
+}: {
+  senderId: string
+  receiverId: string
+  createdAt: string
+  content?: string | null
+  isOrderMessage: boolean
+}) => {
+  if (!conversationId.value) return
+
+  if (isOrderMessage) {
+    await removeRecentMessageNotification({
+      receiverUserId: receiverId,
+      conversationId: conversationId.value,
+      messageCreatedAt: createdAt,
+    })
+    return
+  }
+
+  const shouldRetain = await shouldRetainMessageNotification({
+    conversationId: conversationId.value,
+    senderId,
+    receiverUserId: receiverId,
+    messageCreatedAt: createdAt,
+    content,
+  })
+
+  if (shouldRetain) {
+    return
+  }
+
+  await removeRecentMessageNotification({
+    receiverUserId: receiverId,
+    conversationId: conversationId.value,
+    messageCreatedAt: createdAt,
+  })
+}
+
 const getOrCreateConversation = async () => {
   try {
     const currentUserId = await checkAuth()
@@ -110,11 +279,21 @@ const getOrCreateConversation = async () => {
     
     userId.value = currentUserId
 
+    if (conversationId.value) {
+      console.log('Using conversation resolved from route:', conversationId.value)
+      return
+    }
+
+    if (!otherUserId.value) {
+      console.warn('Conversation target is missing; skipping conversation creation.')
+      return
+    }
+
     // Check if conversation already exists
     const { data: existing, error: fetchError } = await supabase
       .from('conversations')
-      .select('id')
-      .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+      .select('id, user1, user2')
+      .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId.value}),and(user1.eq.${otherUserId.value},user2.eq.${userId.value})`)
       .maybeSingle()
 
     if (fetchError) {
@@ -124,19 +303,29 @@ const getOrCreateConversation = async () => {
 
     if (existing) {
       conversationId.value = existing.id
+      viewerConversationRole.value = resolveConversationViewerRole({
+        currentUserId,
+        customerUserId: existing.user1,
+        sellerUserId: existing.user2,
+      })
       console.log('✅ Existing conversation found:', existing.id)
     } else {
+      if (!otherUserProfile.value) {
+        console.warn('Other user profile is unavailable; preventing invalid conversation creation.')
+        return
+      }
+
       // Create new conversation
       const { data: created, error: createError } = await supabase
         .from('conversations')
         .insert([
           { 
             user1: userId.value, 
-            user2: otherUserId,
+            user2: otherUserId.value,
             created_at: new Date().toISOString()
           }
         ])
-        .select('id')
+        .select('id, user1, user2')
         .single()
 
       if (createError) {
@@ -146,12 +335,17 @@ const getOrCreateConversation = async () => {
         if (createError.code === '23505') {
           const { data: retry } = await supabase
             .from('conversations')
-            .select('id')
-            .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId}),and(user1.eq.${otherUserId},user2.eq.${userId.value})`)
+            .select('id, user1, user2')
+            .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId.value}),and(user1.eq.${otherUserId.value},user2.eq.${userId.value})`)
             .maybeSingle()
           
           if (retry) {
             conversationId.value = retry.id
+            viewerConversationRole.value = resolveConversationViewerRole({
+              currentUserId,
+              customerUserId: retry.user1,
+              sellerUserId: retry.user2,
+            })
           }
         }
         return
@@ -159,6 +353,11 @@ const getOrCreateConversation = async () => {
 
       if (created) {
         conversationId.value = created.id
+        viewerConversationRole.value = resolveConversationViewerRole({
+          currentUserId,
+          customerUserId: created.user1,
+          sellerUserId: created.user2,
+        })
         console.log('✅ New conversation created:', created.id)
       }
     }
@@ -494,7 +693,7 @@ const loadMessages = async () => {
           }
         }
 
-        if (isOrderNotification(msg.content)) {
+        if (isOrderChatMessage(msg.content)) {
           console.log('🛒 Processing order notification:', msg.id)
           const { product, productId } = await getOrderProductInfo(msg.content)
           console.log('🎯 Final product result:', { 
@@ -515,6 +714,7 @@ const loadMessages = async () => {
     )
 
     messages.value = enhancedMessages
+    await markConversationMessagesAsRead()
     scrollToBottom()
   } catch (err) {
     console.error('❌ Unexpected error in loadMessages:', err)
@@ -571,14 +771,14 @@ const subscribeMessages = async () => {
           }
         }
 
-        if (isOrderNotification(payload.new.content)) {
+        if (isOrderChatMessage(payload.new.content)) {
           console.log('🛒 Processing new order notification')
           const { product, productId } = await getOrderProductInfo(payload.new.content)
           newMessageWithData.orderProduct = product
           newMessageWithData.orderProductId = productId
         }
 
-        messages.value.push(newMessageWithData)
+        appendMessage(newMessageWithData)
         scrollToBottom()
 
         if (payload.new.receiver_id === userId.value) {
@@ -614,18 +814,20 @@ const sendMessage = async () => {
       return
     }
 
-    if (!newMessage.value.trim() || !conversationId.value) {
+    if (!newMessage.value.trim() || !conversationId.value || !otherUserId.value) {
       console.error('Cannot send message: missing required data')
       return
     }
 
+    const createdAt = new Date().toISOString()
     const msg = {
       conversation_id: conversationId.value,
       sender_id: currentUserId,
-      receiver_id: otherUserId,
+      receiver_id: otherUserId.value,
       content: newMessage.value.trim(),
       is_read: false,
       product_id: null,
+      created_at: createdAt,
     }
 
     console.log('📤 Sending message:', msg)
@@ -638,7 +840,8 @@ const sendMessage = async () => {
         sender_id: msg.sender_id,
         receiver_id: msg.receiver_id,
         content: msg.content,
-        is_read: msg.is_read
+        is_read: msg.is_read,
+        created_at: msg.created_at,
       }])
       .select()
       .single()
@@ -659,7 +862,8 @@ const sendMessage = async () => {
             receiver_id: msg.receiver_id,
             content: msg.content,
             is_read: msg.is_read,
-            product_id: null
+            product_id: null,
+            created_at: msg.created_at,
           }])
         
         if (simpleError) {
@@ -670,9 +874,17 @@ const sendMessage = async () => {
           const manualMsg = {
             id: `temp-${Date.now()}`,
             ...msg,
-            created_at: new Date().toISOString()
+            created_at: msg.created_at,
           }
           messages.value.push(manualMsg)
+          await updateConversationActivity(msg.conversation_id)
+          await syncMessageNotificationAfterSend({
+            senderId: msg.sender_id,
+            receiverId: msg.receiver_id,
+            createdAt: msg.created_at,
+            content: msg.content,
+            isOrderMessage: false,
+          })
           scrollToBottom()
           console.log('✅ Message sent (manual fallback)')
         }
@@ -684,7 +896,15 @@ const sendMessage = async () => {
 
     if (data) {
       console.log('✅ Message sent successfully:', data)
-      messages.value.push(data)
+      appendMessage(data)
+      await updateConversationActivity(msg.conversation_id)
+      await syncMessageNotificationAfterSend({
+        senderId: msg.sender_id,
+        receiverId: msg.receiver_id,
+        createdAt: msg.created_at,
+        content: msg.content,
+        isOrderMessage: false,
+      })
       scrollToBottom()
     }
   } catch (err) {
@@ -698,21 +918,31 @@ const sendMessage = async () => {
 
 // ✅ Send a product message
 const sendProductMessage = async (product: any) => {
-  if (!conversationId.value || !userId.value) return
+  if (!conversationId.value || !userId.value || !otherUserId.value) return
 
+  const createdAt = new Date().toISOString()
   const msg = {
     conversation_id: conversationId.value,
     sender_id: userId.value,
-    receiver_id: otherUserId,
+    receiver_id: otherUserId.value,
     content: `Check out this product: ${product.prod_name}`,
     is_read: false,
     product_id: product.id,
+    created_at: createdAt,
   }
 
   try {
     const { data, error } = await supabase.from('messages').insert([msg]).select('*').single()
     if (!error) {
-      messages.value.push({ ...data, product })
+      appendMessage({ ...data, product })
+      await updateConversationActivity(msg.conversation_id)
+      await syncMessageNotificationAfterSend({
+        senderId: msg.sender_id,
+        receiverId: msg.receiver_id,
+        createdAt: msg.created_at,
+        content: msg.content,
+        isOrderMessage: false,
+      })
       scrollToBottom()
     }
   } catch (err) {
@@ -781,27 +1011,10 @@ const isOrderNotification = (content: string) => {
 }
 
 // ✅ Get user display name
-const userDisplayName = computed(() => {
-  const profileName = getProfileDisplayName(otherUserProfile.value)
-
-  if (currentUserHasShop.value) {
-    return profileName || shopInfo.value?.business_name || 'User'
-  }
-
-  return shopInfo.value?.business_name || profileName || 'User'
-})
+const userDisplayName = computed(() => otherUserIdentity.value.displayName)
 
 // ✅ Get user avatar
-const userAvatar = computed(() => {
-  if (currentUserHasShop.value) {
-    if (otherUserProfile.value?.avatar_url) return otherUserProfile.value.avatar_url
-    if (shopInfo.value?.logo_url) return shopInfo.value.logo_url
-  } else {
-    if (shopInfo.value?.logo_url) return shopInfo.value.logo_url
-    if (otherUserProfile.value?.avatar_url) return otherUserProfile.value.avatar_url
-  }
-  return `https://ui-avatars.com/api/?name=${encodeURIComponent(userDisplayName.value)}&background=random`
-})
+const userAvatar = computed(() => otherUserIdentity.value.avatar)
 
 const goBack = () => router.back()
 
@@ -864,7 +1077,7 @@ onUnmounted(() => {
             :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
           >
             <!-- Order Notification Message -->
-            <div v-if="isOrderNotification(msg.content)" class="order-notification">
+            <div v-if="isOrderChatMessage(msg.content)" class="order-notification">
               <div class="notification-header">
                 <v-icon color="green" small>mdi-cart</v-icon>
                 <span class="notification-title">New Order Received!</span>
