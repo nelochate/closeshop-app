@@ -31,14 +31,27 @@ const shopInfo = ref<any>(null)
 const viewerConversationRole = ref<CounterpartyViewerRole | null>(null)
 const loading = ref(true)
 const sending = ref(false)
+const isUpdatingMessage = ref(false)
 const sendError = ref<string | null>(null)
 const currentTime = ref(Date.now())
+const editingMessageId = ref<string | null>(null)
+const chatScrollEl = ref<HTMLElement | null>(null)
+const messagesEndEl = ref<HTMLElement | null>(null)
+const composerInputEl = ref<any>(null)
+const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0)
 
 let subscription: any = null
 let timeUpdateInterval: any = null
+let viewportCleanup: (() => void) | null = null
+
+const UNSENT_MESSAGE_TEXT = 'Message unsent'
 
 const formatMessageTime = (timestamp: string) => {
   return formatLiveTimestamp(timestamp, currentTime.value)
+}
+
+const formatPrice = (value: number | string | null | undefined) => {
+  return Number(value ?? 0).toFixed(2)
 }
 
 const startTimeUpdates = () => {
@@ -48,10 +61,17 @@ const startTimeUpdates = () => {
   }, 30000)
 }
 
-const scrollToBottom = async () => {
+const scrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
   await nextTick()
-  const el = document.getElementById('chat-scroll')
-  if (el) el.scrollTop = el.scrollHeight
+
+  if (messagesEndEl.value) {
+    messagesEndEl.value.scrollIntoView({ behavior, block: 'end' })
+    return
+  }
+
+  if (chatScrollEl.value) {
+    chatScrollEl.value.scrollTop = chatScrollEl.value.scrollHeight
+  }
 }
 
 const otherUserIdentity = computed(() =>
@@ -61,6 +81,97 @@ const otherUserIdentity = computed(() =>
     shop: shopInfo.value,
   }),
 )
+
+const isEditingMessage = computed(() => Boolean(editingMessageId.value))
+
+const editingTargetMessage = computed(
+  () => messages.value.find((message) => message.id === editingMessageId.value) ?? null,
+)
+
+const chatViewportStyle = computed(() => ({
+  '--chat-viewport-height': viewportHeight.value ? `${viewportHeight.value}px` : '100dvh',
+}))
+
+const updateViewportHeight = () => {
+  if (typeof window === 'undefined') return
+  viewportHeight.value = window.visualViewport?.height || window.innerHeight
+}
+
+const setupViewportListeners = () => {
+  if (typeof window === 'undefined') return
+
+  const handleViewportChange = () => {
+    updateViewportHeight()
+  }
+
+  updateViewportHeight()
+  window.addEventListener('resize', handleViewportChange)
+  window.visualViewport?.addEventListener('resize', handleViewportChange)
+  window.visualViewport?.addEventListener('scroll', handleViewportChange)
+
+  viewportCleanup = () => {
+    window.removeEventListener('resize', handleViewportChange)
+    window.visualViewport?.removeEventListener('resize', handleViewportChange)
+    window.visualViewport?.removeEventListener('scroll', handleViewportChange)
+  }
+}
+
+const focusComposer = async () => {
+  await nextTick()
+  const input =
+    composerInputEl.value?.$el?.querySelector?.('textarea') ??
+    composerInputEl.value?.$el?.querySelector?.('input')
+
+  input?.focus?.()
+
+  if (typeof input?.setSelectionRange === 'function') {
+    const end = String(input.value ?? '').length
+    input.setSelectionRange(end, end)
+  }
+}
+
+const handleComposerEnter = (event: KeyboardEvent) => {
+  if (event.shiftKey) {
+    return
+  }
+
+  event.preventDefault()
+  void sendMessage()
+}
+
+const handleComposerFocus = () => {
+  window.setTimeout(() => {
+    void scrollToBottom('auto')
+  }, 120)
+}
+
+const trimMessageContent = (content: string | null | undefined) => content?.trim() ?? ''
+
+const isUnsentMessage = (message: any) => trimMessageContent(message?.content) === UNSENT_MESSAGE_TEXT
+
+const isPendingMessage = (message: any) => String(message?.id ?? '').startsWith('temp-')
+
+const isOwnMessage = (message: any) => message?.sender_id === userId.value
+
+const canEditMessage = (message: any) =>
+  isOwnMessage(message) &&
+  !isPendingMessage(message) &&
+  !message?.product_id &&
+  !isOrderChatMessage(message?.content || '') &&
+  !isUnsentMessage(message)
+
+const canUnsendMessage = (message: any) =>
+  isOwnMessage(message) &&
+  !isPendingMessage(message) &&
+  !isOrderChatMessage(message?.content || '') &&
+  !isUnsentMessage(message)
+
+const shouldShowMessageActions = (message: any) =>
+  canEditMessage(message) || canUnsendMessage(message)
+
+const isEditedMessage = (message: any) =>
+  !isUnsentMessage(message) &&
+  Boolean(message?.__edited || message?.edited_at || (message?.updated_at && message.updated_at !== message.created_at))
 
 // ✅ Fetch other user's profile and shop info
 const fetchOtherUserInfo = async () => {
@@ -199,12 +310,90 @@ const updateConversationActivity = async (targetConversationId: string) => {
   }
 }
 
+const sortMessages = (messageList: any[]) =>
+  [...messageList].sort(
+    (left, right) =>
+      new Date(left.created_at ?? 0).getTime() - new Date(right.created_at ?? 0).getTime(),
+  )
+
+const findPendingMessageIndex = (incomingMessage: any) =>
+  messages.value.findIndex(
+    (existingMessage) =>
+      isPendingMessage(existingMessage) &&
+      existingMessage.sender_id === incomingMessage.sender_id &&
+      existingMessage.receiver_id === incomingMessage.receiver_id &&
+      existingMessage.content === incomingMessage.content &&
+      existingMessage.created_at === incomingMessage.created_at,
+  )
+
+const mergeEditedState = (existingMessage: any, incomingMessage: any) => {
+  const contentChanged =
+    trimMessageContent(existingMessage?.content) !== trimMessageContent(incomingMessage?.content)
+
+  if (
+    contentChanged &&
+    !isUnsentMessage(incomingMessage) &&
+    !incomingMessage?.edited_at &&
+    !incomingMessage?.updated_at
+  ) {
+    return { ...incomingMessage, __edited: true }
+  }
+
+  if (existingMessage?.__edited && !isUnsentMessage(incomingMessage)) {
+    return { ...incomingMessage, __edited: true }
+  }
+
+  return incomingMessage
+}
+
 const appendMessage = (message: any) => {
   if (messages.value.some((existingMessage) => existingMessage.id === message.id)) {
     return
   }
 
-  messages.value.push(message)
+  const pendingMessageIndex = findPendingMessageIndex(message)
+
+  if (pendingMessageIndex >= 0) {
+    const pendingMessage = messages.value[pendingMessageIndex]
+    messages.value[pendingMessageIndex] = mergeEditedState(pendingMessage, {
+      ...pendingMessage,
+      ...message,
+    })
+  } else {
+    messages.value.push(message)
+  }
+
+  messages.value = sortMessages(messages.value)
+}
+
+const replaceMessage = (message: any) => {
+  const messageIndex = messages.value.findIndex((existingMessage) => existingMessage.id === message.id)
+
+  if (messageIndex >= 0) {
+    const existingMessage = messages.value[messageIndex]
+    messages.value[messageIndex] = mergeEditedState(existingMessage, {
+      ...existingMessage,
+      ...message,
+    })
+  } else {
+    const pendingMessageIndex = findPendingMessageIndex(message)
+
+    if (pendingMessageIndex >= 0) {
+      const pendingMessage = messages.value[pendingMessageIndex]
+      messages.value[pendingMessageIndex] = mergeEditedState(pendingMessage, {
+        ...pendingMessage,
+        ...message,
+      })
+    } else {
+      messages.value.push(message)
+    }
+  }
+
+  messages.value = sortMessages(messages.value)
+}
+
+const removeMessage = (messageId: string) => {
+  messages.value = messages.value.filter((message) => message.id !== messageId)
 }
 
 const markConversationMessagesAsRead = async () => {
@@ -625,6 +814,230 @@ const getOrderProductInfo = async (content: string): Promise<{product: any, prod
 }
 
 // ✅ IMPROVED: Load messages with guaranteed product info
+const hydrateProductMessage = async (message: any) => {
+  if (!message?.product_id) {
+    return null
+  }
+
+  try {
+    const { data: product, error: productError } = await supabase
+      .from('products')
+      .select(`
+        id,
+        prod_name,
+        price,
+        main_img_urls,
+        shop_id,
+        description,
+        has_varieties,
+        varieties
+      `)
+      .eq('id', message.product_id)
+      .single()
+
+    if (productError) {
+      console.error('Error fetching product for message:', productError)
+      return null
+    }
+
+    let productShop = null
+
+    if (product?.shop_id) {
+      const { data: shop } = await supabase
+        .from('shops')
+        .select('id, business_name, logo_url')
+        .eq('id', product.shop_id)
+        .single()
+
+      productShop = shop
+    }
+
+    return product ? { ...product, shop: productShop } : null
+  } catch (error) {
+    console.error('Unexpected product hydration error:', error)
+    return null
+  }
+}
+
+const enrichMessage = async (message: any) => {
+  const enrichedMessage = {
+    ...message,
+    product: null,
+    orderProduct: null,
+    orderProductId: null,
+  }
+
+  if (enrichedMessage.product_id) {
+    enrichedMessage.product = await hydrateProductMessage(enrichedMessage)
+  }
+
+  if (isOrderChatMessage(enrichedMessage.content || '')) {
+    const { product, productId } = await getOrderProductInfo(enrichedMessage.content)
+    enrichedMessage.orderProduct = product
+    enrichedMessage.orderProductId = productId
+  }
+
+  return enrichedMessage
+}
+
+const runMessageUpdate = async (messageId: string, payload: Record<string, any>, withSelect = true) => {
+  const query = supabase.from('messages').update(payload).eq('id', messageId)
+
+  if (withSelect) {
+    return query.select('*').maybeSingle()
+  }
+
+  const { error } = await query
+  return { data: null, error }
+}
+
+const updateMessageRecord = async ({
+  messageId,
+  values,
+  includeEditedMarker = false,
+}: {
+  messageId: string
+  values: Record<string, any>
+  includeEditedMarker?: boolean
+}) => {
+  const timestamp = new Date().toISOString()
+  const payloads = includeEditedMarker
+    ? [
+        { ...values, edited_at: timestamp, updated_at: timestamp },
+        { ...values, updated_at: timestamp },
+        values,
+      ]
+    : [{ ...values, updated_at: timestamp }, values]
+
+  let lastError: any = null
+
+  for (const payload of payloads) {
+    const { data, error } = await runMessageUpdate(messageId, payload, true)
+    if (!error) {
+      return data ?? { id: messageId, ...payload }
+    }
+    lastError = error
+  }
+
+  for (const payload of payloads) {
+    const { error } = await runMessageUpdate(messageId, payload, false)
+    if (!error) {
+      return { id: messageId, ...payload }
+    }
+    lastError = error
+  }
+
+  throw lastError
+}
+
+const startEditingMessage = async (message: any) => {
+  if (!canEditMessage(message)) {
+    return
+  }
+
+  editingMessageId.value = message.id
+  newMessage.value = message.content ?? ''
+  sendError.value = null
+  await focusComposer()
+  handleComposerFocus()
+}
+
+const cancelEditingMessage = () => {
+  editingMessageId.value = null
+  newMessage.value = ''
+  sendError.value = null
+}
+
+const saveEditedMessage = async () => {
+  const editingTarget = editingTargetMessage.value
+  const nextContent = newMessage.value.trim()
+
+  if (!editingTarget || !editingMessageId.value) {
+    cancelEditingMessage()
+    return
+  }
+
+  if (!canEditMessage(editingTarget)) {
+    sendError.value = 'That message can no longer be edited.'
+    return
+  }
+
+  if (!nextContent) {
+    sendError.value = 'Message cannot be empty.'
+    return
+  }
+
+  if (nextContent === trimMessageContent(editingTarget.content)) {
+    cancelEditingMessage()
+    return
+  }
+
+  isUpdatingMessage.value = true
+  sendError.value = null
+
+  try {
+    const updatedRow = await updateMessageRecord({
+      messageId: editingMessageId.value,
+      values: { content: nextContent },
+      includeEditedMarker: true,
+    })
+
+    const enrichedMessage = await enrichMessage(updatedRow)
+    replaceMessage({ ...enrichedMessage, __edited: true })
+    cancelEditingMessage()
+  } catch (error: any) {
+    console.error('Error editing message:', error)
+    sendError.value = error?.message || 'Unable to edit the message right now.'
+  } finally {
+    isUpdatingMessage.value = false
+  }
+}
+
+const unsendMessage = async (message: any) => {
+  if (!canUnsendMessage(message)) {
+    return
+  }
+
+  const confirmed = window.confirm('Unsend this message?')
+  if (!confirmed) {
+    return
+  }
+
+  isUpdatingMessage.value = true
+  sendError.value = null
+
+  try {
+    const updatedRow = await updateMessageRecord({
+      messageId: message.id,
+      values: {
+        content: UNSENT_MESSAGE_TEXT,
+        product_id: null,
+      },
+    })
+
+    const enrichedMessage = await enrichMessage(updatedRow)
+    replaceMessage({
+      ...message,
+      ...enrichedMessage,
+      content: UNSENT_MESSAGE_TEXT,
+      product_id: null,
+      product: null,
+      orderProduct: null,
+      orderProductId: null,
+      __edited: false,
+    })
+
+    if (editingMessageId.value === message.id) {
+      cancelEditingMessage()
+    }
+  } catch (error: any) {
+    console.error('Error unsending message:', error)
+    sendError.value = error?.message || 'Unable to unsend the message right now.'
+  } finally {
+    isUpdatingMessage.value = false
+  }
+}
+
 const loadMessages = async () => {
   if (!conversationId.value) return
 
@@ -636,7 +1049,7 @@ const loadMessages = async () => {
       .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('❌ Error loading messages:', error)
+      console.error('Error loading messages:', error)
       return
     }
 
@@ -645,83 +1058,14 @@ const loadMessages = async () => {
       return
     }
 
-    console.log('📨 Loading messages:', data.length)
-
-    const enhancedMessages = await Promise.all(
-      data.map(async (msg) => {
-        console.log('💬 Processing message:', msg.id, 'Content:', msg.content)
-
-        if (msg.product_id) {
-          try {
-            const { data: product, error: productError } = await supabase
-              .from('products')
-              .select(`
-                id,
-                prod_name,
-                price,
-                main_img_urls,
-                shop_id,
-                description,
-                has_varieties,
-                varieties
-              `)
-              .eq('id', msg.product_id)
-              .single()
-
-            if (productError) {
-              console.error('❌ Error fetching product:', productError)
-              return { ...msg, product: null }
-            }
-
-            let shopInfo = null
-            if (product?.shop_id) {
-              const { data: shop } = await supabase
-                .from('shops')
-                .select('id, business_name, logo_url')
-                .eq('id', product.shop_id)
-                .single()
-              shopInfo = shop
-            }
-
-            return {
-              ...msg,
-              product: product ? { ...product, shop: shopInfo } : null,
-            }
-          } catch (err) {
-            console.error('❌ Error in product message processing:', err)
-            return { ...msg, product: null }
-          }
-        }
-
-        if (isOrderChatMessage(msg.content)) {
-          console.log('🛒 Processing order notification:', msg.id)
-          const { product, productId } = await getOrderProductInfo(msg.content)
-          console.log('🎯 Final product result:', { 
-            productId, 
-            productName: product?.prod_name,
-            hasProduct: !!product,
-            hasVarieties: product?.has_varieties
-          })
-          return {
-            ...msg,
-            orderProduct: product,
-            orderProductId: productId
-          }
-        }
-
-        return { ...msg, orderProduct: null, orderProductId: null }
-      }),
-    )
-
-    messages.value = enhancedMessages
+    const enhancedMessages = await Promise.all(data.map((message) => enrichMessage(message)))
+    messages.value = sortMessages(enhancedMessages)
     await markConversationMessagesAsRead()
-    scrollToBottom()
-  } catch (err) {
-    console.error('❌ Unexpected error in loadMessages:', err)
+  } catch (error) {
+    console.error('Unexpected error in loadMessages:', error)
   }
 }
 
-// ✅ IMPROVED: Subscribe to realtime messages
 const subscribeMessages = async () => {
   if (!conversationId.value) return
 
@@ -736,60 +1080,45 @@ const subscribeMessages = async () => {
         filter: `conversation_id=eq.${conversationId.value}`,
       },
       async (payload) => {
-        console.log('🆕 New message received:', payload.new)
-        let newMessageWithData = { ...payload.new }
-
-        if (payload.new.product_id) {
-          try {
-            const { data: product } = await supabase
-              .from('products')
-              .select(`
-                id,
-                prod_name,
-                price,
-                main_img_urls,
-                shop_id,
-                description,
-                has_varieties,
-                varieties
-              `)
-              .eq('id', payload.new.product_id)
-              .single()
-
-            if (product?.shop_id) {
-              const { data: shop } = await supabase
-                .from('shops')
-                .select('id, business_name, logo_url')
-                .eq('id', product.shop_id)
-                .single()
-              newMessageWithData.product = { ...product, shop }
-            } else {
-              newMessageWithData.product = product
-            }
-          } catch (error) {
-            console.error('❌ Error fetching product for new message:', error)
-          }
-        }
-
-        if (isOrderChatMessage(payload.new.content)) {
-          console.log('🛒 Processing new order notification')
-          const { product, productId } = await getOrderProductInfo(payload.new.content)
-          newMessageWithData.orderProduct = product
-          newMessageWithData.orderProductId = productId
-        }
-
-        appendMessage(newMessageWithData)
-        scrollToBottom()
+        const realtimeMessage = await enrichMessage(payload.new)
+        appendMessage(realtimeMessage)
+        void scrollToBottom('smooth')
 
         if (payload.new.receiver_id === userId.value) {
           await markMessageAsRead(payload.new.id)
         }
       },
     )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId.value}`,
+      },
+      async (payload) => {
+        const realtimeMessage = await enrichMessage(payload.new)
+        replaceMessage(realtimeMessage)
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'DELETE',
+        schema: 'public',
+        table: 'messages',
+        filter: `conversation_id=eq.${conversationId.value}`,
+      },
+      (payload) => {
+        if (payload.old?.id) {
+          removeMessage(payload.old.id)
+        }
+      },
+    )
     .subscribe()
 }
 
-// ✅ Mark single message as read
 const markMessageAsRead = async (messageId: string) => {
   try {
     await supabase.from('messages').update({ is_read: true }).eq('id', messageId)
@@ -800,13 +1129,24 @@ const markMessageAsRead = async (messageId: string) => {
 
 // ✅ FIXED: Send a regular text message with workaround for notifications trigger
 const sendMessage = async () => {
-  if (sending.value) return
-  
-  sending.value = true
+  if (isEditingMessage.value) {
+    await saveEditedMessage()
+    return
+  }
+
+  if (sending.value || isUpdatingMessage.value) return
+
   sendError.value = null
+  const messageContent = newMessage.value.trim()
+
+  if (!messageContent) {
+    return
+  }
+
+  sending.value = true
+  let shouldClearComposer = false
 
   try {
-    // Check authentication first
     const currentUserId = await checkAuth()
     if (!currentUserId) {
       alert('Please sign in to send messages')
@@ -814,8 +1154,8 @@ const sendMessage = async () => {
       return
     }
 
-    if (!newMessage.value.trim() || !conversationId.value || !otherUserId.value) {
-      console.error('Cannot send message: missing required data')
+    if (!conversationId.value || !otherUserId.value) {
+      sendError.value = 'Conversation is still loading. Please try again.'
       return
     }
 
@@ -824,59 +1164,57 @@ const sendMessage = async () => {
       conversation_id: conversationId.value,
       sender_id: currentUserId,
       receiver_id: otherUserId.value,
-      content: newMessage.value.trim(),
+      content: messageContent,
       is_read: false,
       product_id: null,
       created_at: createdAt,
     }
 
-    console.log('📤 Sending message:', msg)
-
-    // Try sending message directly with minimal columns to avoid trigger issues
     const { data, error } = await supabase
       .from('messages')
-      .insert([{
-        conversation_id: msg.conversation_id,
-        sender_id: msg.sender_id,
-        receiver_id: msg.receiver_id,
-        content: msg.content,
-        is_read: msg.is_read,
-        created_at: msg.created_at,
-      }])
+      .insert([
+        {
+          conversation_id: msg.conversation_id,
+          sender_id: msg.sender_id,
+          receiver_id: msg.receiver_id,
+          content: msg.content,
+          is_read: msg.is_read,
+          created_at: msg.created_at,
+        },
+      ])
       .select()
       .single()
 
     if (error) {
-      console.error('❌ Supabase error sending message:', error)
-      
-      // If it's a notifications trigger error, try alternative approach
+      console.error('Supabase error sending message:', error)
+
       if (error.message.includes('notifications')) {
-        console.log('⚠️ Notifications trigger error detected, trying alternative...')
-        
-        // Try without select to see if it works
         const { error: simpleError } = await supabase
           .from('messages')
-          .insert([{
-            conversation_id: msg.conversation_id,
-            sender_id: msg.sender_id,
-            receiver_id: msg.receiver_id,
-            content: msg.content,
-            is_read: msg.is_read,
-            product_id: null,
-            created_at: msg.created_at,
-          }])
-        
+          .insert([
+            {
+              conversation_id: msg.conversation_id,
+              sender_id: msg.sender_id,
+              receiver_id: msg.receiver_id,
+              content: msg.content,
+              is_read: msg.is_read,
+              product_id: null,
+              created_at: msg.created_at,
+            },
+          ])
+
         if (simpleError) {
-          console.error('❌ Alternative insert also failed:', simpleError)
-          alert('Unable to send message due to database permissions. Please try again later.')
+          console.error('Fallback insert also failed:', simpleError)
+          sendError.value = 'Unable to send the message right now. Please try again.'
         } else {
-          // If insert succeeded without select, manually add to messages array
           const manualMsg = {
             id: `temp-${Date.now()}`,
             ...msg,
-            created_at: msg.created_at,
+            product: null,
+            orderProduct: null,
+            orderProductId: null,
           }
-          messages.value.push(manualMsg)
+          appendMessage(manualMsg)
           await updateConversationActivity(msg.conversation_id)
           await syncMessageNotificationAfterSend({
             senderId: msg.sender_id,
@@ -885,18 +1223,18 @@ const sendMessage = async () => {
             content: msg.content,
             isOrderMessage: false,
           })
-          scrollToBottom()
-          console.log('✅ Message sent (manual fallback)')
+          shouldClearComposer = true
+          void scrollToBottom('smooth')
         }
       } else {
-        alert(`Error sending message: ${error.message}`)
+        sendError.value = error.message || 'Unable to send the message right now.'
       }
       return
     }
 
     if (data) {
-      console.log('✅ Message sent successfully:', data)
-      appendMessage(data)
+      const enrichedMessage = await enrichMessage(data)
+      appendMessage(enrichedMessage)
       await updateConversationActivity(msg.conversation_id)
       await syncMessageNotificationAfterSend({
         senderId: msg.sender_id,
@@ -905,18 +1243,20 @@ const sendMessage = async () => {
         content: msg.content,
         isOrderMessage: false,
       })
-      scrollToBottom()
+      shouldClearComposer = true
+      void scrollToBottom('smooth')
     }
-  } catch (err) {
-    console.error('❌ Unexpected error sending message:', err)
-    alert('Failed to send message. Please try again.')
+  } catch (error) {
+    console.error('Unexpected error sending message:', error)
+    sendError.value = 'Failed to send the message. Please try again.'
   } finally {
     sending.value = false
-    newMessage.value = ''
+    if (shouldClearComposer) {
+      newMessage.value = ''
+    }
   }
 }
 
-// ✅ Send a product message
 const sendProductMessage = async (product: any) => {
   if (!conversationId.value || !userId.value || !otherUserId.value) return
 
@@ -1019,6 +1359,7 @@ const userAvatar = computed(() => otherUserIdentity.value.avatar)
 const goBack = () => router.back()
 
 onMounted(async () => {
+  setupViewportListeners()
   loading.value = true
   try {
     await fetchOtherUserInfo()
@@ -1030,254 +1371,359 @@ onMounted(async () => {
     console.error('❌ Error during initialization:', err)
   } finally {
     loading.value = false
+    await nextTick()
+    await scrollToBottom('auto')
   }
 })
 
 onUnmounted(() => {
   if (subscription) supabase.removeChannel(subscription)
   if (timeUpdateInterval) clearInterval(timeUpdateInterval)
+  viewportCleanup?.()
 })
 </script>
 
 <template>
-  <v-app>
+  <v-app class="chat-page" :style="chatViewportStyle">
     <v-app-bar class="chat-app-bar" flat color="primary" dark>
       <v-btn icon @click="goBack" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
 
       <div class="user-info">
-        <v-avatar size="36" class="user-avatar">
+        <v-avatar size="38" class="user-avatar">
           <v-img :src="userAvatar" :alt="userDisplayName" />
         </v-avatar>
         <div class="user-details">
           <v-toolbar-title class="user-name">{{ userDisplayName }}</v-toolbar-title>
         </div>
       </div>
-
-      <v-spacer />
     </v-app-bar>
 
-    <v-main>
-      <div id="chat-scroll" class="chat-container">
-        <div v-if="loading" class="loading-state">
-          <v-progress-circular indeterminate color="primary" />
-          <p>Loading messages...</p>
-        </div>
+    <v-main class="chat-main">
+      <section class="chat-shell">
+        <div ref="chatScrollEl" class="chat-container">
+          <div v-if="loading" class="loading-state">
+            <v-progress-circular indeterminate color="primary" />
+            <p>Loading messages...</p>
+          </div>
 
-        <div v-else-if="messages.length === 0" class="empty-state">
-          <v-icon size="64" color="grey-lighten-1">mdi-chat-outline</v-icon>
-          <p class="text-caption mt-2">No messages yet. Start the conversation!</p>
-        </div>
+          <div v-else-if="messages.length === 0" class="empty-state">
+            <v-icon size="64" color="grey-lighten-1">mdi-chat-outline</v-icon>
+            <p class="text-caption mt-2">No messages yet. Start the conversation!</p>
+          </div>
 
-        <div v-else>
-          <div
-            v-for="msg in messages"
-            :key="msg.id"
-            :class="['message-row', msg.sender_id === userId ? 'me' : 'other']"
-          >
-            <!-- Order Notification Message -->
-            <div v-if="isOrderChatMessage(msg.content)" class="order-notification">
-              <div class="notification-header">
-                <v-icon color="green" small>mdi-cart</v-icon>
-                <span class="notification-title">New Order Received!</span>
-              </div>
-              <div class="notification-content">
-                {{ msg.content }}
-              </div>
-              
-              <div class="order-action-buttons">
-                <v-btn
-                  color="primary"
-                  variant="outlined"
-                  size="small"
-                  @click="viewProduct(getOrderProductId(msg))"
-                  class="view-product-btn"
-                >
-                  <v-icon left small>mdi-eye</v-icon>
-                  View Product
-                </v-btn>
-              </div>
-              
-              <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
-            </div>
+          <div v-else class="messages-list">
+            <div
+              v-for="msg in messages"
+              :key="msg.id"
+              :class="['message-row', isOwnMessage(msg) ? 'me' : 'other']"
+            >
+              <div v-if="isOrderChatMessage(msg.content || '')" class="order-notification">
+                <div class="notification-header">
+                  <v-icon color="green" size="18">mdi-cart-outline</v-icon>
+                  <span class="notification-title">New order received</span>
+                </div>
 
-            <!-- Product Share Message -->
-            <div v-else-if="msg.product_id && msg.product" class="product-message">
-              <div class="product-card">
-                <v-img
-                  :src="getProductImage(msg.product)"
-                  :alt="msg.product.prod_name"
-                  class="product-image"
-                  cover
-                  @click="viewProduct(msg.product.id)"
-                />
-                <div class="product-info">
-                  <div class="product-name">{{ msg.product.prod_name }}</div>
-                  <div class="product-price">₱{{ msg.product.price?.toFixed(2) }}</div>
-                  <div class="product-shop" v-if="msg.product.shop">
-                    {{ msg.product.shop.business_name }}
-                  </div>
-                  <div v-if="msg.product.has_varieties" class="varieties-indicator">
-                    <v-chip size="x-small" color="primary" variant="outlined">
-                      <v-icon left small>mdi-palette</v-icon>
-                      Has Varieties
-                    </v-chip>
-                  </div>
+                <div class="notification-content">
+                  {{ msg.content }}
+                </div>
+
+                <div class="order-action-buttons">
+                  <v-btn
+                    color="primary"
+                    variant="outlined"
+                    size="small"
+                    class="view-product-btn"
+                    @click="viewProduct(getOrderProductId(msg))"
+                  >
+                    <v-icon start size="16">mdi-eye-outline</v-icon>
+                    View Product
+                  </v-btn>
+                </div>
+
+                <div class="message-meta">
+                  <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
                 </div>
               </div>
 
-              <div class="action-buttons">
-                <v-btn
-                  color="primary"
-                  variant="outlined"
-                  size="small"
-                  @click="viewProduct(msg.product.id)"
-                  class="view-btn"
+              <div v-else-if="msg.product_id && msg.product" class="product-message">
+                <div class="product-card" @click="viewProduct(msg.product.id)">
+                  <v-img
+                    :src="getProductImage(msg.product)"
+                    :alt="msg.product.prod_name"
+                    class="product-image"
+                    cover
+                  />
+
+                  <div class="product-info">
+                    <div class="product-name">{{ msg.product.prod_name }}</div>
+                    <div class="product-price">PHP {{ formatPrice(msg.product.price) }}</div>
+                    <div v-if="msg.product.shop" class="product-shop">
+                      {{ msg.product.shop.business_name }}
+                    </div>
+                    <div v-if="msg.product.has_varieties" class="varieties-indicator">
+                      <v-chip size="x-small" color="primary" variant="outlined">
+                        <v-icon start size="14">mdi-palette-outline</v-icon>
+                        Has Varieties
+                      </v-chip>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="action-buttons">
+                  <v-btn
+                    color="primary"
+                    variant="outlined"
+                    size="small"
+                    class="view-btn"
+                    @click="viewProduct(msg.product.id)"
+                  >
+                    <v-icon start size="16">mdi-eye-outline</v-icon>
+                    View Product
+                  </v-btn>
+                </div>
+
+                <div
+                  v-if="msg.content && !msg.content.startsWith('Check out this product:')"
+                  class="message-content"
                 >
-                  <v-icon left small>mdi-eye</v-icon>
-                  View Product
-                </v-btn>
+                  {{ msg.content }}
+                </div>
+
+                <div class="message-meta">
+                  <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
+                  <span v-if="isEditedMessage(msg)" class="edited-label">Edited</span>
+                  <v-menu v-if="shouldShowMessageActions(msg)" location="top end">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        icon
+                        variant="text"
+                        size="x-small"
+                        class="message-action-trigger"
+                      >
+                        <v-icon size="16">mdi-dots-horizontal</v-icon>
+                      </v-btn>
+                    </template>
+
+                    <v-list density="compact" class="message-action-menu">
+                      <v-list-item
+                        v-if="canEditMessage(msg)"
+                        prepend-icon="mdi-pencil-outline"
+                        title="Edit message"
+                        @click="startEditingMessage(msg)"
+                      />
+                      <v-list-item
+                        v-if="canUnsendMessage(msg)"
+                        prepend-icon="mdi-delete-outline"
+                        title="Unsend message"
+                        @click="unsendMessage(msg)"
+                      />
+                    </v-list>
+                  </v-menu>
+                </div>
               </div>
 
-              <div class="message-content" v-if="msg.content && !msg.content.startsWith('Check out this product:')">
-                {{ msg.content }}
+              <div v-else :class="['bubble', { 'is-unsent': isUnsentMessage(msg) }]">
+                <div :class="['message-text', { 'is-unsent-text': isUnsentMessage(msg) }]">
+                  {{ msg.content }}
+                </div>
+
+                <div class="message-meta">
+                  <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
+                  <span v-if="isEditedMessage(msg)" class="edited-label">Edited</span>
+                  <v-menu v-if="shouldShowMessageActions(msg)" location="top end">
+                    <template #activator="{ props }">
+                      <v-btn
+                        v-bind="props"
+                        icon
+                        variant="text"
+                        size="x-small"
+                        class="message-action-trigger"
+                      >
+                        <v-icon size="16">mdi-dots-horizontal</v-icon>
+                      </v-btn>
+                    </template>
+
+                    <v-list density="compact" class="message-action-menu">
+                      <v-list-item
+                        v-if="canEditMessage(msg)"
+                        prepend-icon="mdi-pencil-outline"
+                        title="Edit message"
+                        @click="startEditingMessage(msg)"
+                      />
+                      <v-list-item
+                        v-if="canUnsendMessage(msg)"
+                        prepend-icon="mdi-delete-outline"
+                        title="Unsend message"
+                        @click="unsendMessage(msg)"
+                      />
+                    </v-list>
+                  </v-menu>
+                </div>
               </div>
-
-              <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
             </div>
 
-            <!-- Regular Text Message -->
-            <div v-else class="bubble">
-              <div class="message-text">{{ msg.content }}</div>
-              <span class="time">{{ formatMessageTime(msg.created_at) }}</span>
-            </div>
+            <div ref="messagesEndEl" class="messages-end" aria-hidden="true" />
           </div>
         </div>
-      </div>
-    </v-main>
 
-    <v-footer app class="chat-footer" color="white" elevation="3">
-      <div class="input-container">
-        <v-text-field v-model="newMessage" variant="outlined" placeholder="Type a message..." hide-details
-          class="message-input" @keyup.enter="sendMessage" :disabled="loading || sending">
-          <template v-slot:prepend-inner v-if="!newMessage.trim()">
-            <v-icon color="grey" size="20">mdi-emoticon-outline</v-icon>
-          </template>
-        </v-text-field>
-        <v-btn icon color="primary" @click="sendMessage" :disabled="!newMessage.trim() || loading || sending"
-          :loading="sending" class="send-btn">
-          <v-icon>mdi-send</v-icon>
-        </v-btn>
-      </div>
-    </v-footer>
+        <div class="chat-footer">
+          <div v-if="isEditingMessage" class="composer-mode">
+            <div class="composer-mode-copy">
+              <span class="composer-mode-label">Editing message</span>
+              <span class="composer-mode-text">{{ editingTargetMessage?.content }}</span>
+            </div>
+
+            <v-btn variant="text" size="small" @click="cancelEditingMessage">Cancel</v-btn>
+          </div>
+
+          <div class="input-container">
+            <v-textarea
+              ref="composerInputEl"
+              v-model="newMessage"
+              variant="outlined"
+              rows="1"
+              max-rows="5"
+              auto-grow
+              no-resize
+              hide-details
+              class="message-input"
+              :placeholder="isEditingMessage ? 'Update your message...' : 'Type a message...'"
+              :disabled="loading || sending || isUpdatingMessage"
+              @keydown.enter.exact.prevent="handleComposerEnter"
+              @focus="handleComposerFocus"
+            >
+              <template #prepend-inner>
+                <v-icon color="grey-darken-1" size="20">
+                  {{ isEditingMessage ? 'mdi-pencil-outline' : 'mdi-message-text-outline' }}
+                </v-icon>
+              </template>
+            </v-textarea>
+
+            <v-btn
+              icon
+              color="primary"
+              class="send-btn"
+              :disabled="!newMessage.trim() || loading || sending || isUpdatingMessage"
+              :loading="sending || isUpdatingMessage"
+              @click="sendMessage"
+            >
+              <v-icon>{{ isEditingMessage ? 'mdi-check' : 'mdi-send' }}</v-icon>
+            </v-btn>
+          </div>
+
+          <p v-if="sendError" class="composer-error">{{ sendError }}</p>
+        </div>
+      </section>
+    </v-main>
   </v-app>
 </template>
 
 <style scoped>
-/* CSS Variables for safe area insets */
-:root {
-  --sat: env(safe-area-inset-top);
-  --sar: env(safe-area-inset-right);
-  --sab: env(safe-area-inset-bottom);
-  --sal: env(safe-area-inset-left);
+.chat-page {
+  min-height: var(--chat-viewport-height, 100dvh);
+  background:
+    radial-gradient(circle at top, rgba(63, 131, 199, 0.14), transparent 38%),
+    linear-gradient(180deg, #eef4f9 0%, #f8fafc 100%);
+  --chat-safe-top: env(safe-area-inset-top, 0px);
+  --chat-safe-right: env(safe-area-inset-right, 0px);
+  --chat-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --chat-safe-left: env(safe-area-inset-left, 0px);
+  --chat-header-height: calc(64px + var(--chat-safe-top));
 }
 
-/* Chat App Bar with Safe Area Support */
+.chat-page :deep(.v-application__wrap) {
+  min-height: inherit;
+  background: transparent;
+}
+
 .chat-app-bar {
   position: fixed !important;
   top: 0;
   left: 0;
   right: 0;
-  z-index: 1000;
-  background: linear-gradient(135deg, #3f83c7, #2c5f8a) !important;
-  padding-top: var(--sat, 0px);
-  height: calc(64px + var(--sat, 0px)) !important;
-  min-height: calc(64px + var(--sat, 0px)) !important;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  z-index: 20;
+  padding-top: var(--chat-safe-top);
+  min-height: var(--chat-header-height) !important;
+  height: var(--chat-header-height) !important;
+  background: linear-gradient(135deg, #3f83c7, #295f8d) !important;
+  box-shadow: 0 14px 36px rgba(20, 44, 73, 0.18);
 }
 
-/* For iOS devices */
-@supports (padding-top: env(safe-area-inset-top)) {
-  .chat-app-bar {
-    padding-top: env(safe-area-inset-top);
-    height: calc(64px + env(safe-area-inset-top)) !important;
-  }
-}
-
-/* Ensure toolbar content is properly aligned */
 .chat-app-bar :deep(.v-toolbar__content) {
   height: 64px !important;
-  padding-top: 0 !important;
+  padding: 0 max(12px, var(--chat-safe-right)) 0 max(8px, var(--chat-safe-left));
+  gap: 8px;
+  align-items: center;
 }
 
-/* Back Button */
 .back-btn {
-  margin-left: 4px;
-  backdrop-filter: blur(8px);
+  flex-shrink: 0;
 }
 
-.back-btn:hover {
-  background: rgba(255, 255, 255, 0.25) !important;
-  transform: scale(1.05);
-}
-
-/* User Info Section */
 .user-info {
   display: flex;
   align-items: center;
   gap: 12px;
-  cursor: pointer;
-  padding: 4px 12px;
-  border-radius: 30px;
-  transition: background 0.2s ease;
-  flex: 1; 
-  min-width: 0;  
-}
-
-.user-info:hover {
-  background: rgba(255, 255, 255, 0.1);
+  min-width: 0;
+  flex: 1;
+  padding: 4px 8px;
 }
 
 .user-avatar {
-  border: 2px solid rgba(255, 255, 255, 0.3);
-  flex-shrink: 0;  
+  border: 2px solid rgba(255, 255, 255, 0.24);
+  flex-shrink: 0;
 }
 
 .user-details {
-  display: flex;
-  flex-direction: column;
-  line-height: 1.2;
-  min-width: 0;            
-  flex: 1; 
+  min-width: 0;
 }
 
 .user-name {
   font-size: 1rem !important;
-  font-weight: 600 !important;
-  letter-spacing: -0.2px;
-  white-space: nowrap;       
-  overflow: hidden;        
-  text-overflow: ellipsis;  
-  width: 100%;               
+  font-weight: 700 !important;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
-/* Chat Container */
-.chat-container {
+.chat-main {
+  height: var(--chat-viewport-height, 100dvh);
+  padding-top: var(--chat-header-height);
+  overflow: hidden;
+}
+
+.chat-shell {
+  height: calc(var(--chat-viewport-height, 100dvh) - var(--chat-header-height));
   display: flex;
   flex-direction: column;
-  padding: 20px 16px;
-  gap: 16px;
-  height: calc(100vh - 64px - 80px - var(--sat, 0px) - var(--sab, 0px));
-  overflow-y: auto;
-  background: #f5f7fa;
 }
 
-/* Message Row */
+.chat-container {
+  flex: 1;
+  overflow-y: auto;
+  padding:
+    18px
+    max(16px, var(--chat-safe-right))
+    16px
+    max(16px, var(--chat-safe-left));
+  overscroll-behavior: contain;
+  scroll-padding-bottom: 24px;
+}
+
+.messages-list {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 .message-row {
   display: flex;
-  margin-bottom: 8px;
-  animation: slideIn 0.2s ease;
 }
 
 .message-row.me {
@@ -1288,81 +1734,82 @@ onUnmounted(() => {
   justify-content: flex-start;
 }
 
-/* Regular Message Bubble */
+.bubble,
+.product-message,
+.order-notification {
+  max-width: min(100%, 360px);
+}
+
 .bubble {
-  max-width: 75%;
-  padding: 10px 14px;
-  border-radius: 20px;
-  position: relative;
-  word-wrap: break-word;
+  padding: 12px 14px;
+  border-radius: 22px;
+  word-break: break-word;
+  box-shadow: 0 10px 26px rgba(15, 23, 42, 0.06);
 }
 
 .message-row.me .bubble {
-  background: linear-gradient(135deg, #007aff, #0051d5);
+  background: linear-gradient(135deg, #3f83c7, #2563eb);
   color: white;
-  border-bottom-right-radius: 4px;
+  border-bottom-right-radius: 8px;
 }
 
 .message-row.other .bubble {
-  background: white;
+  background: rgba(255, 255, 255, 0.96);
   color: #1f2937;
-  border-bottom-left-radius: 4px;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+  border-bottom-left-radius: 8px;
+}
+
+.bubble.is-unsent {
+  background: rgba(226, 232, 240, 0.9);
+  color: #475569;
+  box-shadow: none;
 }
 
 .message-text {
-  line-height: 1.4;
-  font-size: 0.9rem;
+  font-size: 0.94rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
 }
 
-/* Product Message */
+.message-text.is-unsent-text {
+  font-style: italic;
+}
+
 .product-message {
-  max-width: 320px;
-  background: white;
-  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.98);
+  border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.message-row.me .product-message {
-  background: white;
+  border: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 14px 30px rgba(15, 23, 42, 0.08);
 }
 
 .product-card {
   display: flex;
-  padding: 12px;
   gap: 12px;
+  padding: 12px;
   cursor: pointer;
 }
 
-.product-card:hover {
-  background: #f8f9fa;
-}
-
 .product-image {
-  width: 80px;
-  height: 80px;
-  border-radius: 12px;
+  width: 84px;
+  height: 84px;
+  border-radius: 14px;
   flex-shrink: 0;
-  transition: transform 0.2s ease;
-}
-
-.product-image:hover {
-  transform: scale(1.05);
 }
 
 .product-info {
-  flex: 1;
   min-width: 0;
+  flex: 1;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
 
 .product-name {
-  font-weight: 600;
-  font-size: 0.85rem;
-  line-height: 1.3;
+  font-weight: 700;
+  font-size: 0.9rem;
+  line-height: 1.35;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
@@ -1370,26 +1817,52 @@ onUnmounted(() => {
 }
 
 .product-price {
+  font-size: 0.84rem;
   font-weight: 700;
-  color: #007aff;
-  font-size: 0.85rem;
+  color: #2563eb;
 }
 
 .product-shop {
-  font-size: 0.7rem;
-  color: #6b7280;
+  font-size: 0.75rem;
+  color: #64748b;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* Order Notification */
-.order-notification {
-  max-width: 320px;
-  background: #f0fdf4;
-  border: 1px solid #bbf7d0;
-  border-radius: 16px;
+.varieties-indicator {
+  margin-top: 4px;
+}
+
+.action-buttons {
+  display: flex;
+  gap: 8px;
+  padding: 0 12px 12px;
+}
+
+.view-btn,
+.view-product-btn {
+  flex: 1;
+  height: 34px !important;
+  border-radius: 12px !important;
+  text-transform: none;
+}
+
+.message-content {
   padding: 12px;
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+  font-size: 0.88rem;
+  line-height: 1.45;
+  color: #334155;
+  white-space: pre-wrap;
+}
+
+.order-notification {
+  background: linear-gradient(180deg, rgba(240, 253, 244, 0.98), rgba(236, 252, 203, 0.88));
+  border: 1px solid rgba(134, 239, 172, 0.75);
+  border-radius: 20px;
+  padding: 14px;
+  box-shadow: 0 14px 30px rgba(34, 197, 94, 0.1);
 }
 
 .notification-header {
@@ -1400,328 +1873,289 @@ onUnmounted(() => {
 }
 
 .notification-title {
-  font-weight: 600;
+  font-size: 0.88rem;
+  font-weight: 700;
   color: #166534;
-  font-size: 0.85rem;
 }
 
 .notification-content {
-  font-size: 0.8rem;
-  color: #374151;
-  line-height: 1.4;
-  margin-bottom: 12px;
+  font-size: 0.84rem;
+  line-height: 1.45;
+  color: #14532d;
+  white-space: pre-line;
 }
 
 .order-action-buttons {
   display: flex;
-  gap: 8px;
-  padding-top: 8px;
-  border-top: 1px solid #bbf7d0;
+  padding-top: 12px;
 }
 
-.view-product-btn {
-  flex: 1;
-  font-size: 0.7rem;
-  height: 32px !important;
-}
-
-/* Action buttons for product messages */
-.action-buttons {
+.message-meta {
   display: flex;
-  padding: 8px 12px;
+  align-items: center;
   gap: 8px;
-  border-top: 1px solid #e5e7eb;
-  background: #fafafa;
+  margin-top: 10px;
+  font-size: 0.72rem;
+  color: #64748b;
 }
 
-.view-btn {
-  flex: 1;
-  font-size: 0.7rem;
-  height: 32px !important;
+.message-row.me .message-meta {
+  justify-content: flex-end;
 }
 
-.message-content {
-  padding: 8px 12px 4px;
-  border-top: 1px solid #e5e7eb;
-  font-size: 0.85rem;
-  line-height: 1.4;
+.message-row.other .message-meta {
+  justify-content: flex-start;
 }
 
-/* Time Styling */
-.time {
-  display: block;
-  font-size: 0.65rem;
-  opacity: 0.7;
-  margin-top: 6px;
-  text-align: right;
-  padding: 0 12px 8px;
+.message-row.me .bubble .message-meta {
+  color: rgba(255, 255, 255, 0.86);
 }
 
-.message-row.other .time {
-  text-align: left;
+.bubble.is-unsent .message-meta {
+  color: #64748b;
 }
 
-/* Chat Footer */
+.edited-label {
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.message-action-trigger {
+  width: 26px !important;
+  height: 26px !important;
+  margin-right: -6px;
+  color: inherit;
+}
+
+.message-action-menu {
+  border-radius: 16px !important;
+}
+
 .chat-footer {
-  position: fixed !important;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  background: white !important;
-  padding: 12px 16px !important;
-  padding-bottom: max(12px, var(--sab, 0px)) !important;
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.08);
-  border-top: 1px solid rgba(0, 0, 0, 0.05);
+  padding:
+    12px
+    max(16px, var(--chat-safe-right))
+    max(12px, var(--chat-safe-bottom))
+    max(16px, var(--chat-safe-left));
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(18px);
+  border-top: 1px solid rgba(148, 163, 184, 0.14);
+  box-shadow: 0 -12px 26px rgba(15, 23, 42, 0.06);
+}
+
+.composer-mode {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: min(100%, 900px);
+  margin: 0 auto 10px;
+  padding: 10px 14px;
+  border-radius: 16px;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+}
+
+.composer-mode-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.composer-mode-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.composer-mode-text {
+  font-size: 0.84rem;
+  color: #1e3a8a;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .input-container {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  max-width: 800px;
+  width: min(100%, 900px);
   margin: 0 auto;
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
 }
 
-/* Message Input Field - Enhanced */
 .message-input {
   flex: 1;
-  transition: all 0.2s ease;
 }
 
 .message-input :deep(.v-field) {
-  border-radius: 28px !important;
-  background: #f5f7fa !important;
-  transition: all 0.2s ease;
-  border: 1px solid transparent;
-}
-
-.message-input :deep(.v-field:hover) {
-  background: #ffffff !important;
-  border-color: #e0e0e0;
+  border-radius: 24px !important;
+  background: #f8fafc !important;
+  box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.24);
 }
 
 .message-input :deep(.v-field--focused) {
-  border-color: #007aff !important;
-  box-shadow: 0 0 0 2px rgba(0, 122, 255, 0.1);
+  box-shadow:
+    0 0 0 2px rgba(63, 131, 199, 0.18),
+    inset 0 0 0 1px rgba(63, 131, 199, 0.4) !important;
 }
 
-.message-input :deep(.v-field__field) {
-  padding: 10px 16px;
-  min-height: 48px;
+.message-input :deep(.v-field__input) {
+  padding-top: 12px;
+  padding-bottom: 12px;
 }
 
-.message-input :deep(input) {
+.message-input :deep(textarea) {
   font-size: 0.95rem;
+  line-height: 1.45;
 }
 
-.message-input :deep(input::placeholder) {
-  color: #9ca3af;
-  font-size: 0.9rem;
-}
-
-/* Send Button - Enhanced */
 .send-btn {
-  width: 48px !important;
-  height: 48px !important;
-  border-radius: 50% !important;
-  background: linear-gradient(135deg, #007aff, #0051d5) !important;
-  box-shadow: 0 4px 12px rgba(0, 122, 255, 0.3);
-  transition: all 0.2s ease;
+  width: 52px !important;
+  height: 52px !important;
+  border-radius: 18px !important;
+  background: linear-gradient(135deg, #3f83c7, #2563eb) !important;
+  box-shadow: 0 10px 20px rgba(37, 99, 235, 0.24);
   flex-shrink: 0;
 }
 
-.send-btn:hover:not(:disabled) {
-  transform: scale(1.05);
-  box-shadow: 0 6px 16px rgba(0, 122, 255, 0.4);
-}
-
-.send-btn:active:not(:disabled) {
-  transform: scale(0.98);
-}
-
 .send-btn:disabled {
-  opacity: 0.5;
-  background: linear-gradient(135deg, #9ca3af, #6b7280) !important;
+  background: #bfdbfe !important;
   box-shadow: none;
 }
 
-/* Loading & Empty States */
+.composer-error {
+  width: min(100%, 900px);
+  margin: 10px auto 0;
+  font-size: 0.8rem;
+  color: #b91c1c;
+}
+
 .loading-state,
 .empty-state {
+  min-height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 60px 20px;
+  gap: 8px;
+  padding: 32px 16px;
+  color: #64748b;
   text-align: center;
-  min-height: 300px;
 }
 
-/* Animations */
-@keyframes slideIn {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.messages-end {
+  width: 100%;
+  height: 1px;
 }
 
-/* Scrollbar Styling */
 .chat-container::-webkit-scrollbar {
   width: 6px;
 }
 
-.chat-container::-webkit-scrollbar-track {
-  background: #f1f1f1;
-  border-radius: 3px;
-}
-
 .chat-container::-webkit-scrollbar-thumb {
-  background: #c1c1c1;
-  border-radius: 3px;
+  background: rgba(148, 163, 184, 0.8);
+  border-radius: 999px;
 }
 
-.chat-container::-webkit-scrollbar-thumb:hover {
-  background: #a8a8a8;
+.chat-container::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-/* Responsive Design */
 @media (max-width: 600px) {
+  .chat-page {
+    --chat-header-height: calc(56px + var(--chat-safe-top));
+  }
+
+  .chat-app-bar :deep(.v-toolbar__content) {
+    height: 56px !important;
+    padding: 0 max(10px, var(--chat-safe-right)) 0 max(6px, var(--chat-safe-left));
+  }
+
   .chat-container {
-    padding: 16px 12px;
-    gap: 12px;
+    padding:
+      14px
+      max(12px, var(--chat-safe-right))
+      12px
+      max(12px, var(--chat-safe-left));
   }
 
   .bubble {
-    max-width: 85%;
-    padding: 8px 12px;
+    max-width: 88%;
+    padding: 10px 12px;
   }
 
   .product-message,
   .order-notification {
-    max-width: 280px;
+    max-width: 100%;
   }
 
   .product-card {
-    padding: 10px;
     gap: 10px;
+    padding: 10px;
   }
 
   .product-image {
-    width: 70px;
-    height: 70px;
-  }
-
-  .product-name {
-    font-size: 0.8rem;
-  }
-
-  .user-name {
-    font-size: 0.9rem !important;
+    width: 72px;
+    height: 72px;
   }
 
   .user-info {
-    gap: 8px;
-    padding: 4px 8px;
-  }
-
-.chat-footer {
-    padding: 10px 12px !important;
-    padding-bottom: max(10px, var(--sab, 0px)) !important;
-  }
-  
-  .input-container {
     gap: 10px;
   }
-  
-  .message-input :deep(.v-field__field) {
-    padding: 8px 14px;
-    min-height: 44px;
+
+  .user-name {
+    font-size: 0.94rem !important;
   }
-  
-  .message-input :deep(input) {
-    font-size: 0.9rem;
+
+  .chat-footer {
+    padding:
+      10px
+      max(12px, var(--chat-safe-right))
+      max(10px, var(--chat-safe-bottom))
+      max(12px, var(--chat-safe-left));
   }
-  
+
+  .composer-mode {
+    padding: 9px 12px;
+  }
+
+  .send-btn {
+    width: 48px !important;
+    height: 48px !important;
+    border-radius: 16px !important;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .chat-page {
+    --chat-safe-top: 0px;
+    --chat-header-height: 56px;
+  }
+
+  .chat-app-bar {
+    padding-top: 0;
+  }
+
+  .chat-app-bar :deep(.v-toolbar__content) {
+    height: 56px !important;
+  }
+
+  .chat-container {
+    padding-top: 12px;
+  }
+
+  .chat-footer {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
   .send-btn {
     width: 44px !important;
     height: 44px !important;
   }
 }
-
-@media (max-width: 480px) {
-  .chat-footer {
-    padding: 8px 10px !important;
-    padding-bottom: max(8px, var(--sab, 0px)) !important;
-  }
-  
-  .input-container {
-    gap: 8px;
-  }
-  
-  .message-input :deep(.v-field__field) {
-    padding: 6px 12px;
-    min-height: 40px;
-  }
-  
-  .message-input :deep(input) {
-    font-size: 0.85rem;
-  }
-  
-  .send-btn {
-    width: 40px !important;
-    height: 40px !important;
-  }
-}
-
-/* Landscape Mode */
-@media (orientation: landscape) and (max-height: 500px) {
-  .chat-app-bar {
-    height: 56px !important;
-    padding-top: 0 !important;
-  }
-  
-  .chat-main {
-    margin-top: 56px;
-  }
-  
-  .chat-container {
-    height: calc(100vh - 56px - 70px);
-  }
-
-   .chat-footer {
-    padding: 6px 12px !important;
-  }
-  
-  .message-input :deep(.v-field__field) {
-    padding: 6px 12px;
-    min-height: 36px;
-  }
-  
-  .send-btn {
-    width: 36px !important;
-    height: 36px !important;
-  }
-}
-
-/* Animation when sending */
-@keyframes pulse {
-  0% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.1);
-  }
-  100% {
-    transform: scale(1);
-  }
-}
-
-.send-btn:active:not(:disabled) {
-  animation: pulse 0.2s ease;
-}
 </style>
+
