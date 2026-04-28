@@ -231,10 +231,7 @@ const fetchOrderDetails = async () => {
           products (id, prod_name, main_img_urls, description, shop_id)
         ),
         buyer:profiles!orders_user_id_fkey (id, first_name, last_name, avatar_url, phone),
-        address:addresses!orders_address_id_fkey (
-          id, recipient_name, phone, street, postal_code, purok, building, 
-          house_no, region_name, province_name, city_name, barangay_name, latitude, longitude
-        )
+        address:addresses!orders_address_id_fkey ( * )
       `)
       .eq('id', orderId)
       .single()
@@ -341,7 +338,7 @@ const loadTrackingLocations = async () => {
   })
 
   deliveryTrackingLocation.value = await resolveTrackingLocation({
-    name: shippingAddress.value?.recipient_name || buyerDisplayName.value,
+    name: getPreferredAddressRecipientName(shippingAddress.value) || getProfileDisplayName(buyer.value) || 'Customer',
     address: buildDeliveryAddress(shippingAddress.value),
     lat: shippingAddress.value?.latitude,
     lng: shippingAddress.value?.longitude,
@@ -363,19 +360,40 @@ const totalAmount = computed(() => order.value?.total_amount || subtotal.value)
 
 const shopDisplayName = computed(() => shop.value?.business_name || 'Shop unavailable')
 
+const getProfileDisplayName = (profile: any) => {
+  const preferredName = [profile?.full_name, profile?.name].find(
+    (value) => typeof value === 'string' && value.trim(),
+  )
+
+  if (preferredName) return preferredName.trim()
+
+  return [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
+}
+
+const getPreferredAddressRecipientName = (address: any) => {
+  const preferredName = [address?.recipient_name, address?.full_name, address?.name].find(
+    (value) => typeof value === 'string' && value.trim(),
+  )
+
+  return preferredName?.trim() || ''
+}
+
 const sellerDisplayName = computed(() => {
   if (!seller.value) return 'Seller unavailable'
-  return [seller.value.first_name, seller.value.last_name].filter(Boolean).join(' ') || 'Seller unavailable'
+  return getProfileDisplayName(seller.value) || 'Seller unavailable'
 })
 
 const buyerDisplayName = computed(() => {
-  if (!buyer.value) return 'Customer unavailable'
-  return [buyer.value.first_name, buyer.value.last_name].filter(Boolean).join(' ') || 'Customer unavailable'
+  return (
+    getPreferredAddressRecipientName(shippingAddress.value) ||
+    getProfileDisplayName(buyer.value) ||
+    'Customer unavailable'
+  )
 })
 
 const riderDisplayName = computed(() => {
   if (!riderDetails.value) return 'Assigned rider'
-  return [riderDetails.value.first_name, riderDetails.value.last_name].filter(Boolean).join(' ') || 'Assigned rider'
+  return getProfileDisplayName(riderDetails.value) || 'Assigned rider'
 })
 
 const shopAddress = computed(() => {
@@ -948,7 +966,7 @@ onMounted(async () => {
                   </v-card-text>
                 </v-card>
 
-                <v-card class="surface-card" v-if="shop || seller || buyer">
+                <v-card class="surface-card" v-if="shop || seller || buyer || shippingAddress">
                   <v-card-title class="section-title">
                     <v-icon start>mdi-store-marker-outline</v-icon>
                     Fulfillment details
@@ -967,7 +985,7 @@ onMounted(async () => {
                         <span class="label">Pickup address</span>
                         <span class="value">{{ shopAddress }}</span>
                       </div>
-                      <div class="info-item" v-if="buyer">
+                      <div class="info-item" v-if="shippingAddress || buyer">
                         <span class="label">Customer</span>
                         <span class="value">{{ buyerDisplayName }}</span>
                       </div>
@@ -1084,7 +1102,7 @@ onMounted(async () => {
                   </v-card-title>
                   <v-card-text>
                     <div class="address-content">
-                      <strong>{{ shippingAddress.recipient_name }}</strong>
+                      <strong>{{ buyerDisplayName }}</strong>
                       <span v-if="shippingAddress.phone"> • {{ shippingAddress.phone }}</span>
                       <div class="address-details">{{ buildFullAddress }}</div>
                     </div>
