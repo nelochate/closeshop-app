@@ -1296,37 +1296,25 @@ const viewProduct = (productId: string) => {
   
   if (productId && !productId.startsWith('order-')) {
     console.log('✅ Navigating to product page:', productId)
-    router.push(`/viewproduct/${productId}`)
+    router.push({ name: 'product-detail', params: { id: productId } })
   } else {
     console.log('⚠️ Fallback product ID, showing product catalog')
-    router.push('/products')
+    router.push({ name: 'productlist' })
   }
 }
 
 // ✅ ALWAYS WORKING: Get product ID for order message
-const getOrderProductId = (msg: any): string => {
-  console.log('🔍 Getting product ID for message:', msg.id)
-  
-  if (msg.orderProductId) {
-    console.log('✅ Using stored orderProductId:', msg.orderProductId)
-    return msg.orderProductId
+const viewOrder = (orderId: string | null) => {
+  if (!orderId) {
+    console.warn('Unable to open order details because no order ID was found.')
+    return
   }
-  
-  if (msg.orderProduct?.id) {
-    console.log('✅ Using orderProduct.id:', msg.orderProduct.id)
-    return msg.orderProduct.id
-  }
-  
-  const extractedId = extractProductIdFromOrder(msg.content)
-  if (extractedId) {
-    console.log('✅ Using extracted ID:', extractedId)
-    return extractedId
-  }
-  
-  const fallbackId = generateFallbackProductId()
-  console.log('⚠️ Using fallback ID:', fallbackId)
-  return fallbackId
+
+  router.push({ name: 'order-details', params: { id: orderId } })
 }
+
+const getOrderMessageOrderId = (msg: any): string | null =>
+  extractOrderIdFromContent(msg.content || '')
 
 // ✅ Get product image
 const getProductImage = (product: any) => {
@@ -1435,10 +1423,11 @@ onUnmounted(() => {
                     variant="outlined"
                     size="small"
                     class="view-product-btn"
-                    @click="viewProduct(getOrderProductId(msg))"
+                    @click="viewOrder(getOrderMessageOrderId(msg))"
+                    :disabled="!getOrderMessageOrderId(msg)"
                   >
                     <v-icon start size="16">mdi-eye-outline</v-icon>
-                    View Product
+                    View Order
                   </v-btn>
                 </div>
 
@@ -2158,4 +2147,3 @@ onUnmounted(() => {
   }
 }
 </style>
-

@@ -748,17 +748,10 @@ const formatDate = (dateString) => {
   })
 }
 
-// View product function
-const viewProduct = (productId) => {
-  if (productId) {
-    router.push(`/viewproduct/${productId}`)
-  }
-}
-
 // View order details function
 const viewOrder = (orderId) => {
   if (orderId) {
-    router.push(`/orderdetails/${orderId}`)
+    router.push({ name: 'order-details', params: { id: orderId } })
   }
 }
 
@@ -1053,7 +1046,7 @@ onBeforeRouteUpdate((to, from, next) => {
                     <div class="product-image-container">
                       <v-img :src="item.product_img || '/placeholder-product.png'"
                         :lazy-src="'/placeholder-product.png'" cover class="product-image"
-                        @click="viewProduct(item.product_id)" aspect-ratio="1">
+                        @click="viewOrder(order.id)" aspect-ratio="1">
                         <template v-slot:placeholder>
                           <v-row class="fill-height ma-0" align="center" justify="center">
                             <v-progress-circular indeterminate color="primary"></v-progress-circular>
@@ -1063,7 +1056,7 @@ onBeforeRouteUpdate((to, from, next) => {
                     </div>
 
                     <div class="item-details">
-                      <h4 class="product-name" @click="viewProduct(item.product_id)">
+                      <h4 class="product-name" @click="viewOrder(order.id)">
                         {{ item.product_name || 'Product' }}
                       </h4>
                       <div class="item-specs">
@@ -1091,7 +1084,7 @@ onBeforeRouteUpdate((to, from, next) => {
                   <div class="action-buttons">
                     <v-btn color="primary" variant="outlined" size="small" @click="viewOrder(order.id)">
                       <v-icon left small>mdi-receipt</v-icon>
-                      Details
+                      View Order
                     </v-btn>
                     <v-btn v-if="order.payment_status === 'paid' && order.delivery_status !== 'delivered'"
                       color="success" variant="flat" size="small">
