@@ -5,6 +5,10 @@ import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
+import {
+  getVisibleUnreadNotificationCount,
+  resolveVisibleNotification,
+} from '@/utils/chatNotifications'
 
 const activeTab = ref('account')
 
@@ -802,14 +806,21 @@ const setupNotificationListener = async () => {
         table: 'notifications',
         filter: `user_id=eq.${user.id}`,
       },
-      (payload) => {
+      async (payload) => {
         console.log('New notification received in profile:', payload)
+
+        const visibleNotification = await resolveVisibleNotification(payload.new)
+
+        if (!visibleNotification) {
+          return
+        }
+
         unreadNotifications.value++
 
         // Show native notification if enabled
         if (Notification.permission === 'granted') {
           new Notification('CloseShop', {
-            body: payload.new.message,
+            body: visibleNotification.message,
             icon: '/icon.png',
           })
         }
@@ -839,15 +850,7 @@ const fetchUnreadNotificationCount = async () => {
   } = await supabase.auth.getUser()
   if (!user) return
 
-  const { count, error } = await supabase
-    .from('notifications')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('is_read', false)
-
-  if (!error && count !== null) {
-    unreadNotifications.value = count
-  }
+  unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
 }
 
 // Add goNotifications function

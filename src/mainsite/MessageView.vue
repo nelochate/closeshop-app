@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
-import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue' 
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
+import { formatLiveTimestamp, parseAppTimestamp } from '@/utils/dateTime'
+import { resolveConversationViewerRole, resolveCounterpartyIdentity } from '@/utils/chatIdentity'
 
 const activeTab = ref('chat')
 const router = useRouter()
@@ -16,17 +18,24 @@ const error = ref<string | null>(null)
 const showDeleteDialog = ref(false)
 const conversationToDelete = ref<any>(null)
 const deleting = ref(false)
+const currentTime = ref(Date.now())
+let conversationsSubscription: any = null
+let refreshInterval: ReturnType<typeof setInterval> | null = null
+let timeUpdateInterval: ReturnType<typeof setInterval> | null = null
+
+const formatConversationTime = (timestamp?: string | null) =>
+  formatLiveTimestamp(timestamp, currentTime.value)
 
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing conversations...')
-  
+
   try {
     // Clear any existing errors
     error.value = null
-    
+
     // Refresh conversations
     await fetchConversations()
-    
+
     console.log('✅ Conversations refresh complete!')
   } catch (err) {
     console.error('❌ Refresh failed:', err)
@@ -148,32 +157,28 @@ const fetchConversations = async () => {
 
         console.log('🏪 Shop data:', shop)
 
-        // Determine display name and avatar
-        let displayName = 'User'
-        let avatar = `https://ui-avatars.com/api/?name=User&background=random`
+        const viewerRole = resolveConversationViewerRole({
+          currentUserId: currentProfile.id,
+          customerUserId: conv.user1,
+          sellerUserId: conv.user2,
+        })
 
-        if (shop?.business_name) {
-          displayName = shop.business_name
-          avatar = shop.logo_url || avatar
-        } else if (otherProfile?.first_name) {
-          displayName = `${otherProfile.first_name} ${otherProfile.last_name || ''}`.trim()
-          avatar = otherProfile.avatar_url || avatar
-        }
+        // Determine display name and avatar
+        const { displayName, avatar } = resolveCounterpartyIdentity({
+          viewerRole,
+          profile: otherProfile,
+          shop,
+        })
 
         // Determine last message preview
         let lastMessagePreview = '(No messages yet)'
         let senderName = ''
-        let messageTime = ''
         let isUnread = unreadMessages.length > 0
 
         if (latestMessage) {
           const isFromCurrentUser = latestMessage.sender_id === user.id
-          senderName = isFromCurrentUser ? 'You' : (otherProfile?.first_name || 'User')
+          senderName = isFromCurrentUser ? 'You' : displayName
           lastMessagePreview = latestMessage.content
-          messageTime = new Date(latestMessage.created_at).toLocaleTimeString([], {
-            hour: '2-digit',
-            minute: '2-digit'
-          })
 
           // Check if the latest message itself is unread
           const isLatestMessageUnread = latestMessage.receiver_id === user.id && !latestMessage.is_read
@@ -186,8 +191,8 @@ const fetchConversations = async () => {
           otherUserName: displayName,
           avatar: avatar,
           lastMessage: lastMessagePreview,
+          lastMessageCreatedAt: latestMessage?.created_at || null,
           sender: senderName,
-          time: messageTime,
           unread: isUnread,
           unreadCount: unreadMessages.length,
           updatedAt: conv.updated_at,
@@ -200,7 +205,11 @@ const fetchConversations = async () => {
     )
 
     // Sort by update time (most recent first)
-    conversations.value.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
+    conversations.value.sort((a, b) => {
+      const rightTime = parseAppTimestamp(b.updatedAt)?.getTime() || 0
+      const leftTime = parseAppTimestamp(a.updatedAt)?.getTime() || 0
+      return rightTime - leftTime
+    })
 
     console.log('🎉 Final conversations:', conversations.value)
 
@@ -349,7 +358,8 @@ const openChat = (conversation: any) => {
   console.log('💬 Opening chat with:', conversation)
   router.push({
     name: 'chatview',
-    params: { id: conversation.otherUserId }
+    params: { id: conversation.otherUserId },
+    query: { conversationId: conversation.id },
   })
 }
 
@@ -362,17 +372,28 @@ const startNewConversation = () => {
 
 // Initialize
 onMounted(async () => {
+  currentTime.value = Date.now()
+  timeUpdateInterval = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 30000)
   await fetchConversations()
-  const subscription = subscribeToMessages()
-
-  // Cleanup subscription on component unmount
-  return () => {
-    subscription.unsubscribe()
-  }
+  conversationsSubscription = subscribeToMessages()
+  refreshInterval = setInterval(fetchConversations, 30000)
 })
 
-// Refresh every 30 seconds (optional)
-setInterval(fetchConversations, 30000)
+onUnmounted(() => {
+  conversationsSubscription?.unsubscribe()
+
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
+
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
+  }
+})
 </script>
 
 <template>
@@ -473,7 +494,7 @@ setInterval(fetchConversations, 30000)
                     class="message-time"
                     :class="{ 'unread-time': conversation.unread }"
                   >
-                    {{ conversation.time }}
+                    {{ formatConversationTime(conversation.lastMessageCreatedAt) }}
                   </div>
                   <div class="action-buttons">
                     <v-icon
@@ -589,7 +610,7 @@ setInterval(fetchConversations, 30000)
 
 /* Main content area - accounts for the fixed header */
 .messages-view {
-  margin-top: calc(56px + var(--sat, 0px));  
+  margin-top: calc(56px + var(--sat, 0px));
   min-height: calc(100vh - 56px - var(--sat, 0px));
   padding-bottom: 80px;
 }
@@ -599,7 +620,7 @@ setInterval(fetchConversations, 30000)
   .top-nav {
     padding-top: env(safe-area-inset-top);
   }
-  
+
   .messages-view {
     margin-top: calc(56px + env(safe-area-inset-top));
   }
@@ -611,7 +632,7 @@ setInterval(fetchConversations, 30000)
     height: 56px !important;
     padding-top: 0 !important;
   }
-  
+
   .messages-view {
     margin-top: 56px;
   }

@@ -241,7 +241,7 @@ onUnmounted(() => {
 // Watch for route changes to mark messages as read when viewing chat
 watch(() => route.path, (newPath) => {
   // Check if we're on a chat-related page
-  if (newPath.includes('/messageview') || newPath.includes('/chat/')) {
+  if (newPath.includes('/messageview') || newPath.includes('/chatview/')) {
     markAllMessagesAsRead()
   }
 })

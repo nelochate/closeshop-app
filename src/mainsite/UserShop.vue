@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
 
 const router = useRouter()
 const goBack = () => router.back()
@@ -292,16 +293,31 @@ const markAsDelivered = async (orderId: string) => {
   if (!confirm('Mark this order as delivered?')) return
 
   try {
+    const deliveredAt = new Date().toISOString()
+    const orderToUpdate = orders.value.find((order) => order.id === orderId)
+
     const { error } = await supabase
       .from('orders')
       .update({
         status: 'delivered',
         delivery_status: 'delivered',
-        updated_at: new Date().toISOString(),
+        delivered_at: deliveredAt,
+        updated_at: deliveredAt,
       })
       .eq('id', orderId)
 
     if (error) throw error
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: 'delivered',
+        createdAt: deliveredAt,
+        orderData: orderToUpdate,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about delivered status:', notificationError)
+    }
 
     alert('✅ Order marked as delivered')
     await fetchOrders()
