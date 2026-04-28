@@ -3,6 +3,15 @@ import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
+import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
+import {
+  buildDeliveryAddress,
+  buildShopAddress,
+  extractPersistedRiderCoordinates,
+  resolveTrackingLocation,
+  type TrackingLocation,
+  type TrackingViewerMode,
+} from '@/utils/orderTracking'
 
 const route = useRoute()
 const router = useRouter()
@@ -23,6 +32,8 @@ const riderDetails = ref<any>(null)
 const userRole = ref<'buyer' | 'seller' | 'rider' | null>(null)
 const currentRiderId = ref<number | null>(null)
 const currentRiderProfile = ref<any>(null)
+const pickupTrackingLocation = ref<TrackingLocation | null>(null)
+const deliveryTrackingLocation = ref<TrackingLocation | null>(null)
 
 // Timer state
 const timeRemaining = ref<number>(300)
@@ -208,6 +219,8 @@ const fetchOrderDetails = async () => {
   try {
     loading.value = true
     error.value = null
+    pickupTrackingLocation.value = null
+    deliveryTrackingLocation.value = null
 
     const { data: orderData, error: orderError } = await supabase
       .from('orders')
@@ -220,7 +233,7 @@ const fetchOrderDetails = async () => {
         buyer:profiles!orders_user_id_fkey (id, first_name, last_name, avatar_url, phone),
         address:addresses!orders_address_id_fkey (
           id, recipient_name, phone, street, postal_code, purok, building, 
-          house_no, region_name, province_name, city_name, barangay_name
+          house_no, region_name, province_name, city_name, barangay_name, latitude, longitude
         )
       `)
       .eq('id', orderId)
@@ -241,6 +254,8 @@ const fetchOrderDetails = async () => {
     if (resolvedShopId) {
       await fetchShopAndSeller(resolvedShopId)
     }
+
+    await loadTrackingLocations()
     
     await getCurrentUserAndRole()
 
@@ -252,6 +267,8 @@ const fetchOrderDetails = async () => {
       shop.value = null
       shippingAddress.value = null
       riderDetails.value = null
+      pickupTrackingLocation.value = null
+      deliveryTrackingLocation.value = null
       error.value = 'You do not have access to this order.'
       return
     }
@@ -291,6 +308,47 @@ const fetchShopAndSeller = async (shopId: string) => {
   }
 }
 
+const loadTrackingLocations = async () => {
+  const pickupQuery = [
+    shop.value?.house_no,
+    shop.value?.building,
+    shop.value?.street,
+    shop.value?.barangay,
+    shop.value?.city,
+    shop.value?.province,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  const deliveryQuery = [
+    shippingAddress.value?.house_no,
+    shippingAddress.value?.building,
+    shippingAddress.value?.street,
+    shippingAddress.value?.purok,
+    shippingAddress.value?.barangay_name,
+    shippingAddress.value?.city_name,
+    shippingAddress.value?.province_name,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  pickupTrackingLocation.value = await resolveTrackingLocation({
+    name: shop.value?.business_name || 'Pickup point',
+    address: buildShopAddress(shop.value),
+    lat: shop.value?.latitude,
+    lng: shop.value?.longitude,
+    fallbackQuery: pickupQuery || undefined,
+  })
+
+  deliveryTrackingLocation.value = await resolveTrackingLocation({
+    name: shippingAddress.value?.recipient_name || buyerDisplayName.value,
+    address: buildDeliveryAddress(shippingAddress.value),
+    lat: shippingAddress.value?.latitude,
+    lng: shippingAddress.value?.longitude,
+    fallbackQuery: deliveryQuery || undefined,
+  })
+}
+
 // Computed properties
 const subtotal = computed(() => {
   return orderItems.value.reduce((sum, item) => sum + (item.price * item.quantity), 0)
@@ -315,20 +373,14 @@ const buyerDisplayName = computed(() => {
   return [buyer.value.first_name, buyer.value.last_name].filter(Boolean).join(' ') || 'Customer unavailable'
 })
 
+const riderDisplayName = computed(() => {
+  if (!riderDetails.value) return 'Assigned rider'
+  return [riderDetails.value.first_name, riderDetails.value.last_name].filter(Boolean).join(' ') || 'Assigned rider'
+})
+
 const shopAddress = computed(() => {
   if (!shop.value) return 'Shop address unavailable'
-
-  const parts = [
-    shop.value.house_no,
-    shop.value.building,
-    shop.value.street,
-    shop.value.barangay,
-    shop.value.city,
-    shop.value.province,
-    shop.value.postal,
-  ].filter(Boolean)
-
-  return parts.join(', ') || shop.value.detected_address || 'Shop address unavailable'
+  return buildShopAddress(shop.value)
 })
 
 const statusColor = computed(() => {
@@ -376,6 +428,49 @@ const statusDisplayText = computed(() => {
 const isBuyer = computed(() => userRole.value === 'buyer')
 const isSeller = computed(() => userRole.value === 'seller')
 const isRider = computed(() => userRole.value === 'rider')
+const trackingViewerMode = computed<TrackingViewerMode>(() => {
+  if (isSeller.value) return 'seller'
+  if (isRider.value) return 'rider'
+  return 'customer'
+})
+const shouldTrackOwnLocation = computed(
+  () =>
+    isRider.value &&
+    !!currentRiderId.value &&
+    order.value?.rider_id === currentRiderId.value &&
+    ['accepted_by_rider', 'picked_up'].includes(order.value?.status),
+)
+const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
+  const persisted = extractPersistedRiderCoordinates(order.value)
+
+  if (!persisted) return null
+
+  return {
+    ...persisted,
+    name: riderDisplayName.value,
+    address:
+      riderDetails.value?.phone ||
+      `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+  }
+})
+const trackingMapTitle = computed(() => {
+  if (order.value?.status === 'picked_up') return 'Order is on the way to the customer'
+  if (order.value?.status === 'accepted_by_rider') return 'Rider is heading to the pickup point'
+  if (order.value?.status === 'waiting_for_rider') return 'Tracking is ready once a rider accepts'
+  if (order.value?.status === 'delivered' || order.value?.status === 'completed') {
+    return 'Delivery route completed'
+  }
+  return 'Follow the delivery journey'
+})
+const trackingMapSubtitle = computed(() => {
+  if (order.value?.status === 'pending_approval') {
+    return 'The map is ready, and live rider tracking will appear after approval and assignment.'
+  }
+  if (!order.value?.rider_id) {
+    return 'Pickup and delivery addresses are available now. Live rider sharing starts once the order is assigned.'
+  }
+  return ''
+})
 
 const showCancelButton = computed(() => isBuyer.value && order.value?.status === 'pending_approval')
 const isCancelDisabled = computed(() => !canCancel.value || timeRemaining.value <= 0)
@@ -665,16 +760,7 @@ const getProductImage = (product: any) => {
 
 const buildFullAddress = computed(() => {
   if (!shippingAddress.value) return 'No shipping address'
-  const parts = [
-    shippingAddress.value.house_no,
-    shippingAddress.value.building,
-    shippingAddress.value.street,
-    shippingAddress.value.purok,
-    shippingAddress.value.barangay_name,
-    shippingAddress.value.city_name,
-    shippingAddress.value.province_name
-  ].filter(Boolean)
-  return parts.join(', ')
+  return buildDeliveryAddress(shippingAddress.value)
 })
 
 const goBack = () => router.back()
@@ -698,151 +784,269 @@ onMounted(async () => {
 
 <template>
   <v-app>
-    <v-app-bar flat color="white" elevation="1">
-      <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
-      <v-toolbar-title class="font-weight-bold">Order Details</v-toolbar-title>
-      <v-spacer />
-      <v-chip v-if="order?.status" :color="statusColor" variant="flat">
-        <v-icon start small>{{ statusIcon }}</v-icon>
-        {{ statusDisplayText }}
-      </v-chip>
-    </v-app-bar>
+    <v-main class="order-page">
+      <header class="order-header">
+        <div class="order-header__inner">
+          <div class="order-header__lead">
+            <v-btn icon variant="text" class="header-icon-btn" @click="goBack">
+              <v-icon>mdi-arrow-left</v-icon>
+            </v-btn>
 
-    <v-main>
-      <div v-if="loading" class="loading-container">
+            <div>
+              <p class="order-header__eyebrow">
+                {{ isSeller ? 'Seller order view' : isRider ? 'Rider order view' : 'Customer order view' }}
+              </p>
+              <h1>Order Details</h1>
+              <p class="order-header__subtext">
+                {{ order?.transaction_number || order?.id?.slice(0, 8) || 'Track every milestone in one place.' }}
+              </p>
+            </div>
+          </div>
+
+          <v-chip v-if="order?.status" :color="statusColor" variant="flat" class="order-status-chip">
+            <v-icon start size="16">{{ statusIcon }}</v-icon>
+            {{ statusDisplayText }}
+          </v-chip>
+        </div>
+      </header>
+
+      <div v-if="loading" class="state-container">
         <v-progress-circular indeterminate color="primary" size="64" />
         <p>Loading order details...</p>
       </div>
 
-      <div v-else-if="error" class="error-container">
+      <div v-else-if="error" class="state-container">
         <v-icon color="error" size="64">mdi-alert-circle-outline</v-icon>
         <p>{{ error }}</p>
         <v-btn color="primary" @click="fetchOrderDetails">Try Again</v-btn>
       </div>
 
-      <div v-else-if="order" class="order-content">
-        <!-- Progress Bar -->
-        <div class="progress-section" v-if="order.status !== 'cancelled'">
-          <v-progress-linear :model-value="timelineProgress" height="6" color="primary" rounded />
-          <div class="progress-text">
-            <span v-if="order.status === 'completed'">Order Completed!</span>
-            <span v-if="order.status === 'delivered'">🎉 Order Delivered!</span>
-            <span v-else-if="order.status === 'picked_up'">🚚 Out for Delivery</span>
-            <span v-else-if="order.status === 'accepted_by_rider'">🏍️ Rider on the way</span>
-            <span v-else-if="order.status === 'waiting_for_rider'">⏳ Looking for a rider</span>
-            <span v-else-if="order.status === 'pending_approval'">📝 Waiting for seller approval</span>
+      <div v-else-if="order" class="order-shell">
+        <section class="hero-card">
+          <div class="hero-card__top">
+            <div class="hero-card__progress">
+              <span class="hero-card__label">Fulfillment progress</span>
+              <h2>{{ trackingMapTitle }}</h2>
+              <p>
+                <span v-if="order.status === 'completed'">The order is fully completed.</span>
+                <span v-else-if="order.status === 'delivered'">The rider marked the order as delivered.</span>
+                <span v-else-if="order.status === 'picked_up'">The order has left the shop and is heading to the customer.</span>
+                <span v-else-if="order.status === 'accepted_by_rider'">The rider is moving toward the pickup point.</span>
+                <span v-else-if="order.status === 'waiting_for_rider'">The seller approved the order and it is waiting for a rider.</span>
+                <span v-else-if="order.status === 'pending_approval'">The seller still needs to approve the order.</span>
+                <span v-else-if="order.status === 'cancelled'">This order was cancelled before completion.</span>
+              </p>
+            </div>
+
+            <div class="hero-card__meta">
+              <div class="hero-chip">
+                <v-icon size="16" color="#2f7de1">mdi-storefront-outline</v-icon>
+                <span>{{ shopDisplayName }}</span>
+              </div>
+              <div class="hero-chip">
+                <v-icon size="16" color="#2f7de1">mdi-account-outline</v-icon>
+                <span>{{ buyerDisplayName }}</span>
+              </div>
+            </div>
           </div>
-        </div>
+
+          <v-progress-linear
+            v-if="order.status !== 'cancelled'"
+            :model-value="timelineProgress"
+            height="8"
+            color="primary"
+            rounded
+            class="hero-progress-bar"
+          />
+
+          <div class="hero-stats">
+            <article class="hero-stat">
+              <span class="hero-stat__label">Order total</span>
+              <strong>{{ formatCurrency(totalAmount) }}</strong>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat__label">Delivery option</span>
+              <strong>{{ order.delivery_option || 'Standard' }}</strong>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat__label">Payment method</span>
+              <strong>{{ order.payment_method || 'Cash' }}</strong>
+            </article>
+            <article class="hero-stat">
+              <span class="hero-stat__label">Order placed</span>
+              <strong>{{ formatDate(order.created_at) }}</strong>
+            </article>
+          </div>
+        </section>
 
         <v-tabs v-model="activeTab" color="primary" class="tabs-container">
-          <v-tab value="details">Order Details</v-tab>
+          <v-tab value="details">Overview</v-tab>
           <v-tab value="timeline">Timeline</v-tab>
         </v-tabs>
 
         <v-window v-model="activeTab" class="window-container">
-          <!-- Details Tab -->
           <v-window-item value="details">
             <div class="details-content">
-              <!-- Cancellation Alert -->
-              <v-alert v-if="showCancelButton" :type="timeRemaining > 0 ? 'warning' : 'error'" variant="tonal" class="mb-4">
-                <v-row align="center" no-gutters>
-                  <v-col cols="auto" class="mr-3">
-                    <v-icon>{{ timeRemaining > 0 ? 'mdi-timer-sand' : 'mdi-timer-off' }}</v-icon>
-                  </v-col>
-                  <v-col>
-                    <strong v-if="timeRemaining > 0">Cancel within {{ formatTimeRemaining() }}</strong>
-                    <strong v-else>Cancellation window expired</strong>
-                  </v-col>
-                </v-row>
+              <v-alert
+                v-if="showCancelButton"
+                :type="timeRemaining > 0 ? 'warning' : 'error'"
+                variant="tonal"
+                class="mb-4"
+              >
+                <div class="inline-alert">
+                  <v-icon>{{ timeRemaining > 0 ? 'mdi-timer-sand' : 'mdi-timer-off' }}</v-icon>
+                  <strong v-if="timeRemaining > 0">Cancel within {{ formatTimeRemaining() }}</strong>
+                  <strong v-else>Cancellation window expired</strong>
+                </div>
               </v-alert>
 
-              <!-- Order Summary -->
-              <v-card class="mb-4">
-                <v-card-title class="section-title"><v-icon left>mdi-receipt</v-icon>Order Summary</v-card-title>
-                <v-card-text>
-                  <v-row>
-                    <v-col cols="6">
-                      <div class="info-item"><span class="label">Order ID:</span><span class="value">{{ order.id.slice(0,8) }}...</span></div>
-                      <div class="info-item"><span class="label">Order Date:</span><span class="value">{{ formatDate(order.created_at) }}</span></div>
-                      <div class="info-item" v-if="order.transaction_number"><span class="label">Transaction #:</span><span class="value">{{ order.transaction_number }}</span></div>
-                    </v-col>
-                    <v-col cols="6">
-                      <div class="info-item"><span class="label">Status:</span><span class="value">{{ statusDisplayText }}</span></div>
-                      <div class="info-item"><span class="label">Delivery:</span><span class="value">{{ order.delivery_option || 'Standard' }}</span></div>
-                      <div class="info-item"><span class="label">Payment:</span><span class="value">{{ order.payment_method || 'Cash' }}</span></div>
-                    </v-col>
-                    <v-col cols="12" v-if="order.note">
-                      <div class="info-item"><span class="label">Note:</span><span class="value">{{ order.note }}</span></div>
-                    </v-col>
-                  </v-row>
-                </v-card-text>
-              </v-card>
+              <OrderTrackingMap
+                class="mb-4"
+                :order-id="orderId"
+                :pickup-location="pickupTrackingLocation"
+                :delivery-location="deliveryTrackingLocation"
+                :rider-location="persistedRiderTrackingLocation"
+                :viewer-mode="trackingViewerMode"
+                :track-own-location="shouldTrackOwnLocation"
+                :title="trackingMapTitle"
+                :subtitle="trackingMapSubtitle"
+              />
 
-              <!-- Fulfillment Details -->
-              <v-card class="mb-4" v-if="shop || seller || buyer">
-                <v-card-title class="section-title"><v-icon left>mdi-storefront-outline</v-icon>Fulfillment Details</v-card-title>
-                <v-card-text>
-                  <div class="info-item" v-if="shop">
-                    <span class="label">Shop:</span>
-                    <span class="value">{{ shopDisplayName }}</span>
-                  </div>
-                  <div class="info-item" v-if="seller">
-                    <span class="label">Seller:</span>
-                    <span class="value">{{ sellerDisplayName }}</span>
-                  </div>
-                  <div class="info-item" v-if="shop">
-                    <span class="label">Pickup Address:</span>
-                    <span class="value">{{ shopAddress }}</span>
-                  </div>
-                  <div class="info-item" v-if="buyer">
-                    <span class="label">Customer:</span>
-                    <span class="value">{{ buyerDisplayName }}</span>
-                  </div>
-                  <div class="detail-actions">
+              <div class="content-grid">
+                <v-card class="surface-card">
+                  <v-card-title class="section-title">
+                    <v-icon start>mdi-receipt-text-outline</v-icon>
+                    Order summary
+                  </v-card-title>
+                  <v-card-text>
+                    <div class="info-list">
+                      <div class="info-item">
+                        <span class="label">Order ID</span>
+                        <span class="value">{{ order.id.slice(0, 8) }}...</span>
+                      </div>
+                      <div class="info-item" v-if="order.transaction_number">
+                        <span class="label">Transaction #</span>
+                        <span class="value">{{ order.transaction_number }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="label">Status</span>
+                        <span class="value">{{ statusDisplayText }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="label">Delivery</span>
+                        <span class="value">{{ order.delivery_option || 'Standard' }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="label">Payment</span>
+                        <span class="value">{{ order.payment_method || 'Cash' }}</span>
+                      </div>
+                      <div class="info-item" v-if="order.note">
+                        <span class="label">Note</span>
+                        <span class="value">{{ order.note }}</span>
+                      </div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+
+                <v-card class="surface-card" v-if="shop || seller || buyer">
+                  <v-card-title class="section-title">
+                    <v-icon start>mdi-store-marker-outline</v-icon>
+                    Fulfillment details
+                  </v-card-title>
+                  <v-card-text>
+                    <div class="info-list">
+                      <div class="info-item" v-if="shop">
+                        <span class="label">Shop</span>
+                        <span class="value">{{ shopDisplayName }}</span>
+                      </div>
+                      <div class="info-item" v-if="seller">
+                        <span class="label">Seller</span>
+                        <span class="value">{{ sellerDisplayName }}</span>
+                      </div>
+                      <div class="info-item" v-if="shop">
+                        <span class="label">Pickup address</span>
+                        <span class="value">{{ shopAddress }}</span>
+                      </div>
+                      <div class="info-item" v-if="buyer">
+                        <span class="label">Customer</span>
+                        <span class="value">{{ buyerDisplayName }}</span>
+                      </div>
+                    </div>
+
+                    <div class="detail-actions">
+                      <v-btn
+                        v-if="shop?.owner_id && !isSeller"
+                        color="primary"
+                        variant="outlined"
+                        size="small"
+                        @click="contactSeller"
+                      >
+                        <v-icon start size="16">mdi-chat-outline</v-icon>
+                        Contact seller
+                      </v-btn>
+                      <v-btn
+                        v-if="buyer?.id && !isBuyer"
+                        color="primary"
+                        variant="outlined"
+                        size="small"
+                        @click="contactBuyer"
+                      >
+                        <v-icon start size="16">mdi-chat-outline</v-icon>
+                        Contact customer
+                      </v-btn>
+                    </div>
+                  </v-card-text>
+                </v-card>
+
+                <v-card class="surface-card" v-if="riderDetails && order.status !== 'pending_approval'">
+                  <v-card-title class="section-title">
+                    <v-icon start>mdi-motorbike</v-icon>
+                    Rider information
+                  </v-card-title>
+                  <v-card-text>
+                    <div class="info-list">
+                      <div class="info-item">
+                        <span class="label">Name</span>
+                        <span class="value">{{ riderDisplayName }}</span>
+                      </div>
+                      <div class="info-item">
+                        <span class="label">Phone</span>
+                        <span class="value">{{ riderDetails.phone || 'Not provided' }}</span>
+                      </div>
+                    </div>
+
                     <v-btn
-                      v-if="shop?.owner_id && !isSeller"
                       color="primary"
                       variant="outlined"
                       size="small"
-                      @click="contactSeller"
+                      @click="contactRider"
+                      :disabled="!riderDetails?.phone"
                     >
-                      <v-icon left small>mdi-chat-outline</v-icon>Contact Seller
+                      <v-icon start size="16">mdi-phone</v-icon>
+                      Contact rider
                     </v-btn>
-                    <v-btn
-                      v-if="buyer?.id && !isBuyer"
-                      color="primary"
-                      variant="outlined"
-                      size="small"
-                      @click="contactBuyer"
-                    >
-                      <v-icon left small>mdi-chat-outline</v-icon>Contact Customer
-                    </v-btn>
-                  </div>
-                </v-card-text>
-              </v-card>
+                  </v-card-text>
+                </v-card>
+              </div>
 
-              <!-- Rider Info -->
-              <v-card class="mb-4" v-if="riderDetails && order.status !== 'pending_approval'">
-                <v-card-title class="section-title"><v-icon left>mdi-motorbike</v-icon>Rider Information</v-card-title>
-                <v-card-text>
-                  <div class="info-item"><span class="label">Name:</span><span class="value">{{ riderDetails.first_name }} {{ riderDetails.last_name }}</span></div>
-                  <div class="info-item"><span class="label">Phone:</span><span class="value">{{ riderDetails.phone || 'Not provided' }}</span></div>
-                  <v-btn color="primary" variant="outlined" size="small" @click="contactRider" :disabled="!riderDetails?.phone">
-                    <v-icon left small>mdi-phone</v-icon>Contact Rider
-                  </v-btn>
-                </v-card-text>
-              </v-card>
-
-              <!-- Products -->
-              <v-card class="mb-4">
-                <v-card-title class="section-title"><v-icon left>mdi-package-variant</v-icon>Products ({{ orderItems.length }})</v-card-title>
+              <v-card class="surface-card mb-4">
+                <v-card-title class="section-title">
+                  <v-icon start>mdi-package-variant-closed</v-icon>
+                  Products ({{ orderItems.length }})
+                </v-card-title>
                 <v-card-text>
                   <div v-for="item in orderItems" :key="item.id" class="product-item">
-                    <v-row align="center">
-                      <v-col cols="auto">
-                        <v-img :src="getProductImage(item.products)" width="60" height="60" class="product-image" @click="viewProduct(item.product_id)" style="cursor:pointer"/>
-                      </v-col>
-                      <v-col>
+                    <div class="product-layout">
+                      <v-img
+                        :src="getProductImage(item.products)"
+                        width="68"
+                        height="68"
+                        class="product-image"
+                        cover
+                        @click="viewProduct(item.product_id)"
+                      />
+
+                      <div class="product-copy">
                         <div class="product-name">{{ item.products?.prod_name }}</div>
                         <div class="product-details">
                           <span>Qty: {{ item.quantity }}</span>
@@ -850,66 +1054,88 @@ onMounted(async () => {
                           <span v-if="item.selected_variety">Variety: {{ item.selected_variety }}</span>
                         </div>
                         <div class="product-price">{{ formatCurrency(item.price) }} each</div>
-                      </v-col>
-                      <v-col cols="auto">
-                        <div class="item-total">{{ formatCurrency(item.price * item.quantity) }}</div>
-                      </v-col>
-                    </v-row>
+                      </div>
+
+                      <div class="item-total">{{ formatCurrency(item.price * item.quantity) }}</div>
+                    </div>
                   </div>
                 </v-card-text>
               </v-card>
 
-              <!-- Price Breakdown -->
-              <v-card class="mb-4">
-                <v-card-title class="section-title"><v-icon left>mdi-cash</v-icon>Price Breakdown</v-card-title>
-                <v-card-text>
-                  <div class="price-breakdown">
-                    <div class="price-item"><span>Subtotal:</span><span>{{ formatCurrency(subtotal) }}</span></div>
-                    <div class="price-item"><span>Delivery Fee:</span><span>{{ formatCurrency(deliveryFee) }}</span></div>
-                    <div class="price-item total"><span>Total:</span><span>{{ formatCurrency(totalAmount) }}</span></div>
-                  </div>
-                </v-card-text>
-              </v-card>
+              <div class="content-grid content-grid--two">
+                <v-card class="surface-card">
+                  <v-card-title class="section-title">
+                    <v-icon start>mdi-cash-multiple</v-icon>
+                    Price breakdown
+                  </v-card-title>
+                  <v-card-text>
+                    <div class="price-breakdown">
+                      <div class="price-item"><span>Subtotal</span><span>{{ formatCurrency(subtotal) }}</span></div>
+                      <div class="price-item"><span>Delivery fee</span><span>{{ formatCurrency(deliveryFee) }}</span></div>
+                      <div class="price-item total"><span>Total</span><span>{{ formatCurrency(totalAmount) }}</span></div>
+                    </div>
+                  </v-card-text>
+                </v-card>
 
-              <!-- Delivery Address -->
-              <v-card class="mb-4" v-if="shippingAddress">
-                <v-card-title class="section-title"><v-icon left>mdi-map-marker</v-icon>Delivery Address</v-card-title>
-                <v-card-text>
-                  <div class="address-content">
-                    <strong>{{ shippingAddress.recipient_name }}</strong>
-                    <span v-if="shippingAddress.phone"> • {{ shippingAddress.phone }}</span>
-                    <div class="address-details">{{ buildFullAddress }}</div>
-                  </div>
-                </v-card-text>
-              </v-card>
+                <v-card class="surface-card" v-if="shippingAddress">
+                  <v-card-title class="section-title">
+                    <v-icon start>mdi-home-map-marker</v-icon>
+                    Delivery address
+                  </v-card-title>
+                  <v-card-text>
+                    <div class="address-content">
+                      <strong>{{ shippingAddress.recipient_name }}</strong>
+                      <span v-if="shippingAddress.phone"> • {{ shippingAddress.phone }}</span>
+                      <div class="address-details">{{ buildFullAddress }}</div>
+                    </div>
+                  </v-card-text>
+                </v-card>
+              </div>
             </div>
           </v-window-item>
 
-          <!-- Timeline Tab -->
           <v-window-item value="timeline">
-            <v-card>
-              <v-card-title class="section-title"><v-icon left>mdi-timeline</v-icon>Order Timeline</v-card-title>
+            <v-card class="surface-card">
+              <v-card-title class="section-title">
+                <v-icon start>mdi-timeline-clock-outline</v-icon>
+                Order timeline
+              </v-card-title>
               <v-card-text>
                 <div class="timeline-container">
-                  <div v-for="step in timelineSteps" :key="step.key" class="timeline-item"
+                  <div
+                    v-for="step in timelineSteps"
+                    :key="step.key"
+                    class="timeline-item"
                     :class="{
                       'timeline-completed': step.status === 'completed',
                       'timeline-current': step.status === 'current',
                       'timeline-pending': step.status === 'pending',
-                      'timeline-cancelled': step.status === 'cancelled'
-                    }">
+                      'timeline-cancelled': step.status === 'cancelled',
+                    }"
+                  >
                     <div class="timeline-icon">
-                      <v-icon :color="step.status === 'completed' ? '#4caf50' : step.status === 'current' ? '#2196f3' : step.status === 'cancelled' ? '#f44336' : '#9e9e9e'">
+                      <v-icon
+                        :color="
+                          step.status === 'completed'
+                            ? '#4caf50'
+                            : step.status === 'current'
+                              ? '#2196f3'
+                              : step.status === 'cancelled'
+                                ? '#f44336'
+                                : '#9e9e9e'
+                        "
+                      >
                         {{ step.icon }}
                       </v-icon>
                     </div>
+
                     <div class="timeline-content">
                       <div class="timeline-header">
                         <h4>{{ step.title }}</h4>
                         <span class="timeline-date">{{ formatDate(step.date) }}</span>
                       </div>
                       <p>{{ step.description }}</p>
-                      <v-chip v-if="step.actor" size="x-small" variant="tonal" class="mt-1">
+                      <v-chip v-if="step.actor" size="x-small" variant="tonal" class="mt-2">
                         {{ step.actor }}
                       </v-chip>
                     </div>
@@ -920,7 +1146,10 @@ onMounted(async () => {
                   <div class="legend-item"><div class="legend-dot completed"></div><span>Completed</span></div>
                   <div class="legend-item"><div class="legend-dot current"></div><span>Current</span></div>
                   <div class="legend-item"><div class="legend-dot pending"></div><span>Pending</span></div>
-                  <div v-if="order.status === 'cancelled'" class="legend-item"><div class="legend-dot cancelled"></div><span>Cancelled</span></div>
+                  <div v-if="order.status === 'cancelled'" class="legend-item">
+                    <div class="legend-dot cancelled"></div>
+                    <span>Cancelled</span>
+                  </div>
                 </div>
               </v-card-text>
             </v-card>
@@ -929,39 +1158,52 @@ onMounted(async () => {
       </div>
     </v-main>
 
-    <!-- Action Buttons Footer -->
-    <v-footer app class="action-footer pa-3" color="white" elevation="6" v-if="order && !loading">
+    <v-footer app class="action-footer" color="white" elevation="6" v-if="order && !loading">
       <div class="action-buttons">
-        <!-- Buyer Actions -->
         <template v-if="isBuyer">
-          <v-btn v-if="showCancelButton" :color="isCancelDisabled ? 'grey' : 'error'" :disabled="isCancelDisabled" @click="cancelOrder">
-            <v-icon left>mdi-close-circle</v-icon>{{ getCancelButtonText }}
+          <v-btn
+            v-if="showCancelButton"
+            :color="isCancelDisabled ? 'grey' : 'error'"
+            :disabled="isCancelDisabled"
+            @click="cancelOrder"
+          >
+            <v-icon start>mdi-close-circle</v-icon>
+            {{ getCancelButtonText }}
           </v-btn>
         </template>
 
-        <!-- Seller Actions -->
         <template v-else-if="isSeller">
           <v-btn v-if="order.status === 'pending_approval'" color="success" @click="approveOrder">
-            <v-icon left>mdi-check-circle</v-icon>Approve Order
+            <v-icon start>mdi-check-circle</v-icon>
+            Approve order
           </v-btn>
-          <v-btn v-if="order.status === 'pending_approval'" color="error" variant="outlined" @click="rejectOrder">
-            <v-icon left>mdi-close-circle</v-icon>Reject Order
+          <v-btn
+            v-if="order.status === 'pending_approval'"
+            color="error"
+            variant="outlined"
+            @click="rejectOrder"
+          >
+            <v-icon start>mdi-close-circle</v-icon>
+            Reject order
           </v-btn>
           <v-btn v-if="order.status === 'picked_up'" color="success" @click="markAsDelivered">
-            <v-icon left>mdi-check</v-icon>Mark Delivered
+            <v-icon start>mdi-check</v-icon>
+            Mark delivered
           </v-btn>
         </template>
 
-        <!-- Rider Actions -->
         <template v-else-if="isRider">
           <v-btn v-if="order.status === 'waiting_for_rider'" color="primary" @click="acceptOrderAsRider">
-            <v-icon left>mdi-check-circle</v-icon>Accept Order
+            <v-icon start>mdi-check-circle</v-icon>
+            Accept order
           </v-btn>
           <v-btn v-if="order.status === 'accepted_by_rider'" color="warning" @click="markAsPickedUp">
-            <v-icon left>mdi-package-up</v-icon>Mark as Picked Up
+            <v-icon start>mdi-package-up</v-icon>
+            Mark as picked up
           </v-btn>
           <v-btn v-if="order.status === 'picked_up'" color="success" @click="markAsDelivered">
-            <v-icon left>mdi-check</v-icon>Mark Delivered
+            <v-icon start>mdi-check</v-icon>
+            Mark delivered
           </v-btn>
         </template>
 
@@ -972,145 +1214,348 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.loading-container, .error-container {
+.order-page {
+  min-height: 100dvh;
+  background:
+    radial-gradient(circle at top left, rgba(47, 125, 225, 0.12), transparent 30%),
+    linear-gradient(180deg, #edf4ff 0%, #f7f9fc 30%, #f4f6fb 100%);
+}
+
+.order-header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  padding-top: env(safe-area-inset-top, 0px);
+  background: rgba(11, 37, 69, 0.92);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
+}
+
+.order-header__inner {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 14px 20px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.order-header__lead {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.header-icon-btn {
+  color: white !important;
+  background: rgba(255, 255, 255, 0.1) !important;
+}
+
+.order-header__eyebrow {
+  margin: 0 0 4px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(194, 220, 255, 0.88);
+}
+
+.order-header h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  line-height: 1.2;
+  color: white;
+}
+
+.order-header__subtext {
+  margin: 4px 0 0;
+  color: rgba(226, 236, 255, 0.82);
+  font-size: 0.88rem;
+}
+
+.order-status-chip {
+  font-weight: 700;
+}
+
+.state-container {
+  min-height: calc(100dvh - 220px);
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  height: 60vh;
+  gap: 14px;
   text-align: center;
+  padding: 32px 20px 120px;
+  color: #12304f;
 }
 
-.order-content {
-  padding-bottom: 80px;
+.order-shell {
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 22px 20px calc(120px + env(safe-area-inset-bottom, 0px));
 }
 
-.progress-section {
-  padding: 16px;
-  background: white;
-  border-bottom: 1px solid #e0e0e0;
+.hero-card {
+  padding: 22px;
+  border-radius: 28px;
+  background:
+    linear-gradient(135deg, rgba(15, 50, 92, 0.97), rgba(53, 77, 124, 0.97)),
+    linear-gradient(180deg, #ffffff, #f6f9ff);
+  color: white;
+  box-shadow: 0 24px 56px rgba(11, 37, 69, 0.18);
 }
 
-.progress-text {
-  text-align: center;
+.hero-card__top {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.hero-card__progress h2 {
+  margin: 8px 0;
+  font-size: 1.45rem;
+  line-height: 1.25;
+}
+
+.hero-card__progress p {
+  margin: 0;
+  max-width: 700px;
+  line-height: 1.55;
+  color: rgba(231, 240, 255, 0.84);
+}
+
+.hero-card__label {
+  font-size: 0.76rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(194, 220, 255, 0.88);
+}
+
+.hero-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.hero-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  font-size: 0.84rem;
+  font-weight: 600;
+}
+
+.hero-progress-bar {
+  margin: 18px 0 20px;
+}
+
+.hero-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hero-stat {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.hero-stat__label {
+  display: block;
+  font-size: 0.78rem;
+  color: rgba(214, 228, 255, 0.84);
+}
+
+.hero-stat strong {
+  display: block;
   margin-top: 8px;
-  font-size: 0.85rem;
-  font-weight: 500;
-  color: #354d7c;
+  font-size: 0.98rem;
 }
 
 .tabs-container {
-  background: white;
+  margin-top: 18px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid rgba(53, 77, 124, 0.08);
+  border-radius: 18px;
   position: sticky;
-  top: 0;
-  z-index: 100;
+  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  z-index: 15;
+  backdrop-filter: blur(14px);
 }
 
 .window-container {
-  padding: 16px;
+  padding-top: 18px;
 }
 
 .details-content {
-  max-width: 800px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.inline-alert {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.content-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.content-grid--two {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.surface-card {
+  border-radius: 24px;
+  border: 1px solid rgba(53, 77, 124, 0.08);
+  box-shadow: 0 18px 42px rgba(18, 48, 79, 0.08);
 }
 
 .section-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  padding: 16px;
-}
-
-.product-item {
-  padding: 12px 0;
-  border-bottom: 1px solid #f0f0f0;
-}
-
-.product-name {
-  font-weight: 600;
-  margin-bottom: 4px;
-}
-
-.product-details {
-  display: flex;
-  gap: 12px;
-  font-size: 0.85rem;
-  color: #666;
-  margin-bottom: 4px;
-  flex-wrap: wrap;
-}
-
-.product-price {
-  font-size: 0.9rem;
-  color: #666;
-}
-
-.item-total {
-  font-weight: 600;
   font-size: 1rem;
+  font-weight: 700;
+  padding: 18px 18px 0;
+  color: #12304f;
 }
 
-.product-image {
-  border-radius: 8px;
-  border: 1px solid #f0f0f0;
+.info-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .info-item {
   display: flex;
   justify-content: space-between;
-  padding: 8px 0;
+  gap: 14px;
+  padding: 0 0 10px;
+  border-bottom: 1px solid rgba(18, 48, 79, 0.06);
+}
+
+.info-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
 }
 
 .label {
+  color: #627d98;
   font-weight: 600;
-  color: #666;
 }
 
 .value {
-  color: #333;
+  color: #102a43;
   text-align: right;
+  font-weight: 600;
 }
 
 .detail-actions {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
-  margin-top: 12px;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.product-item {
+  padding: 14px 0;
+  border-bottom: 1px solid rgba(18, 48, 79, 0.06);
+}
+
+.product-item:last-child {
+  border-bottom: 0;
+  padding-bottom: 0;
+}
+
+.product-layout {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.product-image {
+  border-radius: 16px;
+  border: 1px solid rgba(18, 48, 79, 0.08);
+  cursor: pointer;
+}
+
+.product-copy {
+  min-width: 0;
+}
+
+.product-name {
+  font-weight: 700;
+  color: #102a43;
+}
+
+.product-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 6px;
+  font-size: 0.84rem;
+  color: #627d98;
+}
+
+.product-price {
+  margin-top: 6px;
+  font-size: 0.88rem;
+  color: #52667d;
+}
+
+.item-total {
+  font-weight: 700;
+  color: #102a43;
 }
 
 .price-breakdown {
-  max-width: 300px;
-  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
 .price-item {
   display: flex;
   justify-content: space-between;
-  padding: 4px 0;
+  gap: 16px;
 }
 
 .price-item.total {
-  border-top: 2px solid #e0e0e0;
-  padding-top: 8px;
-  margin-top: 8px;
-  font-weight: 700;
-  font-size: 1.1rem;
+  padding-top: 12px;
+  border-top: 2px solid rgba(18, 48, 79, 0.08);
+  font-weight: 800;
+  color: #102a43;
 }
 
 .address-content {
-  padding: 12px;
-  background: #f8f9fa;
-  border-radius: 8px;
+  padding: 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f8fbff, #eef4fc);
   font-size: 0.95rem;
-  line-height: 1.5;
+  line-height: 1.6;
+  color: #12304f;
 }
 
 .address-details {
-  color: #666;
   margin-top: 8px;
+  color: #52667d;
 }
 
-/* Timeline Styles */
 .timeline-container {
   position: relative;
   padding-left: 40px;
@@ -1127,39 +1572,32 @@ onMounted(async () => {
   padding-bottom: 0;
 }
 
+.timeline-item::before {
+  content: '';
+  position: absolute;
+  left: 19px;
+  top: 40px;
+  bottom: 0;
+  width: 2px;
+  background: #d9e2ec;
+}
+
+.timeline-item:last-child::before {
+  display: none;
+}
+
 .timeline-icon {
   flex-shrink: 0;
   width: 40px;
   height: 40px;
-  background: white;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   position: relative;
   z-index: 2;
-  border: 2px solid #e0e0e0;
-}
-
-.timeline-completed .timeline-icon {
-  border-color: #4caf50;
-  background: #e8f5e9;
-}
-
-.timeline-current .timeline-icon {
-  border-color: #2196f3;
-  background: #e3f2fd;
-  animation: pulse 2s infinite;
-}
-
-.timeline-pending .timeline-icon {
-  border-color: #e0e0e0;
-  background: #f5f5f5;
-}
-
-.timeline-cancelled .timeline-icon {
-  border-color: #f44336;
-  background: #ffebee;
+  border: 2px solid #d9e2ec;
+  background: white;
 }
 
 .timeline-content {
@@ -1176,34 +1614,41 @@ onMounted(async () => {
 }
 
 .timeline-header h4 {
-  font-size: 1rem;
-  font-weight: 600;
   margin: 0;
+  font-size: 1rem;
+  font-weight: 700;
+  color: #12304f;
 }
 
 .timeline-date {
-  font-size: 0.75rem;
-  color: #999;
+  font-size: 0.76rem;
+  color: #7b8794;
 }
 
 .timeline-content p {
-  font-size: 0.85rem;
-  color: #666;
   margin: 0;
+  color: #52667d;
+  line-height: 1.5;
 }
 
-.timeline-item::before {
-  content: '';
-  position: absolute;
-  left: 19px;
-  top: 40px;
-  bottom: 0;
-  width: 2px;
-  background: #e0e0e0;
+.timeline-completed .timeline-icon {
+  border-color: #4caf50;
+  background: #e8f5e9;
 }
 
-.timeline-item:last-child::before {
-  display: none;
+.timeline-current .timeline-icon {
+  border-color: #2196f3;
+  background: #e3f2fd;
+  animation: pulse 2s infinite;
+}
+
+.timeline-pending .timeline-icon {
+  background: #f5f7fa;
+}
+
+.timeline-cancelled .timeline-icon {
+  border-color: #f44336;
+  background: #ffebee;
 }
 
 .timeline-completed::before {
@@ -1214,27 +1659,22 @@ onMounted(async () => {
   background: linear-gradient(to bottom, #4caf50 0%, #2196f3 100%);
 }
 
-@keyframes pulse {
-  0% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.4); }
-  70% { box-shadow: 0 0 0 6px rgba(33, 150, 243, 0); }
-  100% { box-shadow: 0 0 0 0 rgba(33, 150, 243, 0); }
-}
-
 .timeline-legend {
   display: flex;
   justify-content: center;
-  gap: 24px;
-  margin-top: 32px;
+  flex-wrap: wrap;
+  gap: 18px;
+  margin-top: 26px;
   padding-top: 16px;
-  border-top: 1px solid #e0e0e0;
+  border-top: 1px solid rgba(18, 48, 79, 0.08);
 }
 
 .legend-item {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 0.75rem;
-  color: #666;
+  font-size: 0.76rem;
+  color: #627d98;
 }
 
 .legend-dot {
@@ -1243,33 +1683,149 @@ onMounted(async () => {
   border-radius: 50%;
 }
 
-.legend-dot.completed { background: #4caf50; border: 2px solid #4caf50; }
-.legend-dot.current { background: #2196f3; border: 2px solid #2196f3; animation: pulse 2s infinite; }
-.legend-dot.pending { background: #e0e0e0; border: 2px solid #e0e0e0; }
-.legend-dot.cancelled { background: #f44336; border: 2px solid #f44336; }
+.legend-dot.completed {
+  background: #4caf50;
+  border: 2px solid #4caf50;
+}
+
+.legend-dot.current {
+  background: #2196f3;
+  border: 2px solid #2196f3;
+  animation: pulse 2s infinite;
+}
+
+.legend-dot.pending {
+  background: #d9e2ec;
+  border: 2px solid #d9e2ec;
+}
+
+.legend-dot.cancelled {
+  background: #f44336;
+  border: 2px solid #f44336;
+}
 
 .action-footer {
-  border-top: 1px solid #e0e0e0;
+  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid rgba(18, 48, 79, 0.08);
+  background: rgba(255, 255, 255, 0.96) !important;
+  backdrop-filter: blur(18px);
 }
 
 .action-buttons {
-  display: flex;
-  gap: 12px;
   width: 100%;
-  max-width: 800px;
+  max-width: 1180px;
   margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
+  gap: 12px;
 }
 
-@media (max-width: 768px) {
-  .window-container { padding: 12px; }
-  .section-title { padding: 12px; font-size: 1rem; }
-  .info-item { flex-direction: column; gap: 4px; }
-  .value { text-align: left; }
-  .action-buttons { flex-direction: column; }
-  .timeline-container { padding-left: 20px; }
-  .timeline-icon { width: 32px; height: 32px; }
-  .timeline-item::before { left: 15px; top: 32px; }
-  .timeline-header { flex-direction: column; gap: 4px; }
+@keyframes pulse {
+  0% {
+    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0.36);
+  }
+  70% {
+    box-shadow: 0 0 0 8px rgba(33, 150, 243, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(33, 150, 243, 0);
+  }
+}
+
+@media (max-width: 960px) {
+  .hero-card__top,
+  .hero-card__meta {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .hero-stats,
+  .content-grid,
+  .content-grid--two {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 720px) {
+  .order-header__inner {
+    padding: 12px 14px 14px;
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .order-header h1 {
+    font-size: 1.16rem;
+  }
+
+  .order-header__subtext {
+    font-size: 0.8rem;
+  }
+
+  .order-shell {
+    padding: 16px 12px calc(124px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .hero-card {
+    padding: 18px;
+    border-radius: 22px;
+  }
+
+  .hero-card__progress h2 {
+    font-size: 1.2rem;
+  }
+
+  .tabs-container {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+  }
+
+  .window-container {
+    padding-top: 14px;
+  }
+
+  .section-title {
+    padding: 16px 16px 0;
+  }
+
+  .info-item {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .value {
+    text-align: left;
+  }
+
+  .product-layout {
+    grid-template-columns: auto 1fr;
+  }
+
+  .item-total {
+    grid-column: 2;
+    justify-self: start;
+  }
+
+  .timeline-container {
+    padding-left: 22px;
+  }
+
+  .timeline-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .timeline-item::before {
+    left: 15px;
+    top: 32px;
+  }
+
+  .timeline-header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .action-buttons {
+    flex-direction: column;
+  }
 }
 </style>

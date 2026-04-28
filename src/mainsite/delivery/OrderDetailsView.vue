@@ -31,42 +31,48 @@
             <div class="status-chip" :class="getStatusClass(order.status)">
               {{ getStatusText(order.status) }}
             </div>
+            <p class="status-caption">{{ trackingMapTitle }}</p>
           </div>
 
           <!-- Route Information -->
-          <v-card class="info-card mb-4" rounded="lg">
+          <v-card class="info-card mb-4 tracking-section-card" rounded="xl">
             <v-card-title class="info-title">
               <v-icon size="20" color="#354d7c">mdi-map-marker-path</v-icon>
-              <span>Route Information</span>
+              <span>Live Delivery Map</span>
             </v-card-title>
             <v-divider></v-divider>
             <v-card-text class="pa-4">
-              <div class="route-info">
-                <div class="route-point">
-                  <div class="point-marker pickup">P</div>
-                  <div class="point-details">
-                    <div class="point-label">Pickup Location</div>
-                    <div class="point-address">{{ order.pickup_address }}</div>
-                    <div class="point-label">Shop: {{ order.shop_name }}</div>
-                  </div>
+              <OrderTrackingMap
+                :order-id="String(orderId)"
+                :pickup-location="pickupTrackingLocation"
+                :delivery-location="deliveryTrackingLocation"
+                :rider-location="persistedRiderTrackingLocation"
+                viewer-mode="rider"
+                :track-own-location="shouldTrackOwnLocation"
+                :title="trackingMapTitle"
+                subtitle="Use the map below to compare your current position, the pickup point, and the customer address."
+                :show-expand-action="true"
+                expand-action-label="Open full-screen map"
+                @expand="goToLocationToDeliver"
+              />
+
+              <div class="route-summary-grid">
+                <div class="route-summary-item">
+                  <span class="route-summary-label">Pickup</span>
+                  <strong>{{ order.shop_name }}</strong>
+                  <span>{{ order.pickup_address }}</span>
                 </div>
-
-                <div class="route-line"></div>
-
-                <div class="route-point">
-                  <div class="point-marker delivery">D</div>
-                  <div class="point-details">
-                    <div class="point-label">Delivery Location</div>
-                    <div class="point-address">{{ order.delivery_address }}</div>
-                    <div class="point-label">Customer: {{ order.customer_name }}</div>
-                    <div class="point-label">Phone: {{ order.customer_phone }}</div>
-                  </div>
+                <div class="route-summary-item">
+                  <span class="route-summary-label">Customer</span>
+                  <strong>{{ order.customer_name }}</strong>
+                  <span>{{ order.delivery_address }}</span>
+                </div>
+                <div class="route-summary-item">
+                  <span class="route-summary-label">Contact</span>
+                  <strong>{{ order.customer_phone || 'No phone provided' }}</strong>
+                  <span>Reach the customer if delivery details need confirmation.</span>
                 </div>
               </div>
-              <v-btn color="primary" block class="mt-3" @click="goToLocationToDeliver">
-                <v-icon left>mdi-map</v-icon>
-                See on Map
-              </v-btn>
             </v-card-text>
           </v-card>
 
@@ -431,16 +437,20 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
-import { useAuthUserStore } from '@/stores/authUser'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
+import {
+  buildDeliveryAddress,
+  extractPersistedRiderCoordinates,
+  resolveTrackingLocation,
+} from '@/utils/orderTracking'
 
 const router = useRouter()
 const route = useRoute()
-const authStore = useAuthUserStore()
 const orderId = route.params.id
 
 // State
@@ -457,6 +467,9 @@ const selectedImage = ref(null)
 const selectedProductName = ref('')
 const currentRiderNumericId = ref(null)
 const currentRider = ref(null)
+const pickupTrackingLocation = ref(null)
+const deliveryTrackingLocation = ref(null)
+let statusSubscription = null
 
 // State for proof of delivery with Capacitor Camera
 const showProofDialog = ref(false)
@@ -549,10 +562,67 @@ const getCurrentRider = async () => {
   }
 }
 
+const loadTrackingLocations = async (data) => {
+  const shop = data?.shop || {}
+  const address = data?.address || {}
+
+  const pickupQuery = [shop.building, shop.street, shop.barangay, shop.city, shop.province]
+    .filter(Boolean)
+    .join(', ')
+  const deliveryQuery = [
+    address.house_no,
+    address.building,
+    address.street,
+    address.barangay_name,
+    address.city_name,
+    address.province_name,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  pickupTrackingLocation.value = await resolveTrackingLocation({
+    name: shop.business_name || 'Pickup point',
+    address: order.value?.pickup_address || 'Store address',
+    lat: shop.latitude,
+    lng: shop.longitude,
+    fallbackQuery: pickupQuery || undefined,
+  })
+
+  deliveryTrackingLocation.value = await resolveTrackingLocation({
+    name: order.value?.customer_name || address.recipient_name || 'Customer',
+    address: buildDeliveryAddress(address),
+    lat: address.latitude,
+    lng: address.longitude,
+    fallbackQuery: deliveryQuery || undefined,
+  })
+}
+
+const subscribeToOrderUpdates = () => {
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
+
+  statusSubscription = supabase
+    .channel(`rider-order-${orderId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      },
+      async () => {
+        await fetchOrderDetails()
+      },
+    )
+    .subscribe()
+}
+
 // Fetch order details
 const fetchOrderDetails = async () => {
   loading.value = true
   error.value = null
+  pickupTrackingLocation.value = null
+  deliveryTrackingLocation.value = null
   try {
     const { data, error: fetchError } = await supabase
       .from('orders')
@@ -595,7 +665,9 @@ const fetchOrderDetails = async () => {
           house_no,
           barangay_name,
           city_name,
-          province_name
+          province_name,
+          latitude,
+          longitude
         )
       `)
       .eq('id', orderId)
@@ -657,10 +729,15 @@ const fetchOrderDetails = async () => {
         shop_name: shop.business_name || 'Shop',
         pickup_lat: shop.latitude,
         pickup_lng: shop.longitude,
+        delivery_lat: address.latitude,
+        delivery_lng: address.longitude,
         items: items,
         subtotal: subtotal,
         delivery_fee: deliveryFee,
       }
+
+      await loadTrackingLocations(data)
+      subscribeToOrderUpdates()
     }
   } catch (err) {
     console.error('Error fetching order:', err)
@@ -949,28 +1026,59 @@ const isAvailableForAcceptance = computed(() => {
   return order.value?.status === 'waiting_for_rider' && !order.value?.rider_id
 })
 
+const shouldTrackOwnLocation = computed(() => {
+  return isMyOrder.value && ['accepted_by_rider', 'picked_up'].includes(order.value?.status)
+})
+
+const persistedRiderTrackingLocation = computed(() => {
+  const persisted = extractPersistedRiderCoordinates(order.value)
+
+  if (!persisted) return null
+
+  return {
+    ...persisted,
+    name: currentRider.value
+      ? `${currentRider.value.first_name || ''} ${currentRider.value.last_name || ''}`.trim() || 'Assigned rider'
+      : 'Assigned rider',
+    address:
+      currentRider.value?.phone || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+  }
+})
+
+const trackingMapTitle = computed(() => {
+  if (order.value?.status === 'picked_up') return 'Delivering to customer'
+  if (order.value?.status === 'accepted_by_rider') return 'Heading to the pickup point'
+  if (isAvailableForAcceptance.value) return 'Ready for pickup'
+  return 'Route overview'
+})
+
 onMounted(async () => {
   await getCurrentRider()
   await fetchOrderDetails()
+})
+
+onUnmounted(() => {
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
 })
 </script>
 
 <style scoped>
 .order-details-page {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .header-section {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 16px;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) 16px 18px;
   background: linear-gradient(135deg, #354d7c, #5276b0);
   color: white;
   position: sticky;
   top: 0;
   z-index: 100;
+  box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
 }
 
 .back-btn {
@@ -984,6 +1092,10 @@ onMounted(async () => {
   margin: 0;
 }
 
+.order-details-container {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
 .order-status-section {
   text-align: center;
   margin-bottom: 20px;
@@ -995,6 +1107,14 @@ onMounted(async () => {
   border-radius: 30px;
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.status-caption {
+  margin: 12px auto 0;
+  max-width: 520px;
+  color: #52667d;
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .status-pending {
@@ -1032,10 +1152,41 @@ onMounted(async () => {
   overflow: hidden;
 }
 
+.tracking-section-card {
+  border: 1px solid rgba(53, 77, 124, 0.08);
+  box-shadow: 0 20px 44px rgba(18, 48, 79, 0.08);
+}
+
 .info-title {
   font-weight: 600;
   color: #354d7c;
   font-size: 1rem;
+}
+
+.route-summary-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.route-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f8fbff, #eef4fc);
+  border: 1px solid rgba(53, 77, 124, 0.07);
+  color: #12304f;
+}
+
+.route-summary-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #5276b0;
+  font-weight: 700;
 }
 
 .route-point {
@@ -1205,6 +1356,10 @@ onMounted(async () => {
     font-size: 1.2rem;
   }
 
+  .status-caption {
+    font-size: 0.84rem;
+  }
+
   .field-label {
     width: 85px;
     font-size: 0.75rem;
@@ -1216,6 +1371,10 @@ onMounted(async () => {
 
   .point-address {
     font-size: 0.75rem;
+  }
+
+  .route-summary-grid {
+    grid-template-columns: 1fr;
   }
   
   .proof-field {
