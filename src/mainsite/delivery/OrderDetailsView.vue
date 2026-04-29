@@ -440,7 +440,8 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
+import { notifyCustomerOrderStatus, notifySellerOrderStatus } from '@/utils/orderNotifications'
+import { formatAppDateTime } from '@/utils/dateTime'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
 import {
@@ -484,14 +485,10 @@ const formatNumber = (num) => {
 }
 
 const formatDateTime = (dateString) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleString('en-US', {
+  return formatAppDateTime(dateString, {
+    fallback: '',
     month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+    year: 'auto',
   })
 }
 
@@ -768,14 +765,22 @@ const acceptOrder = () => {
 }
 
 const confirmAcceptOrder = async () => {
+  if (!isAvailableForAcceptance.value || !currentRiderNumericId.value) {
+    alert('This order is no longer available for acceptance.')
+    showAcceptDialog.value = false
+    return
+  }
+
   accepting.value = true
   try {
+    const acceptedAt = new Date().toISOString()
+
     const { data, error } = await supabase
       .from('orders')
       .update({
         status: 'accepted_by_rider',
         rider_id: currentRiderNumericId.value,
-        accepted_at: new Date().toISOString(),
+        accepted_at: acceptedAt,
       })
       .eq('id', orderId)
       .is('rider_id', null)
@@ -792,6 +797,16 @@ const confirmAcceptOrder = async () => {
     }
 
     showAcceptDialog.value = false
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: 'accepted_by_rider',
+        createdAt: acceptedAt,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about rider acceptance:', notificationError)
+    }
     alert('✅ Order accepted successfully!')
     await fetchOrderDetails()
 
@@ -805,12 +820,22 @@ const confirmAcceptOrder = async () => {
 
 // Update order status (for picked up)
 const updateOrderStatus = (status) => {
+  if (!isMyOrder.value) {
+    alert('Only the assigned rider can update this order.')
+    return
+  }
+
   pendingStatusUpdate.value = status
   showUpdateDialog.value = true
 }
 
 // Open proof of delivery dialog
 const openProofDialog = () => {
+  if (!isMyOrder.value) {
+    alert('Only the assigned rider can update this order.')
+    return
+  }
+
   pendingStatusUpdate.value = 'delivered'
   showProofDialog.value = true
 }
@@ -952,7 +977,16 @@ const confirmUpdateStatus = async () => {
     return
   }
 
+  if (!isMyOrder.value || !currentRiderNumericId.value) {
+    alert('Only the assigned rider can update this order.')
+    showUpdateDialog.value = false
+    showProofDialog.value = false
+    pendingStatusUpdate.value = null
+    return
+  }
+
   uploadingProof.value = true
+  updating.value = true
   const statusToApply = pendingStatusUpdate.value
   const statusTimestamp = new Date().toISOString()
   try {
@@ -980,12 +1014,21 @@ const confirmUpdateStatus = async () => {
       updateData.rider_earnings = Math.round((order.value.delivery_fee || 0) * 0.8)
     }
 
-    const { error } = await supabase
+    const expectedCurrentStatus = statusToApply === 'picked_up' ? 'accepted_by_rider' : 'picked_up'
+
+    const { data, error } = await supabase
       .from('orders')
       .update(updateData)
       .eq('id', orderId)
+      .eq('rider_id', currentRiderNumericId.value)
+      .eq('status', expectedCurrentStatus)
+      .select('id')
 
     if (error) throw error
+
+    if (!data || data.length === 0) {
+      throw new Error('This order can only be updated by the rider who accepted it.')
+    }
 
     try {
       await notifyCustomerOrderStatus({
@@ -996,6 +1039,17 @@ const confirmUpdateStatus = async () => {
       })
     } catch (notificationError) {
       console.warn('Could not notify customer about order status update:', notificationError)
+    }
+
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: statusToApply,
+        createdAt: statusTimestamp,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about order status update:', notificationError)
     }
 
     showProofDialog.value = false
@@ -1015,9 +1069,10 @@ const confirmUpdateStatus = async () => {
     }
   } catch (error) {
     console.error('Error updating order:', error)
-    alert('Failed to update order status. Please try again.')
+    alert(error?.message || 'Failed to update order status. Please try again.')
   } finally {
     uploadingProof.value = false
+    updating.value = false
     pendingStatusUpdate.value = null
   }
 }

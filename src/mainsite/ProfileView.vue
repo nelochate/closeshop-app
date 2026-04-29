@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
@@ -38,6 +38,61 @@ const shopData = ref(null)
 const isRider = ref(false)
 const riderStatus = ref(null)
 const riderApplicationId = ref(null)
+const availableRiderOrdersCount = ref(0)
+const riderOrdersSubscription = ref(null)
+const hasAvailableRiderOrders = computed(
+  () => isRider.value && riderStatus.value === 'approved' && availableRiderOrdersCount.value > 0,
+)
+
+const cleanupRiderOrdersSubscription = () => {
+  if (riderOrdersSubscription.value) {
+    riderOrdersSubscription.value.unsubscribe()
+    riderOrdersSubscription.value = null
+  }
+}
+
+const fetchAvailableRiderOrdersCount = async () => {
+  if (!isRider.value || riderStatus.value !== 'approved') {
+    availableRiderOrdersCount.value = 0
+    return
+  }
+
+  try {
+    const { count, error } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'waiting_for_rider')
+      .is('rider_id', null)
+
+    if (error) throw error
+
+    availableRiderOrdersCount.value = count || 0
+  } catch (error) {
+    console.error('Error fetching available rider orders count:', error)
+    availableRiderOrdersCount.value = 0
+  }
+}
+
+const setupRiderOrdersSubscription = () => {
+  cleanupRiderOrdersSubscription()
+
+  if (!isRider.value || riderStatus.value !== 'approved') return
+
+  riderOrdersSubscription.value = supabase
+    .channel(`profile-rider-orders-${user.value?.id || 'guest'}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'orders',
+      },
+      async () => {
+        await fetchAvailableRiderOrdersCount()
+      },
+    )
+    .subscribe()
+}
 
 const handleRefresh = async () => {
   console.log('🔄 Refreshing profile...')
@@ -370,6 +425,8 @@ const checkRiderStatus = async () => {
 
     if (profileError) {
       console.error('Error fetching profile:', profileError)
+      availableRiderOrdersCount.value = 0
+      cleanupRiderOrdersSubscription()
       return
     }
 
@@ -392,8 +449,18 @@ const checkRiderStatus = async () => {
       isRider: isRider.value,
       status: riderStatus.value
     })
+
+    if (isRider.value && riderStatus.value === 'approved') {
+      await fetchAvailableRiderOrdersCount()
+      setupRiderOrdersSubscription()
+    } else {
+      availableRiderOrdersCount.value = 0
+      cleanupRiderOrdersSubscription()
+    }
   } catch (err) {
     console.error('Error checking rider:', err)
+    availableRiderOrdersCount.value = 0
+    cleanupRiderOrdersSubscription()
   }
 }
 
@@ -864,6 +931,7 @@ onMounted(async () => {
 
 onUnmounted(() => {
   cleanupShopSubscription()
+  cleanupRiderOrdersSubscription()
   if (notificationSubscription.value) {
     notificationSubscription.value.unsubscribe()
   }
@@ -943,6 +1011,7 @@ onBeforeRouteUpdate((to, from, next) => {
         title="Rider Dashboard"
       >
         <v-icon size="28">mdi-motorbike</v-icon>
+        <span v-if="hasAvailableRiderOrders" class="rider-available-dot"></span>
       </v-btn>
 
       <!-- Notification Button with Badge -->
@@ -1244,12 +1313,25 @@ onBeforeRouteUpdate((to, from, next) => {
 
 /* Rider Dashboard Button */
 .rider-dashboard-btn {
+  position: relative;
   color: #ffffff;
   width: 38px;
   height: 38px;
   backdrop-filter: blur(8px);
   border-radius: 50%;
   transition: all 0.3s ease;
+}
+
+.rider-available-dot {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
 }
 
 .rider-dashboard-btn:hover {

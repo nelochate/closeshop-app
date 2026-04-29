@@ -2,12 +2,15 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { formatAppDateTime, getAppTimestampValue, parseAppTimestamp } from '@/utils/dateTime'
 
 const router = useRouter()
 
 // State
 const loading = ref(false)
 const activeFilter = ref('available')
+const currentTime = ref(Date.now())
+let currentTimeInterval = null
 
 // Location state
 const currentLocation = ref(null)
@@ -22,6 +25,46 @@ const ordersSubscription = ref(null)
 const currentRider = ref(null)
 const currentRiderNumericId = ref(null)
 
+const getOrderActivityTimestamp = (order) => {
+  if (!order) return null
+
+  if (order.status === 'accepted_by_rider') {
+    return order.accepted_at || order.updated_at || order.created_at
+  }
+
+  if (order.status === 'picked_up') {
+    return order.picked_up_at || order.accepted_at || order.updated_at || order.created_at
+  }
+
+  if (order.status === 'delivered' || order.status === 'completed') {
+    return order.delivered_at || order.completed_at || order.updated_at || order.created_at
+  }
+
+  return order.created_at || order.updated_at || null
+}
+
+const getOrderActivityTimestampValue = (order) => getAppTimestampValue(getOrderActivityTimestamp(order))
+
+const sortOrdersByActivityTime = (left, right, direction = 'asc') => {
+  const leftValue = getOrderActivityTimestampValue(left)
+  const rightValue = getOrderActivityTimestampValue(right)
+
+  return direction === 'desc' ? rightValue - leftValue : leftValue - rightValue
+}
+
+const isSameLocalDay = (timestamp, now = Date.now()) => {
+  const date = parseAppTimestamp(timestamp)
+  if (!date) return false
+
+  const current = new Date(now)
+
+  return (
+    date.getFullYear() === current.getFullYear() &&
+    date.getMonth() === current.getMonth() &&
+    date.getDate() === current.getDate()
+  )
+}
+
 // Check if rider is approved
 const isApproved = ref(false)
 const applicationStatus = ref(null)
@@ -34,7 +77,7 @@ const acceptedOrders = computed(() => {
       order.status === 'accepted_by_rider' &&
       order.rider_id === currentRiderNumericId.value
     )
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const availableOrders = computed(() => {
@@ -45,7 +88,7 @@ const availableOrders = computed(() => {
       const isWaitingForRider = order.status === 'waiting_for_rider'
       return hasNoRider && isWaitingForRider
     })
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const pickedUpOrders = computed(() => {
@@ -54,7 +97,7 @@ const pickedUpOrders = computed(() => {
       order.status === 'picked_up' &&
       order.rider_id === currentRiderNumericId.value
     )
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const completedOrders = computed(() => {
@@ -63,7 +106,7 @@ const completedOrders = computed(() => {
       (order.status === 'delivered' || order.status === 'completed') &&
       order.rider_id === currentRiderNumericId.value
     )
-    .sort((a, b) => new Date(b.completed_at || b.updated_at) - new Date(a.completed_at || a.updated_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
 
 // Stats
@@ -72,9 +115,7 @@ const stats = computed(() => ({
   availableOrders: availableOrders.value.length,
   pickedUpOrders: pickedUpOrders.value.length,
   completedToday: completedOrders.value.filter((order) => {
-    const today = new Date().toDateString()
-    const orderDate = new Date(order.completed_at || order.updated_at).toDateString()
-    return orderDate === today
+    return isSameLocalDay(getOrderActivityTimestamp(order), currentTime.value)
   }).length,
   totalEarnings: completedOrders.value.reduce(
     (sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0),
@@ -99,15 +140,21 @@ const filteredOrders = computed(() => {
 })
 
 // Helper functions
-const formatDateTime = (dateString) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleString('en-US', {
+const getOrderTimeLabel = (order) => {
+  if (order?.status === 'accepted_by_rider') return 'Accepted'
+  if (order?.status === 'picked_up') return 'Picked up'
+  if (order?.status === 'delivered' || order?.status === 'completed') return 'Delivered'
+  if (order?.status === 'waiting_for_rider') return 'Placed'
+  return 'Updated'
+}
+
+const formatOrderDateTime = (order) => {
+  return formatAppDateTime(getOrderActivityTimestamp(order), {
+    now: currentTime.value,
+    fallback: 'Unknown time',
+    relativeDay: true,
     month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+    year: 'auto',
   })
 }
 
@@ -268,6 +315,7 @@ const stopWatchingLocation = () => {
 const fetchOrders = async () => {
   loading.value = true
   try {
+    currentTime.value = Date.now()
     console.log('Fetching orders for rider ID:', currentRiderNumericId.value)
 
     const { data, error } = await supabase
@@ -398,29 +446,17 @@ const subscribeToOrders = () => {
   }
 
   ordersSubscription.value = supabase
-    .channel('rider-orders')
+    .channel(`rider-orders-${currentRiderNumericId.value || 'all'}`)
     .on(
       'postgres_changes',
       {
-        event: 'INSERT',
+        event: '*',
         schema: 'public',
         table: 'orders',
-        filter: 'status=eq.waiting_for_rider', 
       },
-      () => {
-        fetchOrders()
-      },
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'orders',
-        filter: `rider_id=eq.${currentRiderNumericId.value}`,
-      },
-      () => {
-        fetchOrders()
+      async () => {
+        currentTime.value = Date.now()
+        await fetchOrders()
       },
     )
     .subscribe()
@@ -453,6 +489,11 @@ const getOrderNumber = (index) => {
 
 // Lifecycle
 onMounted(async () => {
+  currentTime.value = Date.now()
+  currentTimeInterval = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 30000)
+
   await checkRiderApproval()
   if (isApproved.value && currentRiderNumericId.value) {
     await fetchOrders()
@@ -465,6 +506,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (ordersSubscription.value) {
     supabase.removeChannel(ordersSubscription.value)
+  }
+  if (currentTimeInterval) {
+    clearInterval(currentTimeInterval)
+    currentTimeInterval = null
   }
   stopWatchingLocation()
 })
@@ -664,7 +709,7 @@ onUnmounted(() => {
               </div>
               <div class="order-time">
                 <v-icon size="16">mdi-clock-outline</v-icon>
-                {{ formatDateTime(order.created_at) }}
+                {{ getOrderTimeLabel(order) }} • {{ formatOrderDateTime(order) }}
               </div>
             </div>
 

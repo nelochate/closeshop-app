@@ -7,19 +7,39 @@ const getShopName = (orderData = {}) => {
   return ''
 }
 
+const getProfileDisplayName = (profile = {}) =>
+  [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
+
+const getCustomerName = (orderData = {}) => {
+  const preferredName = [
+    orderData.customer_name,
+    orderData.address?.recipient_name,
+    getProfileDisplayName(orderData.user),
+    getProfileDisplayName(orderData.buyer),
+    getProfileDisplayName(orderData.profiles),
+  ].find((value) => typeof value === 'string' && value.trim())
+
+  return preferredName?.trim() || ''
+}
+
 const normalizeOrderContext = (orderData = {}) => {
   return {
-    customerUserId: orderData.user_id || orderData.customer_id || orderData.buyer?.id || null,
+    customerUserId:
+      orderData.user_id || orderData.customer_id || orderData.user?.id || orderData.buyer?.id || null,
+    sellerUserId: orderData.shop_owner_id || orderData.shop?.owner_id || null,
     shopName: getShopName(orderData),
     transactionNumber: orderData.transaction_number || null,
+    customerName: getCustomerName(orderData),
   }
 }
 
 const mergeOrderContext = (primaryContext = {}, fallbackContext = {}) => {
   return {
     customerUserId: primaryContext.customerUserId || fallbackContext.customerUserId || null,
+    sellerUserId: primaryContext.sellerUserId || fallbackContext.sellerUserId || null,
     shopName: primaryContext.shopName || fallbackContext.shopName || '',
     transactionNumber: primaryContext.transactionNumber || fallbackContext.transactionNumber || null,
+    customerName: primaryContext.customerName || fallbackContext.customerName || '',
   }
 }
 
@@ -30,8 +50,17 @@ const fetchOrderContext = async (orderId) => {
       id,
       user_id,
       transaction_number,
+      buyer:profiles!orders_user_id_fkey (
+        id,
+        first_name,
+        last_name
+      ),
+      address:addresses!orders_address_id_fkey (
+        recipient_name
+      ),
       shop:shop_id (
-        business_name
+        business_name,
+        owner_id
       )
     `)
     .eq('id', orderId)
@@ -58,6 +87,34 @@ const buildCustomerOrderStatusNotification = ({ status, shopName, transactionNum
         type: 'order_delivered',
         title: 'Order Delivered',
         message: `${orderLabel}${shopLabel} has been marked as delivered.`,
+      }
+    default:
+      return null
+  }
+}
+
+const buildSellerOrderStatusNotification = ({ status, transactionNumber, customerName }) => {
+  const orderLabel = transactionNumber ? `order ${transactionNumber}` : 'the order'
+  const customerLabel = customerName ? ` for ${customerName}` : ''
+
+  switch (status) {
+    case 'accepted_by_rider':
+      return {
+        type: 'shipping_update',
+        title: 'Rider Accepted Order',
+        message: `A rider has accepted ${orderLabel}${customerLabel}.`,
+      }
+    case 'picked_up':
+      return {
+        type: 'shipping_update',
+        title: 'Order Picked Up',
+        message: `${orderLabel.charAt(0).toUpperCase()}${orderLabel.slice(1)}${customerLabel} has been picked up by the rider.`,
+      }
+    case 'delivered':
+      return {
+        type: 'order_delivered',
+        title: 'Order Delivered',
+        message: `${orderLabel.charAt(0).toUpperCase()}${orderLabel.slice(1)}${customerLabel} has been delivered.`,
       }
     default:
       return null
@@ -121,6 +178,63 @@ export const notifyCustomerOrderStatus = async ({
 
   const { error } = await supabase.from('notifications').insert({
     user_id: context.customerUserId,
+    type: notification.type,
+    title: notification.title,
+    message: notification.message,
+    related_id: orderId,
+    related_type: 'order',
+    is_read: false,
+    created_at: createdAt || new Date().toISOString(),
+  })
+
+  if (error) throw error
+
+  return { created: true }
+}
+
+export const notifySellerOrderStatus = async ({
+  orderId,
+  status,
+  orderData = null,
+  createdAt = null,
+  actorUserId = null,
+}) => {
+  if (!orderId || !status) return { created: false, reason: 'missing-order-or-status' }
+
+  let context = normalizeOrderContext(orderData || {})
+
+  if (!context.sellerUserId || !context.shopName || !context.transactionNumber || !context.customerName) {
+    const fetchedContext = await fetchOrderContext(orderId)
+    context = mergeOrderContext(context, fetchedContext)
+  }
+
+  if (actorUserId && context.sellerUserId && actorUserId === context.sellerUserId) {
+    return { created: false, reason: 'actor-is-recipient' }
+  }
+
+  const notification = buildSellerOrderStatusNotification({
+    status,
+    transactionNumber: context.transactionNumber,
+    customerName: context.customerName,
+  })
+
+  if (!context.sellerUserId || !notification) {
+    return { created: false, reason: 'missing-context' }
+  }
+
+  const exists = await notificationAlreadyExists({
+    userId: context.sellerUserId,
+    orderId,
+    type: notification.type,
+    title: notification.title,
+  })
+
+  if (exists) {
+    return { created: false, reason: 'duplicate' }
+  }
+
+  const { error } = await supabase.from('notifications').insert({
+    user_id: context.sellerUserId,
     type: notification.type,
     title: notification.title,
     message: notification.message,

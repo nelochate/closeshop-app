@@ -2,7 +2,8 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
+import { notifyCustomerOrderStatus, notifySellerOrderStatus } from '@/utils/orderNotifications'
+import { formatAppDateTime, getAppTimestampValue } from '@/utils/dateTime'
 import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
 import {
   buildDeliveryAddress,
@@ -131,8 +132,9 @@ const calculateTimeRemaining = () => {
   if (!order.value || !order.value.created_at) return 300
   if (order.value.status !== 'pending_approval') return 0
   
-  const orderCreatedAt = new Date(order.value.created_at).getTime()
-  const currentTime = new Date().getTime()
+  const orderCreatedAt = getAppTimestampValue(order.value.created_at)
+  if (!orderCreatedAt) return 300
+  const currentTime = Date.now()
   const timeElapsed = (currentTime - orderCreatedAt) / 1000
   const maxCancelTime = 5 * 60
   
@@ -484,6 +486,15 @@ const trackingMapSubtitle = computed(() => {
 
 const showCancelButton = computed(() => isBuyer.value && order.value?.status === 'pending_approval')
 const isCancelDisabled = computed(() => !canCancel.value || timeRemaining.value <= 0)
+const isAssignedRider = computed(
+  () => !!currentRiderId.value && order.value?.rider_id === currentRiderId.value,
+)
+const canMarkAsPickedUp = computed(
+  () => isAssignedRider.value && order.value?.status === 'accepted_by_rider',
+)
+const canMarkAsDelivered = computed(
+  () => isAssignedRider.value && order.value?.status === 'picked_up',
+)
 const getCancelButtonText = computed(() => {
   if (timeRemaining.value <= 0) return 'Cancellation Unavailable'
   return `Cancel Order (${formatTimeRemaining()})`
@@ -549,8 +560,12 @@ const timelineSteps = computed(() => {
   // If cancelled, mark steps appropriately
   if (currentStatus === 'cancelled') {
     const cancelledDate = order.value?.cancelled_at
+    const cancelledDateValue = getAppTimestampValue(cancelledDate)
+
     steps.forEach(step => {
-      if (step.date && new Date(step.date) <= new Date(cancelledDate)) {
+      const stepDateValue = getAppTimestampValue(step.date)
+
+      if (stepDateValue && cancelledDateValue && stepDateValue <= cancelledDateValue) {
         step.status = 'completed'
       } else if (step.status !== 'completed') {
         step.status = 'cancelled'
@@ -649,16 +664,46 @@ const acceptOrderAsRider = async () => {
       return
     }
     
-    const { error } = await supabase
+    const acceptedAt = new Date().toISOString()
+
+    const { data, error } = await supabase
       .from('orders')
       .update({ 
         status: 'accepted_by_rider',
-        accepted_at: new Date().toISOString(),
+        accepted_at: acceptedAt,
         rider_id: currentRiderId.value
       })
       .eq('id', orderId)
+      .is('rider_id', null)
+      .eq('status', 'waiting_for_rider')
+      .select('id')
     
     if (error) throw error
+
+    if (!data || data.length === 0) {
+      alert('This order is no longer available for rider acceptance.')
+      await fetchOrderDetails()
+      return
+    }
+
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: 'accepted_by_rider',
+        createdAt: acceptedAt,
+        actorUserId: currentUser.value?.id,
+        orderData: {
+          ...order.value,
+          address: shippingAddress.value,
+          buyer: buyer.value,
+          shop: shop.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about rider acceptance:', notificationError)
+    }
+
     alert('Order accepted! Head to the store to pick it up.')
     await fetchOrderDetails()
   } catch (err) {
@@ -668,21 +713,31 @@ const acceptOrderAsRider = async () => {
 }
 
 const markAsPickedUp = async () => {
-  if (!isRider.value) return
+  if (!canMarkAsPickedUp.value || !currentRiderId.value) {
+    alert('Only the rider who accepted this order can mark it as picked up.')
+    return
+  }
   if (!confirm('Mark this order as picked up?')) return
   
   try {
     const pickedUpAt = new Date().toISOString()
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('orders')
       .update({ 
         status: 'picked_up',
         picked_up_at: pickedUpAt
       })
       .eq('id', orderId)
+      .eq('rider_id', currentRiderId.value)
+      .eq('status', 'accepted_by_rider')
+      .select('id')
     
     if (error) throw error
+
+    if (!data || data.length === 0) {
+      throw new Error('This order can only be updated by the rider who accepted it.')
+    }
 
     try {
       await notifyCustomerOrderStatus({
@@ -698,30 +753,58 @@ const markAsPickedUp = async () => {
       console.warn('Could not notify customer about picked up status:', notificationError)
     }
 
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: 'picked_up',
+        createdAt: pickedUpAt,
+        actorUserId: currentUser.value?.id,
+        orderData: {
+          ...order.value,
+          address: shippingAddress.value,
+          buyer: buyer.value,
+          shop: shop.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about picked up status:', notificationError)
+    }
+
     alert('Order marked as picked up. Deliver to customer.')
     await fetchOrderDetails()
   } catch (err) {
     console.error('Error marking as picked up:', err)
-    alert('Failed to update status.')
+    alert(err instanceof Error ? err.message : 'Failed to update status.')
   }
 }
 
 const markAsDelivered = async () => {
-  if (!isRider.value && !isSeller.value) return
+  if (!canMarkAsDelivered.value || !currentRiderId.value) {
+    alert('Only the rider who accepted this order can mark it as delivered.')
+    return
+  }
   if (!confirm('Mark this order as delivered?')) return
   
   try {
     const deliveredAt = new Date().toISOString()
 
-    const { error } = await supabase
+    const { data, error } = await supabase
       .from('orders')
       .update({ 
         status: 'delivered',
         delivered_at: deliveredAt
       })
       .eq('id', orderId)
+      .eq('rider_id', currentRiderId.value)
+      .eq('status', 'picked_up')
+      .select('id')
     
     if (error) throw error
+
+    if (!data || data.length === 0) {
+      throw new Error('This order can only be updated by the rider who accepted it.')
+    }
 
     try {
       await notifyCustomerOrderStatus({
@@ -737,20 +820,38 @@ const markAsDelivered = async () => {
       console.warn('Could not notify customer about delivered status:', notificationError)
     }
 
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: 'delivered',
+        createdAt: deliveredAt,
+        actorUserId: currentUser.value?.id,
+        orderData: {
+          ...order.value,
+          address: shippingAddress.value,
+          buyer: buyer.value,
+          shop: shop.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about delivered status:', notificationError)
+    }
+
     alert('Order marked as delivered!')
     await fetchOrderDetails()
   } catch (err) {
     console.error('Error marking as delivered:', err)
-    alert('Failed to update status.')
+    alert(err instanceof Error ? err.message : 'Failed to update status.')
   }
 }
 
 // Format functions
 const formatDate = (dateString: string) => {
-  if (!dateString) return 'Not set'
-  return new Date(dateString).toLocaleDateString('en-US', {
-    year: 'numeric', month: 'long', day: 'numeric',
-    hour: '2-digit', minute: '2-digit'
+  return formatAppDateTime(dateString, {
+    fallback: 'Not set',
+    month: 'long',
+    year: 'numeric',
   })
 }
 
@@ -1185,10 +1286,6 @@ onMounted(async () => {
             <v-icon start>mdi-close-circle</v-icon>
             Reject order
           </v-btn>
-          <v-btn v-if="order.status === 'picked_up'" color="success" @click="markAsDelivered">
-            <v-icon start>mdi-check</v-icon>
-            Mark delivered
-          </v-btn>
         </template>
 
         <template v-else-if="isRider">
@@ -1196,15 +1293,16 @@ onMounted(async () => {
             <v-icon start>mdi-check-circle</v-icon>
             Accept order
           </v-btn>
-          <v-btn v-if="order.status === 'accepted_by_rider'" color="warning" @click="markAsPickedUp">
-            <v-icon start>mdi-package-up</v-icon>
-            Mark as picked up
-          </v-btn>
-          <v-btn v-if="order.status === 'picked_up'" color="success" @click="markAsDelivered">
-            <v-icon start>mdi-check</v-icon>
-            Mark delivered
-          </v-btn>
         </template>
+
+        <v-btn v-if="canMarkAsPickedUp" color="warning" @click="markAsPickedUp">
+          <v-icon start>mdi-package-up</v-icon>
+          Mark as picked up
+        </v-btn>
+        <v-btn v-if="canMarkAsDelivered" color="success" @click="markAsDelivered">
+          <v-icon start>mdi-check</v-icon>
+          Mark delivered
+        </v-btn>
 
         <v-btn variant="outlined" @click="goBack">Close</v-btn>
       </div>

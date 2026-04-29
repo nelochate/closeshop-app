@@ -71,6 +71,62 @@ const formatExactDateLabel = (date: Date, now: Date) =>
 const formatExactDateTimeLabel = (date: Date, now: Date) =>
   `${formatExactDateLabel(date, now)} - ${formatTimeLabel(date)}`
 
+type FormatAppDateTimeOptions = {
+  now?: number
+  fallback?: string
+  relativeDay?: boolean
+  month?: 'numeric' | '2-digit' | 'short' | 'long'
+  day?: 'numeric' | '2-digit'
+  year?: 'auto' | 'numeric' | '2-digit' | false
+}
+
+export const getAppTimestampValue = (timestamp?: string | number | Date | null) =>
+  parseAppTimestamp(timestamp)?.getTime() ?? 0
+
+export const formatAppDateTime = (
+  timestamp?: string | number | Date | null,
+  {
+    now = Date.now(),
+    fallback = '',
+    relativeDay = false,
+    month = 'short',
+    day = 'numeric',
+    year = 'auto',
+  }: FormatAppDateTimeOptions = {},
+) => {
+  const date = parseAppTimestamp(timestamp)
+  if (!date) return fallback
+
+  const current = new Date(now)
+  const exactLabel = date.toLocaleString([], {
+    month,
+    day,
+    ...(year === false
+      ? {}
+      : year === 'auto'
+        ? date.getFullYear() !== current.getFullYear()
+          ? { year: 'numeric' as const }
+          : {}
+        : { year }),
+    hour: 'numeric',
+    minute: '2-digit',
+  })
+
+  if (!relativeDay) {
+    return exactLabel
+  }
+
+  if (isSameDay(date, current)) {
+    return `Today, ${formatTimeLabel(date)}`
+  }
+
+  if (isYesterday(date, current)) {
+    return `Yesterday, ${formatTimeLabel(date)}`
+  }
+
+  return exactLabel
+}
+
 export const formatRelativeDayLabel = (timestamp?: string | null, now = Date.now()) => {
   if (!timestamp) return ''
 

@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
+import { formatAppDateTime } from '@/utils/dateTime'
 
 const router = useRouter()
 const goBack = () => router.back()
@@ -25,6 +26,9 @@ const orders = ref<any[]>([])
 const loadingOrders = ref(false)
 const ordersError = ref('')
 const approvingOrderId = ref(null)
+const currentTime = ref(Date.now())
+let currentTimeInterval: ReturnType<typeof setInterval> | null = null
+let ordersSubscription: any = null
 
 // Mobile state
 const isMobile = ref(window.innerWidth < 768)
@@ -169,6 +173,12 @@ const convertTo12Hour = (time24: string) => {
   }
 }
 
+const getProfileDisplayName = (profile: any = {}) =>
+  [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
+
+const getCustomerDisplayName = (order: any = {}) =>
+  order.address?.recipient_name?.trim() || getProfileDisplayName(order.user) || 'Customer'
+
 // Fixed fetchOrders function - removing the incorrect rider relationship
 const fetchOrders = async () => {
   if (!shopId.value) {
@@ -178,6 +188,7 @@ const fetchOrders = async () => {
 
   loadingOrders.value = true
   ordersError.value = ''
+  currentTime.value = Date.now()
 
   try {
     console.log('🛍️ Fetching orders for shop:', shopId.value)
@@ -274,8 +285,8 @@ const fetchOrders = async () => {
       return {
         ...order,
         items,
-        customer_name: `${order.user?.first_name || ''} ${order.user?.last_name || ''}`.trim() || 'Customer',
-        customer_phone: order.user?.phone || '',
+        customer_name: getCustomerDisplayName(order),
+        customer_phone: order.address?.phone || order.user?.phone || '',
         rider_details: riderInfo
       }
     }))
@@ -287,6 +298,35 @@ const fetchOrders = async () => {
   } finally {
     loadingOrders.value = false
   }
+}
+
+const stopOrdersSubscription = () => {
+  if (!ordersSubscription) return
+  supabase.removeChannel(ordersSubscription)
+  ordersSubscription = null
+}
+
+const subscribeToOrders = (targetShopId: string | null) => {
+  stopOrdersSubscription()
+
+  if (!targetShopId) return
+
+  ordersSubscription = supabase
+    .channel(`usershop-orders-${targetShopId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'orders',
+        filter: `shop_id=eq.${targetShopId}`,
+      },
+      async () => {
+        currentTime.value = Date.now()
+        await fetchOrders()
+      },
+    )
+    .subscribe()
 }
 
 const markAsDelivered = async (orderId: string) => {
@@ -426,31 +466,32 @@ const getStatusIcon = (order: any): string => {
 
 // Mobile-friendly date formatting
 const formatDate = (dateString: string) => {
-  const date = new Date(dateString)
-  const now = new Date()
-  const diffTime = Math.abs(now.getTime() - date.getTime())
-  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24))
+  return formatAppDateTime(dateString, {
+    now: currentTime.value,
+    fallback: 'Unknown time',
+    relativeDay: true,
+    month: 'short',
+    year: 'auto',
+  })
+}
 
-  if (diffDays === 0) {
-    return 'Today, ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  } else if (diffDays === 1) {
-    return 'Yesterday, ' + date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
-  } else if (diffDays < 7) {
-    return date.toLocaleDateString('en-US', {
-      weekday: 'short',
-      hour: '2-digit',
-      minute: '2-digit',
+const formatDeliveryDate = (dateString: string) => {
+  if (!dateString) return ''
+
+  const localDateMatch = dateString.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (localDateMatch) {
+    const [, year, month, day] = localDateMatch
+    return new Date(Number(year), Number(month) - 1, Number(day)).toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
     })
   }
 
-  return isMobile.value
-    ? date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-    : date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-    })
+  return formatAppDateTime(dateString, {
+    fallback: '',
+    month: 'short',
+    year: false,
+  })
 }
 
 const formatPaymentInfo = (order: any): string => {
@@ -774,12 +815,21 @@ const deleteShop = async () => {
 }
 
 onMounted(() => {
+  currentTime.value = Date.now()
+  currentTimeInterval = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 30000)
   fetchShopData()
   window.addEventListener('resize', updateMobileState)
 })
 
 // Cleanup
 onUnmounted(() => {
+  stopOrdersSubscription()
+  if (currentTimeInterval) {
+    clearInterval(currentTimeInterval)
+    currentTimeInterval = null
+  }
   window.removeEventListener('resize', updateMobileState)
 })
 
@@ -808,7 +858,9 @@ const refreshOrders = () => {
 // Watch for shopId changes to fetch orders
 watch(shopId, (newShopId) => {
   if (newShopId) {
-    fetchOrders()
+    subscribeToOrders(newShopId)
+  } else {
+    stopOrdersSubscription()
   }
 })
 
@@ -1381,12 +1433,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
                               <v-icon size="14" class="mr-1 text-primary">mdi-calendar-clock</v-icon>
                               <span class="text-caption font-weight-medium">Schedule:</span>
                               <span class="text-caption ml-1">
-                                {{
-                                  new Date(order.delivery_date).toLocaleDateString('en-US', {
-                                    month: 'short',
-                                    day: 'numeric',
-                                  })
-                                }}
+                                {{ formatDeliveryDate(order.delivery_date) }}
                                 {{
                                   order.delivery_time ? convertTo12Hour(order.delivery_time) : ''
                                 }}
@@ -1632,21 +1679,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   <!-- Action Buttons - Mobile Optimized -->
                   <div class="order-actions mt-3">
                     <div class="d-flex flex-wrap gap-1">
-
-                  <!-- Mark as Delivered Button (only for picked_up orders) -->
-                  <v-btn 
-                    color="info" 
-                    :size="isMobile ? 'x-small' : 'small'" 
-                    variant="flat" 
-                    v-if="order.status === 'picked_up'"
-                    @click="markAsDelivered(order.id)" 
-                    :rounded="isMobile ? 'sm' : 'lg'"
-                    class="action-button flex-grow-1" 
-                    :block="isMobile"
-                  >
-                    <v-icon :start="!isMobile" :size="isMobile ? 12 : 14">mdi-truck-check</v-icon>
-                    <span class="ml-1">Mark Delivered</span>
-                  </v-btn>
 
                       <!-- Cancel Order Button -->
                       <v-btn color="error" :size="isMobile ? 'x-small' : 'small'" variant="outlined"
