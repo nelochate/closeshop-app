@@ -1903,7 +1903,7 @@ const getProfileDisplayName = (profile: any) => {
 }
 
 const getBuyerDisplayName = (profile: any = buyer.value) => {
-  return getProfileDisplayName(profile) || address.value?.recipient_name || 'Customer'
+  return address.value?.recipient_name?.trim() || getProfileDisplayName(profile) || 'Customer'
 }
 
 const updateConversationActivity = async (targetConversationId: string) => {

@@ -39,12 +39,18 @@ const chatScrollEl = ref<HTMLElement | null>(null)
 const messagesEndEl = ref<HTMLElement | null>(null)
 const composerInputEl = ref<any>(null)
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0)
+const orderMessageDetailsCache = new Map<string, OrderMessageDetails | null>()
 
 let subscription: any = null
 let timeUpdateInterval: any = null
 let viewportCleanup: (() => void) | null = null
 
 const UNSENT_MESSAGE_TEXT = 'Message unsent'
+
+type OrderMessageDetails = {
+  orderId: string
+  customerName: string | null
+}
 
 const formatMessageTime = (timestamp: string) => {
   return formatLiveTimestamp(timestamp, currentTime.value)
@@ -53,6 +59,9 @@ const formatMessageTime = (timestamp: string) => {
 const formatPrice = (value: number | string | null | undefined) => {
   return Number(value ?? 0).toFixed(2)
 }
+
+const getProfileDisplayName = (profile: any) =>
+  [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
 
 const startTimeUpdates = () => {
   currentTime.value = Date.now()
@@ -813,6 +822,56 @@ const getOrderProductInfo = async (content: string): Promise<{product: any, prod
   return { product: fallbackProduct, productId: fallbackProductId }
 }
 
+const hydrateOrderMessageDetails = async (content: string): Promise<OrderMessageDetails | null> => {
+  const orderId = extractOrderIdFromContent(content)
+
+  if (!orderId) {
+    return null
+  }
+
+  if (orderMessageDetailsCache.has(orderId)) {
+    return orderMessageDetailsCache.get(orderId) || null
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select(`
+        id,
+        address:addresses!orders_address_id_fkey (
+          recipient_name
+        ),
+        buyer:profiles!orders_user_id_fkey (
+          first_name,
+          last_name
+        )
+      `)
+      .eq('id', orderId)
+      .maybeSingle()
+
+    if (error) {
+      console.error('Error hydrating order message details:', error)
+      orderMessageDetailsCache.set(orderId, null)
+      return null
+    }
+
+    const customerName =
+      data?.address?.recipient_name?.trim() || getProfileDisplayName(data?.buyer) || null
+
+    const details = {
+      orderId,
+      customerName,
+    }
+
+    orderMessageDetailsCache.set(orderId, details)
+    return details
+  } catch (error) {
+    console.error('Unexpected order message hydration error:', error)
+    orderMessageDetailsCache.set(orderId, null)
+    return null
+  }
+}
+
 // ✅ IMPROVED: Load messages with guaranteed product info
 const hydrateProductMessage = async (message: any) => {
   if (!message?.product_id) {
@@ -865,6 +924,7 @@ const enrichMessage = async (message: any) => {
     product: null,
     orderProduct: null,
     orderProductId: null,
+    orderDetails: null,
   }
 
   if (enrichedMessage.product_id) {
@@ -875,9 +935,21 @@ const enrichMessage = async (message: any) => {
     const { product, productId } = await getOrderProductInfo(enrichedMessage.content)
     enrichedMessage.orderProduct = product
     enrichedMessage.orderProductId = productId
+    enrichedMessage.orderDetails = await hydrateOrderMessageDetails(enrichedMessage.content)
   }
 
   return enrichedMessage
+}
+
+const formatOrderMessageContent = (message: any) => {
+  const content = message?.content || ''
+  const customerName = message?.orderDetails?.customerName?.trim()
+
+  if (!customerName) {
+    return content
+  }
+
+  return content.replace(/^Customer:\s*.*$/m, `Customer: ${customerName}`)
 }
 
 const runMessageUpdate = async (messageId: string, payload: Record<string, any>, withSelect = true) => {
@@ -1414,7 +1486,7 @@ onUnmounted(() => {
                 </div>
 
                 <div class="notification-content">
-                  {{ msg.content }}
+                  {{ formatOrderMessageContent(msg) }}
                 </div>
 
                 <div class="order-action-buttons">

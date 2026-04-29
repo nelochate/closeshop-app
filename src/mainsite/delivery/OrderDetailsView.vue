@@ -562,9 +562,24 @@ const getCurrentRider = async () => {
   }
 }
 
+const getProfileDisplayName = (profile = {}) => {
+  return [profile?.first_name, profile?.last_name]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .join(' ')
+    .trim()
+}
+
+const getCustomerDisplayName = ({ address = {}, user = {} } = {}) => {
+  return address?.recipient_name?.trim() || getProfileDisplayName(user) || 'Recipient unavailable'
+}
+
 const loadTrackingLocations = async (data) => {
   const shop = data?.shop || {}
   const address = data?.address || {}
+  const customerName = getCustomerDisplayName({
+    address,
+    user: data?.user,
+  })
 
   const pickupQuery = [shop.building, shop.street, shop.barangay, shop.city, shop.province]
     .filter(Boolean)
@@ -589,7 +604,7 @@ const loadTrackingLocations = async (data) => {
   })
 
   deliveryTrackingLocation.value = await resolveTrackingLocation({
-    name: order.value?.customer_name || address.recipient_name || 'Customer',
+    name: customerName,
     address: buildDeliveryAddress(address),
     lat: address.latitude,
     lng: address.longitude,
@@ -642,7 +657,8 @@ const fetchOrderDetails = async () => {
             price
           )
         ),
-        profiles:user_id (
+        user:profiles!orders_user_id_fkey (
+          id,
           first_name,
           last_name,
           phone
@@ -657,7 +673,7 @@ const fetchOrderDetails = async () => {
           latitude,
           longitude
         ),
-        address:address_id (
+        address:addresses!orders_address_id_fkey (
           recipient_name,
           phone,
           street,
@@ -683,6 +699,7 @@ const fetchOrderDetails = async () => {
           .join(', ') || 'Store Address'
 
       const address = data.address || {}
+      const user = data.user || {}
       const deliveryAddress =
         [
           address.house_no,
@@ -695,9 +712,7 @@ const fetchOrderDetails = async () => {
           .filter(Boolean)
           .join(', ') || 'Delivery Address'
 
-      const profile = data.profiles || {}
-      const customerName =
-        `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Customer'
+      const customerName = getCustomerDisplayName({ address, user })
 
       const items = (data.order_items || []).map((item) => {
         const product = item.products || {}
@@ -725,7 +740,7 @@ const fetchOrderDetails = async () => {
         pickup_address: pickupAddress,
         delivery_address: deliveryAddress,
         customer_name: customerName,
-        customer_phone: profile.phone || address.phone || '',
+        customer_phone: address.phone || user.phone || '',
         shop_name: shop.business_name || 'Shop',
         pickup_lat: shop.latitude,
         pickup_lng: shop.longitude,

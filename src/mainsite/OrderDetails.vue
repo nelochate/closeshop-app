@@ -21,7 +21,6 @@ const orderId = route.params.id as string
 const order = ref<any>(null)
 const orderItems = ref<any[]>([])
 const buyer = ref<any>(null)
-const seller = ref<any>(null)
 const shop = ref<any>(null)
 const shippingAddress = ref<any>(null)
 const loading = ref(true)
@@ -249,7 +248,7 @@ const fetchOrderDetails = async () => {
     const resolvedShopId = orderData.shop_id || orderItems.value[0]?.products?.shop_id
 
     if (resolvedShopId) {
-      await fetchShopAndSeller(resolvedShopId)
+      await fetchShopDetails(resolvedShopId)
     }
 
     await loadTrackingLocations()
@@ -260,7 +259,6 @@ const fetchOrderDetails = async () => {
       order.value = null
       orderItems.value = []
       buyer.value = null
-      seller.value = null
       shop.value = null
       shippingAddress.value = null
       riderDetails.value = null
@@ -282,8 +280,8 @@ const fetchOrderDetails = async () => {
   }
 }
 
-// Fetch shop and seller
-const fetchShopAndSeller = async (shopId: string) => {
+// Fetch shop details
+const fetchShopDetails = async (shopId: string) => {
   try {
     const { data: shopData } = await supabase
       .from('shops')
@@ -293,12 +291,6 @@ const fetchShopAndSeller = async (shopId: string) => {
     
     if (shopData) {
       shop.value = shopData
-      const { data: sellerData } = await supabase
-        .from('profiles')
-        .select('id, first_name, last_name, avatar_url, phone')
-        .eq('id', shopData.owner_id)
-        .single()
-      if (sellerData) seller.value = sellerData
     }
   } catch (err) {
     console.error('Error fetching shop:', err)
@@ -359,6 +351,11 @@ const deliveryFee = computed(() => {
 const totalAmount = computed(() => order.value?.total_amount || subtotal.value)
 
 const shopDisplayName = computed(() => shop.value?.business_name || 'Shop unavailable')
+const orderReferenceText = computed(() => {
+  if (order.value?.transaction_number) return `Transaction #${order.value.transaction_number}`
+  if (order.value?.id) return `Order #${order.value.id.slice(0, 8)}`
+  return 'Order details'
+})
 
 const getProfileDisplayName = (profile: any) => {
   const preferredName = [profile?.full_name, profile?.name].find(
@@ -377,11 +374,6 @@ const getPreferredAddressRecipientName = (address: any) => {
 
   return preferredName?.trim() || ''
 }
-
-const sellerDisplayName = computed(() => {
-  if (!seller.value) return 'Seller unavailable'
-  return getProfileDisplayName(seller.value) || 'Seller unavailable'
-})
 
 const buyerDisplayName = computed(() => {
   return (
@@ -810,21 +802,8 @@ onMounted(async () => {
               <v-icon>mdi-arrow-left</v-icon>
             </v-btn>
 
-            <div>
-              <p class="order-header__eyebrow">
-                {{ isSeller ? 'Seller order view' : isRider ? 'Rider order view' : 'Customer order view' }}
-              </p>
-              <h1>Order Details</h1>
-              <p class="order-header__subtext">
-                {{ order?.transaction_number || order?.id?.slice(0, 8) || 'Track every milestone in one place.' }}
-              </p>
-            </div>
+            <h1>Order Details</h1>
           </div>
-
-          <v-chip v-if="order?.status" :color="statusColor" variant="flat" class="order-status-chip">
-            <v-icon start size="16">{{ statusIcon }}</v-icon>
-            {{ statusDisplayText }}
-          </v-chip>
         </div>
       </header>
 
@@ -843,7 +822,13 @@ onMounted(async () => {
         <section class="hero-card">
           <div class="hero-card__top">
             <div class="hero-card__progress">
-              <span class="hero-card__label">Fulfillment progress</span>
+              <div class="hero-card__meta">
+                <v-chip v-if="order?.status" :color="statusColor" variant="tonal" class="order-status-chip">
+                  <v-icon start size="16">{{ statusIcon }}</v-icon>
+                  {{ statusDisplayText }}
+                </v-chip>
+                <span class="hero-reference">{{ orderReferenceText }}</span>
+              </div>
               <h2>{{ trackingMapTitle }}</h2>
               <p>
                 <span v-if="order.status === 'completed'">The order is fully completed.</span>
@@ -854,17 +839,6 @@ onMounted(async () => {
                 <span v-else-if="order.status === 'pending_approval'">The seller still needs to approve the order.</span>
                 <span v-else-if="order.status === 'cancelled'">This order was cancelled before completion.</span>
               </p>
-            </div>
-
-            <div class="hero-card__meta">
-              <div class="hero-chip">
-                <v-icon size="16" color="#2f7de1">mdi-storefront-outline</v-icon>
-                <span>{{ shopDisplayName }}</span>
-              </div>
-              <div class="hero-chip">
-                <v-icon size="16" color="#2f7de1">mdi-account-outline</v-icon>
-                <span>{{ buyerDisplayName }}</span>
-              </div>
             </div>
           </div>
 
@@ -893,6 +867,17 @@ onMounted(async () => {
             <article class="hero-stat">
               <span class="hero-stat__label">Order placed</span>
               <strong>{{ formatDate(order.created_at) }}</strong>
+            </article>
+          </div>
+
+          <div class="hero-context">
+            <article class="hero-context__item" v-if="shop">
+              <span class="hero-context__label">Shop</span>
+              <strong>{{ shopDisplayName }}</strong>
+            </article>
+            <article class="hero-context__item">
+              <span class="hero-context__label">Recipient</span>
+              <strong>{{ buyerDisplayName }}</strong>
             </article>
           </div>
         </section>
@@ -966,10 +951,10 @@ onMounted(async () => {
                   </v-card-text>
                 </v-card>
 
-                <v-card class="surface-card" v-if="shop || seller || buyer || shippingAddress">
+                <v-card class="surface-card" v-if="shop || buyer || shippingAddress">
                   <v-card-title class="section-title">
                     <v-icon start>mdi-store-marker-outline</v-icon>
-                    Fulfillment details
+                    Delivery details
                   </v-card-title>
                   <v-card-text>
                     <div class="info-list">
@@ -977,16 +962,12 @@ onMounted(async () => {
                         <span class="label">Shop</span>
                         <span class="value">{{ shopDisplayName }}</span>
                       </div>
-                      <div class="info-item" v-if="seller">
-                        <span class="label">Seller</span>
-                        <span class="value">{{ sellerDisplayName }}</span>
-                      </div>
                       <div class="info-item" v-if="shop">
                         <span class="label">Pickup address</span>
                         <span class="value">{{ shopAddress }}</span>
                       </div>
                       <div class="info-item" v-if="shippingAddress || buyer">
-                        <span class="label">Customer</span>
+                        <span class="label">Recipient</span>
                         <span class="value">{{ buyerDisplayName }}</span>
                       </div>
                     </div>
@@ -1000,7 +981,7 @@ onMounted(async () => {
                         @click="contactSeller"
                       >
                         <v-icon start size="16">mdi-chat-outline</v-icon>
-                        Contact seller
+                        Contact shop
                       </v-btn>
                       <v-btn
                         v-if="buyer?.id && !isBuyer"
@@ -1103,7 +1084,7 @@ onMounted(async () => {
                   <v-card-text>
                     <div class="address-content">
                       <strong>{{ buyerDisplayName }}</strong>
-                      <span v-if="shippingAddress.phone"> • {{ shippingAddress.phone }}</span>
+                      <span v-if="shippingAddress.phone"> - {{ shippingAddress.phone }}</span>
                       <div class="address-details">{{ buildFullAddress }}</div>
                     </div>
                   </v-card-text>
@@ -1233,10 +1214,9 @@ onMounted(async () => {
 
 <style scoped>
 .order-page {
+  --order-header-offset: calc(env(safe-area-inset-top, 0px) + 60px);
   min-height: 100dvh;
-  background:
-    radial-gradient(circle at top left, rgba(47, 125, 225, 0.12), transparent 30%),
-    linear-gradient(180deg, #edf4ff 0%, #f7f9fc 30%, #f4f6fb 100%);
+  background: linear-gradient(180deg, #f6f9fc 0%, #eef4fa 100%);
 }
 
 .order-header {
@@ -1244,26 +1224,23 @@ onMounted(async () => {
   top: 0;
   z-index: 20;
   padding-top: env(safe-area-inset-top, 0px);
-  background: rgba(11, 37, 69, 0.92);
-  backdrop-filter: blur(16px);
-  box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
+  background: linear-gradient(135deg, #3f83c7, #295f8d);
+  box-shadow: 0 12px 28px rgba(20, 44, 73, 0.16);
 }
 
 .order-header__inner {
-  max-width: 1180px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 14px 20px 16px;
+  padding: 10px 16px 12px;
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 16px;
 }
 
 .order-header__lead {
-  min-width: 0;
+  width: 100%;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
 }
 
 .header-icon-btn {
@@ -1271,26 +1248,12 @@ onMounted(async () => {
   background: rgba(255, 255, 255, 0.1) !important;
 }
 
-.order-header__eyebrow {
-  margin: 0 0 4px;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.12em;
-  text-transform: uppercase;
-  color: rgba(194, 220, 255, 0.88);
-}
-
 .order-header h1 {
   margin: 0;
-  font-size: 1.35rem;
+  font-size: 1.02rem;
+  font-weight: 700;
   line-height: 1.2;
   color: white;
-}
-
-.order-header__subtext {
-  margin: 4px 0 0;
-  color: rgba(226, 236, 255, 0.82);
-  font-size: 0.88rem;
 }
 
 .order-status-chip {
@@ -1310,70 +1273,56 @@ onMounted(async () => {
 }
 
 .order-shell {
-  max-width: 1180px;
+  max-width: 960px;
   margin: 0 auto;
-  padding: 22px 20px calc(120px + env(safe-area-inset-bottom, 0px));
+  padding: 18px 16px calc(120px + env(safe-area-inset-bottom, 0px));
 }
 
 .hero-card {
-  padding: 22px;
-  border-radius: 28px;
-  background:
-    linear-gradient(135deg, rgba(15, 50, 92, 0.97), rgba(53, 77, 124, 0.97)),
-    linear-gradient(180deg, #ffffff, #f6f9ff);
-  color: white;
-  box-shadow: 0 24px 56px rgba(11, 37, 69, 0.18);
+  padding: 18px;
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(53, 77, 124, 0.08);
+  color: #12304f;
+  box-shadow: 0 18px 42px rgba(18, 48, 79, 0.08);
 }
 
 .hero-card__top {
   display: flex;
-  justify-content: space-between;
-  gap: 24px;
+  gap: 16px;
   align-items: flex-start;
 }
 
 .hero-card__progress h2 {
-  margin: 8px 0;
-  font-size: 1.45rem;
+  margin: 0;
+  font-size: 1.2rem;
   line-height: 1.25;
+  color: #102a43;
 }
 
 .hero-card__progress p {
-  margin: 0;
-  max-width: 700px;
-  line-height: 1.55;
-  color: rgba(231, 240, 255, 0.84);
-}
-
-.hero-card__label {
-  font-size: 0.76rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(194, 220, 255, 0.88);
+  margin: 8px 0 0;
+  max-width: 640px;
+  line-height: 1.5;
+  color: #52667d;
 }
 
 .hero-card__meta {
   display: flex;
   flex-wrap: wrap;
-  justify-content: flex-end;
   gap: 10px;
+  align-items: center;
+  margin-bottom: 10px;
 }
 
-.hero-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 38px;
-  padding: 0 14px;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.12);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  font-size: 0.84rem;
-  font-weight: 600;
+.hero-reference {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #627d98;
 }
 
 .hero-progress-bar {
-  margin: 18px 0 20px;
+  margin: 16px 0 18px;
 }
 
 .hero-stats {
@@ -1383,22 +1332,51 @@ onMounted(async () => {
 }
 
 .hero-stat {
-  padding: 14px 16px;
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: #f8fbff;
+  border: 1px solid rgba(53, 77, 124, 0.08);
 }
 
 .hero-stat__label {
   display: block;
-  font-size: 0.78rem;
-  color: rgba(214, 228, 255, 0.84);
+  font-size: 0.74rem;
+  color: #627d98;
 }
 
 .hero-stat strong {
   display: block;
-  margin-top: 8px;
-  font-size: 0.98rem;
+  margin-top: 6px;
+  font-size: 0.92rem;
+  color: #102a43;
+}
+
+.hero-context {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.hero-context__item {
+  padding-top: 14px;
+  border-top: 1px solid rgba(18, 48, 79, 0.08);
+}
+
+.hero-context__label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #7b8794;
+}
+
+.hero-context__item strong {
+  display: block;
+  margin-top: 6px;
+  color: #102a43;
+  font-size: 0.94rem;
 }
 
 .tabs-container {
@@ -1407,7 +1385,7 @@ onMounted(async () => {
   border: 1px solid rgba(53, 77, 124, 0.08);
   border-radius: 18px;
   position: sticky;
-  top: calc(env(safe-area-inset-top, 0px) + 12px);
+  top: calc(var(--order-header-offset) + 10px);
   z-index: 15;
   backdrop-filter: blur(14px);
 }
@@ -1419,7 +1397,7 @@ onMounted(async () => {
 .details-content {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 16px;
 }
 
 .inline-alert {
@@ -1440,15 +1418,15 @@ onMounted(async () => {
 }
 
 .surface-card {
-  border-radius: 24px;
+  border-radius: 20px;
   border: 1px solid rgba(53, 77, 124, 0.08);
-  box-shadow: 0 18px 42px rgba(18, 48, 79, 0.08);
+  box-shadow: 0 14px 32px rgba(18, 48, 79, 0.07);
 }
 
 .section-title {
-  font-size: 1rem;
+  font-size: 0.96rem;
   font-weight: 700;
-  padding: 18px 18px 0;
+  padding: 16px 16px 0;
   color: #12304f;
 }
 
@@ -1561,11 +1539,11 @@ onMounted(async () => {
 }
 
 .address-content {
-  padding: 18px;
-  border-radius: 18px;
+  padding: 16px;
+  border-radius: 16px;
   background: linear-gradient(180deg, #f8fbff, #eef4fc);
-  font-size: 0.95rem;
-  line-height: 1.6;
+  font-size: 0.9rem;
+  line-height: 1.55;
   color: #12304f;
 }
 
@@ -1723,7 +1701,7 @@ onMounted(async () => {
 }
 
 .action-footer {
-  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0px));
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid rgba(18, 48, 79, 0.08);
   background: rgba(255, 255, 255, 0.96) !important;
   backdrop-filter: blur(18px);
@@ -1731,7 +1709,7 @@ onMounted(async () => {
 
 .action-buttons {
   width: 100%;
-  max-width: 1180px;
+  max-width: 960px;
   margin: 0 auto;
   display: flex;
   flex-wrap: wrap;
@@ -1752,57 +1730,59 @@ onMounted(async () => {
 }
 
 @media (max-width: 960px) {
-  .hero-card__top,
-  .hero-card__meta {
+  .hero-card__top {
     flex-direction: column;
     align-items: flex-start;
   }
 
-  .hero-stats,
   .content-grid,
   .content-grid--two {
     grid-template-columns: 1fr;
   }
+
+  .hero-stats,
+  .hero-context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 720px) {
+  .order-page {
+    --order-header-offset: calc(env(safe-area-inset-top, 0px) + 56px);
+  }
+
   .order-header__inner {
-    padding: 12px 14px 14px;
-    align-items: flex-start;
-    flex-direction: column;
+    padding: 8px 12px 10px;
   }
 
   .order-header h1 {
-    font-size: 1.16rem;
-  }
-
-  .order-header__subtext {
-    font-size: 0.8rem;
+    font-size: 0.98rem;
   }
 
   .order-shell {
-    padding: 16px 12px calc(124px + env(safe-area-inset-bottom, 0px));
+    padding: 14px 12px calc(124px + env(safe-area-inset-bottom, 0px));
   }
 
   .hero-card {
-    padding: 18px;
-    border-radius: 22px;
+    padding: 16px;
+    border-radius: 20px;
   }
 
   .hero-card__progress h2 {
-    font-size: 1.2rem;
+    font-size: 1.08rem;
   }
 
   .tabs-container {
-    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    top: calc(var(--order-header-offset) + 8px);
   }
 
   .window-container {
     padding-top: 14px;
   }
 
-  .section-title {
-    padding: 16px 16px 0;
+  .hero-stats,
+  .hero-context {
+    grid-template-columns: 1fr;
   }
 
   .info-item {

@@ -75,7 +75,7 @@
               </div>
               <div class="detail-row">
                 <span>Customer</span>
-                <strong>{{ orderData?.address?.recipient_name || 'Unavailable' }}</strong>
+                <strong>{{ customerDisplayName }}</strong>
               </div>
             </v-card-text>
           </v-card>
@@ -139,6 +139,12 @@ const statusMap = {
 }
 
 const statusText = computed(() => statusMap[orderData.value?.status] || orderData.value?.status || 'Unknown')
+const customerDisplayName = computed(() =>
+  getCustomerDisplayName({
+    address: orderData.value?.address,
+    user: orderData.value?.user,
+  }),
+)
 
 const shouldTrackOwnLocation = computed(() => {
   return (
@@ -162,6 +168,17 @@ const persistedRiderTrackingLocation = computed(() => {
 
 const goBack = () => {
   router.back()
+}
+
+const getProfileDisplayName = (profile = {}) => {
+  return [profile?.first_name, profile?.last_name]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .join(' ')
+    .trim()
+}
+
+const getCustomerDisplayName = ({ address = {}, user = {} } = {}) => {
+  return address?.recipient_name?.trim() || getProfileDisplayName(user) || 'Recipient unavailable'
 }
 
 const fetchCurrentRider = async () => {
@@ -190,6 +207,10 @@ const fetchCurrentRider = async () => {
 const loadTrackingLocations = async (data) => {
   const shop = data?.shop || {}
   const address = data?.address || {}
+  const customerName = getCustomerDisplayName({
+    address,
+    user: data?.user,
+  })
 
   const pickupQuery = [
     shop.house_no,
@@ -222,7 +243,7 @@ const loadTrackingLocations = async (data) => {
   })
 
   deliveryTrackingLocation.value = await resolveTrackingLocation({
-    name: address.recipient_name || 'Customer',
+    name: customerName,
     address: buildDeliveryAddress(address),
     lat: address.latitude,
     lng: address.longitude,
@@ -239,6 +260,11 @@ const fetchOrderDetails = async () => {
       .from('orders')
       .select(`
         *,
+        user:profiles!orders_user_id_fkey (
+          id,
+          first_name,
+          last_name
+        ),
         shop:shop_id (
           id,
           business_name,
@@ -251,7 +277,7 @@ const fetchOrderDetails = async () => {
           latitude,
           longitude
         ),
-        address:address_id (
+        address:addresses!orders_address_id_fkey (
           id,
           recipient_name,
           phone,
