@@ -129,7 +129,6 @@ const setupShopRealtimeSubscription = () => {
       (payload) => {
         console.log('Shop status changed:', payload)
         const updatedShop = payload.new
-        const oldShop = payload.old
 
         if (updatedShop) {
           const wasApproved = hasShop.value && shopCreationStatus.value === 'approved'
@@ -156,7 +155,7 @@ const setupShopRealtimeSubscription = () => {
 
 // Check if shop was recently approved (for first load after approval)
 const checkRecentApproval = () => {
-  if (!shopData || shopCreationStatus.value !== 'approved') return false
+  if (!shopData.value || shopCreationStatus.value !== 'approved') return false
 
   // Check if this is the first time seeing the approved status
   const lastApprovedShown = localStorage.getItem(`shop_approved_shown_${user.value?.id}`)
@@ -312,7 +311,7 @@ const checkUserShop = async () => {
 
 // Debug function to check current user
 const debugCurrentUser = async () => {
-  const { data: { user }, error } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
   console.log('Current user:', user)
   console.log('User ID:', user?.id)
 
@@ -571,7 +570,7 @@ const loadOrderCounts = async () => {
   try {
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('status, payment_status, delivery_status, id')
+      .select('status, payment_status, delivered_at, completed_at, id')
       .eq('user_id', user.value.id)
 
     if (error) {
@@ -591,27 +590,18 @@ const loadOrderCounts = async () => {
           ).length
           break
         case 'to-receive':
-          // Orders that are approved by seller (waiting_for_rider) or accepted by rider
           count = orders.filter(
-            (o) =>
-              (o.status === 'waiting_for_rider' || 
-              o.status === 'accepted_by_rider' ||
-              (o.payment_status === 'paid' && o.delivery_status !== 'delivered')) &&
-              o.delivery_status !== 'delivered' &&
-              o.status !== 'cancelled' &&
-              o.status !== 'delivered'
+            (o) => isOrderPendingDelivery(o) || isOrderAwaitingCustomerConfirmation(o)
           ).length
           break
         case 'reviews':
           count = orders.filter(
-            (o) => 
-              (o.delivery_status === 'delivered' || o.status === 'delivered') && 
-              o.status !== 'cancelled'
+            (o) => isOrderDeliveredState(o) && o.status !== 'cancelled'
           ).length
           break
         case 'completed':
           count = orders.filter(
-            (o) => o.status === 'delivered' || o.status === 'completed'
+            (o) => isOrderCompleted(o)
           ).length
           break
         case 'cancelled':
@@ -643,6 +633,27 @@ const handleNavClick = async (itemId) => {
   await loadSectionItems(itemId)
 }
 
+const isOrderCompleted = (order) => !!order?.completed_at || order?.status === 'completed'
+
+const isOrderAwaitingCustomerConfirmation = (order) => {
+  if (!order) return false
+  return ['picked_up', 'delivered'].includes(order.status) && !!order.delivered_at && !order.completed_at
+}
+
+const isOrderDeliveredState = (order) => {
+  if (!order) return false
+  if (isOrderCompleted(order) || order.status === 'delivered') return true
+
+  return order.status === 'picked_up' && !!order.delivered_at && !order.completed_at
+}
+
+const isOrderPendingDelivery = (order) => {
+  if (!order || order.status === 'cancelled') return false
+  if (order.status === 'waiting_for_rider' || order.status === 'accepted_by_rider') return true
+
+  return order.status === 'picked_up' && !order.delivered_at && !order.completed_at
+}
+
 // FIXED: Load items for the selected section with correct filtering
 const loadSectionItems = async (sectionId) => {
   if (!user.value?.id) return
@@ -656,7 +667,8 @@ const loadSectionItems = async (sectionId) => {
         id,
         status,
         payment_status,
-        delivery_status,
+        delivered_at,
+        completed_at,
         total_amount,
         created_at,
         transaction_number,
@@ -681,21 +693,16 @@ const loadSectionItems = async (sectionId) => {
     switch (sectionId) {
       case 'to-receive':
         query = query
-          .or(`status.eq.waiting_for_rider,status.eq.accepted_by_rider,payment_status.eq.paid`)
-          .neq('delivery_status', 'delivered')
-          .neq('status', 'cancelled')
-          .neq('status', 'delivered')
+          .in('status', ['waiting_for_rider', 'accepted_by_rider', 'picked_up', 'completed', 'delivered'])
         break
       case 'reviews':
-        // Look for delivered orders (either by delivery_status OR status)
         query = query
-          .or(`delivery_status.eq.delivered,status.eq.delivered`)
+          .in('status', ['picked_up', 'completed', 'delivered'])
           .neq('status', 'cancelled')
         break
       case 'completed':
-        // Look for delivered/completed orders
         query = query
-          .or(`status.eq.delivered,status.eq.completed,payment_status.eq.paid,delivery_status.eq.delivered`)
+          .in('status', ['picked_up', 'completed', 'delivered'])
           .neq('status', 'cancelled')
         break
       case 'cancelled':
@@ -706,8 +713,6 @@ const loadSectionItems = async (sectionId) => {
         break
       case 'my-purchases':
         query = query
-          .eq('payment_status', 'pending')
-          .neq('delivery_status', 'delivered')
           .neq('status', 'cancelled')
         break
     }
@@ -720,13 +725,37 @@ const loadSectionItems = async (sectionId) => {
     } else {
       console.log(`📦 ${sectionId} items:`, data)
 
+      const filteredData = (data || []).filter((order) => {
+        switch (sectionId) {
+          case 'to-receive':
+            return isOrderPendingDelivery(order) || isOrderAwaitingCustomerConfirmation(order)
+          case 'reviews':
+            return isOrderDeliveredState(order) && order.status !== 'cancelled'
+          case 'completed':
+            return isOrderCompleted(order) && order.status !== 'cancelled'
+          case 'cancelled':
+            return order.status === 'cancelled' || order.payment_status === 'cancelled'
+          case 'failed':
+            return (
+              order.payment_status === 'failed' ||
+              order.status === 'failed' ||
+              (order.payment_status === 'rejected' && order.status !== 'cancelled')
+            )
+          case 'my-purchases':
+            return order.status !== 'cancelled'
+          default:
+            return true
+        }
+      })
+
       // Enhanced order data structure
-      sectionItems.value = data.map((order) => ({
+      sectionItems.value = filteredData.map((order) => ({
         id: order.id,
         transaction_number: order.transaction_number,
         status: order.status,
         payment_status: order.payment_status,
-        delivery_status: order.delivery_status,
+        delivered_at: order.delivered_at,
+        completed_at: order.completed_at,
         total_amount: order.total_amount,
         created_at: order.created_at,
         items: order.order_items.map((item) => ({
@@ -754,11 +783,10 @@ const loadSectionItems = async (sectionId) => {
 // Helper function to get status color
 const getStatusColor = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
-  if (order.status === 'delivered' || order.status === 'completed') return 'success'
+  if (isOrderDeliveredState(order)) return 'success'
   if (order.status === 'waiting_for_rider') return 'warning'     // Orange/Yellow
   if (order.status === 'accepted_by_rider') return 'info'        // Blue
   if (order.status === 'picked_up') return 'warning'             // Orange/Yellow
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'success'
   if (order.payment_status === 'paid') return 'primary'
   if (order.status === 'pending_approval') return 'warning'      // Orange/Yellow
   if (order.payment_status === 'pending') return 'warning'
@@ -769,11 +797,12 @@ const getStatusColor = (order) => {
 // Helper function to get status text
 const getStatusText = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
-  if (order.status === 'delivered' || order.status === 'completed') return 'Completed'
+  if (isOrderCompleted(order)) return 'Completed'
+  if (isOrderDeliveredState(order)) return 'Delivered'
   if (order.status === 'waiting_for_rider') return 'Waiting for Rider'  // Added
   if (order.status === 'accepted_by_rider') return 'Rider Accepted'     // Added
   if (order.status === 'picked_up') return 'Picked Up'                  // Added
-  if (order.payment_status === 'paid' && order.delivery_status !== 'delivered') return 'To Receive'
+  if (order.payment_status === 'paid') return 'To Receive'
   if (order.status === 'pending_approval') return 'Pending Approval'    // Added
   if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
@@ -1155,12 +1184,7 @@ onBeforeRouteUpdate((to, from, next) => {
                       <v-icon left small>mdi-receipt</v-icon>
                       View Order
                     </v-btn>
-                    <v-btn v-if="order.payment_status === 'paid' && order.delivery_status !== 'delivered'"
-                      color="success" variant="flat" size="small">
-                      <v-icon left small>mdi-truck</v-icon>
-                      Track
-                    </v-btn>
-                    <v-btn v-if="order.delivery_status === 'delivered'" color="secondary" variant="flat" size="small"
+                    <v-btn v-if="isOrderDeliveredState(order)" color="secondary" variant="flat" size="small"
                       @click="rateOrder(order.id)">
                       <v-icon left small>mdi-star</v-icon>
                       Review
@@ -1198,7 +1222,7 @@ onBeforeRouteUpdate((to, from, next) => {
     <!-- Success Toast Notification -->
     <v-snackbar v-model="showApprovalToast" :color="toastColor" :timeout="6000" location="top" rounded="lg"
       elevation="24">
-      <template v-slot:activator="{ props }">
+      <template v-slot:activator>
         <!-- This is just for the snackbar itself -->
       </template>
 

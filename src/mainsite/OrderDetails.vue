@@ -2,8 +2,13 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { notifyCustomerOrderStatus, notifySellerOrderStatus } from '@/utils/orderNotifications'
+import {
+  notifyAssignedRiderOrderStatus,
+  notifyCustomerOrderStatus,
+  notifySellerOrderStatus,
+} from '@/utils/orderNotifications'
 import { formatAppDateTime, getAppTimestampValue } from '@/utils/dateTime'
+import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
 import {
   buildDeliveryAddress,
@@ -34,11 +39,19 @@ const currentRiderId = ref<number | null>(null)
 const currentRiderProfile = ref<any>(null)
 const pickupTrackingLocation = ref<TrackingLocation | null>(null)
 const deliveryTrackingLocation = ref<TrackingLocation | null>(null)
+const showProofDialog = ref(false)
+const proofImage = ref<File | null>(null)
+const proofImagePreview = ref<string | null>(null)
+const uploadingProof = ref(false)
+const showImageDialog = ref(false)
+const selectedImage = ref<string | null>(null)
+const selectedImageTitle = ref('')
+const customerDecisionLoading = ref<'completed' | 'not_received' | null>(null)
 
 // Timer state
 const timeRemaining = ref<number>(300)
 const canCancel = ref<boolean>(true)
-let timerInterval: number | null = null
+let timerInterval: ReturnType<typeof setInterval> | null = null
 let statusSubscription: any = null
 
 const fetchCurrentRiderProfile = async (profileId: string) => {
@@ -390,19 +403,65 @@ const riderDisplayName = computed(() => {
   return getProfileDisplayName(riderDetails.value) || 'Assigned rider'
 })
 
+const deliveryProofUrl = computed(
+  () => order.value?.proof_of_delivery_url || order.value?.delivery_proof_url || '',
+)
+const isOrderCompleted = computed(
+  () => !!order.value?.completed_at || order.value?.status === 'completed',
+)
+const isAwaitingCustomerConfirmation = computed(
+  () =>
+    ['picked_up', 'delivered'].includes(order.value?.status || '') &&
+    !!deliveryProofUrl.value &&
+    !!order.value?.delivered_at &&
+    !order.value?.completed_at,
+)
+const hasDeliveryIssue = computed(
+  () =>
+    order.value?.status === 'picked_up' &&
+    !!deliveryProofUrl.value &&
+    !order.value?.delivered_at &&
+    !order.value?.completed_at,
+)
+const deliveryProofMetaLabel = computed(() =>
+  hasDeliveryIssue.value ? 'Latest issue update' : 'Uploaded by rider',
+)
+const deliveryProofMetaValue = computed(() => {
+  const timestamp = order.value?.delivered_at || order.value?.completed_at || order.value?.updated_at
+  return timestamp ? formatDate(timestamp) : 'Recently'
+})
+const deliveryIssueRoleMessage = computed(() => {
+  if (isBuyer.value) {
+    return 'You reported that the order was not received. Please wait while the issue is being handled.'
+  }
+  if (isSeller.value) {
+    return 'The customer reported that the order was not received. Please coordinate with the rider for resolution.'
+  }
+  if (isRider.value) {
+    return 'The customer reported that the order was not received. Please coordinate with the seller or the support team for proper resolution.'
+  }
+  return 'A delivery issue was reported for this order and it is waiting for resolution.'
+})
+const reattemptDeliveryButtonText = computed(() =>
+  hasDeliveryIssue.value ? 'Reattempt delivery' : 'Upload proof & mark delivered',
+)
+
 const shopAddress = computed(() => {
   if (!shop.value) return 'Shop address unavailable'
   return buildShopAddress(shop.value)
 })
 
 const statusColor = computed(() => {
+  if (isOrderCompleted.value) return 'success'
+  if (hasDeliveryIssue.value) return 'warning'
+  if (isAwaitingCustomerConfirmation.value) return 'success'
+
   const status = order.value?.status
   const colors: Record<string, string> = {
     pending_approval: 'warning',
     waiting_for_rider: 'info',
     accepted_by_rider: 'primary',
     picked_up: 'purple',
-    delivered: 'success',
     completed: 'success',
     cancelled: 'error'
   }
@@ -410,13 +469,16 @@ const statusColor = computed(() => {
 })
 
 const statusIcon = computed(() => {
+  if (isOrderCompleted.value) return 'mdi-check-decagram'
+  if (hasDeliveryIssue.value) return 'mdi-alert-circle'
+  if (isAwaitingCustomerConfirmation.value) return 'mdi-check-circle'
+
   const status = order.value?.status
   const icons: Record<string, string> = {
     pending_approval: 'mdi-clock-outline',
     waiting_for_rider: 'mdi-bike-fast',
     accepted_by_rider: 'mdi-check-circle',
     picked_up: 'mdi-truck-delivery',
-    delivered: 'mdi-check-circle',
     completed: 'mdi-check-decagram',
     cancelled: 'mdi-close-circle'
   }
@@ -424,13 +486,16 @@ const statusIcon = computed(() => {
 })
 
 const statusDisplayText = computed(() => {
+  if (isOrderCompleted.value) return 'Completed'
+  if (hasDeliveryIssue.value) return 'Delivery Issue Reported'
+  if (isAwaitingCustomerConfirmation.value) return 'Delivered'
+
   const status = order.value?.status
   const texts: Record<string, string> = {
     pending_approval: 'Pending Approval',
     waiting_for_rider: 'Waiting for Rider',
     accepted_by_rider: 'Rider Accepted',
     picked_up: 'Picked Up',
-    delivered: 'Delivered',
     completed: 'Completed',
     cancelled: 'Cancelled'
   }
@@ -450,7 +515,10 @@ const shouldTrackOwnLocation = computed(
     isRider.value &&
     !!currentRiderId.value &&
     order.value?.rider_id === currentRiderId.value &&
-    ['accepted_by_rider', 'picked_up'].includes(order.value?.status),
+    (
+      order.value?.status === 'accepted_by_rider' ||
+      (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)
+    ),
 )
 const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
   const persisted = extractPersistedRiderCoordinates(order.value)
@@ -466,15 +534,23 @@ const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
   }
 })
 const trackingMapTitle = computed(() => {
+  if (hasDeliveryIssue.value) return 'Delivery issue reported by the customer'
+  if (isOrderCompleted.value) return 'Customer confirmed the delivery'
+  if (isAwaitingCustomerConfirmation.value) {
+    return 'Delivery completed and waiting for customer confirmation'
+  }
   if (order.value?.status === 'picked_up') return 'Order is on the way to the customer'
   if (order.value?.status === 'accepted_by_rider') return 'Rider is heading to the pickup point'
   if (order.value?.status === 'waiting_for_rider') return 'Tracking is ready once a rider accepts'
-  if (order.value?.status === 'delivered' || order.value?.status === 'completed') {
-    return 'Delivery route completed'
-  }
   return 'Follow the delivery journey'
 })
 const trackingMapSubtitle = computed(() => {
+  if (hasDeliveryIssue.value) {
+    return deliveryIssueRoleMessage.value
+  }
+  if (isAwaitingCustomerConfirmation.value) {
+    return 'The proof of delivery has been uploaded and the order is waiting for customer confirmation.'
+  }
   if (order.value?.status === 'pending_approval') {
     return 'The map is ready, and live rider tracking will appear after approval and assignment.'
   }
@@ -493,16 +569,69 @@ const canMarkAsPickedUp = computed(
   () => isAssignedRider.value && order.value?.status === 'accepted_by_rider',
 )
 const canMarkAsDelivered = computed(
-  () => isAssignedRider.value && order.value?.status === 'picked_up',
+  () =>
+    isAssignedRider.value &&
+    order.value?.status === 'picked_up' &&
+    !isAwaitingCustomerConfirmation.value,
 )
+const showDeliveryProofSection = computed(
+  () =>
+    !!deliveryProofUrl.value ||
+    !!order.value?.completed_at ||
+    isAwaitingCustomerConfirmation.value ||
+    hasDeliveryIssue.value,
+)
+const showCustomerDeliveryActions = computed(
+  () => isBuyer.value && isAwaitingCustomerConfirmation.value,
+)
+const deliveryConfirmationAlertType = computed(() => {
+  if (isOrderCompleted.value) return 'success'
+  if (hasDeliveryIssue.value) return 'warning'
+  return 'info'
+})
+const deliveryConfirmationTitle = computed(() => {
+  if (isOrderCompleted.value) return 'Order receipt confirmed'
+  if (hasDeliveryIssue.value) return 'Delivery issue reported'
+  if (isAwaitingCustomerConfirmation.value && isBuyer.value) {
+    return 'Please review and confirm this delivery'
+  }
+  if (isAwaitingCustomerConfirmation.value) return 'Waiting for customer confirmation'
+  return 'Delivery proof available'
+})
+const deliveryConfirmationMessage = computed(() => {
+  if (isOrderCompleted.value) {
+    return `The customer confirmed receipt${order.value?.completed_at ? ` on ${formatDate(order.value.completed_at)}` : ''}.`
+  }
+
+  if (hasDeliveryIssue.value) {
+    return deliveryIssueRoleMessage.value
+  }
+
+  if (isBuyer.value) {
+    return 'Check the proof of delivery below, then confirm if the order arrived or report an issue if it did not.'
+  }
+
+  if (isAwaitingCustomerConfirmation.value) {
+    return 'The rider uploaded proof of delivery. The customer can now confirm receipt or report a delivery issue.'
+  }
+
+  return 'The latest delivery proof is attached to this order for reference.'
+})
 const getCancelButtonText = computed(() => {
   if (timeRemaining.value <= 0) return 'Cancellation Unavailable'
   return `Cancel Order (${formatTimeRemaining()})`
 })
 
+const getTimelineStatus = () => {
+  if (isOrderCompleted.value) return 'delivered'
+  if (hasDeliveryIssue.value) return 'delivery_issue'
+  if (isAwaitingCustomerConfirmation.value) return 'delivered'
+  return order.value?.status
+}
+
 // Timeline steps based on order status
 const timelineSteps = computed(() => {
-  const currentStatus = order.value?.status
+  const currentStatus = getTimelineStatus()
   
   const steps = [
     {
@@ -556,6 +685,19 @@ const timelineSteps = computed(() => {
       actor: 'Rider'
     }
   ]
+
+  if (hasDeliveryIssue.value) {
+    steps.push({
+      key: 'delivery_issue',
+      title: 'Delivery Issue Reported',
+      description: 'The customer reported that the order was not received and the case is waiting for resolution.',
+      status: getStepStatus('delivery_issue'),
+      timestamp: order.value?.updated_at,
+      icon: 'mdi-alert-circle',
+      date: order.value?.updated_at,
+      actor: 'Customer',
+    })
+  }
   
   // If cancelled, mark steps appropriately
   if (currentStatus === 'cancelled') {
@@ -576,11 +718,11 @@ const timelineSteps = computed(() => {
   return steps
 })
 
-const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | 'cancelled' => {
-  const currentStatus = order.value?.status === 'completed' ? 'delivered' : order.value?.status
+const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | 'cancelled' | 'issue' => {
+  const currentStatus = getTimelineStatus()
   if (currentStatus === 'cancelled') return 'cancelled'
   
-  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered']
+  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered', 'delivery_issue']
   const currentIndex = statusOrder.indexOf(currentStatus)
   
   const stepMap: Record<string, number> = {
@@ -588,22 +730,24 @@ const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | '
     approved: 0,
     rider_assigned: 1,
     picked_up: 2,
-    delivered: 3
+    delivered: 3,
+    delivery_issue: 4,
   }
   
   const stepIndex = stepMap[stepKey]
   
+  if (stepKey === 'delivery_issue' && currentStatus === 'delivery_issue') return 'issue'
   if (stepIndex < currentIndex) return 'completed'
   if (stepIndex === currentIndex) return 'current'
   return 'pending'
 }
 
 const timelineProgress = computed(() => {
-  const currentStatus = order.value?.status === 'completed' ? 'delivered' : order.value?.status
+  const currentStatus = getTimelineStatus()
   if (currentStatus === 'cancelled') return 0
-  if (currentStatus === 'delivered') return 100
+  if (currentStatus === 'delivered' || currentStatus === 'delivery_issue') return 100
   
-  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered']
+  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered', 'delivery_issue']
   const currentIndex = statusOrder.indexOf(currentStatus)
   if (currentIndex === -1) return 0
   return ((currentIndex + 1) / statusOrder.length) * 100
@@ -779,25 +923,144 @@ const markAsPickedUp = async () => {
   }
 }
 
+const resetProofDraft = () => {
+  proofImage.value = null
+  proofImagePreview.value = null
+}
+
+const closeProofDialog = () => {
+  showProofDialog.value = false
+  resetProofDraft()
+}
+
+const openProofDialog = () => {
+  if (!canMarkAsDelivered.value) {
+    alert('Only the rider who accepted this order can mark it as delivered.')
+    return
+  }
+
+  showProofDialog.value = true
+}
+
+const viewFullImage = (imageUrl: string, title: string) => {
+  selectedImage.value = imageUrl
+  selectedImageTitle.value = title
+  showImageDialog.value = true
+}
+
+const takePhoto = async () => {
+  try {
+    showProofDialog.value = false
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const photo = await Camera.getPhoto({
+      resultType: CameraResultType.DataUrl,
+      source: CameraSource.Camera,
+      quality: 90,
+      allowEditing: false,
+      saveToGallery: false,
+    })
+
+    if (photo?.dataUrl) {
+      const response = await fetch(photo.dataUrl)
+      const blob = await response.blob()
+      proofImage.value = new File([blob], `delivery_proof_${Date.now()}.jpg`, {
+        type: 'image/jpeg',
+      })
+      proofImagePreview.value = photo.dataUrl
+    }
+  } catch (error: any) {
+    if (error?.message !== 'User cancelled photos app') {
+      console.error('Error taking delivery proof photo:', error)
+      alert('Failed to open the camera. Please check camera permissions and try again.')
+    }
+  } finally {
+    showProofDialog.value = true
+  }
+}
+
+const chooseFromGallery = async () => {
+  try {
+    showProofDialog.value = false
+    await new Promise((resolve) => setTimeout(resolve, 100))
+
+    const photo = await Camera.getPhoto({
+      resultType: CameraResultType.DataUrl,
+      source: CameraSource.Photos,
+      quality: 90,
+      allowEditing: false,
+    })
+
+    if (photo?.dataUrl) {
+      const response = await fetch(photo.dataUrl)
+      const blob = await response.blob()
+      proofImage.value = new File([blob], `delivery_proof_${Date.now()}.jpg`, {
+        type: 'image/jpeg',
+      })
+      proofImagePreview.value = photo.dataUrl
+    }
+  } catch (error: any) {
+    if (error?.message !== 'User cancelled photos app') {
+      console.error('Error choosing delivery proof image:', error)
+      alert('Failed to load an image from the gallery.')
+    }
+  } finally {
+    showProofDialog.value = true
+  }
+}
+
+const uploadProofImage = async () => {
+  if (!proofImage.value) return null
+
+  const fileExt = proofImage.value.name.split('.').pop() || 'jpg'
+  const fileName = `proof_${orderId}_${Date.now()}.${fileExt}`
+  const filePath = `delivery_proofs/${fileName}`
+
+  const { error: uploadError } = await supabase.storage
+    .from('order-proofs')
+    .upload(filePath, proofImage.value, {
+      cacheControl: '3600',
+      upsert: false,
+      contentType: `image/${fileExt === 'jpg' ? 'jpeg' : fileExt}`,
+    })
+
+  if (uploadError) throw uploadError
+
+  const {
+    data: { publicUrl },
+  } = supabase.storage.from('order-proofs').getPublicUrl(filePath)
+
+  return publicUrl
+}
+
 const markAsDelivered = async () => {
   if (!canMarkAsDelivered.value || !currentRiderId.value) {
     alert('Only the rider who accepted this order can mark it as delivered.')
     return
   }
-  if (!confirm('Mark this order as delivered?')) return
+  if (!proofImage.value) {
+    alert('Please add a proof of delivery image before completing this order.')
+    return
+  }
   
   try {
+    uploadingProof.value = true
     const deliveredAt = new Date().toISOString()
-
+    const proofImageUrl = await uploadProofImage()
+    const updateData = {
+      delivered_at: deliveredAt,
+      delivery_proof_url: proofImageUrl,
+      updated_at: deliveredAt,
+      rider_earnings: Math.round((deliveryFee.value || 0) * 0.8),
+    }
     const { data, error } = await supabase
       .from('orders')
-      .update({ 
-        status: 'delivered',
-        delivered_at: deliveredAt
-      })
+      .update(updateData)
       .eq('id', orderId)
       .eq('rider_id', currentRiderId.value)
       .eq('status', 'picked_up')
+      .is('delivered_at', null)
+      .is('completed_at', null)
       .select('id')
     
     if (error) throw error
@@ -805,6 +1068,8 @@ const markAsDelivered = async () => {
     if (!data || data.length === 0) {
       throw new Error('This order can only be updated by the rider who accepted it.')
     }
+
+    closeProofDialog()
 
     try {
       await notifyCustomerOrderStatus({
@@ -838,11 +1103,124 @@ const markAsDelivered = async () => {
       console.warn('Could not notify seller about delivered status:', notificationError)
     }
 
-    alert('Order marked as delivered!')
+    alert('Delivery proof uploaded. Waiting for customer confirmation.')
     await fetchOrderDetails()
   } catch (err) {
     console.error('Error marking as delivered:', err)
     alert(err instanceof Error ? err.message : 'Failed to update status.')
+  } finally {
+    uploadingProof.value = false
+  }
+}
+
+const confirmOrderReceived = async () => {
+  if (!showCustomerDeliveryActions.value || !currentUser.value?.id) return
+  if (!confirm('Confirm that you received this order?')) return
+
+  const completedAt = new Date().toISOString()
+  customerDecisionLoading.value = 'completed'
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .update({
+        completed_at: completedAt,
+        updated_at: completedAt,
+      })
+      .eq('id', orderId)
+      .eq('user_id', currentUser.value.id)
+      .in('status', ['picked_up', 'delivered'])
+      .not('delivered_at', 'is', null)
+      .is('completed_at', null)
+      .select('id')
+
+    if (error) throw error
+
+    if (!data || data.length === 0) {
+      throw new Error('This order is no longer waiting for customer confirmation.')
+    }
+
+    alert('Order confirmed as received.')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error confirming delivered order:', err)
+    alert(err instanceof Error ? err.message : 'Failed to confirm this order.')
+  } finally {
+    customerDecisionLoading.value = null
+  }
+}
+
+const reportOrderNotReceived = async () => {
+  if (!showCustomerDeliveryActions.value || !currentUser.value?.id) return
+  if (!confirm('Report that this order was not received?')) return
+
+  const reportedAt = new Date().toISOString()
+  customerDecisionLoading.value = 'not_received'
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .update({
+        status: 'picked_up',
+        delivered_at: null,
+        updated_at: reportedAt,
+      })
+      .eq('id', orderId)
+      .eq('user_id', currentUser.value.id)
+      .in('status', ['picked_up', 'delivered'])
+      .not('delivered_at', 'is', null)
+      .is('completed_at', null)
+      .select('id')
+
+    if (error) throw error
+
+    if (!data || data.length === 0) {
+      throw new Error('This order is no longer waiting for customer confirmation.')
+    }
+
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: 'not_received',
+        createdAt: reportedAt,
+        actorUserId: currentUser.value.id,
+        orderData: {
+          ...order.value,
+          address: shippingAddress.value,
+          buyer: buyer.value,
+          shop: shop.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about the delivery issue:', notificationError)
+    }
+
+    try {
+      await notifyAssignedRiderOrderStatus({
+        orderId,
+        status: 'not_received',
+        createdAt: reportedAt,
+        actorUserId: currentUser.value.id,
+        orderData: {
+          ...order.value,
+          address: shippingAddress.value,
+          buyer: buyer.value,
+          shop: shop.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify the assigned rider about the delivery issue:', notificationError)
+    }
+
+    alert('Delivery issue reported. The shop owner and assigned rider have been notified.')
+    await fetchOrderDetails()
+  } catch (err) {
+    console.error('Error reporting order not received:', err)
+    alert(err instanceof Error ? err.message : 'Failed to report this delivery issue.')
+  } finally {
+    customerDecisionLoading.value = null
   }
 }
 
@@ -932,8 +1310,9 @@ onMounted(async () => {
               </div>
               <h2>{{ trackingMapTitle }}</h2>
               <p>
-                <span v-if="order.status === 'completed'">The order is fully completed.</span>
-                <span v-else-if="order.status === 'delivered'">The rider marked the order as delivered.</span>
+                <span v-if="isOrderCompleted">The customer confirmed receipt and the order is fully completed.</span>
+                <span v-else-if="hasDeliveryIssue">{{ deliveryIssueRoleMessage }}</span>
+                <span v-else-if="isAwaitingCustomerConfirmation">The rider marked the order as delivered and the customer can now confirm receipt.</span>
                 <span v-else-if="order.status === 'picked_up'">The order has left the shop and is heading to the customer.</span>
                 <span v-else-if="order.status === 'accepted_by_rider'">The rider is moving toward the pickup point.</span>
                 <span v-else-if="order.status === 'waiting_for_rider'">The seller approved the order and it is waiting for a rider.</span>
@@ -1129,6 +1508,71 @@ onMounted(async () => {
                 </v-card>
               </div>
 
+              <v-card v-if="showDeliveryProofSection" class="surface-card">
+                <v-card-title class="section-title">
+                  <v-icon start>mdi-camera</v-icon>
+                  Proof of delivery
+                </v-card-title>
+                <v-card-text>
+                  <div v-if="deliveryProofUrl" class="proof-card">
+                    <div class="proof-image-frame" @click="viewFullImage(deliveryProofUrl, 'Proof of Delivery')">
+                      <v-img
+                        :src="deliveryProofUrl"
+                        height="220"
+                        cover
+                        class="proof-image"
+                      >
+                        <template #placeholder>
+                          <div class="proof-image-placeholder">
+                            <v-progress-circular indeterminate color="primary" />
+                          </div>
+                        </template>
+                      </v-img>
+                    </div>
+
+                    <div class="proof-meta">
+                      <div class="proof-meta__row">
+                        <span>{{ deliveryProofMetaLabel }}</span>
+                        <strong>{{ deliveryProofMetaValue }}</strong>
+                      </div>
+                      <p>The proof image is visible to the buyer, seller, and rider for delivery transparency.</p>
+                    </div>
+
+                    <div class="detail-actions">
+                      <v-btn
+                        color="primary"
+                        variant="outlined"
+                        size="small"
+                        @click="viewFullImage(deliveryProofUrl, 'Proof of Delivery')"
+                      >
+                        <v-icon start size="16">mdi-magnify</v-icon>
+                        View full image
+                      </v-btn>
+                    </div>
+                  </div>
+
+                  <div v-else class="proof-empty-state">
+                    <v-icon size="36" color="grey">mdi-image-off-outline</v-icon>
+                    <div>
+                      <strong>Proof image not available yet</strong>
+                      <p v-if="canMarkAsDelivered">Add a delivery photo before you complete this delivery attempt.</p>
+                      <p v-else>The proof of delivery image has not been attached to this order yet.</p>
+                    </div>
+                  </div>
+                </v-card-text>
+              </v-card>
+
+              <v-alert
+                v-if="showDeliveryProofSection"
+                :type="deliveryConfirmationAlertType"
+                variant="tonal"
+              >
+                <div class="delivery-confirmation-copy">
+                  <strong>{{ deliveryConfirmationTitle }}</strong>
+                  <span>{{ deliveryConfirmationMessage }}</span>
+                </div>
+              </v-alert>
+
               <v-card class="surface-card mb-4">
                 <v-card-title class="section-title">
                   <v-icon start>mdi-package-variant-closed</v-icon>
@@ -1209,6 +1653,7 @@ onMounted(async () => {
                     :class="{
                       'timeline-completed': step.status === 'completed',
                       'timeline-current': step.status === 'current',
+                      'timeline-issue': step.status === 'issue',
                       'timeline-pending': step.status === 'pending',
                       'timeline-cancelled': step.status === 'cancelled',
                     }"
@@ -1220,6 +1665,8 @@ onMounted(async () => {
                             ? '#4caf50'
                             : step.status === 'current'
                               ? '#2196f3'
+                              : step.status === 'issue'
+                                ? '#f59e0b'
                               : step.status === 'cancelled'
                                 ? '#f44336'
                                 : '#9e9e9e'
@@ -1245,6 +1692,7 @@ onMounted(async () => {
                 <div class="timeline-legend">
                   <div class="legend-item"><div class="legend-dot completed"></div><span>Completed</span></div>
                   <div class="legend-item"><div class="legend-dot current"></div><span>Current</span></div>
+                  <div v-if="hasDeliveryIssue" class="legend-item"><div class="legend-dot issue"></div><span>Issue</span></div>
                   <div class="legend-item"><div class="legend-dot pending"></div><span>Pending</span></div>
                   <div v-if="order.status === 'cancelled'" class="legend-item">
                     <div class="legend-dot cancelled"></div>
@@ -1269,6 +1717,27 @@ onMounted(async () => {
           >
             <v-icon start>mdi-close-circle</v-icon>
             {{ getCancelButtonText }}
+          </v-btn>
+          <v-btn
+            v-if="showCustomerDeliveryActions"
+            color="error"
+            variant="outlined"
+            :loading="customerDecisionLoading === 'not_received'"
+            :disabled="customerDecisionLoading !== null"
+            @click="reportOrderNotReceived"
+          >
+            <v-icon start>mdi-alert-circle-outline</v-icon>
+            Order Not Received
+          </v-btn>
+          <v-btn
+            v-if="showCustomerDeliveryActions"
+            color="success"
+            :loading="customerDecisionLoading === 'completed'"
+            :disabled="customerDecisionLoading !== null"
+            @click="confirmOrderReceived"
+          >
+            <v-icon start>mdi-check-circle</v-icon>
+            Order Received
           </v-btn>
         </template>
 
@@ -1299,14 +1768,94 @@ onMounted(async () => {
           <v-icon start>mdi-package-up</v-icon>
           Mark as picked up
         </v-btn>
-        <v-btn v-if="canMarkAsDelivered" color="success" @click="markAsDelivered">
-          <v-icon start>mdi-check</v-icon>
-          Mark delivered
+        <v-btn v-if="canMarkAsDelivered" color="success" @click="openProofDialog">
+          <v-icon start>mdi-camera</v-icon>
+          {{ reattemptDeliveryButtonText }}
         </v-btn>
 
         <v-btn variant="outlined" @click="goBack">Close</v-btn>
       </div>
     </v-footer>
+
+    <v-dialog v-model="showProofDialog" max-width="520">
+      <v-card>
+        <v-card-title class="text-h6">
+          <v-icon start color="success">mdi-camera</v-icon>
+          Proof of Delivery
+        </v-card-title>
+        <v-divider />
+        <v-card-text class="pa-4">
+          <div class="proof-dialog-copy">
+            <strong>Add a delivery photo before completing this order.</strong>
+            <p>The buyer and shop owner will be able to see this image in order details.</p>
+          </div>
+
+          <div v-if="proofImagePreview" class="proof-preview">
+            <v-img
+              :src="proofImagePreview"
+              height="240"
+              cover
+              class="proof-image"
+              @click="viewFullImage(proofImagePreview, 'Proof Preview')"
+            />
+            <div class="detail-actions mt-3">
+              <v-btn size="small" variant="text" @click="takePhoto">
+                <v-icon start size="16">mdi-camera-retake</v-icon>
+                Retake photo
+              </v-btn>
+              <v-btn size="small" variant="text" @click="chooseFromGallery">
+                <v-icon start size="16">mdi-folder-image</v-icon>
+                Choose from gallery
+              </v-btn>
+            </div>
+          </div>
+
+          <div v-else class="proof-source-actions">
+            <v-btn color="primary" variant="outlined" @click="takePhoto">
+              <v-icon start>mdi-camera</v-icon>
+              Take photo
+            </v-btn>
+            <v-btn color="primary" variant="outlined" @click="chooseFromGallery">
+              <v-icon start>mdi-folder-image</v-icon>
+              Choose from gallery
+            </v-btn>
+          </div>
+        </v-card-text>
+        <v-card-actions>
+          <v-btn variant="text" @click="closeProofDialog">Cancel</v-btn>
+          <v-spacer />
+          <v-btn
+            color="success"
+            :loading="uploadingProof"
+            :disabled="!proofImage"
+            @click="markAsDelivered"
+          >
+            Upload & mark delivered
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <v-dialog v-model="showImageDialog" max-width="90vw">
+      <v-card class="image-viewer-card">
+        <div class="image-viewer-head">
+          <strong>{{ selectedImageTitle || 'Image Preview' }}</strong>
+          <v-btn icon variant="text" @click="showImageDialog = false">
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </div>
+        <v-divider />
+        <v-card-text class="pa-2">
+          <v-img
+            v-if="selectedImage"
+            :src="selectedImage"
+            max-height="70vh"
+            contain
+            class="image-viewer-preview"
+          />
+        </v-card-text>
+      </v-card>
+    </v-dialog>
   </v-app>
 </template>
 
@@ -1565,6 +2114,123 @@ onMounted(async () => {
   margin-top: 16px;
 }
 
+.proof-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.proof-image-frame {
+  border-radius: 18px;
+  overflow: hidden;
+  border: 1px solid rgba(18, 48, 79, 0.08);
+  cursor: pointer;
+}
+
+.proof-image,
+.image-viewer-preview {
+  border-radius: 18px;
+}
+
+.proof-image-placeholder {
+  height: 220px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(180deg, #f8fbff, #eef4fc);
+}
+
+.proof-meta {
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fbff, #eef4fc);
+  color: #12304f;
+}
+
+.proof-meta__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 8px;
+}
+
+.proof-meta p {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  color: #52667d;
+}
+
+.proof-empty-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #f8fbff, #eef4fc);
+}
+
+.proof-empty-state strong {
+  display: block;
+  color: #12304f;
+}
+
+.proof-empty-state p {
+  margin: 6px 0 0;
+  color: #627d98;
+  font-size: 0.88rem;
+}
+
+.delivery-confirmation-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.delivery-confirmation-copy strong {
+  color: #12304f;
+}
+
+.delivery-confirmation-copy span {
+  line-height: 1.5;
+}
+
+.proof-dialog-copy strong {
+  display: block;
+  color: #12304f;
+}
+
+.proof-dialog-copy p {
+  margin: 8px 0 0;
+  color: #627d98;
+  line-height: 1.5;
+}
+
+.proof-preview {
+  margin-top: 16px;
+}
+
+.proof-source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.image-viewer-card {
+  border-radius: 24px;
+  overflow: hidden;
+}
+
+.image-viewer-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+}
+
 .product-item {
   padding: 14px 0;
   border-bottom: 1px solid rgba(18, 48, 79, 0.06);
@@ -1736,6 +2402,11 @@ onMounted(async () => {
   animation: pulse 2s infinite;
 }
 
+.timeline-issue .timeline-icon {
+  border-color: #f59e0b;
+  background: #fff7e6;
+}
+
 .timeline-pending .timeline-icon {
   background: #f5f7fa;
 }
@@ -1751,6 +2422,10 @@ onMounted(async () => {
 
 .timeline-current::before {
   background: linear-gradient(to bottom, #4caf50 0%, #2196f3 100%);
+}
+
+.timeline-issue::before {
+  background: #f59e0b;
 }
 
 .timeline-legend {
@@ -1786,6 +2461,11 @@ onMounted(async () => {
   background: #2196f3;
   border: 2px solid #2196f3;
   animation: pulse 2s infinite;
+}
+
+.legend-dot.issue {
+  background: #f59e0b;
+  border: 2px solid #f59e0b;
 }
 
 .legend-dot.pending {
@@ -1918,6 +2598,20 @@ onMounted(async () => {
   .timeline-header {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .proof-meta__row,
+  .proof-empty-state {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .proof-source-actions {
+    flex-direction: column;
+  }
+
+  .proof-source-actions :deep(.v-btn) {
+    width: 100%;
   }
 
   .action-buttons {

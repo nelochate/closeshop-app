@@ -43,30 +43,42 @@ const activeOrdersWithRiders = computed(() => {
   return orders.value.filter(order =>
     order.status === 'waiting_for_rider' ||
     order.status === 'accepted_by_rider' ||
-    order.status === 'picked_up'
+    (order.status === 'picked_up' && !order.delivered_at)
   )
 })
 
+const isOrderCompletedState = (order: any = {}) =>
+  !!order.completed_at || order.status === 'completed'
+
+const isOrderDeliveredState = (order: any = {}) =>
+  isOrderCompletedState(order) ||
+  order.status === 'delivered' ||
+  (order.status === 'picked_up' && !!order.delivered_at && !order.completed_at)
+
 // Add these helper functions
-const getOrderStatusText = (status) => {
+const getOrderStatusText = (order: any = {}) => {
+  if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
+
+  const status = order.status
   const statusMap = {
     'pending_approval': 'Pending Approval',
     'waiting_for_rider': 'Waiting for Rider',
     'accepted_by_rider': 'Rider Accepted',
     'picked_up': 'Picked Up',
-    'delivered': 'Delivered',
     'cancelled': 'Cancelled'
   }
   return statusMap[status] || status
 }
 
-const getOrderStatusColor = (status) => {
+const getOrderStatusColor = (order: any = {}) => {
+  if (isOrderDeliveredState(order)) return 'success'
+
+  const status = order.status
   const colorMap = {
     'pending_approval': 'warning',
     'waiting_for_rider': 'info',
     'accepted_by_rider': 'primary',
     'picked_up': 'warning',
-    'delivered': 'success',
     'cancelled': 'error'
   }
   return colorMap[status] || 'grey'
@@ -117,8 +129,7 @@ const rejectOrder = async (order) => {
       .from('orders')
       .update({
         status: 'cancelled',
-        payment_status: 'cancelled',
-        delivery_status: 'cancelled'
+        payment_status: 'cancelled'
       })
       .eq('id', order.id)
 
@@ -339,12 +350,12 @@ const markAsDelivered = async (orderId: string) => {
     const { error } = await supabase
       .from('orders')
       .update({
-        status: 'delivered',
-        delivery_status: 'delivered',
         delivered_at: deliveredAt,
         updated_at: deliveredAt,
       })
       .eq('id', orderId)
+      .eq('status', 'picked_up')
+      .is('completed_at', null)
 
     if (error) throw error
 
@@ -376,7 +387,6 @@ const cancelOrder = async (orderId: string) => {
       .update({
         status: 'cancelled',
         payment_status: 'cancelled',
-        delivery_status: 'cancelled',
         updated_at: new Date().toISOString(),
       })
       .eq('id', orderId)
@@ -401,7 +411,7 @@ const filteredOrders = computed(() => {
     // Active deliveries: orders that are accepted or picked up
     return orders.value.filter((order) => 
       order.status === 'accepted_by_rider' || 
-      order.status === 'picked_up'
+      (order.status === 'picked_up' && !order.delivered_at)
     )
   }
 
@@ -412,7 +422,7 @@ const filteredOrders = computed(() => {
       case 'waiting_for_rider':
         return order.status === 'waiting_for_rider'
       case 'delivered':
-        return order.status === 'delivered'
+        return isOrderDeliveredState(order)
       case 'cancelled':
         return order.status === 'cancelled'
       default:
@@ -426,13 +436,15 @@ const getStatusText = (order: any): string => {
   if (isMobile.value) {
     // Shorter text for mobile
     if (order.status === 'cancelled') return 'Cancelled'
+    if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
     if (order.status === 'pending_approval') return 'Pending'
     if (order.status === 'waiting_for_rider') return 'Wait for Rider'
     if (order.status === 'accepted_by_rider') return 'Accepted'
     if (order.status === 'picked_up') return 'Picked Up'
-    if (order.status === 'delivered') return 'Delivered'
     return 'Processing'
   }
+
+  if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
 
   // Full text for desktop
   if (order.status === 'cancelled') return 'Cancelled ❌'
@@ -445,22 +457,22 @@ const getStatusText = (order: any): string => {
 }
 
 const getStatusColor = (order: any): string => {
+  if (isOrderDeliveredState(order)) return 'success'
   if (order.status === 'cancelled') return 'error'
   if (order.status === 'pending_approval') return 'warning'
   if (order.status === 'waiting_for_rider') return 'info'
   if (order.status === 'accepted_by_rider') return 'primary'
   if (order.status === 'picked_up') return 'warning'
-  if (order.status === 'delivered') return 'success'
   return 'grey'
 }
 
 const getStatusIcon = (order: any): string => {
+  if (isOrderDeliveredState(order)) return 'mdi-check-circle'
   if (order.status === 'cancelled') return 'mdi-cancel'
   if (order.status === 'pending_approval') return 'mdi-clock-outline'
   if (order.status === 'waiting_for_rider') return 'mdi-truck-clock'
   if (order.status === 'accepted_by_rider') return 'mdi-check-circle'
   if (order.status === 'picked_up') return 'mdi-truck'
-  if (order.status === 'delivered') return 'mdi-check-circle'
   return 'mdi-help-circle'
 }
 
@@ -1260,8 +1272,8 @@ const getOrderDeliveryDisplay = (order: any): string => {
                         {{ formatDate(order.created_at) }}
                       </div>
                     </div>
-                    <v-chip :color="getOrderStatusColor(order.status)" size="x-small">
-                      {{ getOrderStatusText(order.status) }}
+                    <v-chip :color="getOrderStatusColor(order)" size="x-small">
+                      {{ getOrderStatusText(order) }}
                     </v-chip>
                   </div>
 
@@ -1682,7 +1694,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                       <!-- Cancel Order Button -->
                       <v-btn color="error" :size="isMobile ? 'x-small' : 'small'" variant="outlined"
-                        v-if="order.status !== 'cancelled' && order.status !== 'delivered' && order.status !== 'pending_approval'"
+                        v-if="order.status !== 'cancelled' && !isOrderDeliveredState(order) && order.status !== 'pending_approval'"
                         @click="cancelOrder(order.id)" :rounded="isMobile ? 'sm' : 'lg'"
                         class="action-button flex-grow-1" :block="isMobile">
                         <v-icon :start="!isMobile" :size="isMobile ? 12 : 14">mdi-cancel</v-icon>

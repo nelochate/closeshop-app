@@ -28,8 +28,8 @@
         <div v-else-if="order" class="order-details-container">
           <!-- Order Status -->
           <div class="order-status-section">
-            <div class="status-chip" :class="getStatusClass(order.status)">
-              {{ getStatusText(order.status) }}
+            <div class="status-chip" :class="getStatusClass(order)">
+              {{ getStatusText(order) }}
             </div>
             <p class="status-caption">{{ trackingMapTitle }}</p>
           </div>
@@ -162,17 +162,17 @@
           </v-card>
 
           <!-- Proof of Delivery Section - Only show for delivered/completed orders -->
-          <v-card v-if="order.status === 'delivered' || order.status === 'completed'" class="info-card mb-4" rounded="lg">
+          <v-card v-if="showDeliveryProofSection" class="info-card mb-4" rounded="lg">
             <v-card-title class="info-title">
               <v-icon size="20" color="#4caf50">mdi-camera</v-icon>
               <span>Proof of Delivery</span>
             </v-card-title>
             <v-divider></v-divider>
             <v-card-text class="pa-4">
-              <div v-if="order.delivery_proof_url" class="proof-container">
-                <div class="proof-image-wrapper" @click="viewFullImage(order.delivery_proof_url, 'Proof of Delivery')">
+              <div v-if="proofOfDeliveryUrl" class="proof-container">
+                <div class="proof-image-wrapper" @click="viewFullImage(proofOfDeliveryUrl, 'Proof of Delivery')">
                   <v-img
-                    :src="order.delivery_proof_url"
+                    :src="proofOfDeliveryUrl"
                     height="200"
                     cover
                     class="rounded proof-image"
@@ -189,7 +189,7 @@
                     size="small"
                     color="primary"
                     variant="text"
-                    @click="viewFullImage(order.delivery_proof_url, 'Proof of Delivery')"
+                    @click="viewFullImage(proofOfDeliveryUrl, 'Proof of Delivery')"
                   >
                     <v-icon left size="small">mdi-magnify</v-icon>
                     View Full Size
@@ -198,8 +198,8 @@
                 <div class="proof-info mt-3">
                   <div class="proof-field">
                     <v-icon size="16" color="success" class="mr-1">mdi-check-circle</v-icon>
-                    <span class="proof-label">Delivery completed on:</span>
-                    <span class="proof-value">{{ formatDateTime(order.delivered_at || order.completed_at) }}</span>
+                    <span class="proof-label">Latest delivery update:</span>
+                    <span class="proof-value">{{ formatDateTime(order.delivered_at || order.updated_at || order.completed_at) }}</span>
                   </div>
                 </div>
               </div>
@@ -227,14 +227,28 @@
             </v-btn>
 
             <!-- Delivered Button (for picked_up orders) -->
-            <v-btn v-else-if="order.status === 'picked_up' && isMyOrder" color="success" size="large" block
+            <v-btn v-else-if="canMarkAsDelivered" color="success" size="large" block
               @click="openProofDialog()">
               <v-icon left>mdi-check-circle</v-icon>
-              Mark as Delivered
+              {{ hasDeliveryIssue ? 'Reattempt Delivery' : 'Mark as Delivered' }}
             </v-btn>
 
+            <v-alert v-if="hasDeliveryIssue" type="warning" variant="tonal" class="mt-3 mb-0">
+              <div class="d-flex align-center">
+                <v-icon left class="mr-2">mdi-alert-circle</v-icon>
+                <span>{{ deliveryIssueMessage }}</span>
+              </div>
+            </v-alert>
+
+            <v-alert v-else-if="isAwaitingCustomerConfirmation" type="info"
+              variant="tonal" class="mb-0">
+              <div class="d-flex align-center">
+                <span>The proof of delivery has been uploaded. Waiting for the customer to confirm receipt.</span>
+              </div>
+            </v-alert>
+
             <!-- Message for completed orders -->
-            <v-alert v-else-if="order.status === 'delivered' || order.status === 'completed'" type="success"
+            <v-alert v-else-if="isOrderCompleted(order)" type="success"
               variant="tonal" class="mb-0">
               <div class="d-flex align-center">
                 <span>This order has been completed. Thank you for your delivery!</span>
@@ -250,7 +264,7 @@
             </v-alert>
 
             <!-- Message for orders assigned to other riders -->
-            <v-alert v-else-if="order.rider_id && !isMyOrder && order.status !== 'delivered'" type="warning"
+            <v-alert v-else-if="order.rider_id && !isMyOrder && !isAwaitingCustomerConfirmation" type="warning"
               variant="tonal" class="mb-0">
               <div class="d-flex align-center">
                 <v-icon left class="mr-2">mdi-alert</v-icon>
@@ -492,26 +506,64 @@ const formatDateTime = (dateString) => {
   })
 }
 
-const getStatusText = (status) => {
+const proofOfDeliveryUrl = computed(
+  () => order.value?.proof_of_delivery_url || order.value?.delivery_proof_url || '',
+)
+const isOrderCompleted = (orderRecord = null) =>
+  !!orderRecord?.completed_at || orderRecord?.status === 'completed'
+const hasOrderAwaitingCustomerConfirmation = (orderRecord = null) =>
+  ['picked_up', 'delivered'].includes(orderRecord?.status || '') &&
+  !!(orderRecord?.proof_of_delivery_url || orderRecord?.delivery_proof_url) &&
+  !!orderRecord?.delivered_at &&
+  !orderRecord?.completed_at
+const hasOrderDeliveryIssue = (orderRecord = null) =>
+  orderRecord?.status === 'picked_up' &&
+  !!(orderRecord?.proof_of_delivery_url || orderRecord?.delivery_proof_url) &&
+  !orderRecord?.delivered_at &&
+  !orderRecord?.completed_at
+const deliveryIssueMessage =
+  'The customer reported that the order was not received. Please coordinate with the seller or the support team for proper resolution.'
+
+const isAwaitingCustomerConfirmation = computed(() =>
+  hasOrderAwaitingCustomerConfirmation(order.value),
+)
+const hasDeliveryIssue = computed(() => hasOrderDeliveryIssue(order.value))
+const showDeliveryProofSection = computed(
+  () =>
+    !!proofOfDeliveryUrl.value ||
+    !!order.value?.completed_at ||
+    isAwaitingCustomerConfirmation.value ||
+    hasDeliveryIssue.value,
+)
+
+const getStatusText = (orderRecord) => {
+  if (isOrderCompleted(orderRecord)) return 'Completed'
+  if (hasOrderDeliveryIssue(orderRecord)) return 'Delivery Issue'
+  if (hasOrderAwaitingCustomerConfirmation(orderRecord)) return 'Delivered'
+
+  const status = typeof orderRecord === 'string' ? orderRecord : orderRecord?.status
   const statusMap = {
     pending_approval: 'Pending Seller Approval',
     waiting_for_rider: 'Available for Pickup',
     accepted_by_rider: 'Accepted by Rider',
     picked_up: 'Picked Up',
-    delivered: 'Delivered',
     completed: 'Completed',
     cancelled: 'Cancelled',
   }
   return statusMap[status] || status
 }
 
-const getStatusClass = (status) => {
+const getStatusClass = (orderRecord) => {
+  if (isOrderCompleted(orderRecord)) return 'status-completed'
+  if (hasOrderDeliveryIssue(orderRecord)) return 'status-issue'
+  if (hasOrderAwaitingCustomerConfirmation(orderRecord)) return 'status-delivered'
+
+  const status = typeof orderRecord === 'string' ? orderRecord : orderRecord?.status
   const classMap = {
     pending_approval: 'status-pending',
     waiting_for_rider: 'status-waiting',
     accepted_by_rider: 'status-accepted',
     picked_up: 'status-picked',
-    delivered: 'status-delivered',
     completed: 'status-completed',
     cancelled: 'status-cancelled',
   }
@@ -944,7 +996,7 @@ const uploadProofImage = async () => {
   try {
     console.log('Uploading proof image...')
     
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from('order-proofs')
       .upload(filePath, proofImage.value, {
         cacheControl: '3600',
@@ -997,8 +1049,8 @@ const confirmUpdateStatus = async () => {
       proofImageUrl = await uploadProofImage()
     }
 
-    const updateData = { 
-      status: statusToApply
+    const updateData = {
+      updated_at: statusTimestamp,
     }
     
     // Add delivery_proof_url if it exists
@@ -1007,22 +1059,28 @@ const confirmUpdateStatus = async () => {
     }
 
     if (statusToApply === 'picked_up') {
+      updateData.status = 'picked_up'
       updateData.picked_up_at = statusTimestamp
     } else if (statusToApply === 'delivered') {
       updateData.delivered_at = statusTimestamp
-      updateData.completed_at = statusTimestamp
       updateData.rider_earnings = Math.round((order.value.delivery_fee || 0) * 0.8)
     }
 
     const expectedCurrentStatus = statusToApply === 'picked_up' ? 'accepted_by_rider' : 'picked_up'
 
-    const { data, error } = await supabase
+    let updateQuery = supabase
       .from('orders')
       .update(updateData)
       .eq('id', orderId)
       .eq('rider_id', currentRiderNumericId.value)
       .eq('status', expectedCurrentStatus)
-      .select('id')
+    if (statusToApply === 'delivered') {
+      updateQuery = updateQuery
+        .is('delivered_at', null)
+        .is('completed_at', null)
+    }
+
+    const { data, error } = await updateQuery.select('id')
 
     if (error) throw error
 
@@ -1097,7 +1155,13 @@ const isAvailableForAcceptance = computed(() => {
 })
 
 const shouldTrackOwnLocation = computed(() => {
-  return isMyOrder.value && ['accepted_by_rider', 'picked_up'].includes(order.value?.status)
+  return (
+    isMyOrder.value &&
+    (
+      order.value?.status === 'accepted_by_rider' ||
+      (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)
+    )
+  )
 })
 
 const persistedRiderTrackingLocation = computed(() => {
@@ -1116,10 +1180,21 @@ const persistedRiderTrackingLocation = computed(() => {
 })
 
 const trackingMapTitle = computed(() => {
+  if (hasDeliveryIssue.value) return 'Delivery issue reported - coordination needed'
+  if (isOrderCompleted(order.value)) return 'Customer confirmed receipt'
+  if (isAwaitingCustomerConfirmation.value) return 'Waiting for customer confirmation'
   if (order.value?.status === 'picked_up') return 'Delivering to customer'
   if (order.value?.status === 'accepted_by_rider') return 'Heading to the pickup point'
   if (isAvailableForAcceptance.value) return 'Ready for pickup'
   return 'Route overview'
+})
+
+const canMarkAsDelivered = computed(() => {
+  return (
+    isMyOrder.value &&
+    order.value?.status === 'picked_up' &&
+    !isAwaitingCustomerConfirmation.value
+  )
 })
 
 onMounted(async () => {
@@ -1211,6 +1286,11 @@ onUnmounted(() => {
 .status-completed {
   background: #e8f5e9;
   color: #4caf50;
+}
+
+.status-issue {
+  background: #fff4e5;
+  color: #b45309;
 }
 
 .status-cancelled {
