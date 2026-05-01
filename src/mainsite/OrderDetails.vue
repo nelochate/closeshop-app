@@ -49,7 +49,8 @@ const selectedImageTitle = ref('')
 const customerDecisionLoading = ref<'completed' | 'not_received' | null>(null)
 
 // Timer state
-const timeRemaining = ref<number>(300)
+const CANCEL_WINDOW_SECONDS = 5 * 60
+const timeRemaining = ref<number>(CANCEL_WINDOW_SECONDS)
 const canCancel = ref<boolean>(true)
 let timerInterval: ReturnType<typeof setInterval> | null = null
 let statusSubscription: any = null
@@ -142,20 +143,19 @@ const fetchRiderDetails = async () => {
 
 // Calculate time remaining for cancellation
 const calculateTimeRemaining = () => {
-  if (!order.value || !order.value.created_at) return 300
+  if (!order.value || !order.value.created_at) return CANCEL_WINDOW_SECONDS
   if (order.value.status !== 'pending_approval') return 0
   
   const orderCreatedAt = getAppTimestampValue(order.value.created_at)
-  if (!orderCreatedAt) return 300
+  if (!orderCreatedAt) return CANCEL_WINDOW_SECONDS
   const currentTime = Date.now()
   const timeElapsed = (currentTime - orderCreatedAt) / 1000
-  const maxCancelTime = 5 * 60
   
-  return Math.max(0, maxCancelTime - timeElapsed)
+  return Math.max(0, CANCEL_WINDOW_SECONDS - timeElapsed)
 }
 
 const formatTimeRemaining = () => {
-  const remaining = timeRemaining.value
+  const remaining = Math.max(0, Math.ceil(timeRemaining.value))
   if (remaining <= 0) return '00:00'
   const minutes = Math.floor(remaining / 60)
   const seconds = remaining % 60
@@ -185,7 +185,7 @@ const startCancelTimer = () => {
 
 const cancelOrder = async () => {
   const remaining = calculateTimeRemaining()
-  if (remaining <= 0) {
+  if (remaining <= 0 || isCancelDisabled.value) {
     alert('Cancellation window has expired.')
     return
   }
