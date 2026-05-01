@@ -39,21 +39,21 @@ const initMap = async () => {
 
   // Default center (Manila)
   const defaultCenter = [120.9842, 14.5995]
-  
+
   map.value = new mapboxgl.Map({
     container: mapContainer.value,
     style: 'mapbox://styles/mapbox/streets-v12',
     center: defaultCenter,
     zoom: 13,
-    pitch: 0
+    pitch: 0,
   })
 
   // Add navigation control
   map.value.addControl(new mapboxgl.NavigationControl(), 'top-right')
-  
+
   // Add scale control
   map.value.addControl(new mapboxgl.ScaleControl(), 'bottom-left')
-  
+
   // Add fullscreen control
   map.value.addControl(new mapboxgl.FullscreenControl(), 'top-right')
 
@@ -84,7 +84,7 @@ const startWatchingLocation = () => {
       handleLocationError(error)
       locationLoading.value = false
     },
-    { enableHighAccuracy: true, timeout: 10000 }
+    { enableHighAccuracy: true, timeout: 10000 },
   )
 
   // Watch for location changes
@@ -98,28 +98,28 @@ const startWatchingLocation = () => {
     {
       enableHighAccuracy: true,
       maximumAge: 0,
-      timeout: 5000
-    }
+      timeout: 5000,
+    },
   )
 }
 
 // Update location on map
 const updateLocation = async (position) => {
   const { latitude, longitude, speed, accuracy: posAccuracy } = position.coords
-  
+
   userLocation.value = { lat: latitude, lng: longitude }
-  
+
   // Update accuracy
   accuracy.value = posAccuracy ? Math.round(posAccuracy) : null
-  
+
   // Update speed (convert m/s to km/h)
   if (speed !== null && speed !== undefined) {
     currentSpeed.value = (speed * 3.6).toFixed(1)
   }
-  
+
   // Update coordinates display
   currentCoordinates.value = `${latitude.toFixed(6)}, ${longitude.toFixed(6)}`
-  
+
   // Update or create default Mapbox marker
   if (userMarker.value) {
     userMarker.value.setLngLat([longitude, latitude])
@@ -128,12 +128,12 @@ const updateLocation = async (position) => {
     userMarker.value = new mapboxgl.Marker({
       color: '#4caf50',
       scale: 1.2,
-      draggable: false
+      draggable: false,
     })
       .setLngLat([longitude, latitude])
       .addTo(map.value)
   }
-  
+
   // Also create custom animated marker for better visibility
   if (customMarker.value) {
     customMarker.value.setLngLat([longitude, latitude])
@@ -146,14 +146,12 @@ const updateLocation = async (position) => {
       <div class="marker-dot"></div>
       <div class="marker-arrow"></div>
     `
-    customMarker.value = new mapboxgl.Marker(el)
-      .setLngLat([longitude, latitude])
-      .addTo(map.value)
+    customMarker.value = new mapboxgl.Marker(el).setLngLat([longitude, latitude]).addTo(map.value)
   }
-  
+
   // Get address and city boundary
   await getAddressAndBoundary(latitude, longitude)
-  
+
   // Center map on user location (if not manually moved)
   if (map.value && !map.value.isMoving && !map.value.isDragging) {
     centerOnUser()
@@ -165,10 +163,10 @@ const getAddressAndBoundary = async (lat, lng) => {
   try {
     // Get address information
     const addressResponse = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
     )
     const addressData = await addressResponse.json()
-    
+
     if (addressData && addressData.display_name) {
       // Format address to short version (remove country, postal code)
       const addressParts = addressData.display_name.split(',')
@@ -177,11 +175,12 @@ const getAddressAndBoundary = async (lat, lng) => {
       // Remove country code if present
       shortAddress = shortAddress.replace(/,\s*Philippines$/, '')
       currentAddress.value = shortAddress
-      
+
       // Extract city for boundary detection
       const address = addressData.address
-      const cityName = address.city || address.town || address.municipality || address.village || 'Unknown'
-      
+      const cityName =
+        address.city || address.town || address.municipality || address.village || 'Unknown'
+
       // Get city boundary
       await getCityBoundary(cityName, lat, lng)
     } else {
@@ -200,13 +199,13 @@ const getCityBoundary = async (city, lat, lng) => {
   try {
     // Search for the city boundary
     const searchResponse = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&polygon_geojson=1&limit=1`
+      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(city)}&format=json&polygon_geojson=1&limit=1`,
     )
     const searchData = await searchResponse.json()
-    
+
     if (searchData && searchData.length > 0 && searchData[0].geojson) {
       const boundaryGeoJSON = searchData[0].geojson
-      
+
       // Remove existing boundary layer if exists
       if (boundaryLayer.value) {
         if (map.value.getLayer('city-boundary')) {
@@ -219,13 +218,13 @@ const getCityBoundary = async (city, lat, lng) => {
           map.value.removeSource('city-boundary')
         }
       }
-      
+
       // Add boundary to map
       map.value.addSource('city-boundary', {
         type: 'geojson',
-        data: boundaryGeoJSON
+        data: boundaryGeoJSON,
       })
-      
+
       map.value.addLayer({
         id: 'city-boundary',
         type: 'line',
@@ -233,20 +232,20 @@ const getCityBoundary = async (city, lat, lng) => {
         paint: {
           'line-color': '#ff9800',
           'line-width': 3,
-          'line-dasharray': [2, 2]
-        }
+          'line-dasharray': [2, 2],
+        },
       })
-      
+
       map.value.addLayer({
         id: 'city-boundary-fill',
         type: 'fill',
         source: 'city-boundary',
         paint: {
           'fill-color': '#ff9800',
-          'fill-opacity': 0.1
-        }
+          'fill-opacity': 0.1,
+        },
       })
-      
+
       boundaryStatus.value = '✓ Within city limits'
       boundaryLayer.value = boundaryGeoJSON
     } else {
@@ -269,33 +268,39 @@ const showRadiusCircle = (lat, lng, radiusInMeters) => {
     }
     map.value.removeSource('radius-circle')
   }
-  
+
   const points = []
   const radiusInKm = radiusInMeters / 1000
   const earthRadius = 6371
-  
+
   for (let angle = 0; angle < 360; angle += 10) {
-    const radian = angle * Math.PI / 180
+    const radian = (angle * Math.PI) / 180
     const distance = radiusInKm / earthRadius
-    const newLat = Math.asin(Math.sin(lat * Math.PI / 180) * Math.cos(distance) +
-                   Math.cos(lat * Math.PI / 180) * Math.sin(distance) * Math.cos(radian))
-    const newLng = (lng * Math.PI / 180) + Math.atan2(Math.sin(radian) * Math.sin(distance) * Math.cos(lat * Math.PI / 180),
-                     Math.cos(distance) - Math.sin(lat * Math.PI / 180) * Math.sin(newLat))
-    
-    points.push([newLng * 180 / Math.PI, newLat * 180 / Math.PI])
+    const newLat = Math.asin(
+      Math.sin((lat * Math.PI) / 180) * Math.cos(distance) +
+        Math.cos((lat * Math.PI) / 180) * Math.sin(distance) * Math.cos(radian),
+    )
+    const newLng =
+      (lng * Math.PI) / 180 +
+      Math.atan2(
+        Math.sin(radian) * Math.sin(distance) * Math.cos((lat * Math.PI) / 180),
+        Math.cos(distance) - Math.sin((lat * Math.PI) / 180) * Math.sin(newLat),
+      )
+
+    points.push([(newLng * 180) / Math.PI, (newLat * 180) / Math.PI])
   }
-  
+
   map.value.addSource('radius-circle', {
     type: 'geojson',
     data: {
       type: 'Feature',
       geometry: {
         type: 'Polygon',
-        coordinates: [points]
-      }
-    }
+        coordinates: [points],
+      },
+    },
   })
-  
+
   map.value.addLayer({
     id: 'radius-circle',
     type: 'fill',
@@ -303,8 +308,8 @@ const showRadiusCircle = (lat, lng, radiusInMeters) => {
     paint: {
       'fill-color': '#2196f3',
       'fill-opacity': 0.1,
-      'fill-outline-color': '#2196f3'
-    }
+      'fill-outline-color': '#2196f3',
+    },
   })
 }
 
@@ -314,28 +319,49 @@ const centerOnUser = () => {
     map.value.flyTo({
       center: [userLocation.value.lng, userLocation.value.lat],
       zoom: 15,
-      duration: 1000
+      duration: 1000,
     })
   }
 }
 
-// Refresh all data
-const refreshData = () => {
-  if (userLocation.value) {
-    getAddressAndBoundary(userLocation.value.lat, userLocation.value.lng)
-  } else {
-    startWatchingLocation()
+// Refresh location data and marker
+const refreshLocation = () => {
+  if (!navigator.geolocation) {
+    alert('Geolocation is not supported by your browser')
+    return
   }
+
+  locationLoading.value = true
+  locationStatus.value = 'active'
+
+  navigator.geolocation.getCurrentPosition(
+    async (position) => {
+      await updateLocation(position)
+      locationLoading.value = false
+    },
+    (error) => {
+      console.error('Error refreshing location:', error)
+      handleLocationError(error)
+      locationLoading.value = false
+    },
+    { enableHighAccuracy: true, timeout: 10000 },
+  )
+}
+
+const refreshData = () => {
+  refreshLocation()
 }
 
 // Share location
 const shareLocation = () => {
   if (navigator.share && userLocation.value) {
-    navigator.share({
-      title: 'My Current Location',
-      text: `I'm currently at ${currentAddress.value}`,
-      url: `https://www.google.com/maps?q=${userLocation.value.lat},${userLocation.value.lng}`
-    }).catch(console.error)
+    navigator
+      .share({
+        title: 'My Current Location',
+        text: `I'm currently at ${currentAddress.value}`,
+        url: `https://www.google.com/maps?q=${userLocation.value.lat},${userLocation.value.lng}`,
+      })
+      .catch(console.error)
   } else {
     // Fallback: copy to clipboard
     const locationUrl = `https://www.google.com/maps?q=${userLocation.value.lat},${userLocation.value.lng}`
@@ -354,7 +380,7 @@ const openDirections = () => {
 
 // Handle location errors
 const handleLocationError = (error) => {
-  switch(error.code) {
+  switch (error.code) {
     case error.PERMISSION_DENIED:
       currentAddress.value = 'Location access denied. Please enable location services.'
       boundaryStatus.value = 'Permission required'
@@ -405,21 +431,16 @@ onMounted(() => {
         </v-btn>
         <h1 class="page-title">My Location</h1>
         <div class="header-actions">
-          <v-btn 
-            icon 
-            variant="text" 
+          <v-btn
+            icon
+            variant="text"
             class="locate-btn"
             :loading="locationLoading"
             @click="centerOnUser"
           >
             <v-icon size="24">mdi-crosshairs-gps</v-icon>
           </v-btn>
-          <v-btn 
-            icon 
-            variant="text" 
-            class="refresh-btn"
-            @click="refreshData"
-          >
+          <v-btn icon variant="text" class="refresh-btn" @click="refreshData">
             <v-icon size="24">mdi-refresh</v-icon>
           </v-btn>
         </div>
@@ -434,9 +455,7 @@ onMounted(() => {
         <v-chip v-if="locationStatus === 'active'" size="x-small" color="success" class="live-chip">
           LIVE
         </v-chip>
-        <v-chip v-else size="x-small" color="warning">
-          UPDATING
-        </v-chip>
+        <v-chip v-else size="x-small" color="warning"> UPDATING </v-chip>
       </div>
 
       <!-- Map Container -->
@@ -467,10 +486,15 @@ onMounted(() => {
               <span>±{{ accuracy }}m</span>
             </div>
             <div class="compact-item">
-              <v-icon size="16" :color="boundaryStatus === '✓ Within city limits' ? '#4caf50' : '#ff9800'">
+              <v-icon
+                size="16"
+                :color="boundaryStatus === '✓ Within city limits' ? '#4caf50' : '#ff9800'"
+              >
                 mdi-map-marker-radius
               </v-icon>
-              <span :class="boundaryStatus === '✓ Within city limits' ? 'success-text' : 'warning-text'">
+              <span
+                :class="boundaryStatus === '✓ Within city limits' ? 'success-text' : 'warning-text'"
+              >
                 {{ boundaryStatus }}
               </span>
             </div>
@@ -480,20 +504,12 @@ onMounted(() => {
 
       <!-- Bottom Controls -->
       <div class="bottom-controls">
-        <v-btn 
-          color="primary" 
-          class="share-btn"
-          @click="shareLocation"
-        >
+        <v-btn color="primary" class="share-btn" @click="shareLocation">
           <v-icon left>mdi-share-variant</v-icon>
           Share Location
         </v-btn>
-        
-        <v-btn 
-          color="success" 
-          class="direction-btn"
-          @click="openDirections"
-        >
+
+        <v-btn color="success" class="direction-btn" @click="openDirections">
           <v-icon left>mdi-directions</v-icon>
           Get Directions
         </v-btn>
@@ -527,7 +543,9 @@ onMounted(() => {
   align-items: center;
 }
 
-.back-btn, .locate-btn, .refresh-btn {
+.back-btn,
+.locate-btn,
+.refresh-btn {
   color: white !important;
   background: rgba(255, 255, 255, 0.1) !important;
 }
@@ -651,7 +669,8 @@ onMounted(() => {
   z-index: 100;
 }
 
-.share-btn, .direction-btn {
+.share-btn,
+.direction-btn {
   flex: 1;
 }
 
@@ -673,7 +692,7 @@ onMounted(() => {
   background: #4caf50;
   border: 3px solid white;
   border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
 }
 
 .pulse-dot {
@@ -727,23 +746,23 @@ onMounted(() => {
   .page-title {
     font-size: 1.2rem;
   }
-  
+
   .location-info-overlay {
     bottom: 70px;
   }
-  
+
   .map-container {
     height: calc(100vh - 180px);
   }
-  
+
   .coordinates {
     font-size: 0.7rem;
   }
-  
+
   .address-summary {
     font-size: 0.65rem;
   }
-  
+
   .compact-item {
     font-size: 0.65rem;
   }
@@ -756,7 +775,7 @@ onMounted(() => {
     width: 380px;
     bottom: 20px;
   }
-  
+
   .map-container {
     height: calc(100vh - 140px);
   }
