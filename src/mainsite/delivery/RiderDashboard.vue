@@ -25,9 +25,7 @@ const ordersSubscription = ref(null)
 const currentRider = ref(null)
 const currentRiderNumericId = ref(null)
 
-const isAwaitingCustomerConfirmation = (order) =>
-  !!order?.delivered_at &&
-  !order?.completed_at
+const isAwaitingCustomerConfirmation = (order) => !!order?.delivered_at && !order?.completed_at
 
 const hasDeliveryIssue = (order) =>
   order?.status === 'picked_up' &&
@@ -35,8 +33,7 @@ const hasDeliveryIssue = (order) =>
   !order?.delivered_at &&
   !order?.completed_at
 
-const isOrderCompleted = (order) =>
-  !!order?.completed_at || order?.status === 'completed'
+const isOrderCompleted = (order) => !!order?.completed_at || order?.status === 'completed'
 
 const isActivePickedUpOrder = (order) =>
   order?.status === 'picked_up' &&
@@ -70,7 +67,8 @@ const getOrderActivityTimestamp = (order) => {
   return order.created_at || order.updated_at || null
 }
 
-const getOrderActivityTimestampValue = (order) => getAppTimestampValue(getOrderActivityTimestamp(order))
+const getOrderActivityTimestampValue = (order) =>
+  getAppTimestampValue(getOrderActivityTimestamp(order))
 
 const sortOrdersByActivityTime = (left, right, direction = 'asc') => {
   const leftValue = getOrderActivityTimestampValue(left)
@@ -100,9 +98,9 @@ const loadingProfile = ref(true)
 // Computed orders by status
 const acceptedOrders = computed(() => {
   return orders.value
-    .filter((order) =>
-      order.status === 'accepted_by_rider' &&
-      order.rider_id === currentRiderNumericId.value
+    .filter(
+      (order) =>
+        order.status === 'accepted_by_rider' && order.rider_id === currentRiderNumericId.value,
     )
     .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
@@ -120,31 +118,59 @@ const availableOrders = computed(() => {
 
 const pickedUpOrders = computed(() => {
   return orders.value
-    .filter((order) =>
-      order.status === 'picked_up' &&
-      !isAwaitingCustomerConfirmation(order) &&
-      !isOrderCompleted(order) &&
-      order.rider_id === currentRiderNumericId.value
+    .filter(
+      (order) =>
+        order.status === 'picked_up' &&
+        !isAwaitingCustomerConfirmation(order) &&
+        !isOrderCompleted(order) &&
+        order.rider_id === currentRiderNumericId.value,
     )
     .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const deliveredOrders = computed(() => {
   return orders.value
-    .filter((order) =>
-      isAwaitingCustomerConfirmation(order) &&
-      order.rider_id === currentRiderNumericId.value
+    .filter(
+      (order) =>
+        isAwaitingCustomerConfirmation(order) && order.rider_id === currentRiderNumericId.value,
     )
     .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
 
 const completedOrders = computed(() => {
   return orders.value
-    .filter((order) =>
-      isOrderCompleted(order) &&
-      order.rider_id === currentRiderNumericId.value
-    )
+    .filter((order) => isOrderCompleted(order) && order.rider_id === currentRiderNumericId.value)
     .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
+})
+
+const allDeliveredOrders = computed(() => {
+  return [...deliveredOrders.value, ...completedOrders.value].sort((a, b) =>
+    sortOrdersByActivityTime(a, b, 'desc'),
+  )
+})
+
+const deliveredProductItems = computed(() => {
+  const completed = allDeliveredOrders.value
+  return completed.flatMap((order) => {
+    const items = order.order_items || []
+    return items.map((item) => ({
+      orderId: order.id,
+      orderStatus: order.status,
+      orderTimestamp: getOrderActivityTimestamp(order),
+      orderNumber: order.transaction_number || order.id?.slice(-6),
+      productName: item.products?.prod_name || item.name || 'Product',
+      quantity: item.quantity || 1,
+      price: item.price || item.products?.price || 0,
+      subtotal: (item.price || item.products?.price || 0) * (item.quantity || 1),
+      productImage: Array.isArray(item.products?.main_img_urls)
+        ? item.products.main_img_urls[0]
+        : item.products?.main_img_urls || null,
+    }))
+  })
+})
+
+const deliveredProductsCount = computed(() => {
+  return deliveredProductItems.value.reduce((sum, item) => sum + (item.quantity || 1), 0)
 })
 
 // Stats
@@ -152,11 +178,9 @@ const stats = computed(() => ({
   acceptedOrders: acceptedOrders.value.length,
   availableOrders: availableOrders.value.length,
   pickedUpOrders: pickedUpOrders.value.length,
-  deliveredOrders: deliveredOrders.value.length,
-  completedToday: completedOrders.value.filter((order) => {
-    return isSameLocalDay(getOrderActivityTimestamp(order), currentTime.value)
-  }).length,
-  totalEarnings: [...deliveredOrders.value, ...completedOrders.value].reduce(
+  deliveredOrders: allDeliveredOrders.value.length,
+  deliveredProducts: deliveredProductsCount.value,
+  totalEarnings: allDeliveredOrders.value.reduce(
     (sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0),
     0,
   ),
@@ -172,9 +196,9 @@ const filteredOrders = computed(() => {
     case 'pickedup':
       return pickedUpOrders.value
     case 'delivered':
-      return deliveredOrders.value
+      return deliveredProductItems.value
     case 'completed':
-      return completedOrders.value
+      return deliveredProductItems.value
     default:
       return availableOrders.value
   }
@@ -201,11 +225,12 @@ const formatOrderDateTime = (order) => {
   })
 }
 
-
 // Check rider approval status
 const checkRiderApproval = async () => {
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (!user) {
       router.push('/login')
       return
@@ -228,7 +253,7 @@ const checkRiderApproval = async () => {
       name: `${data.first_name} ${data.last_name}`,
       email: data.email,
       rider_id: data.rider_id,
-      status: data.status
+      status: data.status,
     })
 
     if (!isApproved.value) {
@@ -314,9 +339,9 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
-    Math.cos((lat2 * Math.PI) / 180) *
-    Math.sin(dLon / 2) *
-    Math.sin(dLon / 2)
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2)
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   return R * c
 }
@@ -363,7 +388,8 @@ const fetchOrders = async () => {
 
     const { data, error } = await supabase
       .from('orders')
-      .select(`
+      .select(
+        `
         *,
         order_items (
           id,
@@ -404,8 +430,11 @@ const fetchOrders = async () => {
           city_name,
           province_name
         )
-      `)
-      .or(`and(status.eq.waiting_for_rider,rider_id.is.null),rider_id.eq.${currentRiderNumericId.value}`)
+      `,
+      )
+      .or(
+        `and(status.eq.waiting_for_rider,rider_id.is.null),rider_id.eq.${currentRiderNumericId.value}`,
+      )
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -511,8 +540,8 @@ const refreshOrders = () => {
 }
 
 // Navigate to order details
-const viewOrderDetails = (order) => {
-  router.push({ name: 'rider-order-details', params: { id: order.id } })
+const viewOrderDetails = (id) => {
+  router.push({ name: 'rider-order-details', params: { id } })
 }
 
 const goToRiderLocation = () => {
@@ -656,57 +685,44 @@ onUnmounted(() => {
           @click="activeFilter = 'delivered'"
         >
           <div class="stat-content">
-            <v-icon size="32" color="#00897b">mdi-check-decagram</v-icon>
+            <v-icon size="32" color="#00897b">mdi-package-variant</v-icon>
             <div class="stat-info">
-              <div class="stat-value">{{ stats.deliveredOrders }}</div>
-              <div class="stat-label">Delivered</div>
+              <div class="stat-value">{{ stats.deliveredProducts }}</div>
+              <div class="stat-label">Delivered Products</div>
             </div>
           </div>
         </v-card>
 
-        <v-card
-          class="stat-card"
-          elevation="2"
-          :class="{ 'active-filter': activeFilter === 'completed' }"
-          @click="activeFilter = 'completed'"
-        >
+        <!-- Earnings Card -->
+        <v-card class="stat-card" elevation="0">
           <div class="stat-content">
-            <v-icon size="32" color="#4caf50">mdi-history</v-icon>
+            <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
             <div class="stat-info">
-              <div class="stat-value">{{ stats.completedToday }}</div>
-              <div class="stat-label">Completed Today</div>
+              <div class="stat-value">{{ stats.totalEarnings.toLocaleString() }}</div>
+              <div class="stat-label">Total Earnings</div>
             </div>
           </div>
         </v-card>
-
-
-      <!-- Earnings Card -->
-      <v-card class="stat-card" elevation="0">
-        <div class="stat-content">
-          <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.totalEarnings.toLocaleString() }}</div>
-            <div class="stat-label">Total Earnings</div>
-          </div>
-        </div>
-      </v-card>
       </div>
-
 
       <!-- Active Filter Status Badge -->
       <div class="active-filter-badge mb-4 mx-4">
-        <div class="status-badge-large" :class="{
-          'status-accepted': activeFilter === 'accepted',
-          'status-available': activeFilter === 'available',
-          'status-picked': activeFilter === 'pickedup',
-          'status-delivered': activeFilter === 'delivered',
-          'status-completed': activeFilter === 'completed'
-        }">
+        <div
+          class="status-badge-large"
+          :class="{
+            'status-accepted': activeFilter === 'accepted',
+            'status-available': activeFilter === 'available',
+            'status-picked': activeFilter === 'pickedup',
+            'status-delivered': activeFilter === 'delivered',
+            'status-completed': activeFilter === 'completed',
+          }"
+        >
           <v-icon left size="24" class="mr-2">
             <template v-if="activeFilter === 'accepted'">mdi-check-circle</template>
             <template v-else-if="activeFilter === 'available'">mdi-bike-fast</template>
             <template v-else-if="activeFilter === 'pickedup'">mdi-truck-delivery</template>
-            <template v-else-if="activeFilter === 'delivered'">mdi-check-decagram</template>
+            <template v-else-if="activeFilter === 'delivered'">mdi-package-variant</template>
+            <template v-else-if="activeFilter === 'completed'">mdi-package-variant</template>
             <template v-else>mdi-history</template>
           </v-icon>
           <span class="status-text">
@@ -714,8 +730,9 @@ onUnmounted(() => {
             <template v-if="activeFilter === 'accepted'">Accepted Orders</template>
             <template v-else-if="activeFilter === 'available'">Available Orders</template>
             <template v-else-if="activeFilter === 'pickedup'">Picked Up and Issue Orders</template>
-            <template v-else-if="activeFilter === 'delivered'">Delivered Awaiting Confirmation</template>
-            <template v-else>Completed Orders</template>
+            <template v-else-if="activeFilter === 'delivered'">Delivered Products</template>
+            <template v-else-if="activeFilter === 'completed'">Delivered Products</template>
+            <template v-else>Delivered Orders</template>
           </span>
         </div>
       </div>
@@ -733,64 +750,126 @@ onUnmounted(() => {
             <template v-else-if="activeFilter === 'available'">mdi-bike-off</template>
             <template v-else-if="activeFilter === 'pickedup'">mdi-truck-off</template>
             <template v-else-if="activeFilter === 'delivered'">mdi-package-check</template>
+            <template v-else-if="activeFilter === 'completed'">mdi-package-check</template>
             <template v-else>mdi-clipboard-check-outline</template>
           </v-icon>
           <h3>No Orders</h3>
           <p>
-            <template v-if="activeFilter === 'accepted'">You haven't accepted any orders yet.</template>
-            <template v-else-if="activeFilter === 'available'">No available orders at the moment.</template>
-            <template v-else-if="activeFilter === 'pickedup'">Picked up orders and re-delivery issues will appear here.</template>
-            <template v-else-if="activeFilter === 'delivered'">Orders waiting for customer confirmation will appear here.</template>
-            <template v-else>Your completed deliveries will appear here.</template>
+            <template v-if="activeFilter === 'accepted'"
+              >You haven't accepted any orders yet.</template
+            >
+            <template v-else-if="activeFilter === 'available'"
+              >No available orders at the moment.</template
+            >
+            <template v-else-if="activeFilter === 'pickedup'"
+              >Picked up orders and re-delivery issues will appear here.</template
+            >
+            <template v-else-if="activeFilter === 'delivered'"
+              >Delivered products will appear here.</template
+            >
+            <template v-else-if="activeFilter === 'completed'"
+              >Delivered products will appear here.</template
+            >
+            <template v-else>Delivered orders will appear here.</template>
           </p>
         </div>
 
-
         <div v-else class="orders-list">
-
           <!-- Click Instruction Banner -->
           <div class="instruction-banner mx-4 mb-3">
             <div class="instruction-content">
-              <span class="instruction-text">Tap on any order card to view full details and manage delivery
-                status</span>
+              <span class="instruction-text"
+                ><template v-if="activeFilter === 'delivered' || activeFilter === 'completed'"
+                  >Tap on any product card to view the order details</template
+                ><template v-else
+                  >Tap on any order card to view full details and manage delivery status</template
+                ></span
+              >
             </div>
           </div>
           <v-card
-            v-for="(order, index) in filteredOrders"
-            :key="order.id"
+            v-for="(item, index) in filteredOrders"
+            :key="activeFilter + '-' + index"
             class="order-card"
             :class="{
               'accepted-card': activeFilter === 'accepted',
               'picked-card': activeFilter === 'pickedup',
               'delivered-card': activeFilter === 'delivered',
-              'issue-card': hasDeliveryIssue(order),
-              'completed-card': activeFilter === 'completed'
+              'issue-card':
+                activeFilter !== 'delivered' &&
+                activeFilter !== 'completed' &&
+                hasDeliveryIssue(item),
+              'completed-card': activeFilter === 'completed',
             }"
             elevation="2"
-            @click="viewOrderDetails(order)"
+            @click="
+              viewOrderDetails(
+                activeFilter === 'delivered' || activeFilter === 'completed'
+                  ? item.orderId
+                  : item.id,
+              )
+            "
           >
             <div class="order-header">
               <div class="order-number">
                 <span class="order-number-badge">#{{ getOrderNumber(index) }}</span>
-                <span class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</span>
+                <span class="order-id">
+                  <template v-if="activeFilter === 'delivered' || activeFilter === 'completed'"
+                    >Product: {{ item.productName }}</template
+                  >
+                  <template v-else
+                    >Order #{{ item.transaction_number || item.id.slice(-6) }}</template
+                  >
+                </span>
               </div>
               <div class="order-time">
                 <v-icon size="16">mdi-clock-outline</v-icon>
-                {{ getOrderTimeLabel(order) }} • {{ formatOrderDateTime(order) }}
+                <template v-if="activeFilter === 'delivered' || activeFilter === 'completed'"
+                  >Delivered •
+                  {{
+                    formatAppDateTime(item.orderTimestamp, {
+                      now: currentTime.value,
+                      fallback: 'Unknown time',
+                      relativeDay: true,
+                      month: 'short',
+                      year: 'auto',
+                    })
+                  }}</template
+                >
+                <template v-else
+                  >{{ getOrderTimeLabel(item) }} • {{ formatOrderDateTime(item) }}</template
+                >
               </div>
             </div>
 
-            <div class="order-shop">
+            <div
+              v-if="activeFilter !== 'delivered' && activeFilter !== 'completed'"
+              class="order-shop"
+            >
               <v-icon size="14" color="#4caf50">mdi-store</v-icon>
-              <span class="shop-name">{{ order.shop_name }}</span>
+              <span class="shop-name">{{ item.shop_name }}</span>
+            </div>
+            <div v-else class="order-shop">
+              <v-icon size="14" color="#4caf50">mdi-package-variant</v-icon>
+              <span class="shop-name">Order #{{ item.orderNumber }}</span>
             </div>
 
-            <div v-if="hasDeliveryIssue(order)" class="order-issue-banner">
+            <div
+              v-if="
+                activeFilter !== 'delivered' &&
+                activeFilter !== 'completed' &&
+                hasDeliveryIssue(item)
+              "
+              class="order-issue-banner"
+            >
               <div class="order-state-chip issue">
                 <v-icon size="14">mdi-alert-circle</v-icon>
                 Re-delivery Required
               </div>
-              <span>Customer reported this order was not received. Coordinate with the seller or support, then reattempt delivery.</span>
+              <span
+                >Customer reported this order was not received. Coordinate with the seller or
+                support, then reattempt delivery.</span
+              >
             </div>
 
             <div class="order-products">
@@ -799,35 +878,77 @@ onUnmounted(() => {
                 Products:
               </div>
               <div class="products-list">
-                <div v-for="(item) in order.items.slice(0, 3)" :key="item.id" class="product-item">
-                  <div class="product-image-wrapper">
-                    <v-img v-if="item.image" :src="item.image" :alt="item.name" width="32" height="32"
-                      class="product-img" cover @error="handleImageError">
-                      <template #placeholder>
-                        <v-icon size="20">mdi-package</v-icon>
-                      </template>
-                    </v-img>
-                    <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                <template v-if="activeFilter === 'delivered' || activeFilter === 'completed'">
+                  <div class="product-item">
+                    <div class="product-image-wrapper">
+                      <v-img
+                        v-if="item.productImage"
+                        :src="item.productImage"
+                        :alt="item.productName"
+                        width="32"
+                        height="32"
+                        class="product-img"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon size="20">mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                    </div>
+                    <div class="product-details">
+                      <span class="product-name">{{ item.productName }}</span>
+                      <span class="product-qty">x{{ item.quantity }}</span>
+                    </div>
                   </div>
-                  <div class="product-details">
-                    <span class="product-name">{{ item.name }}</span>
-                    <span class="product-qty">x{{ item.quantity }}</span>
+                </template>
+                <template v-else>
+                  <div v-for="prod in item.items.slice(0, 3)" :key="prod.id" class="product-item">
+                    <div class="product-image-wrapper">
+                      <v-img
+                        v-if="prod.image"
+                        :src="prod.image"
+                        :alt="prod.name"
+                        width="32"
+                        height="32"
+                        class="product-img"
+                        cover
+                        @error="handleImageError"
+                      >
+                        <template #placeholder>
+                          <v-icon size="20">mdi-package</v-icon>
+                        </template>
+                      </v-img>
+                      <v-icon v-else size="20" color="grey">mdi-package</v-icon>
+                    </div>
+                    <div class="product-details">
+                      <span class="product-name">{{ prod.name }}</span>
+                      <span class="product-qty">x{{ prod.quantity }}</span>
+                    </div>
                   </div>
-                </div>
-                <div v-if="order.items.length > 3" class="more-products">
-                  +{{ order.items.length - 3 }} more
-                </div>
+                  <div v-if="item.items.length > 3" class="more-products">
+                    +{{ item.items.length - 3 }} more
+                  </div>
+                </template>
               </div>
             </div>
 
             <div class="order-footer">
-              <div class="order-distance" v-if="order.distance">
+              <div
+                v-if="activeFilter !== 'delivered' && activeFilter !== 'completed' && item.distance"
+                class="order-distance"
+              >
                 <v-icon size="14">mdi-map-marker-distance</v-icon>
-                {{ order.distance }} km
+                {{ item.distance }} km
               </div>
-              <div class="order-earnings" v-if="order.rider_earnings">
+              <div class="order-earnings">
                 <v-icon size="14" color="#4caf50">mdi-cash</v-icon>
-                ₱{{ order.rider_earnings }}
+                ₱{{
+                  activeFilter === 'delivered' || activeFilter === 'completed'
+                    ? item.subtotal
+                    : item.rider_earnings || 0
+                }}
               </div>
             </div>
           </v-card>
@@ -953,7 +1074,9 @@ onUnmounted(() => {
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition:
+    transform 0.2s,
+    box-shadow 0.2s;
   position: relative;
 }
 
@@ -1297,7 +1420,10 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #388e3c 0%, #66bb6a 100%);
 }
 
-.order-card:not(.accepted-card):not(.picked-card):not(.delivered-card):not(.completed-card):not(.issue-card) .order-number-badge {
+.order-card:not(.accepted-card):not(.picked-card):not(.delivered-card):not(.completed-card):not(
+    .issue-card
+  )
+  .order-number-badge {
   background: linear-gradient(135deg, #055e1d 0%, #229b42 100%);
 }
 

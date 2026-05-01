@@ -18,6 +18,7 @@ const showReviewDialog = ref(false)
 const showImageDialog = ref(false)
 const currentImage = ref('')
 const selectedProduct = ref<any>(null)
+const currentUserId = ref<string | null>(null)
 
 // Image upload state
 const uploadingImages = ref(false)
@@ -157,6 +158,10 @@ const getProductRating = (productId: string) => {
 
 // Open review dialog for a product
 const openReviewDialog = (product: any) => {
+  if (hasUserReviewed(product.id)) {
+    alert('You have already reviewed this product.')
+    return
+  }
   selectedProduct.value = product
   newReview.value = {
     product_id: product.id,
@@ -165,6 +170,11 @@ const openReviewDialog = (product: any) => {
     photos: []
   }
   showReviewDialog.value = true
+}
+
+// Check if user has already reviewed a product
+const hasUserReviewed = (productId: string) => {
+  return reviews.value.some(review => review.product_id === productId && review.user_id === currentUserId.value)
 }
 
 // Handle photo upload
@@ -286,6 +296,11 @@ const submitReview = async () => {
     return
   }
 
+  if (hasUserReviewed(newReview.value.product_id)) {
+    alert('You have already reviewed this product.')
+    return
+  }
+
   isSubmitting.value = true
   try {
     const { data: userData } = await supabase.auth.getUser()
@@ -395,6 +410,8 @@ const formatDate = (dateString: string) => {
 
 // Initialize
 onMounted(async () => {
+  const { data: userData } = await supabase.auth.getUser()
+  currentUserId.value = userData.user?.id || null
   await loadOrderItems()
   await loadReviews()
 })
@@ -486,10 +503,11 @@ watch(orderItems, () => {
                   <v-btn
                     color="primary"
                     variant="outlined"
+                    :disabled="hasUserReviewed(item.product.id)"
                     @click="openReviewDialog(item.product)"
                   >
                     <v-icon left small>mdi-pencil</v-icon>
-                    Review
+                    {{ hasUserReviewed(item.product.id) ? 'Reviewed' : 'Review' }}
                   </v-btn>
                 </template>
               </v-list-item>
