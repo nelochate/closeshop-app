@@ -74,18 +74,14 @@ const activeOrdersWithRiders = computed(() => {
   )
 })
 
-<<<<<<< HEAD
 const deliveredOrders = computed(() => {
-  return orders.value.filter(order => order.status === 'delivered')
+  return orders.value.filter(order => isOrderDeliveredState(order))
 })
 
 const cancelledOrders = computed(() => {
   return orders.value.filter(order => order.status === 'cancelled')
 })
 
-// Helper functions
-const getOrderStatusText = (status) => {
-=======
 const isOrderCompletedState = (order: any = {}) =>
   !!order.completed_at || order.status === 'completed'
 
@@ -99,7 +95,6 @@ const getOrderStatusText = (order: any = {}) => {
   if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
 
   const status = order.status
->>>>>>> da4d9f7e4ab43f2a5a785352edb2686e65afd869
   const statusMap = {
     'pending_approval': 'Pending Approval',
     'waiting_for_rider': 'Waiting for Rider',
@@ -235,6 +230,15 @@ const orderSections = [
   }
 ]
 
+const transactionOptions = [
+  { title: 'All Orders', value: 'all' },
+  { title: 'Pending Approval', value: 'pending_approval' },
+  { title: 'Waiting for Rider', value: 'waiting_for_rider' },
+  { title: 'Active Deliveries', value: 'active' },
+  { title: 'Delivered', value: 'delivered' },
+  { title: 'Cancelled', value: 'cancelled' },
+]
+
 // Function to convert 24-hour time to 12-hour format
 const convertTo12Hour = (time24: string) => {
   if (!time24 || time24 === 'N/A') return 'N/A'
@@ -256,9 +260,6 @@ const convertTo12Hour = (time24: string) => {
   }
 }
 
-<<<<<<< HEAD
-// Fixed fetchOrders function
-=======
 const getProfileDisplayName = (profile: any = {}) =>
   [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
 
@@ -266,7 +267,6 @@ const getCustomerDisplayName = (order: any = {}) =>
   order.address?.recipient_name?.trim() || getProfileDisplayName(order.user) || 'Customer'
 
 // Fixed fetchOrders function - removing the incorrect rider relationship
->>>>>>> da4d9f7e4ab43f2a5a785352edb2686e65afd869
 const fetchOrders = async () => {
   if (!shopId.value) {
     console.log('❌ No shop ID available')
@@ -493,32 +493,6 @@ const filteredOrders = computed(() => {
     default:
       return orders.value
   }
-<<<<<<< HEAD
-=======
-
-  if (activeOrderTab.value === 'active') {
-    // Active deliveries: orders that are accepted or picked up
-    return orders.value.filter((order) => 
-      order.status === 'accepted_by_rider' || 
-      (order.status === 'picked_up' && !order.delivered_at)
-    )
-  }
-
-  return orders.value.filter((order) => {
-    switch (activeOrderTab.value) {
-      case 'pending_approval':
-        return order.status === 'pending_approval'
-      case 'waiting_for_rider':
-        return order.status === 'waiting_for_rider'
-      case 'delivered':
-        return isOrderDeliveredState(order)
-      case 'cancelled':
-        return order.status === 'cancelled'
-      default:
-        return true
-    }
-  })
->>>>>>> da4d9f7e4ab43f2a5a785352edb2686e65afd869
 })
 
 // Mobile-friendly status helpers
@@ -533,12 +507,9 @@ const getStatusText = (order: any): string => {
     return 'Processing'
   }
 
-<<<<<<< HEAD
-=======
   if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
 
   // Full text for desktop
->>>>>>> da4d9f7e4ab43f2a5a785352edb2686e65afd869
   if (order.status === 'cancelled') return 'Cancelled ❌'
   if (order.status === 'pending_approval') return 'Pending Approval ⏳'
   if (order.status === 'waiting_for_rider') return 'Waiting for Rider 🚚'
@@ -1197,9 +1168,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
         </v-row>
       </v-container>
 
-<<<<<<< HEAD
-      <!-- Orders Dashboard Section - Refined Layout (FIXED SCROLLING) -->
-=======
       <!-- NEW: Seller Order Approval Section -->
       <v-container :class="isMobile ? 'px-3 py-3' : 'py-2'">
         <v-card class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
@@ -1379,7 +1347,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
       </v-container>
 
       <!-- Orders Section - Mobile Optimized -->
->>>>>>> da4d9f7e4ab43f2a5a785352edb2686e65afd869
       <v-container :class="isMobile ? 'px-3 py-3' : 'py-4'">
         <!-- Section Header -->
         <div class="d-flex align-center justify-space-between mb-4">
@@ -1418,404 +1385,18 @@ const getOrderDeliveryDisplay = (order: any): string => {
           </v-col>
         </v-row>
 
-<<<<<<< HEAD
-        <!-- Loading State -->
-        <v-card v-if="loadingOrders" class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
-          <v-card-text class="text-center py-8">
-            <v-progress-circular indeterminate color="primary" :size="isMobile ? 48 : 64" />
-            <p class="mt-3 text-body-2 text-medium-emphasis">Loading orders...</p>
-=======
-            <!-- Desktop Select for Order Filter -->
-            <v-select v-else v-model="activeOrderTab" :items="transactionOptions" item-title="title" item-value="value"
-              label="Filter Orders" variant="outlined" density="comfortable" prepend-icon="mdi-filter" class="mb-6"
-              rounded="lg" />
+        <!-- Desktop Select for Order Filter -->
+        <v-select v-if="!isMobile" v-model="activeOrderTab" :items="transactionOptions" item-title="title" item-value="value"
+          label="Filter Orders" variant="outlined" density="comfortable" prepend-icon="mdi-filter" class="mb-6"
+          rounded="lg" />
 
-            <!-- Orders Loading State -->
-            <div v-if="loadingOrders" class="text-center" :class="isMobile ? 'py-8' : 'py-12'">
-              <v-progress-circular indeterminate color="primary" :size="isMobile ? 48 : 64" />
-              <p class="mt-3 text-body-2 text-medium-emphasis">Loading orders...</p>
-            </div>
+        <!-- Orders Loading State -->
+        <div v-if="loadingOrders" class="text-center" :class="isMobile ? 'py-8' : 'py-12'">
+          <v-progress-circular indeterminate color="primary" :size="isMobile ? 48 : 64" />
+          <p class="mt-3 text-body-2 text-medium-emphasis">Loading orders...</p>
+        </div>
 
-            <!-- Orders Error State -->
-            <v-alert v-else-if="ordersError" type="error" class="mb-3" :rounded="isMobile ? 'md' : 'lg'">
-              <div class="d-flex align-center">
-                <v-icon :size="isMobile ? 18 : 20" class="mr-2">mdi-alert-circle</v-icon>
-                <div class="text-caption">{{ ordersError }}</div>
-                <v-spacer></v-spacer>
-                <v-btn variant="text" color="white" @click="fetchOrders" size="x-small" class="ml-1">
-                  Retry
-                </v-btn>
-              </div>
-            </v-alert>
-
-            <!-- No Orders State -->
-            <div v-else-if="filteredOrders.length === 0" :class="isMobile ? 'text-center py-8' : 'text-center py-12'">
-              <v-icon :size="isMobile ? 64 : 96" color="grey-lighten-2" class="mb-3">mdi-cart-off</v-icon>
-              <h3 :class="isMobile ? 'text-subtitle-2 text-grey mb-1' : 'text-h5 text-grey mb-2'">
-                No orders found
-              </h3>
-              <p :class="isMobile
-                  ? 'text-caption text-grey-lighten-1 mb-3'
-                  : 'text-body-1 text-grey-lighten-1 mb-4'
-                ">
-                {{
-                  activeOrderTab === 'all'
-                    ? "You haven't received any orders yet."
-                    : `No ${activeOrderTab} orders.`
-                }}
-              </p>
-              <v-btn @click="refreshOrders" color="primary" variant="outlined" :size="isMobile ? 'small' : 'default'">
-                <v-icon :start="!isMobile">mdi-refresh</v-icon>
-                Refresh
-              </v-btn>
-            </div>
-
-            <!-- Orders List - Mobile Optimized -->
-            <div v-else class="orders-container">
-              <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
-                :rounded="isMobile ? 'lg' : 'xl'">
-                <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-                  <!-- Order Header - Mobile Optimized -->
-                  <div class="d-flex justify-space-between align-start mb-3">
-                    <div class="flex-grow-1">
-                      <div class="d-flex align-center mb-1">
-                        <h4 class="text-subtitle-2 font-weight-bold text-primary mr-2">
-                          #{{ getTransactionNumber(order) }}
-                        </h4>
-                        <v-chip :color="getStatusColor(order)" :size="isMobile ? 'x-small' : 'small'" variant="flat"
-                          class="ml-auto">
-                          <v-icon :start="!isMobile" :size="isMobile ? 12 : 14">{{
-                            getStatusIcon(order)
-                            }}</v-icon>
-                          {{ getStatusText(order) }}
-                        </v-chip>
-                      </div>
-                      <div class="d-flex align-center flex-wrap gap-1">
-                        <p class="text-caption text-medium-emphasis">
-                          <v-icon :size="isMobile ? 12 : 14" class="mr-1">mdi-calendar</v-icon>
-                          {{ formatDate(order.created_at) }}
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Customer Info - Mobile Collapsible -->
-                  <v-expansion-panels v-if="isMobile">
-                    <v-expansion-panel elevation="0">
-                      <v-expansion-panel-title class="px-0" :hide-actions="true">
-                        <template #default="{ expanded }">
-                          <div class="d-flex align-center w-100">
-                            <v-avatar size="36" color="primary" class="mr-2">
-                              <v-img v-if="order.user?.avatar_url" :src="order.user.avatar_url" alt="Customer" />
-                              <span v-else class="text-white text-caption">
-                                {{ order.user?.first_name?.[0] }}{{ order.user?.last_name?.[0] }}
-                              </span>
-                            </v-avatar>
-                            <div class="flex-grow-1">
-                              <div class="text-caption font-weight-medium">
-                                {{ order.user?.first_name }} {{ order.user?.last_name }}
-                              </div>
-                              <div class="text-caption text-medium-emphasis">
-                                {{ order.address?.phone || order.user?.phone || 'N/A' }}
-                              </div>
-                            </div>
-                            <v-icon :size="16">{{
-                              expanded ? 'mdi-chevron-up' : 'mdi-chevron-down'
-                              }}</v-icon>
-                          </div>
-                        </template>
-                      </v-expansion-panel-title>
-                      <v-expansion-panel-text class="px-0">
-                        <!-- Customer Details Content -->
-                        <div class="mt-2">
-                          <v-divider class="my-2"></v-divider>
-
-                          <div class="customer-details-mobile">
-                            <div class="detail-item mb-2">
-                              <v-icon size="14" class="mr-1 text-primary">mdi-truck</v-icon>
-                              <span class="text-caption font-weight-medium">Delivery:</span>
-                              <span class="text-caption ml-1">{{
-                                getOrderDeliveryDisplay(order)
-                                }}</span>
-                            </div>
-
-                            <div v-if="order.delivery_date" class="detail-item mb-2">
-                              <v-icon size="14" class="mr-1 text-primary">mdi-calendar-clock</v-icon>
-                              <span class="text-caption font-weight-medium">Schedule:</span>
-                              <span class="text-caption ml-1">
-                                {{ formatDeliveryDate(order.delivery_date) }}
-                                {{
-                                  order.delivery_time ? convertTo12Hour(order.delivery_time) : ''
-                                }}
-                              </span>
-                            </div>
-
-                            <div class="detail-item mb-2">
-                              <v-icon size="14" class="mr-1 text-primary">mdi-credit-card</v-icon>
-                              <span class="text-caption font-weight-medium">Payment:</span>
-                              <span class="text-caption ml-1">{{
-                                order.payment_method || 'Cash'
-                                }}</span>
-                            </div>
-
-                            <div class="detail-item">
-                              <v-icon size="14" class="mr-1 text-primary">mdi-cash</v-icon>
-                              <span class="text-caption font-weight-medium">Status:</span>
-                              <span class="text-caption ml-1">{{ getPaymentStatus(order) }}</span>
-                            </div>
-                          </div>
-
-                          <v-divider class="my-2"></v-divider>
-
-                          <!-- Address Display -->
-                          <div v-if="order.address" class="mt-2">
-                            <div class="d-flex align-start">
-                              <v-icon size="14" class="mr-1 mt-1 text-primary">mdi-map-marker</v-icon>
-                              <div class="text-caption">
-                                <strong>Delivery Address:</strong><br />
-                                {{ formatFullAddress(order.address) }}
-                              </div>
-                            </div>
-                            <v-btn color="primary" size="x-small" variant="flat" @click="viewInMap(order.id)"
-                              rounded="sm" block class="mt-2">
-                              <v-icon start size="12">mdi-map</v-icon>
-                              View Map
-                            </v-btn>
-                          </div>
-                        </div>
-                      </v-expansion-panel-text>
-                    </v-expansion-panel>
-                  </v-expansion-panels>
-
-                  <!-- Desktop Customer Info -->
-                  <v-card v-else variant="outlined" class="customer-card pa-3 mb-3" rounded="lg">
-                    <div class="d-flex align-center mb-2">
-                      <v-avatar size="40" color="primary" class="mr-3">
-                        <v-img v-if="order.user?.avatar_url" :src="order.user.avatar_url" alt="Customer" />
-                        <span v-else class="text-white text-caption">
-                          {{ order.user?.first_name?.[0] }}{{ order.user?.last_name?.[0] }}
-                        </span>
-                      </v-avatar>
-                      <div>
-                        <div class="text-subtitle-2 font-weight-bold">
-                          {{ order.user?.first_name }} {{ order.user?.last_name }}
-                        </div>
-                        <div class="text-caption text-medium-emphasis">
-                          {{ order.address?.phone || order.user?.phone || 'N/A' }}
-                        </div>
-                      </div>
-                    </div>
-
-                    <v-divider class="my-2"></v-divider>
-
-                    <v-row class="text-caption">
-                      <v-col cols="6" class="pb-1">
-                        <div class="font-weight-medium mb-1">Delivery:</div>
-                        <div>{{ getOrderDeliveryDisplay(order) }}</div>
-                      </v-col>
-                      <v-col cols="6" class="pb-1">
-                        <div class="font-weight-medium mb-1">Payment:</div>
-                        <div>{{ order.payment_method || 'Cash' }}</div>
-                      </v-col>
-                    </v-row>
-
-                    <v-divider class="my-2"></v-divider>
-
-                    <div v-if="order.address" class="mt-2">
-                      <div class="d-flex align-start mb-1">
-                        <v-icon size="16" class="mr-2 mt-1 text-primary">mdi-map-marker</v-icon>
-                        <div class="text-caption">
-                          <strong>Address:</strong> {{ formatFullAddress(order.address) }}
-                        </div>
-                      </div>
-                      <v-btn color="primary" size="x-small" variant="flat" @click="viewInMap(order.id)" rounded="sm"
-                        block class="mt-1">
-                        <v-icon start size="12">mdi-map</v-icon>
-                        View in Map
-                      </v-btn>
-                    </div>
-                  </v-card>
-
-                  <!-- Order Items - Mobile Optimized -->
-                  <div class="order-items-section mb-3">
-                    <h5 :class="isMobile
-                        ? 'text-caption font-weight-bold mb-2'
-                        : 'text-subtitle-1 font-weight-bold mb-3'
-                      ">
-                      Items ({{ order.order_items?.length || 0 }})
-                    </h5>
-
-                    <!-- No items state -->
-                    <v-alert v-if="!order.order_items || order.order_items.length === 0" type="warning"
-                      density="compact" class="mb-2" :rounded="isMobile ? 'md' : 'lg'">
-                      <div class="d-flex align-start">
-                        <v-icon :size="isMobile ? 16 : 18" color="warning" class="mr-2 mt-1">mdi-alert</v-icon>
-                        <div class="text-caption">No order items found</div>
-                      </div>
-                    </v-alert>
-
-                    <!-- Order items list - Mobile Collapsible -->
-                    <v-expansion-panels v-if="isMobile && order.order_items && order.order_items.length > 3">
-                      <v-expansion-panel elevation="0">
-                        <v-expansion-panel-title class="px-0" :hide-actions="true">
-                          <template #default="{ expanded }">
-                            <div class="d-flex align-center w-100">
-                              <div class="text-caption font-weight-medium">
-                                View all {{ order.order_items.length }} items
-                              </div>
-                              <v-spacer></v-spacer>
-                              <v-icon :size="16">{{
-                                expanded ? 'mdi-chevron-up' : 'mdi-chevron-down'
-                                }}</v-icon>
-                            </div>
-                          </template>
-                        </v-expansion-panel-title>
-                        <v-expansion-panel-text class="px-0">
-                          <!-- All items -->
-                          <div v-for="(orderItem, index) in order.order_items" :key="orderItem.id"
-                            class="order-item-mobile mb-2">
-                            <div class="d-flex align-center">
-                              <v-img :src="getOrderItemImage(orderItem)" width="40" height="40" cover
-                                class="rounded-md mr-2" :alt="getProductDisplayName(orderItem)" />
-                              <div class="flex-grow-1">
-                                <div class="text-caption font-weight-medium line-clamp-1">
-                                  {{ getProductDisplayName(orderItem) }}
-                                </div>
-                                <div class="d-flex justify-space-between">
-                                  <div class="text-caption text-medium-emphasis">
-                                    {{ orderItem.quantity || 1 }} × ₱{{
-                                      getProductPrice(orderItem).toLocaleString()
-                                    }}
-                                  </div>
-                                  <div class="text-caption font-weight-medium">
-                                    ₱{{ getProductSubtotal(orderItem).toLocaleString() }}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        </v-expansion-panel-text>
-                      </v-expansion-panel>
-                    </v-expansion-panels>
-
-                    <!-- First few items always visible on mobile -->
-                    <div v-if="order.order_items && order.order_items.length > 0">
-                      <div v-for="(orderItem, index) in isMobile
-                        ? order.order_items.slice(0, 3)
-                        : order.order_items" :key="orderItem.id" class="order-item-mobile mb-2">
-                        <div class="d-flex align-center">
-                          <v-img :src="getOrderItemImage(orderItem)" :width="isMobile ? 40 : 60"
-                            :height="isMobile ? 40 : 60" cover class="rounded-md mr-2"
-                            :alt="getProductDisplayName(orderItem)" />
-                          <div class="flex-grow-1">
-                            <div :class="isMobile
-                                ? 'text-caption font-weight-medium line-clamp-1'
-                                : 'text-body-2 font-weight-medium'
-                              ">
-                              {{ getProductDisplayName(orderItem) }}
-                            </div>
-                            <div class="d-flex justify-space-between align-center mt-1">
-                              <div :class="isMobile
-                                  ? 'text-caption text-medium-emphasis'
-                                  : 'text-body-2 text-medium-emphasis'
-                                ">
-                                {{ orderItem.quantity || 1 }} × ₱{{
-                                  getProductPrice(orderItem).toLocaleString()
-                                }}
-                                <span v-if="orderItem.selected_size" class="ml-1">
-                                  • Size: {{ orderItem.selected_size }}
-                                </span>
-                              </div>
-                              <div :class="isMobile
-                                  ? 'text-caption font-weight-bold text-primary'
-                                  : 'text-body-1 font-weight-bold text-primary'
-                                ">
-                                ₱{{ getProductSubtotal(orderItem).toLocaleString() }}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Order Summary - Mobile Optimized -->
-                  <div class="order-summary mt-3 pt-2 border-top">
-                    <div class="d-flex justify-space-between align-center">
-                      <div>
-                        <div :class="isMobile
-                            ? 'text-caption font-weight-medium'
-                            : 'text-body-2 font-weight-medium'
-                          ">
-                          Order Total
-                        </div>
-                        <div :class="isMobile
-                            ? 'text-caption text-medium-emphasis'
-                            : 'text-caption text-medium-emphasis'
-                          ">
-                          {{ order.order_items?.length || 0 }} items
-                        </div>
-                      </div>
-                      <div class="text-right">
-                        <div :class="isMobile
-                            ? 'text-subtitle-2 font-weight-bold text-primary'
-                            : 'text-h6 font-weight-bold text-primary'
-                          ">
-                          ₱{{ order.total_amount?.toLocaleString() || '0' }}
-                        </div>
-                        <div v-if="order.payments?.[0]?.amount" :class="isMobile
-                            ? 'text-caption text-medium-emphasis'
-                            : 'text-caption text-medium-emphasis'
-                          ">
-                          Paid: ₱{{ order.payments[0].amount.toLocaleString() }}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Order Note - Mobile Optimized -->
-                  <div v-if="order.note" class="order-note mt-2">
-                    <div class="d-flex align-start">
-                      <v-icon :size="isMobile ? 14 : 16" class="mr-1 mt-1 text-primary">mdi-message-text</v-icon>
-                      <div :class="isMobile
-                          ? 'text-caption text-medium-emphasis'
-                          : 'text-caption text-medium-emphasis'
-                        ">
-                        <strong>Note:</strong> {{ order.note }}
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Action Buttons - Mobile Optimized -->
-                  <div class="order-actions mt-3">
-                    <div class="d-flex flex-wrap gap-1">
-
-                      <!-- Cancel Order Button -->
-                      <v-btn color="error" :size="isMobile ? 'x-small' : 'small'" variant="outlined"
-                        v-if="order.status !== 'cancelled' && !isOrderDeliveredState(order) && order.status !== 'pending_approval'"
-                        @click="cancelOrder(order.id)" :rounded="isMobile ? 'sm' : 'lg'"
-                        class="action-button flex-grow-1" :block="isMobile">
-                        <v-icon :start="!isMobile" :size="isMobile ? 12 : 14">mdi-cancel</v-icon>
-                        <span class="ml-1">Cancel</span>
-                      </v-btn>
-
-                      <!-- View Details Button -->
-                      <v-btn color="primary" :size="isMobile ? 'x-small' : 'small'" variant="outlined"
-                        @click="$router.push({ name: 'order-details', params: { id: order.id } })" :rounded="isMobile ? 'sm' : 'lg'"
-                        class="action-button flex-grow-1" :block="isMobile">
-                        <v-icon :start="!isMobile" :size="isMobile ? 12 : 14">mdi-eye</v-icon>
-                        <span class="ml-1">View Order</span>
-                      </v-btn>
-                    </div>
-                  </div>
-                </v-card-text>
-              </v-card>
-            </div>
->>>>>>> da4d9f7e4ab43f2a5a785352edb2686e65afd869
-          </v-card-text>
-        </v-card>
-
-        <!-- Error State -->
+        <!-- Orders Error State -->
         <v-alert v-else-if="ordersError" type="error" class="mb-3" :rounded="isMobile ? 'md' : 'lg'">
           <div class="d-flex align-center">
             <v-icon :size="isMobile ? 18 : 20" class="mr-2">mdi-alert-circle</v-icon>
@@ -1827,23 +1408,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
           </div>
         </v-alert>
 
-        <!-- No Orders State -->
-        <v-card v-else-if="filteredOrders.length === 0" class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
-          <v-card-text :class="isMobile ? 'text-center py-8' : 'text-center py-12'">
-            <v-icon :size="isMobile ? 64 : 96" color="grey-lighten-2" class="mb-3">mdi-cart-off</v-icon>
-            <h3 :class="isMobile ? 'text-subtitle-2 text-grey mb-1' : 'text-h5 text-grey mb-2'">
-              No orders in this section
-            </h3>
-            <p :class="isMobile ? 'text-caption text-grey-lighten-1 mb-3' : 'text-body-1 text-grey-lighten-1 mb-4'">
-              {{ activeOrderTab === 'pending_approval' ? 'No orders waiting for approval.' : `No ${activeOrderTab.replace('_', ' ')} orders.` }}
-            </p>
-            <v-btn @click="refreshOrders" color="primary" variant="outlined" :size="isMobile ? 'small' : 'default'">
-              <v-icon :start="!isMobile">mdi-refresh</v-icon>
-              Refresh
-            </v-btn>
-          </v-card-text>
-        </v-card>
-
         <!-- Orders List - FIXED: Removed max-height to prevent cutting off content -->
         <div v-else class="orders-list">
           <!-- Pending Approval Section Orders -->
@@ -1851,7 +1415,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
             <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
               :rounded="isMobile ? 'lg' : 'xl'">
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-                <!-- Order Header -->
                 <div class="d-flex justify-space-between align-start mb-3">
                   <div>
                     <div class="d-flex align-center mb-1">
@@ -1872,7 +1435,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </div>
                 </div>
 
-                <!-- Customer Info -->
                 <div class="d-flex align-center mb-3">
                   <v-avatar size="36" color="primary" class="mr-2">
                     <v-img v-if="order.user?.avatar_url" :src="order.user.avatar_url" alt="Customer" />
@@ -1890,7 +1452,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </div>
                 </div>
 
-                <!-- Items Summary -->
                 <div class="mb-3">
                   <div class="text-caption font-weight-bold mb-1">Items:</div>
                   <div v-for="item in order.items.slice(0, 2)" :key="item.id" class="d-flex align-center mt-1">
@@ -1908,7 +1469,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </div>
                 </div>
 
-                <!-- Total -->
                 <div class="d-flex justify-space-between align-center mb-3 pt-2 border-top">
                   <span class="text-caption font-weight-bold">Total Amount:</span>
                   <span class="text-subtitle-2 font-weight-bold text-primary">
@@ -1916,7 +1476,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </span>
                 </div>
 
-                <!-- Action Buttons - FIXED: Better wrapping for mobile -->
                 <div class="action-buttons-wrapper">
                   <v-btn color="success" size="small" variant="flat" @click="approveOrder(order)"
                     :loading="approvingOrderId === order.id" :block="isMobile" class="action-btn-small">
@@ -2001,7 +1560,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </v-chip>
                 </div>
 
-                <!-- Rider Info -->
                 <div v-if="order.rider_details" class="mb-2 pa-2 rounded-lg" style="background: #e3f2fd">
                   <div class="d-flex align-center">
                     <v-icon color="primary" size="18" class="mr-2">mdi-motorbike</v-icon>
