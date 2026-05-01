@@ -107,7 +107,7 @@ const checkoutSelected = () => {
 
   // Save to localStorage as backup
   localStorage.setItem('selectedCartItemIds', JSON.stringify(selectedItems.value))
-  
+
   // Save full item data to localStorage as backup
   const itemsForCheckout = selectedCartItems.map(item => ({
     id: item.product_id,
@@ -123,7 +123,7 @@ const checkoutSelected = () => {
     product: item.product,
     shop: item.product?.shop
   }))
-  
+
   localStorage.setItem('cart_checkout_items', JSON.stringify({
     items: itemsForCheckout,
     selectedCartItemIds: selectedItems.value,
@@ -217,34 +217,15 @@ const debugCart = () => {
 
 <template>
   <v-app>
-    <!-- Header with back button -->
-    <v-app-bar class="app-bar" flat color="#3f83c7" dark>
-      <v-btn icon @click="goBack" class="mr-2">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
-      <v-toolbar-title class="font-weight-bold">Cart</v-toolbar-title>
-      <v-spacer />
-      <v-btn
-        v-if="selectedItems.length > 0"
-        variant="text"
-        color="white"
-        @click="clearSelections"
-        size="small"
-      >
-        Clear
-      </v-btn>
-      <!-- Debug button (remove in production) -->
-      <v-btn
-        v-if="false"
-        variant="text"
-        color="white"
-        @click="debugCart"
-        size="small"
-        class="ml-2"
-      >
-        Debug
-      </v-btn>
-    </v-app-bar>
+      <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+        <v-btn variant="text" icon @click="goBack" class="back-btn">
+          <v-icon>mdi-arrow-left</v-icon>
+        </v-btn>
+        <v-toolbar-title class="font-bold">
+          <strong>Cart Items</strong>
+        </v-toolbar-title>
+        <v-spacer />
+      </v-app-bar>
 
     <v-main>
       <v-container fluid class="container pb-12">
@@ -491,11 +472,81 @@ const debugCart = () => {
 </template>
 
 <style scoped>
-.app-bar {
-  padding-top: 12px;
-  position: sticky;
-  top: 0;
-  z-index: 1000;
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
+/* Main content area - accounts for the fixed header */
+.messages-view {
+  margin-top: calc(56px + var(--sat, 0px));
+  min-height: calc(100vh - 56px - var(--sat, 0px));
+  padding-bottom: 80px;
+}
+
+/* iOS support for margin-top */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .messages-view {
+    margin-top: calc(56px + env(safe-area-inset-top));
+  }
+}
+
+/* Landscape mode adjustment */
+@media (orientation: landscape) and (max-height: 500px) {
+  .top-nav {
+    height: 56px !important;
+    padding-top: 0 !important;
+  }
+
+  .messages-view {
+    margin-top: 56px;
+  }
 }
 
 .container {

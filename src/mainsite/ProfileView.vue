@@ -1,10 +1,14 @@
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue'
+import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, onBeforeRouteUpdate } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
+import {
+  getVisibleUnreadNotificationCount,
+  resolveVisibleNotification,
+} from '@/utils/chatNotifications'
 
 const activeTab = ref('account')
 
@@ -34,6 +38,61 @@ const shopData = ref(null)
 const isRider = ref(false)
 const riderStatus = ref(null)
 const riderApplicationId = ref(null)
+const availableRiderOrdersCount = ref(0)
+const riderOrdersSubscription = ref(null)
+const hasAvailableRiderOrders = computed(
+  () => isRider.value && riderStatus.value === 'approved' && availableRiderOrdersCount.value > 0,
+)
+
+const cleanupRiderOrdersSubscription = () => {
+  if (riderOrdersSubscription.value) {
+    riderOrdersSubscription.value.unsubscribe()
+    riderOrdersSubscription.value = null
+  }
+}
+
+const fetchAvailableRiderOrdersCount = async () => {
+  if (!isRider.value || riderStatus.value !== 'approved') {
+    availableRiderOrdersCount.value = 0
+    return
+  }
+
+  try {
+    const { count, error } = await supabase
+      .from('orders')
+      .select('id', { count: 'exact', head: true })
+      .eq('status', 'waiting_for_rider')
+      .is('rider_id', null)
+
+    if (error) throw error
+
+    availableRiderOrdersCount.value = count || 0
+  } catch (error) {
+    console.error('Error fetching available rider orders count:', error)
+    availableRiderOrdersCount.value = 0
+  }
+}
+
+const setupRiderOrdersSubscription = () => {
+  cleanupRiderOrdersSubscription()
+
+  if (!isRider.value || riderStatus.value !== 'approved') return
+
+  riderOrdersSubscription.value = supabase
+    .channel(`profile-rider-orders-${user.value?.id || 'guest'}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'orders',
+      },
+      async () => {
+        await fetchAvailableRiderOrdersCount()
+      },
+    )
+    .subscribe()
+}
 
 const handleRefresh = async () => {
   console.log('🔄 Refreshing profile...')
@@ -70,7 +129,6 @@ const setupShopRealtimeSubscription = () => {
       (payload) => {
         console.log('Shop status changed:', payload)
         const updatedShop = payload.new
-        const oldShop = payload.old
 
         if (updatedShop) {
           const wasApproved = hasShop.value && shopCreationStatus.value === 'approved'
@@ -97,7 +155,7 @@ const setupShopRealtimeSubscription = () => {
 
 // Check if shop was recently approved (for first load after approval)
 const checkRecentApproval = () => {
-  if (!shopData || shopCreationStatus.value !== 'approved') return false
+  if (!shopData.value || shopCreationStatus.value !== 'approved') return false
 
   // Check if this is the first time seeing the approved status
   const lastApprovedShown = localStorage.getItem(`shop_approved_shown_${user.value?.id}`)
@@ -253,7 +311,7 @@ const checkUserShop = async () => {
 
 // Debug function to check current user
 const debugCurrentUser = async () => {
-  const { data: { user }, error } = await supabase.auth.getUser()
+  const { data: { user } } = await supabase.auth.getUser()
   console.log('Current user:', user)
   console.log('User ID:', user?.id)
 
@@ -366,6 +424,8 @@ const checkRiderStatus = async () => {
 
     if (profileError) {
       console.error('Error fetching profile:', profileError)
+      availableRiderOrdersCount.value = 0
+      cleanupRiderOrdersSubscription()
       return
     }
 
@@ -388,8 +448,18 @@ const checkRiderStatus = async () => {
       isRider: isRider.value,
       status: riderStatus.value
     })
+
+    if (isRider.value && riderStatus.value === 'approved') {
+      await fetchAvailableRiderOrdersCount()
+      setupRiderOrdersSubscription()
+    } else {
+      availableRiderOrdersCount.value = 0
+      cleanupRiderOrdersSubscription()
+    }
   } catch (err) {
     console.error('Error checking rider:', err)
+    availableRiderOrdersCount.value = 0
+    cleanupRiderOrdersSubscription()
   }
 }
 
@@ -493,14 +563,14 @@ const loadUser = async () => {
     setupShopRealtimeSubscription()
   }
 }
-// FIXED: Load order counts for each section with correct status mapping
+
 const loadOrderCounts = async () => {
   if (!user.value?.id) return
 
   try {
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('status, payment_status, delivery_status, id')
+      .select('status, payment_status, delivered_at, completed_at, id')
       .eq('user_id', user.value.id)
 
     if (error) {
@@ -514,47 +584,37 @@ const loadOrderCounts = async () => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
+          // Show ALL orders regardless of status
           count = orders.filter(
-            (o) =>
-              o.payment_status === 'pending' &&
-              o.delivery_status !== 'delivered' &&
-              o.status !== 'cancelled',
+            (o) => o.status !== 'cancelled'
           ).length
           break
         case 'to-receive':
-          // Orders that are paid but not delivered yet
           count = orders.filter(
-            (o) =>
-              o.payment_status === 'paid' &&
-              o.delivery_status !== 'delivered' &&
-              o.status !== 'cancelled',
+            (o) => isOrderPendingDelivery(o) || isOrderAwaitingCustomerConfirmation(o)
           ).length
           break
         case 'reviews':
-          // Orders that are delivered but not reviewed (you might need a reviews table to check this)
           count = orders.filter(
-            (o) => o.delivery_status === 'delivered' && o.status !== 'cancelled',
+            (o) => isOrderDeliveredState(o) && o.status !== 'cancelled'
           ).length
           break
         case 'completed':
-          // Orders that are both paid and delivered
           count = orders.filter(
-            (o) => o.payment_status === 'paid' && o.delivery_status === 'delivered',
+            (o) => isOrderCompleted(o)
           ).length
           break
         case 'cancelled':
-          // Orders that are cancelled
           count = orders.filter(
-            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled',
+            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled'
           ).length
           break
         case 'failed':
-          // Failed transactions (unpaid, rejected, or failed payments)
           count = orders.filter(
             (o) =>
               o.payment_status === 'failed' ||
               o.status === 'failed' ||
-              (o.payment_status === 'rejected' && o.status !== 'cancelled'),
+              (o.payment_status === 'rejected' && o.status !== 'cancelled')
           ).length
           break
         default:
@@ -567,11 +627,31 @@ const loadOrderCounts = async () => {
     console.error('Error loading order counts:', err)
   }
 }
-
 // Navigation handler
 const handleNavClick = async (itemId) => {
   selectedSection.value = itemId
   await loadSectionItems(itemId)
+}
+
+const isOrderCompleted = (order) => !!order?.completed_at || order?.status === 'completed'
+
+const isOrderAwaitingCustomerConfirmation = (order) => {
+  if (!order) return false
+  return ['picked_up', 'delivered'].includes(order.status) && !!order.delivered_at && !order.completed_at
+}
+
+const isOrderDeliveredState = (order) => {
+  if (!order) return false
+  if (isOrderCompleted(order) || order.status === 'delivered') return true
+
+  return order.status === 'picked_up' && !!order.delivered_at && !order.completed_at
+}
+
+const isOrderPendingDelivery = (order) => {
+  if (!order || order.status === 'cancelled') return false
+  if (order.status === 'waiting_for_rider' || order.status === 'accepted_by_rider') return true
+
+  return order.status === 'picked_up' && !order.delivered_at && !order.completed_at
 }
 
 // FIXED: Load items for the selected section with correct filtering
@@ -587,7 +667,8 @@ const loadSectionItems = async (sectionId) => {
         id,
         status,
         payment_status,
-        delivery_status,
+        delivered_at,
+        completed_at,
         total_amount,
         created_at,
         transaction_number,
@@ -612,15 +693,17 @@ const loadSectionItems = async (sectionId) => {
     switch (sectionId) {
       case 'to-receive':
         query = query
-          .eq('payment_status', 'paid')
-          .neq('delivery_status', 'delivered')
-          .neq('status', 'cancelled')
+          .in('status', ['waiting_for_rider', 'accepted_by_rider', 'picked_up', 'completed', 'delivered'])
         break
       case 'reviews':
-        query = query.eq('delivery_status', 'delivered').neq('status', 'cancelled')
+        query = query
+          .in('status', ['picked_up', 'completed', 'delivered'])
+          .neq('status', 'cancelled')
         break
       case 'completed':
-        query = query.eq('payment_status', 'paid').eq('delivery_status', 'delivered')
+        query = query
+          .in('status', ['picked_up', 'completed', 'delivered'])
+          .neq('status', 'cancelled')
         break
       case 'cancelled':
         query = query.or('status.eq.cancelled,payment_status.eq.cancelled')
@@ -630,8 +713,6 @@ const loadSectionItems = async (sectionId) => {
         break
       case 'my-purchases':
         query = query
-          .eq('payment_status', 'pending')
-          .neq('delivery_status', 'delivered')
           .neq('status', 'cancelled')
         break
     }
@@ -644,13 +725,37 @@ const loadSectionItems = async (sectionId) => {
     } else {
       console.log(`📦 ${sectionId} items:`, data)
 
+      const filteredData = (data || []).filter((order) => {
+        switch (sectionId) {
+          case 'to-receive':
+            return isOrderPendingDelivery(order) || isOrderAwaitingCustomerConfirmation(order)
+          case 'reviews':
+            return isOrderDeliveredState(order) && order.status !== 'cancelled'
+          case 'completed':
+            return isOrderCompleted(order) && order.status !== 'cancelled'
+          case 'cancelled':
+            return order.status === 'cancelled' || order.payment_status === 'cancelled'
+          case 'failed':
+            return (
+              order.payment_status === 'failed' ||
+              order.status === 'failed' ||
+              (order.payment_status === 'rejected' && order.status !== 'cancelled')
+            )
+          case 'my-purchases':
+            return order.status !== 'cancelled'
+          default:
+            return true
+        }
+      })
+
       // Enhanced order data structure
-      sectionItems.value = data.map((order) => ({
+      sectionItems.value = filteredData.map((order) => ({
         id: order.id,
         transaction_number: order.transaction_number,
         status: order.status,
         payment_status: order.payment_status,
-        delivery_status: order.delivery_status,
+        delivered_at: order.delivered_at,
+        completed_at: order.completed_at,
         total_amount: order.total_amount,
         created_at: order.created_at,
         items: order.order_items.map((item) => ({
@@ -678,8 +783,12 @@ const loadSectionItems = async (sectionId) => {
 // Helper function to get status color
 const getStatusColor = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'success'
+  if (isOrderDeliveredState(order)) return 'success'
+  if (order.status === 'waiting_for_rider') return 'warning'     // Orange/Yellow
+  if (order.status === 'accepted_by_rider') return 'info'        // Blue
+  if (order.status === 'picked_up') return 'warning'             // Orange/Yellow
   if (order.payment_status === 'paid') return 'primary'
+  if (order.status === 'pending_approval') return 'warning'      // Orange/Yellow
   if (order.payment_status === 'pending') return 'warning'
   if (order.payment_status === 'failed') return 'error'
   return 'grey'
@@ -688,11 +797,42 @@ const getStatusColor = (order) => {
 // Helper function to get status text
 const getStatusText = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
-  if (order.payment_status === 'paid' && order.delivery_status === 'delivered') return 'Completed'
-  if (order.payment_status === 'paid') return 'Appproved - To Receive'
+  if (isOrderCompleted(order)) return 'Completed'
+  if (isOrderDeliveredState(order)) return 'Delivered'
+  if (order.status === 'waiting_for_rider') return 'Waiting for Rider'  // Added
+  if (order.status === 'accepted_by_rider') return 'Rider Accepted'     // Added
+  if (order.status === 'picked_up') return 'Picked Up'                  // Added
+  if (order.payment_status === 'paid') return 'To Receive'
+  if (order.status === 'pending_approval') return 'Pending Approval'    // Added
   if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
   return 'Processing'
+}
+
+// Function to subscribe to order status changes
+const setupOrderSubscription = () => {
+  if (!user.value?.id) return
+
+  const orderChannel = supabase
+    .channel('customer-orders')
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `user_id=eq.${user.value.id}`,
+      },
+      async (payload) => {
+        console.log('Order status changed:', payload)
+        // Refresh counts and current section
+        await loadOrderCounts()
+        await loadSectionItems(selectedSection.value)
+      }
+    )
+    .subscribe()
+
+  return orderChannel
 }
 
 // Format date
@@ -704,17 +844,10 @@ const formatDate = (dateString) => {
   })
 }
 
-// View product function
-const viewProduct = (productId) => {
-  if (productId) {
-    router.push(`/viewproduct/${productId}`)
-  }
-}
-
 // View order details function
 const viewOrder = (orderId) => {
   if (orderId) {
-    router.push(`/orderdetails/${orderId}`)
+    router.push({ name: 'order-details', params: { id: orderId } })
   }
 }
 
@@ -762,14 +895,21 @@ const setupNotificationListener = async () => {
         table: 'notifications',
         filter: `user_id=eq.${user.id}`,
       },
-      (payload) => {
+      async (payload) => {
         console.log('New notification received in profile:', payload)
+
+        const visibleNotification = await resolveVisibleNotification(payload.new)
+
+        if (!visibleNotification) {
+          return
+        }
+
         unreadNotifications.value++
 
         // Show native notification if enabled
         if (Notification.permission === 'granted') {
           new Notification('CloseShop', {
-            body: payload.new.message,
+            body: visibleNotification.message,
             icon: '/icon.png',
           })
         }
@@ -799,15 +939,7 @@ const fetchUnreadNotificationCount = async () => {
   } = await supabase.auth.getUser()
   if (!user) return
 
-  const { count, error } = await supabase
-    .from('notifications')
-    .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.id)
-    .eq('is_read', false)
-
-  if (!error && count !== null) {
-    unreadNotifications.value = count
-  }
+  unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
 }
 
 // Add goNotifications function
@@ -823,10 +955,12 @@ onMounted(async () => {
   await loadSectionItems(selectedSection.value)
   setupShopRealtimeSubscription()
   await setupNotificationListener()
+  setupOrderSubscription()
 })
 
 onUnmounted(() => {
   cleanupShopSubscription()
+  cleanupRiderOrdersSubscription()
   if (notificationSubscription.value) {
     notificationSubscription.value.unsubscribe()
   }
@@ -906,6 +1040,7 @@ onBeforeRouteUpdate((to, from, next) => {
         title="Rider Dashboard"
       >
         <v-icon size="28">mdi-motorbike</v-icon>
+        <span v-if="hasAvailableRiderOrders" class="rider-available-dot"></span>
       </v-btn>
 
       <!-- Notification Button with Badge -->
@@ -1009,7 +1144,7 @@ onBeforeRouteUpdate((to, from, next) => {
                     <div class="product-image-container">
                       <v-img :src="item.product_img || '/placeholder-product.png'"
                         :lazy-src="'/placeholder-product.png'" cover class="product-image"
-                        @click="viewProduct(item.product_id)" aspect-ratio="1">
+                        @click="viewOrder(order.id)" aspect-ratio="1">
                         <template v-slot:placeholder>
                           <v-row class="fill-height ma-0" align="center" justify="center">
                             <v-progress-circular indeterminate color="primary"></v-progress-circular>
@@ -1019,7 +1154,7 @@ onBeforeRouteUpdate((to, from, next) => {
                     </div>
 
                     <div class="item-details">
-                      <h4 class="product-name" @click="viewProduct(item.product_id)">
+                      <h4 class="product-name" @click="viewOrder(order.id)">
                         {{ item.product_name || 'Product' }}
                       </h4>
                       <div class="item-specs">
@@ -1047,14 +1182,9 @@ onBeforeRouteUpdate((to, from, next) => {
                   <div class="action-buttons">
                     <v-btn color="primary" variant="outlined" size="small" @click="viewOrder(order.id)">
                       <v-icon left small>mdi-receipt</v-icon>
-                      Details
+                      View Order
                     </v-btn>
-                    <v-btn v-if="order.payment_status === 'paid' && order.delivery_status !== 'delivered'"
-                      color="success" variant="flat" size="small">
-                      <v-icon left small>mdi-truck</v-icon>
-                      Track
-                    </v-btn>
-                    <v-btn v-if="order.delivery_status === 'delivered'" color="secondary" variant="flat" size="small"
+                    <v-btn v-if="isOrderDeliveredState(order)" color="secondary" variant="flat" size="small"
                       @click="rateOrder(order.id)">
                       <v-icon left small>mdi-star</v-icon>
                       Review
@@ -1092,7 +1222,7 @@ onBeforeRouteUpdate((to, from, next) => {
     <!-- Success Toast Notification -->
     <v-snackbar v-model="showApprovalToast" :color="toastColor" :timeout="6000" location="top" rounded="lg"
       elevation="24">
-      <template v-slot:activator="{ props }">
+      <template v-slot:activator>
         <!-- This is just for the snackbar itself -->
       </template>
 
@@ -1207,12 +1337,25 @@ onBeforeRouteUpdate((to, from, next) => {
 
 /* Rider Dashboard Button */
 .rider-dashboard-btn {
+  position: relative;
   color: #ffffff;
   width: 38px;
   height: 38px;
   backdrop-filter: blur(8px);
   border-radius: 50%;
   transition: all 0.3s ease;
+}
+
+.rider-available-dot {
+  position: absolute;
+  top: 6px;
+  right: 5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: #ef4444;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 0 2px rgba(239, 68, 68, 0.15);
 }
 
 .rider-dashboard-btn:hover {

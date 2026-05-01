@@ -79,6 +79,9 @@ const routeConfig = {
   },
 }
 
+const mapPullIgnoreSelectors =
+  '#map, .map-container, .mapboxgl-map, .mapboxgl-canvas-container, .mapboxgl-canvas, .mapboxgl-ctrl, .map-controls-container'
+
 /* -------------------- PULL TO REFRESH HANDLER -------------------- */
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing map data...')
@@ -107,6 +110,28 @@ const handleRefresh = async () => {
   } catch (error) {
     console.error('❌ Refresh failed:', error)
     errorMsg.value = 'Failed to refresh data'
+  }
+}
+
+const handleResumeRecovery = async () => {
+  console.log('📱 App resumed on map view - restoring map responsiveness...')
+
+  try {
+    await nextTick()
+
+    if (!map.value) {
+      await initializeMap()
+    }
+
+    window.setTimeout(() => {
+      map.value?.resize()
+    }, 60)
+
+    window.setTimeout(() => {
+      map.value?.resize()
+    }, 240)
+  } catch (error) {
+    console.warn('Map resume recovery failed:', error)
   }
 }
 
@@ -1768,7 +1793,12 @@ onUnmounted(() => {
 
 <template>
   <v-app>
-    <PullToRefreshWrapper :on-refresh="handleRefresh">
+    <PullToRefreshWrapper
+      :on-refresh="handleRefresh"
+      :on-resume="handleResumeRecovery"
+      :threshold="150"
+      :ignore-selectors="mapPullIgnoreSelectors"
+    >
     <!-- Hero Section - Fixed positioning -->
     <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
       <div class="hero-row">
@@ -1800,7 +1830,7 @@ onUnmounted(() => {
 
     <!-- Main Content Area -->
     <v-main class="main-content">
-      <div id="map" class="map-container"></div>
+      <div id="map" class="map-container" data-ptr-ignore></div>
 
       <!-- Boundary Loading Overlay -->
       <div v-if="boundaryLoading" class="boundary-loading">

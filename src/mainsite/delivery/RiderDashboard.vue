@@ -2,12 +2,15 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { formatAppDateTime, getAppTimestampValue, parseAppTimestamp } from '@/utils/dateTime'
 
 const router = useRouter()
 
 // State
 const loading = ref(false)
 const activeFilter = ref('available')
+const currentTime = ref(Date.now())
+let currentTimeInterval = null
 
 // Location state
 const currentLocation = ref(null)
@@ -22,6 +25,73 @@ const ordersSubscription = ref(null)
 const currentRider = ref(null)
 const currentRiderNumericId = ref(null)
 
+const isAwaitingCustomerConfirmation = (order) =>
+  !!order?.delivered_at &&
+  !order?.completed_at
+
+const hasDeliveryIssue = (order) =>
+  order?.status === 'picked_up' &&
+  !!(order?.delivery_proof_url || order?.proof_of_delivery_url) &&
+  !order?.delivered_at &&
+  !order?.completed_at
+
+const isOrderCompleted = (order) =>
+  !!order?.completed_at || order?.status === 'completed'
+
+const isActivePickedUpOrder = (order) =>
+  order?.status === 'picked_up' &&
+  !hasDeliveryIssue(order) &&
+  !isAwaitingCustomerConfirmation(order) &&
+  !isOrderCompleted(order)
+
+const getOrderActivityTimestamp = (order) => {
+  if (!order) return null
+
+  if (order.status === 'accepted_by_rider') {
+    return order.accepted_at || order.updated_at || order.created_at
+  }
+
+  if (hasDeliveryIssue(order)) {
+    return order.updated_at || order.picked_up_at || order.accepted_at || order.created_at
+  }
+
+  if (isActivePickedUpOrder(order)) {
+    return order.picked_up_at || order.accepted_at || order.updated_at || order.created_at
+  }
+
+  if (isAwaitingCustomerConfirmation(order)) {
+    return order.delivered_at || order.updated_at || order.created_at
+  }
+
+  if (isOrderCompleted(order)) {
+    return order.completed_at || order.delivered_at || order.updated_at || order.created_at
+  }
+
+  return order.created_at || order.updated_at || null
+}
+
+const getOrderActivityTimestampValue = (order) => getAppTimestampValue(getOrderActivityTimestamp(order))
+
+const sortOrdersByActivityTime = (left, right, direction = 'asc') => {
+  const leftValue = getOrderActivityTimestampValue(left)
+  const rightValue = getOrderActivityTimestampValue(right)
+
+  return direction === 'desc' ? rightValue - leftValue : leftValue - rightValue
+}
+
+const isSameLocalDay = (timestamp, now = Date.now()) => {
+  const date = parseAppTimestamp(timestamp)
+  if (!date) return false
+
+  const current = new Date(now)
+
+  return (
+    date.getFullYear() === current.getFullYear() &&
+    date.getMonth() === current.getMonth() &&
+    date.getDate() === current.getDate()
+  )
+}
+
 // Check if rider is approved
 const isApproved = ref(false)
 const applicationStatus = ref(null)
@@ -34,7 +104,7 @@ const acceptedOrders = computed(() => {
       order.status === 'accepted_by_rider' &&
       order.rider_id === currentRiderNumericId.value
     )
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const availableOrders = computed(() => {
@@ -45,25 +115,36 @@ const availableOrders = computed(() => {
       const isWaitingForRider = order.status === 'waiting_for_rider'
       return hasNoRider && isWaitingForRider
     })
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const pickedUpOrders = computed(() => {
   return orders.value
     .filter((order) =>
       order.status === 'picked_up' &&
+      !isAwaitingCustomerConfirmation(order) &&
+      !isOrderCompleted(order) &&
       order.rider_id === currentRiderNumericId.value
     )
-    .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b))
+})
+
+const deliveredOrders = computed(() => {
+  return orders.value
+    .filter((order) =>
+      isAwaitingCustomerConfirmation(order) &&
+      order.rider_id === currentRiderNumericId.value
+    )
+    .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
 
 const completedOrders = computed(() => {
   return orders.value
     .filter((order) =>
-      (order.status === 'delivered' || order.status === 'completed') &&
+      isOrderCompleted(order) &&
       order.rider_id === currentRiderNumericId.value
     )
-    .sort((a, b) => new Date(b.completed_at || b.updated_at) - new Date(a.completed_at || a.updated_at))
+    .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
 
 // Stats
@@ -71,12 +152,11 @@ const stats = computed(() => ({
   acceptedOrders: acceptedOrders.value.length,
   availableOrders: availableOrders.value.length,
   pickedUpOrders: pickedUpOrders.value.length,
+  deliveredOrders: deliveredOrders.value.length,
   completedToday: completedOrders.value.filter((order) => {
-    const today = new Date().toDateString()
-    const orderDate = new Date(order.completed_at || order.updated_at).toDateString()
-    return orderDate === today
+    return isSameLocalDay(getOrderActivityTimestamp(order), currentTime.value)
   }).length,
-  totalEarnings: completedOrders.value.reduce(
+  totalEarnings: [...deliveredOrders.value, ...completedOrders.value].reduce(
     (sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0),
     0,
   ),
@@ -91,6 +171,8 @@ const filteredOrders = computed(() => {
       return availableOrders.value
     case 'pickedup':
       return pickedUpOrders.value
+    case 'delivered':
+      return deliveredOrders.value
     case 'completed':
       return completedOrders.value
     default:
@@ -99,15 +181,23 @@ const filteredOrders = computed(() => {
 })
 
 // Helper functions
-const formatDateTime = (dateString) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleString('en-US', {
+const getOrderTimeLabel = (order) => {
+  if (hasDeliveryIssue(order)) return 'Issue reported'
+  if (order?.status === 'accepted_by_rider') return 'Accepted'
+  if (isActivePickedUpOrder(order)) return 'Picked up'
+  if (isAwaitingCustomerConfirmation(order)) return 'Delivered'
+  if (isOrderCompleted(order)) return 'Completed'
+  if (order?.status === 'waiting_for_rider') return 'Placed'
+  return 'Updated'
+}
+
+const formatOrderDateTime = (order) => {
+  return formatAppDateTime(getOrderActivityTimestamp(order), {
+    now: currentTime.value,
+    fallback: 'Unknown time',
+    relativeDay: true,
     month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+    year: 'auto',
   })
 }
 
@@ -268,6 +358,7 @@ const stopWatchingLocation = () => {
 const fetchOrders = async () => {
   loading.value = true
   try {
+    currentTime.value = Date.now()
     console.log('Fetching orders for rider ID:', currentRiderNumericId.value)
 
     const { data, error } = await supabase
@@ -398,29 +489,17 @@ const subscribeToOrders = () => {
   }
 
   ordersSubscription.value = supabase
-    .channel('rider-orders')
+    .channel(`rider-orders-${currentRiderNumericId.value || 'all'}`)
     .on(
       'postgres_changes',
       {
-        event: 'INSERT',
+        event: '*',
         schema: 'public',
         table: 'orders',
-        filter: 'status=eq.waiting_for_rider', 
       },
-      () => {
-        fetchOrders()
-      },
-    )
-    .on(
-      'postgres_changes',
-      {
-        event: 'UPDATE',
-        schema: 'public',
-        table: 'orders',
-        filter: `rider_id=eq.${currentRiderNumericId.value}`,
-      },
-      () => {
-        fetchOrders()
+      async () => {
+        currentTime.value = Date.now()
+        await fetchOrders()
       },
     )
     .subscribe()
@@ -433,7 +512,7 @@ const refreshOrders = () => {
 
 // Navigate to order details
 const viewOrderDetails = (order) => {
-  router.push(`/order-details/${order.id}`)
+  router.push({ name: 'rider-order-details', params: { id: order.id } })
 }
 
 const goToRiderLocation = () => {
@@ -453,6 +532,11 @@ const getOrderNumber = (index) => {
 
 // Lifecycle
 onMounted(async () => {
+  currentTime.value = Date.now()
+  currentTimeInterval = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 30000)
+
   await checkRiderApproval()
   if (isApproved.value && currentRiderNumericId.value) {
     await fetchOrders()
@@ -465,6 +549,10 @@ onMounted(async () => {
 onUnmounted(() => {
   if (ordersSubscription.value) {
     supabase.removeChannel(ordersSubscription.value)
+  }
+  if (currentTimeInterval) {
+    clearInterval(currentTimeInterval)
+    currentTimeInterval = null
   }
   stopWatchingLocation()
 })
@@ -516,9 +604,9 @@ onUnmounted(() => {
 
       <!-- Stats Cards - Clickable Filters -->
       <div class="stats-container">
-        <v-card 
-          class="stat-card" 
-          elevation="2" 
+        <v-card
+          class="stat-card"
+          elevation="2"
           :class="{ 'active-filter': activeFilter === 'accepted' }"
           @click="activeFilter = 'accepted'"
         >
@@ -531,9 +619,9 @@ onUnmounted(() => {
           </div>
         </v-card>
 
-        <v-card 
-          class="stat-card" 
-          elevation="2" 
+        <v-card
+          class="stat-card"
+          elevation="2"
           :class="{ 'active-filter': activeFilter === 'available' }"
           @click="activeFilter = 'available'"
         >
@@ -546,9 +634,9 @@ onUnmounted(() => {
           </div>
         </v-card>
 
-        <v-card 
-          class="stat-card" 
-          elevation="2" 
+        <v-card
+          class="stat-card"
+          elevation="2"
           :class="{ 'active-filter': activeFilter === 'pickedup' }"
           @click="activeFilter = 'pickedup'"
         >
@@ -561,9 +649,24 @@ onUnmounted(() => {
           </div>
         </v-card>
 
-        <v-card 
-          class="stat-card" 
-          elevation="2" 
+        <v-card
+          class="stat-card"
+          elevation="2"
+          :class="{ 'active-filter': activeFilter === 'delivered' }"
+          @click="activeFilter = 'delivered'"
+        >
+          <div class="stat-content">
+            <v-icon size="32" color="#00897b">mdi-check-decagram</v-icon>
+            <div class="stat-info">
+              <div class="stat-value">{{ stats.deliveredOrders }}</div>
+              <div class="stat-label">Delivered</div>
+            </div>
+          </div>
+        </v-card>
+
+        <v-card
+          class="stat-card"
+          elevation="2"
           :class="{ 'active-filter': activeFilter === 'completed' }"
           @click="activeFilter = 'completed'"
         >
@@ -575,10 +678,10 @@ onUnmounted(() => {
             </div>
           </div>
         </v-card>
-      </div>
+
 
       <!-- Earnings Card -->
-      <v-card class="earning-card mx-4 mb-4" elevation="2">
+      <v-card class="stat-card" elevation="0">
         <div class="stat-content">
           <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
           <div class="stat-info">
@@ -587,6 +690,8 @@ onUnmounted(() => {
           </div>
         </div>
       </v-card>
+      </div>
+
 
       <!-- Active Filter Status Badge -->
       <div class="active-filter-badge mb-4 mx-4">
@@ -594,19 +699,22 @@ onUnmounted(() => {
           'status-accepted': activeFilter === 'accepted',
           'status-available': activeFilter === 'available',
           'status-picked': activeFilter === 'pickedup',
+          'status-delivered': activeFilter === 'delivered',
           'status-completed': activeFilter === 'completed'
         }">
           <v-icon left size="24" class="mr-2">
             <template v-if="activeFilter === 'accepted'">mdi-check-circle</template>
             <template v-else-if="activeFilter === 'available'">mdi-bike-fast</template>
             <template v-else-if="activeFilter === 'pickedup'">mdi-truck-delivery</template>
+            <template v-else-if="activeFilter === 'delivered'">mdi-check-decagram</template>
             <template v-else>mdi-history</template>
           </v-icon>
           <span class="status-text">
             <p></p>
             <template v-if="activeFilter === 'accepted'">Accepted Orders</template>
             <template v-else-if="activeFilter === 'available'">Available Orders</template>
-            <template v-else-if="activeFilter === 'pickedup'">Picked Up Orders</template>
+            <template v-else-if="activeFilter === 'pickedup'">Picked Up and Issue Orders</template>
+            <template v-else-if="activeFilter === 'delivered'">Delivered Awaiting Confirmation</template>
             <template v-else>Completed Orders</template>
           </span>
         </div>
@@ -624,18 +732,20 @@ onUnmounted(() => {
             <template v-if="activeFilter === 'accepted'">mdi-check-circle-outline</template>
             <template v-else-if="activeFilter === 'available'">mdi-bike-off</template>
             <template v-else-if="activeFilter === 'pickedup'">mdi-truck-off</template>
+            <template v-else-if="activeFilter === 'delivered'">mdi-package-check</template>
             <template v-else>mdi-clipboard-check-outline</template>
           </v-icon>
           <h3>No Orders</h3>
           <p>
             <template v-if="activeFilter === 'accepted'">You haven't accepted any orders yet.</template>
             <template v-else-if="activeFilter === 'available'">No available orders at the moment.</template>
-            <template v-else-if="activeFilter === 'pickedup'">Orders you've picked up will appear here.</template>
+            <template v-else-if="activeFilter === 'pickedup'">Picked up orders and re-delivery issues will appear here.</template>
+            <template v-else-if="activeFilter === 'delivered'">Orders waiting for customer confirmation will appear here.</template>
             <template v-else>Your completed deliveries will appear here.</template>
           </p>
         </div>
 
-        
+
         <div v-else class="orders-list">
 
           <!-- Click Instruction Banner -->
@@ -652,6 +762,8 @@ onUnmounted(() => {
             :class="{
               'accepted-card': activeFilter === 'accepted',
               'picked-card': activeFilter === 'pickedup',
+              'delivered-card': activeFilter === 'delivered',
+              'issue-card': hasDeliveryIssue(order),
               'completed-card': activeFilter === 'completed'
             }"
             elevation="2"
@@ -664,13 +776,21 @@ onUnmounted(() => {
               </div>
               <div class="order-time">
                 <v-icon size="16">mdi-clock-outline</v-icon>
-                {{ formatDateTime(order.created_at) }}
+                {{ getOrderTimeLabel(order) }} • {{ formatOrderDateTime(order) }}
               </div>
             </div>
 
             <div class="order-shop">
               <v-icon size="14" color="#4caf50">mdi-store</v-icon>
               <span class="shop-name">{{ order.shop_name }}</span>
+            </div>
+
+            <div v-if="hasDeliveryIssue(order)" class="order-issue-banner">
+              <div class="order-state-chip issue">
+                <v-icon size="14">mdi-alert-circle</v-icon>
+                Re-delivery Required
+              </div>
+              <span>Customer reported this order was not received. Coordinate with the seller or support, then reattempt delivery.</span>
             </div>
 
             <div class="order-products">
@@ -818,12 +938,6 @@ onUnmounted(() => {
   color: #666;
 }
 
-/* Earnings Card */
-.earning-card {
-  border-radius: 16px;
-  overflow: hidden;
-}
-
 /* Orders List */
 .orders-section {
   padding: 0 16px;
@@ -854,6 +968,15 @@ onUnmounted(() => {
 
 .picked-card {
   border-left: 4px solid #9c27b0;
+}
+
+.delivered-card {
+  border-left: 4px solid #00897b;
+}
+
+.issue-card {
+  border-left: 4px solid #f59e0b;
+  background: linear-gradient(180deg, #fffdf7 0%, #ffffff 100%);
 }
 
 .completed-card {
@@ -895,10 +1018,16 @@ onUnmounted(() => {
   border: 1px solid #ce93d8;
 }
 
-.status-badge-large.status-completed {
-  background: linear-gradient(135deg, #e0f2f1 0%, #b2dfdb 100%);
+.status-badge-large.status-delivered {
+  background: linear-gradient(135deg, #e0f7f4 0%, #b2dfdb 100%);
   color: #00796b;
   border: 1px solid #80cbc4;
+}
+
+.status-badge-large.status-completed {
+  background: linear-gradient(135deg, #e8f5e9 0%, #c8e6c9 100%);
+  color: #2e7d32;
+  border: 1px solid #a5d6a7;
 }
 
 .status-text {
@@ -926,6 +1055,24 @@ onUnmounted(() => {
   gap: 4px;
 }
 
+.order-state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.order-state-chip.issue {
+  background: #fff4e5;
+  border: 1px solid #f59e0b;
+  color: #b45309;
+}
+
 .order-shop {
   display: flex;
   align-items: center;
@@ -940,6 +1087,21 @@ onUnmounted(() => {
   font-size: 0.8rem;
   font-weight: 500;
   color: #354d7c;
+}
+
+.order-issue-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  margin: 4px 16px 0;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff8eb;
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  color: #9a6700;
+  font-size: 0.78rem;
+  line-height: 1.45;
 }
 
 .order-products {
@@ -1123,11 +1285,19 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #7b1fa2 0%, #ab47bc 100%);
 }
 
+.issue-card .order-number-badge {
+  background: linear-gradient(135deg, #d97706 0%, #f59e0b 100%);
+}
+
+.delivered-card .order-number-badge {
+  background: linear-gradient(135deg, #00796b 0%, #26a69a 100%);
+}
+
 .completed-card .order-number-badge {
   background: linear-gradient(135deg, #388e3c 0%, #66bb6a 100%);
 }
 
-.order-card:not(.accepted-card):not(.picked-card):not(.completed-card) .order-number-badge {
+.order-card:not(.accepted-card):not(.picked-card):not(.delivered-card):not(.completed-card):not(.issue-card) .order-number-badge {
   background: linear-gradient(135deg, #055e1d 0%, #229b42 100%);
 }
 
@@ -1163,7 +1333,7 @@ onUnmounted(() => {
     flex-wrap: wrap;
     text-align: center;
   }
-  
+
   .instruction-text {
     font-size: 0.7rem;
   }

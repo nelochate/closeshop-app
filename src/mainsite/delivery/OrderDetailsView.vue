@@ -28,45 +28,51 @@
         <div v-else-if="order" class="order-details-container">
           <!-- Order Status -->
           <div class="order-status-section">
-            <div class="status-chip" :class="getStatusClass(order.status)">
-              {{ getStatusText(order.status) }}
+            <div class="status-chip" :class="getStatusClass(order)">
+              {{ getStatusText(order) }}
             </div>
+            <p class="status-caption">{{ trackingMapTitle }}</p>
           </div>
 
           <!-- Route Information -->
-          <v-card class="info-card mb-4" rounded="lg">
+          <v-card class="info-card mb-4 tracking-section-card" rounded="xl">
             <v-card-title class="info-title">
               <v-icon size="20" color="#354d7c">mdi-map-marker-path</v-icon>
-              <span>Route Information</span>
+              <span>Live Delivery Map</span>
             </v-card-title>
             <v-divider></v-divider>
             <v-card-text class="pa-4">
-              <div class="route-info">
-                <div class="route-point">
-                  <div class="point-marker pickup">P</div>
-                  <div class="point-details">
-                    <div class="point-label">Pickup Location</div>
-                    <div class="point-address">{{ order.pickup_address }}</div>
-                    <div class="point-label">Shop: {{ order.shop_name }}</div>
-                  </div>
+              <OrderTrackingMap
+                :order-id="String(orderId)"
+                :pickup-location="pickupTrackingLocation"
+                :delivery-location="deliveryTrackingLocation"
+                :rider-location="persistedRiderTrackingLocation"
+                viewer-mode="rider"
+                :track-own-location="shouldTrackOwnLocation"
+                :title="trackingMapTitle"
+                subtitle="Use the map below to compare your current position, the pickup point, and the customer address."
+                :show-expand-action="true"
+                expand-action-label="Open full-screen map"
+                @expand="goToLocationToDeliver"
+              />
+
+              <div class="route-summary-grid">
+                <div class="route-summary-item">
+                  <span class="route-summary-label">Pickup</span>
+                  <strong>{{ order.shop_name }}</strong>
+                  <span>{{ order.pickup_address }}</span>
                 </div>
-
-                <div class="route-line"></div>
-
-                <div class="route-point">
-                  <div class="point-marker delivery">D</div>
-                  <div class="point-details">
-                    <div class="point-label">Delivery Location</div>
-                    <div class="point-address">{{ order.delivery_address }}</div>
-                    <div class="point-label">Customer: {{ order.customer_name }}</div>
-                    <div class="point-label">Phone: {{ order.customer_phone }}</div>
-                  </div>
+                <div class="route-summary-item">
+                  <span class="route-summary-label">Customer</span>
+                  <strong>{{ order.customer_name }}</strong>
+                  <span>{{ order.delivery_address }}</span>
+                </div>
+                <div class="route-summary-item">
+                  <span class="route-summary-label">Contact</span>
+                  <strong>{{ order.customer_phone || 'No phone provided' }}</strong>
+                  <span>Reach the customer if delivery details need confirmation.</span>
                 </div>
               </div>
-              <v-btn color="primary" block class="mt-3" @click="goToLocationToDeliver">
-                <v-icon left>mdi-map</v-icon>
-                See on Map
-              </v-btn>
             </v-card-text>
           </v-card>
 
@@ -156,17 +162,17 @@
           </v-card>
 
           <!-- Proof of Delivery Section - Only show for delivered/completed orders -->
-          <v-card v-if="order.status === 'delivered' || order.status === 'completed'" class="info-card mb-4" rounded="lg">
+          <v-card v-if="showDeliveryProofSection" class="info-card mb-4" rounded="lg">
             <v-card-title class="info-title">
               <v-icon size="20" color="#4caf50">mdi-camera</v-icon>
               <span>Proof of Delivery</span>
             </v-card-title>
             <v-divider></v-divider>
             <v-card-text class="pa-4">
-              <div v-if="order.delivery_proof_url" class="proof-container">
-                <div class="proof-image-wrapper" @click="viewFullImage(order.delivery_proof_url, 'Proof of Delivery')">
+              <div v-if="proofOfDeliveryUrl" class="proof-container">
+                <div class="proof-image-wrapper" @click="viewFullImage(proofOfDeliveryUrl, 'Proof of Delivery')">
                   <v-img
-                    :src="order.delivery_proof_url"
+                    :src="proofOfDeliveryUrl"
                     height="200"
                     cover
                     class="rounded proof-image"
@@ -183,7 +189,7 @@
                     size="small"
                     color="primary"
                     variant="text"
-                    @click="viewFullImage(order.delivery_proof_url, 'Proof of Delivery')"
+                    @click="viewFullImage(proofOfDeliveryUrl, 'Proof of Delivery')"
                   >
                     <v-icon left size="small">mdi-magnify</v-icon>
                     View Full Size
@@ -192,8 +198,8 @@
                 <div class="proof-info mt-3">
                   <div class="proof-field">
                     <v-icon size="16" color="success" class="mr-1">mdi-check-circle</v-icon>
-                    <span class="proof-label">Delivery completed on:</span>
-                    <span class="proof-value">{{ formatDateTime(order.delivered_at || order.completed_at) }}</span>
+                    <span class="proof-label">Latest delivery update:</span>
+                    <span class="proof-value">{{ formatDateTime(order.delivered_at || order.updated_at || order.completed_at) }}</span>
                   </div>
                 </div>
               </div>
@@ -221,14 +227,28 @@
             </v-btn>
 
             <!-- Delivered Button (for picked_up orders) -->
-            <v-btn v-else-if="order.status === 'picked_up' && isMyOrder" color="success" size="large" block
+            <v-btn v-else-if="canMarkAsDelivered" color="success" size="large" block
               @click="openProofDialog()">
               <v-icon left>mdi-check-circle</v-icon>
-              Mark as Delivered
+              {{ hasDeliveryIssue ? 'Reattempt Delivery' : 'Mark as Delivered' }}
             </v-btn>
 
+            <v-alert v-if="hasDeliveryIssue" type="warning" variant="tonal" class="mt-3 mb-0">
+              <div class="d-flex align-center">
+                <v-icon left class="mr-2">mdi-alert-circle</v-icon>
+                <span>{{ deliveryIssueMessage }}</span>
+              </div>
+            </v-alert>
+
+            <v-alert v-else-if="isAwaitingCustomerConfirmation" type="info"
+              variant="tonal" class="mb-0">
+              <div class="d-flex align-center">
+                <span>The proof of delivery has been uploaded. Waiting for the customer to confirm receipt.</span>
+              </div>
+            </v-alert>
+
             <!-- Message for completed orders -->
-            <v-alert v-else-if="order.status === 'delivered' || order.status === 'completed'" type="success"
+            <v-alert v-else-if="isOrderCompleted(order)" type="success"
               variant="tonal" class="mb-0">
               <div class="d-flex align-center">
                 <span>This order has been completed. Thank you for your delivery!</span>
@@ -244,7 +264,7 @@
             </v-alert>
 
             <!-- Message for orders assigned to other riders -->
-            <v-alert v-else-if="order.rider_id && !isMyOrder && order.status !== 'delivered'" type="warning"
+            <v-alert v-else-if="order.rider_id && !isMyOrder && !isAwaitingCustomerConfirmation" type="warning"
               variant="tonal" class="mb-0">
               <div class="d-flex align-center">
                 <v-icon left class="mr-2">mdi-alert</v-icon>
@@ -431,15 +451,21 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { useAuthUserStore } from '@/stores/authUser'
+import { notifyCustomerOrderStatus, notifySellerOrderStatus } from '@/utils/orderNotifications'
+import { formatAppDateTime } from '@/utils/dateTime'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
+import {
+  buildDeliveryAddress,
+  extractPersistedRiderCoordinates,
+  resolveTrackingLocation,
+} from '@/utils/orderTracking'
 
 const router = useRouter()
 const route = useRoute()
-const authStore = useAuthUserStore()
 const orderId = route.params.id
 
 // State
@@ -456,6 +482,9 @@ const selectedImage = ref(null)
 const selectedProductName = ref('')
 const currentRiderNumericId = ref(null)
 const currentRider = ref(null)
+const pickupTrackingLocation = ref(null)
+const deliveryTrackingLocation = ref(null)
+let statusSubscription = null
 
 // State for proof of delivery with Capacitor Camera
 const showProofDialog = ref(false)
@@ -470,37 +499,71 @@ const formatNumber = (num) => {
 }
 
 const formatDateTime = (dateString) => {
-  if (!dateString) return ''
-  const date = new Date(dateString)
-  return date.toLocaleString('en-US', {
+  return formatAppDateTime(dateString, {
+    fallback: '',
     month: 'short',
-    day: 'numeric',
-    hour: 'numeric',
-    minute: '2-digit',
-    hour12: true,
+    year: 'auto',
   })
 }
 
-const getStatusText = (status) => {
+const proofOfDeliveryUrl = computed(
+  () => order.value?.proof_of_delivery_url || order.value?.delivery_proof_url || '',
+)
+const isOrderCompleted = (orderRecord = null) =>
+  !!orderRecord?.completed_at || orderRecord?.status === 'completed'
+const hasOrderAwaitingCustomerConfirmation = (orderRecord = null) =>
+  ['picked_up', 'delivered'].includes(orderRecord?.status || '') &&
+  !!(orderRecord?.proof_of_delivery_url || orderRecord?.delivery_proof_url) &&
+  !!orderRecord?.delivered_at &&
+  !orderRecord?.completed_at
+const hasOrderDeliveryIssue = (orderRecord = null) =>
+  orderRecord?.status === 'picked_up' &&
+  !!(orderRecord?.proof_of_delivery_url || orderRecord?.delivery_proof_url) &&
+  !orderRecord?.delivered_at &&
+  !orderRecord?.completed_at
+const deliveryIssueMessage =
+  'The customer reported that the order was not received. Please coordinate with the seller or the support team for proper resolution.'
+
+const isAwaitingCustomerConfirmation = computed(() =>
+  hasOrderAwaitingCustomerConfirmation(order.value),
+)
+const hasDeliveryIssue = computed(() => hasOrderDeliveryIssue(order.value))
+const showDeliveryProofSection = computed(
+  () =>
+    !!proofOfDeliveryUrl.value ||
+    !!order.value?.completed_at ||
+    isAwaitingCustomerConfirmation.value ||
+    hasDeliveryIssue.value,
+)
+
+const getStatusText = (orderRecord) => {
+  if (isOrderCompleted(orderRecord)) return 'Completed'
+  if (hasOrderDeliveryIssue(orderRecord)) return 'Delivery Issue'
+  if (hasOrderAwaitingCustomerConfirmation(orderRecord)) return 'Delivered'
+
+  const status = typeof orderRecord === 'string' ? orderRecord : orderRecord?.status
   const statusMap = {
     pending_approval: 'Pending Seller Approval',
     waiting_for_rider: 'Available for Pickup',
     accepted_by_rider: 'Accepted by Rider',
     picked_up: 'Picked Up',
-    delivered: 'Delivered',
     completed: 'Completed',
     cancelled: 'Cancelled',
   }
   return statusMap[status] || status
 }
 
-const getStatusClass = (status) => {
+const getStatusClass = (orderRecord) => {
+  if (isOrderCompleted(orderRecord)) return 'status-completed'
+  if (hasOrderDeliveryIssue(orderRecord)) return 'status-issue'
+  if (hasOrderAwaitingCustomerConfirmation(orderRecord)) return 'status-delivered'
+
+  const status = typeof orderRecord === 'string' ? orderRecord : orderRecord?.status
   const classMap = {
     pending_approval: 'status-pending',
     waiting_for_rider: 'status-waiting',
     accepted_by_rider: 'status-accepted',
     picked_up: 'status-picked',
-    delivered: 'status-delivered',
     completed: 'status-completed',
     cancelled: 'status-cancelled',
   }
@@ -548,10 +611,82 @@ const getCurrentRider = async () => {
   }
 }
 
+const getProfileDisplayName = (profile = {}) => {
+  return [profile?.first_name, profile?.last_name]
+    .filter((value) => typeof value === 'string' && value.trim())
+    .join(' ')
+    .trim()
+}
+
+const getCustomerDisplayName = ({ address = {}, user = {} } = {}) => {
+  return address?.recipient_name?.trim() || getProfileDisplayName(user) || 'Recipient unavailable'
+}
+
+const loadTrackingLocations = async (data) => {
+  const shop = data?.shop || {}
+  const address = data?.address || {}
+  const customerName = getCustomerDisplayName({
+    address,
+    user: data?.user,
+  })
+
+  const pickupQuery = [shop.building, shop.street, shop.barangay, shop.city, shop.province]
+    .filter(Boolean)
+    .join(', ')
+  const deliveryQuery = [
+    address.house_no,
+    address.building,
+    address.street,
+    address.barangay_name,
+    address.city_name,
+    address.province_name,
+  ]
+    .filter(Boolean)
+    .join(', ')
+
+  pickupTrackingLocation.value = await resolveTrackingLocation({
+    name: shop.business_name || 'Pickup point',
+    address: order.value?.pickup_address || 'Store address',
+    lat: shop.latitude,
+    lng: shop.longitude,
+    fallbackQuery: pickupQuery || undefined,
+  })
+
+  deliveryTrackingLocation.value = await resolveTrackingLocation({
+    name: customerName,
+    address: buildDeliveryAddress(address),
+    lat: address.latitude,
+    lng: address.longitude,
+    fallbackQuery: deliveryQuery || undefined,
+  })
+}
+
+const subscribeToOrderUpdates = () => {
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
+
+  statusSubscription = supabase
+    .channel(`rider-order-${orderId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      },
+      async () => {
+        await fetchOrderDetails()
+      },
+    )
+    .subscribe()
+}
+
 // Fetch order details
 const fetchOrderDetails = async () => {
   loading.value = true
   error.value = null
+  pickupTrackingLocation.value = null
+  deliveryTrackingLocation.value = null
   try {
     const { data, error: fetchError } = await supabase
       .from('orders')
@@ -571,7 +706,8 @@ const fetchOrderDetails = async () => {
             price
           )
         ),
-        profiles:user_id (
+        user:profiles!orders_user_id_fkey (
+          id,
           first_name,
           last_name,
           phone
@@ -586,7 +722,7 @@ const fetchOrderDetails = async () => {
           latitude,
           longitude
         ),
-        address:address_id (
+        address:addresses!orders_address_id_fkey (
           recipient_name,
           phone,
           street,
@@ -594,7 +730,9 @@ const fetchOrderDetails = async () => {
           house_no,
           barangay_name,
           city_name,
-          province_name
+          province_name,
+          latitude,
+          longitude
         )
       `)
       .eq('id', orderId)
@@ -610,6 +748,7 @@ const fetchOrderDetails = async () => {
           .join(', ') || 'Store Address'
 
       const address = data.address || {}
+      const user = data.user || {}
       const deliveryAddress =
         [
           address.house_no,
@@ -622,9 +761,7 @@ const fetchOrderDetails = async () => {
           .filter(Boolean)
           .join(', ') || 'Delivery Address'
 
-      const profile = data.profiles || {}
-      const customerName =
-        `${profile.first_name || ''} ${profile.last_name || ''}`.trim() || 'Customer'
+      const customerName = getCustomerDisplayName({ address, user })
 
       const items = (data.order_items || []).map((item) => {
         const product = item.products || {}
@@ -652,14 +789,19 @@ const fetchOrderDetails = async () => {
         pickup_address: pickupAddress,
         delivery_address: deliveryAddress,
         customer_name: customerName,
-        customer_phone: profile.phone || address.phone || '',
+        customer_phone: address.phone || user.phone || '',
         shop_name: shop.business_name || 'Shop',
         pickup_lat: shop.latitude,
         pickup_lng: shop.longitude,
+        delivery_lat: address.latitude,
+        delivery_lng: address.longitude,
         items: items,
         subtotal: subtotal,
         delivery_fee: deliveryFee,
       }
+
+      await loadTrackingLocations(data)
+      subscribeToOrderUpdates()
     }
   } catch (err) {
     console.error('Error fetching order:', err)
@@ -675,14 +817,22 @@ const acceptOrder = () => {
 }
 
 const confirmAcceptOrder = async () => {
+  if (!isAvailableForAcceptance.value || !currentRiderNumericId.value) {
+    alert('This order is no longer available for acceptance.')
+    showAcceptDialog.value = false
+    return
+  }
+
   accepting.value = true
   try {
+    const acceptedAt = new Date().toISOString()
+
     const { data, error } = await supabase
       .from('orders')
       .update({
         status: 'accepted_by_rider',
         rider_id: currentRiderNumericId.value,
-        accepted_at: new Date().toISOString(),
+        accepted_at: acceptedAt,
       })
       .eq('id', orderId)
       .is('rider_id', null)
@@ -699,6 +849,16 @@ const confirmAcceptOrder = async () => {
     }
 
     showAcceptDialog.value = false
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: 'accepted_by_rider',
+        createdAt: acceptedAt,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about rider acceptance:', notificationError)
+    }
     alert('✅ Order accepted successfully!')
     await fetchOrderDetails()
 
@@ -712,12 +872,22 @@ const confirmAcceptOrder = async () => {
 
 // Update order status (for picked up)
 const updateOrderStatus = (status) => {
+  if (!isMyOrder.value) {
+    alert('Only the assigned rider can update this order.')
+    return
+  }
+
   pendingStatusUpdate.value = status
   showUpdateDialog.value = true
 }
 
 // Open proof of delivery dialog
 const openProofDialog = () => {
+  if (!isMyOrder.value) {
+    alert('Only the assigned rider can update this order.')
+    return
+  }
+
   pendingStatusUpdate.value = 'delivered'
   showProofDialog.value = true
 }
@@ -826,7 +996,7 @@ const uploadProofImage = async () => {
   try {
     console.log('Uploading proof image...')
     
-    const { data, error } = await supabase.storage
+    const { error } = await supabase.storage
       .from('order-proofs')
       .upload(filePath, proofImage.value, {
         cacheControl: '3600',
@@ -859,17 +1029,28 @@ const confirmUpdateStatus = async () => {
     return
   }
 
+  if (!isMyOrder.value || !currentRiderNumericId.value) {
+    alert('Only the assigned rider can update this order.')
+    showUpdateDialog.value = false
+    showProofDialog.value = false
+    pendingStatusUpdate.value = null
+    return
+  }
+
   uploadingProof.value = true
+  updating.value = true
+  const statusToApply = pendingStatusUpdate.value
+  const statusTimestamp = new Date().toISOString()
   try {
     let proofImageUrl = null
 
     // Upload proof image if this is a delivery
-    if (pendingStatusUpdate.value === 'delivered' && proofImage.value) {
+    if (statusToApply === 'delivered' && proofImage.value) {
       proofImageUrl = await uploadProofImage()
     }
 
-    const updateData = { 
-      status: pendingStatusUpdate.value
+    const updateData = {
+      updated_at: statusTimestamp,
     }
     
     // Add delivery_proof_url if it exists
@@ -877,20 +1058,57 @@ const confirmUpdateStatus = async () => {
       updateData.delivery_proof_url = proofImageUrl
     }
 
-    if (pendingStatusUpdate.value === 'picked_up') {
-      updateData.picked_up_at = new Date().toISOString()
-    } else if (pendingStatusUpdate.value === 'delivered') {
-      updateData.delivered_at = new Date().toISOString()
-      updateData.completed_at = new Date().toISOString()
+    if (statusToApply === 'picked_up') {
+      updateData.status = 'picked_up'
+      updateData.picked_up_at = statusTimestamp
+    } else if (statusToApply === 'delivered') {
+      updateData.delivered_at = statusTimestamp
       updateData.rider_earnings = Math.round((order.value.delivery_fee || 0) * 0.8)
     }
 
-    const { error } = await supabase
+    const expectedCurrentStatus = statusToApply === 'picked_up' ? 'accepted_by_rider' : 'picked_up'
+
+    let updateQuery = supabase
       .from('orders')
       .update(updateData)
       .eq('id', orderId)
+      .eq('rider_id', currentRiderNumericId.value)
+      .eq('status', expectedCurrentStatus)
+    if (statusToApply === 'delivered') {
+      updateQuery = updateQuery
+        .is('delivered_at', null)
+        .is('completed_at', null)
+    }
+
+    const { data, error } = await updateQuery.select('id')
 
     if (error) throw error
+
+    if (!data || data.length === 0) {
+      throw new Error('This order can only be updated by the rider who accepted it.')
+    }
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: statusToApply,
+        createdAt: statusTimestamp,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about order status update:', notificationError)
+    }
+
+    try {
+      await notifySellerOrderStatus({
+        orderId,
+        status: statusToApply,
+        createdAt: statusTimestamp,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify seller about order status update:', notificationError)
+    }
 
     showProofDialog.value = false
     showUpdateDialog.value = false
@@ -899,19 +1117,20 @@ const confirmUpdateStatus = async () => {
     proofImagePreview.value = null
     
     await fetchOrderDetails()
-    alert(`Order marked as ${pendingStatusUpdate.value.replace('_', ' ')}!`)
+    alert(`Order marked as ${statusToApply.replace('_', ' ')}!`)
     
     // If delivered, go back to dashboard
-    if (pendingStatusUpdate.value === 'delivered') {
+    if (statusToApply === 'delivered') {
       setTimeout(() => {
         router.push('/RiderDashboard')
       }, 1500)
     }
   } catch (error) {
     console.error('Error updating order:', error)
-    alert('Failed to update order status. Please try again.')
+    alert(error?.message || 'Failed to update order status. Please try again.')
   } finally {
     uploadingProof.value = false
+    updating.value = false
     pendingStatusUpdate.value = null
   }
 }
@@ -935,28 +1154,76 @@ const isAvailableForAcceptance = computed(() => {
   return order.value?.status === 'waiting_for_rider' && !order.value?.rider_id
 })
 
+const shouldTrackOwnLocation = computed(() => {
+  return (
+    isMyOrder.value &&
+    (
+      order.value?.status === 'accepted_by_rider' ||
+      (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)
+    )
+  )
+})
+
+const persistedRiderTrackingLocation = computed(() => {
+  const persisted = extractPersistedRiderCoordinates(order.value)
+
+  if (!persisted) return null
+
+  return {
+    ...persisted,
+    name: currentRider.value
+      ? `${currentRider.value.first_name || ''} ${currentRider.value.last_name || ''}`.trim() || 'Assigned rider'
+      : 'Assigned rider',
+    address:
+      currentRider.value?.phone || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+  }
+})
+
+const trackingMapTitle = computed(() => {
+  if (hasDeliveryIssue.value) return 'Delivery issue reported - coordination needed'
+  if (isOrderCompleted(order.value)) return 'Customer confirmed receipt'
+  if (isAwaitingCustomerConfirmation.value) return 'Waiting for customer confirmation'
+  if (order.value?.status === 'picked_up') return 'Delivering to customer'
+  if (order.value?.status === 'accepted_by_rider') return 'Heading to the pickup point'
+  if (isAvailableForAcceptance.value) return 'Ready for pickup'
+  return 'Route overview'
+})
+
+const canMarkAsDelivered = computed(() => {
+  return (
+    isMyOrder.value &&
+    order.value?.status === 'picked_up' &&
+    !isAwaitingCustomerConfirmation.value
+  )
+})
+
 onMounted(async () => {
   await getCurrentRider()
   await fetchOrderDetails()
+})
+
+onUnmounted(() => {
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
 })
 </script>
 
 <style scoped>
 .order-details-page {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
-  min-height: 100vh;
+  min-height: 100dvh;
 }
 
 .header-section {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px 16px;
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) 16px 18px;
   background: linear-gradient(135deg, #354d7c, #5276b0);
   color: white;
   position: sticky;
   top: 0;
   z-index: 100;
+  box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
 }
 
 .back-btn {
@@ -970,6 +1237,10 @@ onMounted(async () => {
   margin: 0;
 }
 
+.order-details-container {
+  padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+}
+
 .order-status-section {
   text-align: center;
   margin-bottom: 20px;
@@ -981,6 +1252,14 @@ onMounted(async () => {
   border-radius: 30px;
   font-size: 0.9rem;
   font-weight: 600;
+}
+
+.status-caption {
+  margin: 12px auto 0;
+  max-width: 520px;
+  color: #52667d;
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .status-pending {
@@ -1009,6 +1288,11 @@ onMounted(async () => {
   color: #4caf50;
 }
 
+.status-issue {
+  background: #fff4e5;
+  color: #b45309;
+}
+
 .status-cancelled {
   background: #ffebee;
   color: #f44336;
@@ -1018,10 +1302,41 @@ onMounted(async () => {
   overflow: hidden;
 }
 
+.tracking-section-card {
+  border: 1px solid rgba(53, 77, 124, 0.08);
+  box-shadow: 0 20px 44px rgba(18, 48, 79, 0.08);
+}
+
 .info-title {
   font-weight: 600;
   color: #354d7c;
   font-size: 1rem;
+}
+
+.route-summary-grid {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.route-summary-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 14px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #f8fbff, #eef4fc);
+  border: 1px solid rgba(53, 77, 124, 0.07);
+  color: #12304f;
+}
+
+.route-summary-label {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #5276b0;
+  font-weight: 700;
 }
 
 .route-point {
@@ -1191,6 +1506,10 @@ onMounted(async () => {
     font-size: 1.2rem;
   }
 
+  .status-caption {
+    font-size: 0.84rem;
+  }
+
   .field-label {
     width: 85px;
     font-size: 0.75rem;
@@ -1202,6 +1521,10 @@ onMounted(async () => {
 
   .point-address {
     font-size: 0.75rem;
+  }
+
+  .route-summary-grid {
+    grid-template-columns: 1fr;
   }
   
   .proof-field {

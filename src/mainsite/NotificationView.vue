@@ -2,6 +2,11 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import {
+  filterVisibleNotifications,
+  resolveVisibleNotification,
+} from '@/utils/chatNotifications'
+import { formatLiveTimestamp, formatRelativeDayLabel } from '@/utils/dateTime'
 
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
@@ -14,7 +19,9 @@ const notificationToDelete = ref(null)
 const showDeleteAllDialog = ref(false)
 const deleting = ref(false)
 const deleteOption = ref('read')
+const currentTime = ref(Date.now())
 let notificationSubscription
+let timeUpdateInterval
 
 // Computed for unread notifications
 const unreadNotifications = computed(() => 
@@ -59,13 +66,20 @@ async function setupNotificationListener() {
         table: 'notifications',
         filter: `user_id=eq.${user.id}`,
       },
-      (payload) => {
+      async (payload) => {
         console.log('New notification:', payload)
-        notifications.value.unshift(payload.new)
+
+        const visibleNotification = await resolveVisibleNotification(payload.new)
+
+        if (!visibleNotification) {
+          return
+        }
+
+        notifications.value.unshift(visibleNotification)
         unreadCount.value++
 
         // Show browser notification
-        showBrowserNotification(payload.new)
+        showBrowserNotification(visibleNotification)
       },
     )
     .on(
@@ -76,14 +90,38 @@ async function setupNotificationListener() {
         table: 'notifications',
         filter: `user_id=eq.${user.id}`,
       },
-      (payload) => {
-        // Update local state if notification is marked as read
+      async (payload) => {
+        const visibleNotification = await resolveVisibleNotification(payload.new)
         const index = notifications.value.findIndex((n) => n.id === payload.new.id)
-        if (index !== -1) {
-          notifications.value[index] = payload.new
-          if (payload.new.is_read && !payload.old.is_read) {
-            unreadCount.value = Math.max(0, unreadCount.value - 1)
+
+        if (!visibleNotification) {
+          if (index !== -1) {
+            if (!notifications.value[index].is_read) {
+              unreadCount.value = Math.max(0, unreadCount.value - 1)
+            }
+            notifications.value.splice(index, 1)
           }
+          return
+        }
+
+        if (index !== -1) {
+          const wasUnread = !notifications.value[index].is_read
+          notifications.value[index] = {
+            ...notifications.value[index],
+            ...visibleNotification,
+          }
+
+          if (visibleNotification.is_read && wasUnread) {
+            unreadCount.value = Math.max(0, unreadCount.value - 1)
+          } else if (!visibleNotification.is_read && !wasUnread) {
+            unreadCount.value += 1
+          }
+          return
+        }
+
+        notifications.value.unshift(visibleNotification)
+        if (!visibleNotification.is_read) {
+          unreadCount.value += 1
         }
       },
     )
@@ -126,8 +164,9 @@ async function fetchNotifications() {
     if (error) throw error
 
     if (data) {
-      notifications.value = data
-      unreadCount.value = data.filter((n) => !n.is_read).length
+      const visibleNotifications = await filterVisibleNotifications(data)
+      notifications.value = visibleNotifications
+      unreadCount.value = visibleNotifications.filter((n) => !n.is_read).length
     }
   } catch (error) {
     console.error('Error fetching notifications:', error)
@@ -140,10 +179,18 @@ function showBrowserNotification(notification) {
   if ('Notification' in window && Notification.permission === 'granted') {
     new Notification('CloseShop', {
       body: notification.message,
-      icon: '/icon.png',
+      icon: notification.counterpartyAvatar || notification.senderShopAvatar || '/icon.png',
       tag: notification.id,
     })
   }
+}
+
+function getNotificationAvatar(notification) {
+  if (notification.type === 'new_message') {
+    return notification.counterpartyAvatar || notification.senderShopAvatar || null
+  }
+
+  return null
 }
 
 async function markAsRead(notificationId) {
@@ -288,17 +335,70 @@ function confirmDeleteAllRead() {
 }
 
 // 🎯 ENHANCED: Smart notification routing based on type and related_id
-function handleNotificationClick(notification) {
+async function handleNotificationClick(notification) {
   // Mark as read when clicked
   if (!notification.is_read) {
-    markAsRead(notification.id)
+    await markAsRead(notification.id)
   }
 
   // Navigate based on notification type and related_id
-  navigateToNotificationTarget(notification)
+  await navigateToNotificationTarget(notification)
 }
 
-function navigateToNotificationTarget(notification) {
+async function openMessageNotification(notification) {
+  const conversationId = notification.related_id
+  if (!conversationId) {
+    router.push({ name: 'messageview' })
+    return
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  if (!user) {
+    router.push({ name: 'messageview' })
+    return
+  }
+
+  const { data: conversation, error } = await supabase
+    .from('conversations')
+    .select('id, user1, user2')
+    .eq('id', conversationId)
+    .maybeSingle()
+
+  if (error) {
+    console.error('Error resolving message notification conversation:', error)
+    router.push({ name: 'messageview' })
+    return
+  }
+
+  if (conversation) {
+    if (![conversation.user1, conversation.user2].includes(user.id)) {
+      router.push({ name: 'messageview' })
+      return
+    }
+
+    const otherUserId = conversation.user1 === user.id ? conversation.user2 : conversation.user1
+
+    if (!otherUserId) {
+      router.push({ name: 'messageview' })
+      return
+    }
+
+    router.push({
+      name: 'chatview',
+      params: { id: otherUserId },
+      query: { conversationId: conversation.id },
+    })
+    return
+  }
+
+  // Backward-compatible fallback if older notifications store a user ID instead.
+  router.push({ name: 'chatview', params: { id: conversationId } })
+}
+
+async function navigateToNotificationTarget(notification) {
   const { type, related_id, related_type, action_url } = notification
 
   console.log('Navigating notification:', { type, related_id, related_type, action_url })
@@ -323,7 +423,7 @@ function navigateToNotificationTarget(notification) {
     case 'order_cancelled':
     case 'shipping_update':
       if (related_id) {
-        router.push({ name: 'orderdetails', params: { id: related_id } })
+        router.push({ name: 'order-details', params: { id: related_id } })
       } else {
         router.push({ name: 'profileview' }) // Fallback to profile/orders
       }
@@ -331,12 +431,7 @@ function navigateToNotificationTarget(notification) {
 
     // 💬 Message notifications
     case 'new_message':
-      if (related_id) {
-        // If related_id is a user ID, go to chat with that user
-        router.push({ name: 'chatview', params: { id: related_id } })
-      } else {
-        router.push({ name: 'messageview' })
-      }
+      await openMessageNotification(notification)
       break
 
     // 🏪 Shop-related notifications
@@ -378,7 +473,7 @@ function navigateToNotificationTarget(notification) {
     case 'payment_successful':
       if (related_id) {
         // If payment is related to an order
-        router.push({ name: 'orderdetails', params: { id: related_id } })
+        router.push({ name: 'order-details', params: { id: related_id } })
       } else {
         router.push({ name: 'profileview' })
       }
@@ -401,19 +496,7 @@ function navigateToNotificationTarget(notification) {
 }
 
 function formatTime(timestamp) {
-  const date = new Date(timestamp)
-  const now = new Date()
-  const diffMs = now - date
-  const diffMins = Math.floor(diffMs / 60000)
-  const diffHours = Math.floor(diffMs / 3600000)
-  const diffDays = Math.floor(diffMs / 86400000)
-
-  if (diffMins < 1) return 'Just now'
-  if (diffMins < 60) return `${diffMins}m ago`
-  if (diffHours < 24) return `${diffHours}h ago`
-  if (diffDays < 7) return `${diffDays}d ago`
-
-  return date.toLocaleDateString()
+  return formatLiveTimestamp(timestamp, currentTime.value)
 }
 
 function getNotificationIcon(type) {
@@ -467,6 +550,7 @@ function getNotificationColor(type) {
 // Helper to get human-readable notification title
 function getNotificationTitle(notification) {
   if (notification.title) return notification.title
+  if (notification.type === 'new_message' && notification.message) return notification.message
 
   const titles = {
     order_placed: 'New Order',
@@ -491,6 +575,18 @@ function getNotificationTitle(notification) {
   return titles[notification.type] || 'Notification'
 }
 
+function getNotificationSubtitle(notification) {
+  if (notification.type === 'new_message' && !notification.title) {
+    return ''
+  }
+
+  if (notification.type === 'new_message' && notification.title === notification.message) {
+    return ''
+  }
+
+  return notification.message || ''
+}
+
 // Group notifications by date
 const groupedNotifications = computed(() => {
   const groups = {}
@@ -506,15 +602,7 @@ const groupedNotifications = computed(() => {
 
 // Get notification age badge
 function getNotificationAge(createdAt) {
-  const date = new Date(createdAt)
-  const now = new Date()
-  const diffDays = Math.floor((now - date) / (1000 * 60 * 60 * 24))
-
-  if (diffDays === 0) return 'Today'
-  if (diffDays === 1) return 'Yesterday'
-  if (diffDays < 7) return 'This Week'
-  if (diffDays < 30) return 'This Month'
-  return 'Older'
+  return formatRelativeDayLabel(createdAt, currentTime.value)
 }
 
 function getPriorityLabel(priority) {
@@ -538,6 +626,10 @@ function getPriorityColor(priority) {
 }
 
 onMounted(() => {
+  currentTime.value = Date.now()
+  timeUpdateInterval = setInterval(() => {
+    currentTime.value = Date.now()
+  }, 30000)
   setupNotificationListener()
   fetchNotifications()
   requestNotificationPermission()
@@ -545,6 +637,11 @@ onMounted(() => {
 
 onUnmounted(() => {
   notificationSubscription?.unsubscribe()
+
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
+  }
 })
 </script>
 
@@ -640,7 +737,14 @@ onUnmounted(() => {
                   @click="handleNotificationClick(notification)"
                 >
                   <template #prepend>
-                    <v-avatar :color="getNotificationColor(notification.type)" size="40">
+                    <v-avatar v-if="getNotificationAvatar(notification)" size="40">
+                      <v-img
+                        :src="getNotificationAvatar(notification)"
+                        :alt="getNotificationTitle(notification)"
+                        cover
+                      />
+                    </v-avatar>
+                    <v-avatar v-else :color="getNotificationColor(notification.type)" size="40">
                       <v-icon :icon="getNotificationIcon(notification.type)" color="white" />
                     </v-avatar>
                   </template>
@@ -661,7 +765,7 @@ onUnmounted(() => {
                   </v-list-item-title>
 
                   <v-list-item-subtitle class="text-caption">
-                    {{ notification.message }}
+                    {{ getNotificationSubtitle(notification) }}
                   </v-list-item-subtitle>
 
                   <template #append>

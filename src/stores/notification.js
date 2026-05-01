@@ -1,5 +1,9 @@
 import { defineStore } from 'pinia'
 import { supabase } from '@/utils/supabase'
+import {
+  filterVisibleNotifications,
+  resolveVisibleNotification,
+} from '@/utils/chatNotifications'
 
 export const useNotificationStore = defineStore('notification', {
   state: () => ({
@@ -19,7 +23,7 @@ export const useNotificationStore = defineStore('notification', {
       if (error) {
         console.error('❌ Error fetching notifications:', error)
       } else {
-        this.notifications = data || []
+        this.notifications = await filterVisibleNotifications(data || [])
       }
       this.loading = false
     },
@@ -35,9 +39,13 @@ export const useNotificationStore = defineStore('notification', {
             table: 'notifications',
             filter: `user_id=eq.${userId}`,
           },
-          (payload) => {
+          async (payload) => {
             console.log('🔔 New notification:', payload.new)
-            this.notifications.unshift(payload.new)
+            const visibleNotification = await resolveVisibleNotification(payload.new)
+            if (!visibleNotification) {
+              return
+            }
+            this.notifications.unshift(visibleNotification)
           }
         )
         .subscribe()
