@@ -22,7 +22,7 @@ const currentUserId = ref<string | null>(null)
 
 // Image upload state
 const uploadingImages = ref(false)
-const imagePreviews = ref<{id: string, file: File, url: string}[]>([])
+const imagePreviews = ref<{ id: string; file: File; url: string }[]>([])
 const uploadProgress = ref(0)
 
 // New review form
@@ -30,17 +30,18 @@ const newReview = ref({
   product_id: '',
   rating: 0,
   comment: '',
-  photos: [] as string[]
+  photos: [] as string[],
 })
 
 // Load order items
 const loadOrderItems = async () => {
   if (!orderId.value) return
-  
+
   try {
     const { data, error } = await supabase
       .from('order_items')
-      .select(`
+      .select(
+        `
         id,
         product_id,
         quantity,
@@ -53,16 +54,18 @@ const loadOrderItems = async () => {
           main_img_urls,
           description
         )
-      `)
+      `,
+      )
       .eq('order_id', orderId.value)
 
     if (error) throw error
-    
-    orderItems.value = data?.map(item => ({
-      ...item,
-      product: item.products
-    })) || []
-    
+
+    orderItems.value =
+      data?.map((item) => ({
+        ...item,
+        product: item.products,
+      })) || []
+
     console.log('Order items loaded:', orderItems.value)
   } catch (error) {
     console.error('Error loading order items:', error)
@@ -73,8 +76,8 @@ const loadOrderItems = async () => {
 const loadReviews = async () => {
   isLoading.value = true
   try {
-    const productIds = orderItems.value.map(item => item.product_id)
-    
+    const productIds = orderItems.value.map((item) => item.product_id)
+
     if (productIds.length === 0) {
       reviews.value = []
       return
@@ -101,22 +104,22 @@ const reviewStats = computed(() => {
     return {
       average_rating: 0,
       total_reviews: 0,
-      rating_distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
+      rating_distribution: { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 },
     }
   }
 
   const total = reviews.value.length
   const average = reviews.value.reduce((sum, review) => sum + review.rating, 0) / total
-  
+
   const distribution = { 5: 0, 4: 0, 3: 0, 2: 0, 1: 0 }
-  reviews.value.forEach(review => {
+  reviews.value.forEach((review) => {
     distribution[review.rating as keyof typeof distribution]++
   })
 
   return {
     average_rating: Math.round(average * 10) / 10,
     total_reviews: total,
-    rating_distribution: distribution
+    rating_distribution: distribution,
   }
 })
 
@@ -127,7 +130,7 @@ const filteredReviews = computed(() => {
   // Apply rating filter
   if (filter.value !== 'all') {
     const rating = parseInt(filter.value)
-    filtered = filtered.filter(review => review.rating === rating)
+    filtered = filtered.filter((review) => review.rating === rating)
   }
 
   // Apply sort
@@ -146,7 +149,7 @@ const filteredReviews = computed(() => {
 
 // Get reviews for a specific product
 const getProductReviews = (productId: string) => {
-  return reviews.value.filter(review => review.product_id === productId)
+  return reviews.value.filter((review) => review.product_id === productId)
 }
 
 // Get product average rating
@@ -167,14 +170,16 @@ const openReviewDialog = (product: any) => {
     product_id: product.id,
     rating: 0,
     comment: '',
-    photos: []
+    photos: [],
   }
   showReviewDialog.value = true
 }
 
 // Check if user has already reviewed a product
 const hasUserReviewed = (productId: string) => {
-  return reviews.value.some(review => review.product_id === productId && review.user_id === currentUserId.value)
+  return reviews.value.some(
+    (review) => review.product_id === productId && review.user_id === currentUserId.value,
+  )
 }
 
 // Handle photo upload
@@ -183,7 +188,7 @@ const handlePhotoUpload = (event: Event) => {
   if (!input.files || input.files.length === 0) return
 
   const files = Array.from(input.files)
-  
+
   // Validate file count
   const totalFiles = imagePreviews.value.length + files.length
   if (totalFiles > 5) {
@@ -194,12 +199,13 @@ const handlePhotoUpload = (event: Event) => {
 
   // Validate file sizes and types
   for (const file of files) {
-    if (file.size > 5 * 1024 * 1024) { // 5MB limit
+    if (file.size > 5 * 1024 * 1024) {
+      // 5MB limit
       alert(`File ${file.name} is too large. Maximum size is 5MB.`)
       input.value = '' // Reset input
       return
     }
-    
+
     if (!file.type.startsWith('image/')) {
       alert(`File ${file.name} is not an image.`)
       input.value = '' // Reset input
@@ -208,11 +214,11 @@ const handlePhotoUpload = (event: Event) => {
   }
 
   // Create previews
-  files.forEach(file => {
+  files.forEach((file) => {
     const preview = {
       id: Math.random().toString(36).substr(2, 9),
       file: file,
-      url: URL.createObjectURL(file)
+      url: URL.createObjectURL(file),
     }
     imagePreviews.value.push(preview)
   })
@@ -241,19 +247,17 @@ const uploadImagesToStorage = async (): Promise<string[]> => {
     for (let i = 0; i < imagePreviews.value.length; i++) {
       const preview = imagePreviews.value[i]
       const file = preview.file
-      
+
       // Generate unique filename
       const fileExt = file.name.split('.').pop()
       const fileName = `${Math.random().toString(36).substr(2, 9)}-${Date.now()}.${fileExt}`
       const filePath = `review-${newReview.value.product_id}/${fileName}`
 
       // Upload file to Supabase Storage
-      const { data, error } = await supabase.storage
-        .from('review-images')
-        .upload(filePath, file, {
-          cacheControl: '3600',
-          upsert: false
-        })
+      const { data, error } = await supabase.storage.from('review-images').upload(filePath, file, {
+        cacheControl: '3600',
+        upsert: false,
+      })
 
       if (error) {
         console.error('Error uploading image:', error)
@@ -261,9 +265,9 @@ const uploadImagesToStorage = async (): Promise<string[]> => {
       }
 
       // Get public URL
-      const { data: { publicUrl } } = supabase.storage
-        .from('review-images')
-        .getPublicUrl(data.path)
+      const {
+        data: { publicUrl },
+      } = supabase.storage.from('review-images').getPublicUrl(data.path)
 
       uploadedUrls.push(publicUrl)
 
@@ -283,7 +287,7 @@ const uploadImagesToStorage = async (): Promise<string[]> => {
 
 // Clean up image previews
 const cleanupImagePreviews = () => {
-  imagePreviews.value.forEach(preview => {
+  imagePreviews.value.forEach((preview) => {
     URL.revokeObjectURL(preview.url)
   })
   imagePreviews.value = []
@@ -319,21 +323,18 @@ const submitReview = async () => {
       comment: newReview.value.comment.trim(),
       photos: photoUrls.length > 0 ? photoUrls : null,
       user_id: userData.user.id,
-      user_name: userData.user.user_metadata?.full_name || 
-                `${userData.user.user_metadata?.first_name || ''} ${userData.user.user_metadata?.last_name || ''}`.trim() ||
-                'Anonymous',
+      user_name:
+        userData.user.user_metadata?.full_name ||
+        `${userData.user.user_metadata?.first_name || ''} ${userData.user.user_metadata?.last_name || ''}`.trim() ||
+        'Anonymous',
       user_avatar: userData.user.user_metadata?.avatar_url || null,
-      is_verified: true
+      is_verified: true,
     }
 
-    const { data, error } = await supabase
-      .from('reviews')
-      .insert(reviewData)
-      .select()
-      .single()
+    const { data, error } = await supabase.from('reviews').insert(reviewData).select().single()
 
     if (error) throw error
-    
+
     // Reset form and close dialog
     cleanupImagePreviews()
     showReviewDialog.value = false
@@ -341,12 +342,12 @@ const submitReview = async () => {
       product_id: '',
       rating: 0,
       comment: '',
-      photos: []
+      photos: [],
     }
-    
+
     // Reload reviews
     await loadReviews()
-    
+
     console.log('Review submitted successfully with images:', photoUrls)
   } catch (error) {
     console.error('Error submitting review:', error)
@@ -360,13 +361,13 @@ const submitReview = async () => {
 const likeReview = async (reviewId: string) => {
   try {
     const { error } = await supabase.rpc('increment_review_likes', {
-      review_uuid: reviewId
+      review_uuid: reviewId,
     })
-    
+
     if (error) throw error
-    
+
     // Update local state
-    const reviewIndex = reviews.value.findIndex(r => r.id === reviewId)
+    const reviewIndex = reviews.value.findIndex((r) => r.id === reviewId)
     if (reviewIndex !== -1) {
       reviews.value[reviewIndex].likes = (reviews.value[reviewIndex].likes || 0) + 1
     }
@@ -390,7 +391,7 @@ const closeReviewDialog = () => {
     product_id: '',
     rating: 0,
     comment: '',
-    photos: []
+    photos: [],
   }
 }
 
@@ -404,7 +405,7 @@ const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleDateString('en-US', {
     year: 'numeric',
     month: 'short',
-    day: 'numeric'
+    day: 'numeric',
   })
 }
 
@@ -454,17 +455,15 @@ watch(orderItems, () => {
           </v-card-title>
           <v-card-text class="pa-0">
             <v-list>
-              <v-list-item
-                v-for="item in orderItems"
-                :key="item.id"
-                class="border-b"
-              >
+              <v-list-item v-for="item in orderItems" :key="item.id" class="border-b">
                 <template v-slot:prepend>
                   <v-avatar rounded="lg" size="64" class="ma-2">
                     <v-img
-                      :src="Array.isArray(item.product?.main_img_urls) 
-                        ? item.product.main_img_urls[0] 
-                        : item.product?.main_img_urls || '/placeholder-product.png'"
+                      :src="
+                        Array.isArray(item.product?.main_img_urls)
+                          ? item.product.main_img_urls[0]
+                          : item.product?.main_img_urls || '/placeholder-product.png'
+                      "
                       cover
                     />
                   </v-avatar>
@@ -529,27 +528,35 @@ watch(orderItems, () => {
                 color="amber"
                 class="my-2"
               />
-              <div class="text-body-2 text-grey">
-                {{ reviewStats.total_reviews }} reviews
-              </div>
+              <div class="text-body-2 text-grey">{{ reviewStats.total_reviews }} reviews</div>
             </v-card>
           </v-col>
-          
+
           <v-col cols="12" md="8">
             <v-card elevation="2" class="pa-4">
               <v-card-title class="text-h6">Rating Distribution</v-card-title>
-              <div v-for="rating in [5,4,3,2,1]" :key="rating" class="d-flex align-center mb-2">
+              <div v-for="rating in [5, 4, 3, 2, 1]" :key="rating" class="d-flex align-center mb-2">
                 <span class="text-caption mr-2" style="min-width: 20px">{{ rating }}</span>
                 <v-icon color="amber">mdi-star</v-icon>
                 <v-progress-linear
-                  :model-value="(reviewStats.rating_distribution[rating as keyof typeof reviewStats.rating_distribution] / reviewStats.total_reviews) * 100"
+                  :model-value="
+                    (reviewStats.rating_distribution[
+                      rating as keyof typeof reviewStats.rating_distribution
+                    ] /
+                      reviewStats.total_reviews) *
+                    100
+                  "
                   color="amber"
                   height="8"
                   class="mx-2"
                   rounded
                 />
                 <span class="text-caption text-grey" style="min-width: 40px">
-                  {{ reviewStats.rating_distribution[rating as keyof typeof reviewStats.rating_distribution] }}
+                  {{
+                    reviewStats.rating_distribution[
+                      rating as keyof typeof reviewStats.rating_distribution
+                    ]
+                  }}
                 </span>
               </div>
             </v-card>
@@ -569,12 +576,12 @@ watch(orderItems, () => {
                 { text: '4 Stars', value: '4' },
                 { text: '3 Stars', value: '3' },
                 { text: '2 Stars', value: '2' },
-                { text: '1 Star', value: '1' }
+                { text: '1 Star', value: '1' },
               ]"
               density="compact"
               variant="outlined"
               hide-details
-              style="max-width: 140px;"
+              style="max-width: 140px"
             />
             <v-select
               v-model="sortBy"
@@ -582,12 +589,12 @@ watch(orderItems, () => {
                 { text: 'Latest', value: 'latest' },
                 { text: 'Highest', value: 'highest' },
                 { text: 'Lowest', value: 'lowest' },
-                { text: 'Most Liked', value: 'most_liked' }
+                { text: 'Most Liked', value: 'most_liked' },
               ]"
               density="compact"
               variant="outlined"
               hide-details
-              style="max-width: 140px;"
+              style="max-width: 140px"
             />
           </v-card-title>
 
@@ -617,22 +624,14 @@ watch(orderItems, () => {
                   <div class="d-flex align-start">
                     <!-- User Avatar -->
                     <v-avatar size="48" class="mr-4">
-                      <v-img
-                        :src="review.user_avatar || '/default-avatar.png'"
-                        alt="User avatar"
-                      />
+                      <v-img :src="review.user_avatar || '/default-avatar.png'" alt="User avatar" />
                     </v-avatar>
 
                     <!-- Review Content -->
                     <div class="flex-grow-1">
                       <div class="d-flex align-center flex-wrap mb-2">
                         <div class="font-weight-medium mr-2">{{ review.user_name }}</div>
-                        <v-chip
-                          v-if="review.is_verified"
-                          size="x-small"
-                          color="green"
-                          class="ml-1"
-                        >
+                        <v-chip v-if="review.is_verified" size="x-small" color="green" class="ml-1">
                           <v-icon left small>mdi-check</v-icon>
                           Verified
                         </v-chip>
@@ -709,12 +708,17 @@ watch(orderItems, () => {
 
           <v-card-text class="pa-4">
             <!-- Product Info -->
-            <div v-if="selectedProduct" class="d-flex align-center mb-4 pa-3 bg-grey-lighten-4 rounded">
+            <div
+              v-if="selectedProduct"
+              class="d-flex align-center mb-4 pa-3 bg-grey-lighten-4 rounded"
+            >
               <v-avatar size="48" rounded class="mr-3">
                 <v-img
-                  :src="Array.isArray(selectedProduct.main_img_urls) 
-                    ? selectedProduct.main_img_urls[0] 
-                    : selectedProduct.main_img_urls || '/placeholder-product.png'"
+                  :src="
+                    Array.isArray(selectedProduct.main_img_urls)
+                      ? selectedProduct.main_img_urls[0]
+                      : selectedProduct.main_img_urls || '/placeholder-product.png'
+                  "
                   cover
                 />
               </v-avatar>
@@ -727,18 +731,21 @@ watch(orderItems, () => {
             <!-- Rating -->
             <div class="text-center mb-4">
               <div class="text-h6 mb-2">How would you rate this product?</div>
-              <v-rating
-                v-model="newReview.rating"
-                size="large"
-                color="amber"
-                class="mb-2"
-              />
+              <v-rating v-model="newReview.rating" size="large" color="amber" class="mb-2" />
               <div class="text-caption text-grey">
-                {{ newReview.rating === 0 ? 'Select rating' : 
-                   newReview.rating === 1 ? 'Poor' :
-                   newReview.rating === 2 ? 'Fair' :
-                   newReview.rating === 3 ? 'Good' :
-                   newReview.rating === 4 ? 'Very Good' : 'Excellent' }}
+                {{
+                  newReview.rating === 0
+                    ? 'Select rating'
+                    : newReview.rating === 1
+                      ? 'Poor'
+                      : newReview.rating === 2
+                        ? 'Fair'
+                        : newReview.rating === 3
+                          ? 'Good'
+                          : newReview.rating === 4
+                            ? 'Very Good'
+                            : 'Excellent'
+                }}
               </div>
             </div>
 
@@ -755,7 +762,7 @@ watch(orderItems, () => {
             <!-- Photo Upload Section -->
             <div class="mb-4">
               <div class="text-body-2 mb-2">Add Photos (Optional)</div>
-              
+
               <!-- File Input -->
               <v-file-input
                 multiple
@@ -768,7 +775,10 @@ watch(orderItems, () => {
                 @change="handlePhotoUpload"
                 :rules="[
                   (files: File[]) => !files || files.length <= 5 || 'Maximum 5 images allowed',
-                  (files: File[]) => !files || Array.from(files).every(file => file.size <= 5 * 1024 * 1024) || 'Each file must be less than 5MB'
+                  (files: File[]) =>
+                    !files ||
+                    Array.from(files).every((file) => file.size <= 5 * 1024 * 1024) ||
+                    'Each file must be less than 5MB',
                 ]"
               />
 
@@ -789,8 +799,10 @@ watch(orderItems, () => {
               <!-- Image Previews -->
               <div v-if="imagePreviews.length > 0" class="mt-3">
                 <div class="text-caption text-grey mb-2">
-                  {{ imagePreviews.length }} image{{ imagePreviews.length !== 1 ? 's' : '' }} selected
-                  ({{ 5 - imagePreviews.length }} remaining)
+                  {{ imagePreviews.length }} image{{
+                    imagePreviews.length !== 1 ? 's' : ''
+                  }}
+                  selected ({{ 5 - imagePreviews.length }} remaining)
                 </div>
                 <v-row dense>
                   <v-col
@@ -801,12 +813,7 @@ watch(orderItems, () => {
                     md="2"
                   >
                     <v-card variant="outlined" class="image-preview-card">
-                      <v-img
-                        :src="preview.url"
-                        aspect-ratio="1"
-                        cover
-                        class="rounded-t"
-                      />
+                      <v-img :src="preview.url" aspect-ratio="1" cover class="rounded-t" />
                       <v-card-actions class="pa-1 justify-center">
                         <v-btn
                           icon
@@ -825,8 +832,8 @@ watch(orderItems, () => {
 
               <!-- Help Text -->
               <div class="text-caption text-grey mt-2">
-                • Maximum 5 images<br>
-                • Each image should be less than 5MB<br>
+                • Maximum 5 images<br />
+                • Each image should be less than 5MB<br />
                 • Supported formats: JPG, PNG, WebP
               </div>
             </div>
@@ -857,12 +864,7 @@ watch(orderItems, () => {
             </v-btn>
           </v-card-actions>
           <v-card-text class="text-center pa-0">
-            <v-img
-              :src="currentImage"
-              max-height="600"
-              contain
-              class="rounded-b"
-            />
+            <v-img :src="currentImage" max-height="600" contain class="rounded-b" />
           </v-card-text>
         </v-card>
       </v-dialog>
