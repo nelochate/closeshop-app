@@ -82,14 +82,16 @@ const fetchCurrentRiderProfile = async (profileId: string) => {
 // Get current user and determine role
 const getCurrentUserAndRole = async () => {
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     currentUser.value = user
     userRole.value = null
-    
+
     if (!user) return
 
     await fetchCurrentRiderProfile(user.id)
-    
+
     // Check if user is buyer (order owner)
     if (order.value && user.id === order.value.user_id) {
       userRole.value = 'buyer'
@@ -107,7 +109,7 @@ const getCurrentUserAndRole = async () => {
     ) {
       userRole.value = 'rider'
     }
-    
+
     console.log('User role:', userRole.value)
   } catch (err) {
     console.error('Error getting user role:', err)
@@ -121,18 +123,22 @@ const fetchRiderDetails = async () => {
     return
   }
 
-  if (currentRiderId.value && order.value.rider_id === currentRiderId.value && currentRiderProfile.value) {
+  if (
+    currentRiderId.value &&
+    order.value.rider_id === currentRiderId.value &&
+    currentRiderProfile.value
+  ) {
     riderDetails.value = currentRiderProfile.value
     return
   }
-  
+
   try {
     const { data, error } = await supabase
       .from('Rider_Registration')
       .select('first_name, last_name, phone, email, rider_id')
       .eq('rider_id', order.value.rider_id)
       .single()
-    
+
     if (!error && data) {
       riderDetails.value = data
     }
@@ -145,12 +151,12 @@ const fetchRiderDetails = async () => {
 const calculateTimeRemaining = () => {
   if (!order.value || !order.value.created_at) return CANCEL_WINDOW_SECONDS
   if (order.value.status !== 'pending_approval') return 0
-  
+
   const orderCreatedAt = getAppTimestampValue(order.value.created_at)
   if (!orderCreatedAt) return CANCEL_WINDOW_SECONDS
   const currentTime = Date.now()
   const timeElapsed = (currentTime - orderCreatedAt) / 1000
-  
+
   return Math.max(0, CANCEL_WINDOW_SECONDS - timeElapsed)
 }
 
@@ -164,11 +170,11 @@ const formatTimeRemaining = () => {
 
 const startCancelTimer = () => {
   if (timerInterval) clearInterval(timerInterval)
-  
+
   const initialRemaining = calculateTimeRemaining()
   timeRemaining.value = initialRemaining
   canCancel.value = initialRemaining > 0 && order.value?.status === 'pending_approval'
-  
+
   if (initialRemaining > 0 && order.value?.status === 'pending_approval') {
     timerInterval = setInterval(() => {
       const newRemaining = calculateTimeRemaining()
@@ -189,15 +195,15 @@ const cancelOrder = async () => {
     alert('Cancellation window has expired.')
     return
   }
-  
+
   if (!confirm(`Cancel this order? You have ${formatTimeRemaining()} left.`)) return
-  
+
   try {
     const { error } = await supabase
       .from('orders')
       .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
       .eq('id', orderId)
-    
+
     if (error) throw error
     if (timerInterval) clearInterval(timerInterval)
     await fetchOrderDetails()
@@ -211,20 +217,24 @@ const cancelOrder = async () => {
 // Subscribe to real-time updates
 const subscribeToOrderUpdates = () => {
   if (statusSubscription) supabase.removeChannel(statusSubscription)
-  
+
   statusSubscription = supabase
     .channel(`order-${orderId}`)
-    .on('postgres_changes', {
-      event: 'UPDATE',
-      schema: 'public',
-      table: 'orders',
-      filter: `id=eq.${orderId}`
-    }, (payload) => {
-      console.log('Order update:', payload.new.status)
-      order.value = { ...order.value, ...payload.new }
-      fetchRiderDetails()
-      getCurrentUserAndRole()
-    })
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      },
+      (payload) => {
+        console.log('Order update:', payload.new.status)
+        order.value = { ...order.value, ...payload.new }
+        fetchRiderDetails()
+        getCurrentUserAndRole()
+      },
+    )
     .subscribe()
 }
 
@@ -238,7 +248,8 @@ const fetchOrderDetails = async () => {
 
     const { data: orderData, error: orderError } = await supabase
       .from('orders')
-      .select(`
+      .select(
+        `
         *,
         order_items (
           id, product_id, quantity, price, selected_size, selected_variety,
@@ -246,7 +257,8 @@ const fetchOrderDetails = async () => {
         ),
         buyer:profiles!orders_user_id_fkey (id, first_name, last_name, avatar_url, phone),
         address:addresses!orders_address_id_fkey ( * )
-      `)
+      `,
+      )
       .eq('id', orderId)
       .single()
 
@@ -267,7 +279,7 @@ const fetchOrderDetails = async () => {
     }
 
     await loadTrackingLocations()
-    
+
     await getCurrentUserAndRole()
 
     if (!userRole.value) {
@@ -282,10 +294,13 @@ const fetchOrderDetails = async () => {
       error.value = 'You do not have access to this order.'
       return
     }
-    
+
     if (order.value?.status === 'pending_approval') startCancelTimer()
-    else { canCancel.value = false; timeRemaining.value = 0 }
-    
+    else {
+      canCancel.value = false
+      timeRemaining.value = 0
+    }
+
     subscribeToOrderUpdates()
   } catch (err: any) {
     console.error('Error:', err)
@@ -298,12 +313,8 @@ const fetchOrderDetails = async () => {
 // Fetch shop details
 const fetchShopDetails = async (shopId: string) => {
   try {
-    const { data: shopData } = await supabase
-      .from('shops')
-      .select('*')
-      .eq('id', shopId)
-      .single()
-    
+    const { data: shopData } = await supabase.from('shops').select('*').eq('id', shopId).single()
+
     if (shopData) {
       shop.value = shopData
     }
@@ -345,7 +356,10 @@ const loadTrackingLocations = async () => {
   })
 
   deliveryTrackingLocation.value = await resolveTrackingLocation({
-    name: getPreferredAddressRecipientName(shippingAddress.value) || getProfileDisplayName(buyer.value) || 'Customer',
+    name:
+      getPreferredAddressRecipientName(shippingAddress.value) ||
+      getProfileDisplayName(buyer.value) ||
+      'Customer',
     address: buildDeliveryAddress(shippingAddress.value),
     lat: shippingAddress.value?.latitude,
     lng: shippingAddress.value?.longitude,
@@ -355,7 +369,7 @@ const loadTrackingLocations = async () => {
 
 // Computed properties
 const subtotal = computed(() => {
-  return orderItems.value.reduce((sum, item) => sum + (item.price * item.quantity), 0)
+  return orderItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
 })
 
 const deliveryFee = computed(() => {
@@ -427,7 +441,8 @@ const deliveryProofMetaLabel = computed(() =>
   hasDeliveryIssue.value ? 'Latest issue update' : 'Uploaded by rider',
 )
 const deliveryProofMetaValue = computed(() => {
-  const timestamp = order.value?.delivered_at || order.value?.completed_at || order.value?.updated_at
+  const timestamp =
+    order.value?.delivered_at || order.value?.completed_at || order.value?.updated_at
   return timestamp ? formatDate(timestamp) : 'Recently'
 })
 const deliveryIssueRoleMessage = computed(() => {
@@ -463,7 +478,7 @@ const statusColor = computed(() => {
     accepted_by_rider: 'primary',
     picked_up: 'purple',
     completed: 'success',
-    cancelled: 'error'
+    cancelled: 'error',
   }
   return colors[status] || 'grey'
 })
@@ -480,7 +495,7 @@ const statusIcon = computed(() => {
     accepted_by_rider: 'mdi-check-circle',
     picked_up: 'mdi-truck-delivery',
     completed: 'mdi-check-decagram',
-    cancelled: 'mdi-close-circle'
+    cancelled: 'mdi-close-circle',
   }
   return icons[status] || 'mdi-help-circle'
 })
@@ -497,7 +512,7 @@ const statusDisplayText = computed(() => {
     accepted_by_rider: 'Rider Accepted',
     picked_up: 'Picked Up',
     completed: 'Completed',
-    cancelled: 'Cancelled'
+    cancelled: 'Cancelled',
   }
   return texts[status] || status
 })
@@ -515,10 +530,8 @@ const shouldTrackOwnLocation = computed(
     isRider.value &&
     !!currentRiderId.value &&
     order.value?.rider_id === currentRiderId.value &&
-    (
-      order.value?.status === 'accepted_by_rider' ||
-      (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)
-    ),
+    (order.value?.status === 'accepted_by_rider' ||
+      (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)),
 )
 const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
   const persisted = extractPersistedRiderCoordinates(order.value)
@@ -529,8 +542,7 @@ const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
     ...persisted,
     name: riderDisplayName.value,
     address:
-      riderDetails.value?.phone ||
-      `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+      riderDetails.value?.phone || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
   }
 })
 const trackingMapTitle = computed(() => {
@@ -632,7 +644,7 @@ const getTimelineStatus = () => {
 // Timeline steps based on order status
 const timelineSteps = computed(() => {
   const currentStatus = getTimelineStatus()
-  
+
   const steps = [
     {
       key: 'order_placed',
@@ -642,7 +654,7 @@ const timelineSteps = computed(() => {
       timestamp: order.value?.created_at,
       icon: 'mdi-cart-check',
       date: order.value?.created_at,
-      actor: 'Customer'
+      actor: 'Customer',
     },
     {
       key: 'approved',
@@ -652,7 +664,7 @@ const timelineSteps = computed(() => {
       timestamp: order.value?.approved_at,
       icon: 'mdi-store-check',
       date: order.value?.approved_at,
-      actor: 'Seller'
+      actor: 'Seller',
     },
     {
       key: 'rider_assigned',
@@ -662,7 +674,7 @@ const timelineSteps = computed(() => {
       timestamp: order.value?.accepted_at,
       icon: 'mdi-motorbike',
       date: order.value?.accepted_at,
-      actor: 'Rider'
+      actor: 'Rider',
     },
     {
       key: 'picked_up',
@@ -672,7 +684,7 @@ const timelineSteps = computed(() => {
       timestamp: order.value?.picked_up_at,
       icon: 'mdi-package-up',
       date: order.value?.picked_up_at,
-      actor: 'Rider'
+      actor: 'Rider',
     },
     {
       key: 'delivered',
@@ -682,15 +694,16 @@ const timelineSteps = computed(() => {
       timestamp: order.value?.delivered_at,
       icon: 'mdi-home-check',
       date: order.value?.delivered_at,
-      actor: 'Rider'
-    }
+      actor: 'Rider',
+    },
   ]
 
   if (hasDeliveryIssue.value) {
     steps.push({
       key: 'delivery_issue',
       title: 'Delivery Issue Reported',
-      description: 'The customer reported that the order was not received and the case is waiting for resolution.',
+      description:
+        'The customer reported that the order was not received and the case is waiting for resolution.',
       status: getStepStatus('delivery_issue'),
       timestamp: order.value?.updated_at,
       icon: 'mdi-alert-circle',
@@ -698,13 +711,13 @@ const timelineSteps = computed(() => {
       actor: 'Customer',
     })
   }
-  
+
   // If cancelled, mark steps appropriately
   if (currentStatus === 'cancelled') {
     const cancelledDate = order.value?.cancelled_at
     const cancelledDateValue = getAppTimestampValue(cancelledDate)
 
-    steps.forEach(step => {
+    steps.forEach((step) => {
       const stepDateValue = getAppTimestampValue(step.date)
 
       if (stepDateValue && cancelledDateValue && stepDateValue <= cancelledDateValue) {
@@ -714,17 +727,26 @@ const timelineSteps = computed(() => {
       }
     })
   }
-  
+
   return steps
 })
 
-const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | 'cancelled' | 'issue' => {
+const getStepStatus = (
+  stepKey: string,
+): 'completed' | 'current' | 'pending' | 'cancelled' | 'issue' => {
   const currentStatus = getTimelineStatus()
   if (currentStatus === 'cancelled') return 'cancelled'
-  
-  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered', 'delivery_issue']
+
+  const statusOrder = [
+    'pending_approval',
+    'waiting_for_rider',
+    'accepted_by_rider',
+    'picked_up',
+    'delivered',
+    'delivery_issue',
+  ]
   const currentIndex = statusOrder.indexOf(currentStatus)
-  
+
   const stepMap: Record<string, number> = {
     order_placed: -1,
     approved: 0,
@@ -733,9 +755,9 @@ const getStepStatus = (stepKey: string): 'completed' | 'current' | 'pending' | '
     delivered: 3,
     delivery_issue: 4,
   }
-  
+
   const stepIndex = stepMap[stepKey]
-  
+
   if (stepKey === 'delivery_issue' && currentStatus === 'delivery_issue') return 'issue'
   if (stepIndex < currentIndex) return 'completed'
   if (stepIndex === currentIndex) return 'current'
@@ -746,8 +768,15 @@ const timelineProgress = computed(() => {
   const currentStatus = getTimelineStatus()
   if (currentStatus === 'cancelled') return 0
   if (currentStatus === 'delivered' || currentStatus === 'delivery_issue') return 100
-  
-  const statusOrder = ['pending_approval', 'waiting_for_rider', 'accepted_by_rider', 'picked_up', 'delivered', 'delivery_issue']
+
+  const statusOrder = [
+    'pending_approval',
+    'waiting_for_rider',
+    'accepted_by_rider',
+    'picked_up',
+    'delivered',
+    'delivery_issue',
+  ]
   const currentIndex = statusOrder.indexOf(currentStatus)
   if (currentIndex === -1) return 0
   return ((currentIndex + 1) / statusOrder.length) * 100
@@ -757,16 +786,16 @@ const timelineProgress = computed(() => {
 const approveOrder = async () => {
   if (!isSeller.value) return
   if (!confirm('Approve this order? It will be made available for riders.')) return
-  
+
   try {
     const { error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'waiting_for_rider',
-        approved_at: new Date().toISOString()
+        approved_at: new Date().toISOString(),
       })
       .eq('id', orderId)
-    
+
     if (error) throw error
     alert('Order approved! Riders can now accept it.')
     await fetchOrderDetails()
@@ -779,16 +808,16 @@ const approveOrder = async () => {
 const rejectOrder = async () => {
   if (!isSeller.value) return
   if (!confirm('Reject this order? This cannot be undone.')) return
-  
+
   try {
     const { error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'cancelled',
-        cancelled_at: new Date().toISOString()
+        cancelled_at: new Date().toISOString(),
       })
       .eq('id', orderId)
-    
+
     if (error) throw error
     alert('Order rejected.')
     await fetchOrderDetails()
@@ -801,27 +830,27 @@ const rejectOrder = async () => {
 const acceptOrderAsRider = async () => {
   if (!isRider.value) return
   if (!confirm('Accept this order for delivery?')) return
-  
+
   try {
     if (!currentRiderId.value) {
       alert('Rider profile not found.')
       return
     }
-    
+
     const acceptedAt = new Date().toISOString()
 
     const { data, error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'accepted_by_rider',
         accepted_at: acceptedAt,
-        rider_id: currentRiderId.value
+        rider_id: currentRiderId.value,
       })
       .eq('id', orderId)
       .is('rider_id', null)
       .eq('status', 'waiting_for_rider')
       .select('id')
-    
+
     if (error) throw error
 
     if (!data || data.length === 0) {
@@ -862,21 +891,21 @@ const markAsPickedUp = async () => {
     return
   }
   if (!confirm('Mark this order as picked up?')) return
-  
+
   try {
     const pickedUpAt = new Date().toISOString()
 
     const { data, error } = await supabase
       .from('orders')
-      .update({ 
+      .update({
         status: 'picked_up',
-        picked_up_at: pickedUpAt
+        picked_up_at: pickedUpAt,
       })
       .eq('id', orderId)
       .eq('rider_id', currentRiderId.value)
       .eq('status', 'accepted_by_rider')
       .select('id')
-    
+
     if (error) throw error
 
     if (!data || data.length === 0) {
@@ -1042,7 +1071,7 @@ const markAsDelivered = async () => {
     alert('Please add a proof of delivery image before completing this order.')
     return
   }
-  
+
   try {
     uploadingProof.value = true
     const deliveredAt = new Date().toISOString()
@@ -1062,7 +1091,7 @@ const markAsDelivered = async () => {
       .is('delivered_at', null)
       .is('completed_at', null)
       .select('id')
-    
+
     if (error) throw error
 
     if (!data || data.length === 0) {
@@ -1211,7 +1240,10 @@ const reportOrderNotReceived = async () => {
         },
       })
     } catch (notificationError) {
-      console.warn('Could not notify the assigned rider about the delivery issue:', notificationError)
+      console.warn(
+        'Could not notify the assigned rider about the delivery issue:',
+        notificationError,
+      )
     }
 
     alert('Delivery issue reported. The shop owner and assigned rider have been notified.')
@@ -1244,7 +1276,9 @@ const getProductImage = (product: any) => {
     }
     if (Array.isArray(product.main_img_urls)) return product.main_img_urls[0]
     return '/placeholder.png'
-  } catch { return '/placeholder.png' }
+  } catch {
+    return '/placeholder.png'
+  }
 }
 
 const buildFullAddress = computed(() => {
@@ -1253,12 +1287,14 @@ const buildFullAddress = computed(() => {
 })
 
 const goBack = () => router.back()
-const viewProduct = (productId: string) => router.push({ name: 'product-detail', params: { id: productId } })
+const viewProduct = (productId: string) =>
+  router.push({ name: 'product-detail', params: { id: productId } })
 const contactSeller = () =>
   shop.value?.owner_id && router.push({ name: 'chatview', params: { id: shop.value.owner_id } })
 const contactBuyer = () =>
   buyer.value?.id && router.push({ name: 'chatview', params: { id: buyer.value.id } })
-const contactRider = () => riderDetails.value?.phone && (window.location.href = `tel:${riderDetails.value.phone}`)
+const contactRider = () =>
+  riderDetails.value?.phone && (window.location.href = `tel:${riderDetails.value.phone}`)
 
 // Cleanup
 onUnmounted(() => {
@@ -1302,7 +1338,12 @@ onMounted(async () => {
           <div class="hero-card__top">
             <div class="hero-card__progress">
               <div class="hero-card__meta">
-                <v-chip v-if="order?.status" :color="statusColor" variant="tonal" class="order-status-chip">
+                <v-chip
+                  v-if="order?.status"
+                  :color="statusColor"
+                  variant="tonal"
+                  class="order-status-chip"
+                >
                   <v-icon start size="16">{{ statusIcon }}</v-icon>
                   {{ statusDisplayText }}
                 </v-chip>
@@ -1310,14 +1351,29 @@ onMounted(async () => {
               </div>
               <h2>{{ trackingMapTitle }}</h2>
               <p>
-                <span v-if="isOrderCompleted">The customer confirmed receipt and the order is fully completed.</span>
+                <span v-if="isOrderCompleted"
+                  >The customer confirmed receipt and the order is fully completed.</span
+                >
                 <span v-else-if="hasDeliveryIssue">{{ deliveryIssueRoleMessage }}</span>
-                <span v-else-if="isAwaitingCustomerConfirmation">The rider marked the order as delivered and the customer can now confirm receipt.</span>
-                <span v-else-if="order.status === 'picked_up'">The order has left the shop and is heading to the customer.</span>
-                <span v-else-if="order.status === 'accepted_by_rider'">The rider is moving toward the pickup point.</span>
-                <span v-else-if="order.status === 'waiting_for_rider'">The seller approved the order and it is waiting for a rider.</span>
-                <span v-else-if="order.status === 'pending_approval'">The seller still needs to approve the order.</span>
-                <span v-else-if="order.status === 'cancelled'">This order was cancelled before completion.</span>
+                <span v-else-if="isAwaitingCustomerConfirmation"
+                  >The rider marked the order as delivered and the customer can now confirm
+                  receipt.</span
+                >
+                <span v-else-if="order.status === 'picked_up'"
+                  >The order has left the shop and is heading to the customer.</span
+                >
+                <span v-else-if="order.status === 'accepted_by_rider'"
+                  >The rider is moving toward the pickup point.</span
+                >
+                <span v-else-if="order.status === 'waiting_for_rider'"
+                  >The seller approved the order and it is waiting for a rider.</span
+                >
+                <span v-else-if="order.status === 'pending_approval'"
+                  >The seller still needs to approve the order.</span
+                >
+                <span v-else-if="order.status === 'cancelled'"
+                  >This order was cancelled before completion.</span
+                >
               </p>
             </div>
           </div>
@@ -1378,7 +1434,9 @@ onMounted(async () => {
               >
                 <div class="inline-alert">
                   <v-icon>{{ timeRemaining > 0 ? 'mdi-timer-sand' : 'mdi-timer-off' }}</v-icon>
-                  <strong v-if="timeRemaining > 0">Cancel within {{ formatTimeRemaining() }}</strong>
+                  <strong v-if="timeRemaining > 0"
+                    >Cancel within {{ formatTimeRemaining() }}</strong
+                  >
                   <strong v-else>Cancellation window expired</strong>
                 </div>
               </v-alert>
@@ -1477,7 +1535,10 @@ onMounted(async () => {
                   </v-card-text>
                 </v-card>
 
-                <v-card class="surface-card" v-if="riderDetails && order.status !== 'pending_approval'">
+                <v-card
+                  class="surface-card"
+                  v-if="riderDetails && order.status !== 'pending_approval'"
+                >
                   <v-card-title class="section-title">
                     <v-icon start>mdi-motorbike</v-icon>
                     Rider information
@@ -1515,13 +1576,11 @@ onMounted(async () => {
                 </v-card-title>
                 <v-card-text>
                   <div v-if="deliveryProofUrl" class="proof-card">
-                    <div class="proof-image-frame" @click="viewFullImage(deliveryProofUrl, 'Proof of Delivery')">
-                      <v-img
-                        :src="deliveryProofUrl"
-                        height="220"
-                        cover
-                        class="proof-image"
-                      >
+                    <div
+                      class="proof-image-frame"
+                      @click="viewFullImage(deliveryProofUrl, 'Proof of Delivery')"
+                    >
+                      <v-img :src="deliveryProofUrl" height="220" cover class="proof-image">
                         <template #placeholder>
                           <div class="proof-image-placeholder">
                             <v-progress-circular indeterminate color="primary" />
@@ -1535,7 +1594,10 @@ onMounted(async () => {
                         <span>{{ deliveryProofMetaLabel }}</span>
                         <strong>{{ deliveryProofMetaValue }}</strong>
                       </div>
-                      <p>The proof image is visible to the buyer, seller, and rider for delivery transparency.</p>
+                      <p>
+                        The proof image is visible to the buyer, seller, and rider for delivery
+                        transparency.
+                      </p>
                     </div>
 
                     <div class="detail-actions">
@@ -1555,8 +1617,12 @@ onMounted(async () => {
                     <v-icon size="36" color="grey">mdi-image-off-outline</v-icon>
                     <div>
                       <strong>Proof image not available yet</strong>
-                      <p v-if="canMarkAsDelivered">Add a delivery photo before you complete this delivery attempt.</p>
-                      <p v-else>The proof of delivery image has not been attached to this order yet.</p>
+                      <p v-if="canMarkAsDelivered">
+                        Add a delivery photo before you complete this delivery attempt.
+                      </p>
+                      <p v-else>
+                        The proof of delivery image has not been attached to this order yet.
+                      </p>
                     </div>
                   </div>
                 </v-card-text>
@@ -1595,7 +1661,9 @@ onMounted(async () => {
                         <div class="product-details">
                           <span>Qty: {{ item.quantity }}</span>
                           <span v-if="item.selected_size">Size: {{ item.selected_size }}</span>
-                          <span v-if="item.selected_variety">Variety: {{ item.selected_variety }}</span>
+                          <span v-if="item.selected_variety"
+                            >Variety: {{ item.selected_variety }}</span
+                          >
                         </div>
                         <div class="product-price">{{ formatCurrency(item.price) }} each</div>
                       </div>
@@ -1614,9 +1682,15 @@ onMounted(async () => {
                   </v-card-title>
                   <v-card-text>
                     <div class="price-breakdown">
-                      <div class="price-item"><span>Subtotal</span><span>{{ formatCurrency(subtotal) }}</span></div>
-                      <div class="price-item"><span>Delivery fee</span><span>{{ formatCurrency(deliveryFee) }}</span></div>
-                      <div class="price-item total"><span>Total</span><span>{{ formatCurrency(totalAmount) }}</span></div>
+                      <div class="price-item">
+                        <span>Subtotal</span><span>{{ formatCurrency(subtotal) }}</span>
+                      </div>
+                      <div class="price-item">
+                        <span>Delivery fee</span><span>{{ formatCurrency(deliveryFee) }}</span>
+                      </div>
+                      <div class="price-item total">
+                        <span>Total</span><span>{{ formatCurrency(totalAmount) }}</span>
+                      </div>
                     </div>
                   </v-card-text>
                 </v-card>
@@ -1667,9 +1741,9 @@ onMounted(async () => {
                               ? '#2196f3'
                               : step.status === 'issue'
                                 ? '#f59e0b'
-                              : step.status === 'cancelled'
-                                ? '#f44336'
-                                : '#9e9e9e'
+                                : step.status === 'cancelled'
+                                  ? '#f44336'
+                                  : '#9e9e9e'
                         "
                       >
                         {{ step.icon }}
@@ -1690,10 +1764,22 @@ onMounted(async () => {
                 </div>
 
                 <div class="timeline-legend">
-                  <div class="legend-item"><div class="legend-dot completed"></div><span>Completed</span></div>
-                  <div class="legend-item"><div class="legend-dot current"></div><span>Current</span></div>
-                  <div v-if="hasDeliveryIssue" class="legend-item"><div class="legend-dot issue"></div><span>Issue</span></div>
-                  <div class="legend-item"><div class="legend-dot pending"></div><span>Pending</span></div>
+                  <div class="legend-item">
+                    <div class="legend-dot completed"></div>
+                    <span>Completed</span>
+                  </div>
+                  <div class="legend-item">
+                    <div class="legend-dot current"></div>
+                    <span>Current</span>
+                  </div>
+                  <div v-if="hasDeliveryIssue" class="legend-item">
+                    <div class="legend-dot issue"></div>
+                    <span>Issue</span>
+                  </div>
+                  <div class="legend-item">
+                    <div class="legend-dot pending"></div>
+                    <span>Pending</span>
+                  </div>
                   <div v-if="order.status === 'cancelled'" class="legend-item">
                     <div class="legend-dot cancelled"></div>
                     <span>Cancelled</span>
@@ -1758,7 +1844,11 @@ onMounted(async () => {
         </template>
 
         <template v-else-if="isRider">
-          <v-btn v-if="order.status === 'waiting_for_rider'" color="primary" @click="acceptOrderAsRider">
+          <v-btn
+            v-if="order.status === 'waiting_for_rider'"
+            color="primary"
+            @click="acceptOrderAsRider"
+          >
             <v-icon start>mdi-check-circle</v-icon>
             Accept order
           </v-btn>

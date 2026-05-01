@@ -44,42 +44,42 @@ const orderCounts = computed(() => {
     active: 0,
     delivered: 0,
     cancelled: 0,
-    all: orders.value.length
+    all: orders.value.length,
   }
-  
-  orders.value.forEach(order => {
+
+  orders.value.forEach((order) => {
     if (order.status === 'pending_approval') counts.pending_approval++
     else if (order.status === 'waiting_for_rider') counts.waiting_for_rider++
     else if (order.status === 'accepted_by_rider' || order.status === 'picked_up') counts.active++
     else if (order.status === 'delivered') counts.delivered++
     else if (order.status === 'cancelled') counts.cancelled++
   })
-  
+
   return counts
 })
 
 // Approving order state for rider assignment
 const pendingApprovalOrders = computed(() => {
-  return orders.value.filter(order => order.status === 'pending_approval')
+  return orders.value.filter((order) => order.status === 'pending_approval')
 })
 
 const waitingForRiderOrders = computed(() => {
-  return orders.value.filter(order => order.status === 'waiting_for_rider')
+  return orders.value.filter((order) => order.status === 'waiting_for_rider')
 })
 
 const activeOrdersWithRiders = computed(() => {
-  return orders.value.filter(order =>
-    order.status === 'accepted_by_rider' ||
-    (order.status === 'picked_up' && !order.delivered_at)
+  return orders.value.filter(
+    (order) =>
+      order.status === 'accepted_by_rider' || (order.status === 'picked_up' && !order.delivered_at),
   )
 })
 
 const deliveredOrders = computed(() => {
-  return orders.value.filter(order => isOrderDeliveredState(order))
+  return orders.value.filter((order) => isOrderDeliveredState(order))
 })
 
 const cancelledOrders = computed(() => {
-  return orders.value.filter(order => order.status === 'cancelled')
+  return orders.value.filter((order) => order.status === 'cancelled')
 })
 
 const isOrderCompletedState = (order: any = {}) =>
@@ -96,11 +96,11 @@ const getOrderStatusText = (order: any = {}) => {
 
   const status = order.status
   const statusMap = {
-    'pending_approval': 'Pending Approval',
-    'waiting_for_rider': 'Waiting for Rider',
-    'accepted_by_rider': 'Rider Accepted',
-    'picked_up': 'Picked Up',
-    'cancelled': 'Cancelled'
+    pending_approval: 'Pending Approval',
+    waiting_for_rider: 'Waiting for Rider',
+    accepted_by_rider: 'Rider Accepted',
+    picked_up: 'Picked Up',
+    cancelled: 'Cancelled',
   }
   return statusMap[status] || status
 }
@@ -110,32 +110,38 @@ const getOrderStatusColor = (order: any = {}) => {
 
   const status = order.status
   const colorMap = {
-    'pending_approval': 'warning',
-    'waiting_for_rider': 'info',
-    'accepted_by_rider': 'primary',
-    'picked_up': 'warning',
-    'cancelled': 'error'
+    pending_approval: 'warning',
+    waiting_for_rider: 'info',
+    accepted_by_rider: 'primary',
+    picked_up: 'warning',
+    cancelled: 'error',
   }
   return colorMap[status] || 'grey'
 }
 
 // Approve/reject functions
 const approveOrder = async (order) => {
-  if (!confirm(`Approve order #${getTransactionNumber(order)}? The order will be made available for riders.`)) {
+  if (
+    !confirm(
+      `Approve order #${getTransactionNumber(order)}? The order will be made available for riders.`,
+    )
+  ) {
     return
   }
 
   approvingOrderId.value = order.id
 
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
 
     const { error } = await supabase
       .from('orders')
       .update({
         status: 'waiting_for_rider',
         approved_at: new Date().toISOString(),
-        approved_by: user?.id
+        approved_by: user?.id,
       })
       .eq('id', order.id)
 
@@ -143,7 +149,6 @@ const approveOrder = async (order) => {
 
     alert('✅ Order approved! Riders can now accept this order.')
     await fetchOrders()
-
   } catch (error) {
     console.error('Error approving order:', error)
     alert('Failed to approve order. Please try again.')
@@ -162,7 +167,7 @@ const rejectOrder = async (order) => {
       .from('orders')
       .update({
         status: 'cancelled',
-        payment_status: 'cancelled'
+        payment_status: 'cancelled',
       })
       .eq('id', order.id)
 
@@ -170,7 +175,6 @@ const rejectOrder = async (order) => {
 
     alert('❌ Order rejected and cancelled.')
     await fetchOrders()
-
   } catch (error) {
     console.error('Error rejecting order:', error)
     alert('Failed to reject order. Please try again.')
@@ -188,46 +192,46 @@ const updateMobileState = () => {
 
 // Order sections configuration
 const orderSections = [
-  { 
-    id: 'pending_approval', 
-    title: 'Pending Approval', 
-    icon: 'mdi-clock-outline', 
+  {
+    id: 'pending_approval',
+    title: 'Pending Approval',
+    icon: 'mdi-clock-outline',
     color: 'warning',
     bgColor: 'warning-lighten-5',
-    borderColor: '#ff9800'
+    borderColor: '#ff9800',
   },
-  { 
-    id: 'waiting_for_rider', 
-    title: 'Waiting for Rider', 
-    icon: 'mdi-bike-fast', 
+  {
+    id: 'waiting_for_rider',
+    title: 'Waiting for Rider',
+    icon: 'mdi-bike-fast',
     color: 'info',
     bgColor: 'info-lighten-5',
-    borderColor: '#2196f3'
+    borderColor: '#2196f3',
   },
-  { 
-    id: 'active', 
-    title: 'Active Deliveries', 
-    icon: 'mdi-truck-delivery', 
+  {
+    id: 'active',
+    title: 'Active Deliveries',
+    icon: 'mdi-truck-delivery',
     color: 'primary',
     bgColor: 'primary-lighten-5',
-    borderColor: '#667eea'
+    borderColor: '#667eea',
   },
-  { 
-    id: 'delivered', 
-    title: 'Delivered', 
-    icon: 'mdi-truck-check', 
+  {
+    id: 'delivered',
+    title: 'Delivered',
+    icon: 'mdi-truck-check',
     color: 'success',
     bgColor: 'success-lighten-5',
-    borderColor: '#4caf50'
+    borderColor: '#4caf50',
   },
-  { 
-    id: 'cancelled', 
-    title: 'Cancelled', 
-    icon: 'mdi-cancel', 
+  {
+    id: 'cancelled',
+    title: 'Cancelled',
+    icon: 'mdi-cancel',
     color: 'error',
     bgColor: 'error-lighten-5',
-    borderColor: '#f44336'
-  }
+    borderColor: '#f44336',
+  },
 ]
 
 const transactionOptions = [
@@ -282,7 +286,8 @@ const fetchOrders = async () => {
 
     const { data: ordersData, error: ordersError } = await supabase
       .from('orders')
-      .select(`
+      .select(
+        `
         *,
         address:addresses (
           id,
@@ -334,7 +339,8 @@ const fetchOrders = async () => {
           payment_date,
           method
         )
-      `)
+      `,
+      )
       .eq('shop_id', shopId.value)
       .order('created_at', { ascending: false })
 
@@ -343,40 +349,42 @@ const fetchOrders = async () => {
     console.log('✅ Orders loaded:', ordersData?.length || 0)
 
     // Process orders to add rider info separately if needed
-    const ordersWithInfo = await Promise.all((ordersData || []).map(async (order) => {
-      let riderInfo = null
+    const ordersWithInfo = await Promise.all(
+      (ordersData || []).map(async (order) => {
+        let riderInfo = null
 
-      if (order.rider_id) {
-        const { data: riderData } = await supabase
-          .from('Rider_Registration')
-          .select('rider_id, first_name, last_name, phone')
-          .eq('rider_id', order.rider_id)
-          .maybeSingle()
+        if (order.rider_id) {
+          const { data: riderData } = await supabase
+            .from('Rider_Registration')
+            .select('rider_id, first_name, last_name, phone')
+            .eq('rider_id', order.rider_id)
+            .maybeSingle()
 
-        if (riderData) {
-          riderInfo = {
-            name: `${riderData.first_name} ${riderData.last_name}`,
-            phone: riderData.phone
+          if (riderData) {
+            riderInfo = {
+              name: `${riderData.first_name} ${riderData.last_name}`,
+              phone: riderData.phone,
+            }
           }
         }
-      }
 
-      const items = (order.order_items || []).map(item => ({
-        id: item.id,
-        name: item.product?.prod_name || 'Product',
-        quantity: item.quantity,
-        price: item.price,
-        image: item.product?.main_img_urls?.[0] || null
-      }))
+        const items = (order.order_items || []).map((item) => ({
+          id: item.id,
+          name: item.product?.prod_name || 'Product',
+          quantity: item.quantity,
+          price: item.price,
+          image: item.product?.main_img_urls?.[0] || null,
+        }))
 
-      return {
-        ...order,
-        items,
-        customer_name: getCustomerDisplayName(order),
-        customer_phone: order.address?.phone || order.user?.phone || '',
-        rider_details: riderInfo
-      }
-    }))
+        return {
+          ...order,
+          items,
+          customer_name: getCustomerDisplayName(order),
+          customer_phone: order.address?.phone || order.user?.phone || '',
+          rider_details: riderInfo,
+        }
+      }),
+    )
 
     orders.value = ordersWithInfo
   } catch (err) {
@@ -499,7 +507,8 @@ const filteredOrders = computed(() => {
 const getStatusText = (order: any): string => {
   if (isMobile.value) {
     if (order.status === 'cancelled') return 'Cancelled'
-    if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
+    if (isOrderDeliveredState(order))
+      return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
     if (order.status === 'pending_approval') return 'Pending'
     if (order.status === 'waiting_for_rider') return 'Wait for Rider'
     if (order.status === 'accepted_by_rider') return 'Accepted'
@@ -976,14 +985,15 @@ const getOrderDeliveryDisplay = (order: any): string => {
     'self-pickup',
     'self-pick-up',
     'store pickup',
-    'in-store pickup'
+    'in-store pickup',
   ]
 
-  const isMeetup = meetupVariations.some(variation =>
-    deliveryOption === variation ||
-    deliveryOption.includes(variation) ||
-    deliveryOption.replace(/\s+/g, '') === variation.replace(/\s+/g, '') ||
-    deliveryOption.replace(/[-\s]/g, '') === variation.replace(/[-\s]/g, '')
+  const isMeetup = meetupVariations.some(
+    (variation) =>
+      deliveryOption === variation ||
+      deliveryOption.includes(variation) ||
+      deliveryOption.replace(/\s+/g, '') === variation.replace(/\s+/g, '') ||
+      deliveryOption.replace(/[-\s]/g, '') === variation.replace(/[-\s]/g, ''),
   )
 
   if (isMeetup) {
@@ -1000,18 +1010,18 @@ const getOrderDeliveryDisplay = (order: any): string => {
   const displayOption = order.delivery_option.trim()
 
   const optionMap: Record<string, string> = {
-    'delivery': 'Delivery',
-    'standard': 'Standard Delivery',
+    delivery: 'Delivery',
+    standard: 'Standard Delivery',
     'standard delivery': 'Standard Delivery',
-    'express': 'Express Delivery',
+    express: 'Express Delivery',
     'express delivery': 'Express Delivery',
     'same day': 'Same Day Delivery',
     'same day delivery': 'Same Day Delivery',
     'next day': 'Next Day Delivery',
     'next day delivery': 'Next Day Delivery',
-    'shipping': 'Shipping',
+    shipping: 'Shipping',
     'door to door': 'Door-to-Door Delivery',
-    'door-to-door': 'Door-to-Door Delivery'
+    'door-to-door': 'Door-to-Door Delivery',
   }
 
   const formattedOption = optionMap[deliveryOption]
@@ -1021,7 +1031,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
   return displayOption
     .split(' ')
-    .map(word => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
     .join(' ')
 }
 </script>
@@ -1029,7 +1039,14 @@ const getOrderDeliveryDisplay = (order: any): string => {
 <template>
   <v-app>
     <!-- Top Bar - Mobile Optimized -->
-    <v-app-bar class="top-bar" flat color="primary" dark elevation="2" :height="isMobile ? '56' : '64'">
+    <v-app-bar
+      class="top-bar"
+      flat
+      color="primary"
+      dark
+      elevation="2"
+      :height="isMobile ? '56' : '64'"
+    >
       <v-btn icon @click="goBack" class="mr-1" size="small">
         <v-icon>{{ isMobile ? 'mdi-arrow-left' : 'mdi-arrow-left' }}</v-icon>
       </v-btn>
@@ -1070,8 +1087,14 @@ const getOrderDeliveryDisplay = (order: any): string => {
     <v-main class="background-gradient" :class="{ 'mobile-padding': isMobile }">
       <!-- Cover + Logo -->
       <v-container class="pa-0 cover-container">
-        <v-img v-if="coverPhoto" :src="coverPhoto" :height="isMobile ? 120 : 160" cover class="cover-photo"
-          gradient="to bottom, rgba(0,0,0,0.2), rgba(0,0,0,0.6)" />
+        <v-img
+          v-if="coverPhoto"
+          :src="coverPhoto"
+          :height="isMobile ? 120 : 160"
+          cover
+          class="cover-photo"
+          gradient="to bottom, rgba(0,0,0,0.2), rgba(0,0,0,0.6)"
+        />
         <div v-else class="cover-placeholder" :style="{ height: isMobile ? '120px' : '160px' }">
           <v-icon :size="isMobile ? 48 : 64" color="white">mdi-store-front</v-icon>
         </div>
@@ -1095,7 +1118,9 @@ const getOrderDeliveryDisplay = (order: any): string => {
               <v-col cols="12" sm="6" class="pb-2">
                 <v-card variant="outlined" class="info-card pa-2" :rounded="isMobile ? 'md' : 'lg'">
                   <div class="d-flex align-center">
-                    <v-icon color="primary" :size="isMobile ? 18 : 24" class="mr-2">mdi-clock-outline</v-icon>
+                    <v-icon color="primary" :size="isMobile ? 18 : 24" class="mr-2"
+                      >mdi-clock-outline</v-icon
+                    >
                     <div class="text-left">
                       <div class="text-caption text-medium-emphasis">Hours</div>
                       <div class="text-body-2 font-weight-medium">
@@ -1108,7 +1133,9 @@ const getOrderDeliveryDisplay = (order: any): string => {
               <v-col cols="12" sm="6" class="pb-2">
                 <v-card variant="outlined" class="info-card pa-2" :rounded="isMobile ? 'md' : 'lg'">
                   <div class="d-flex align-center">
-                    <v-icon color="primary" :size="isMobile ? 18 : 24" class="mr-2">mdi-map-marker</v-icon>
+                    <v-icon color="primary" :size="isMobile ? 18 : 24" class="mr-2"
+                      >mdi-map-marker</v-icon
+                    >
                     <div class="text-left">
                       <div class="text-caption text-medium-emphasis">Location</div>
                       <div class="text-body-2 font-weight-medium line-clamp-1">{{ address }}</div>
@@ -1118,20 +1145,35 @@ const getOrderDeliveryDisplay = (order: any): string => {
               </v-col>
             </v-row>
 
-            <v-card class="status-card pa-3 mb-3" variant="outlined" :rounded="isMobile ? 'lg' : 'xl'">
+            <v-card
+              class="status-card pa-3 mb-3"
+              variant="outlined"
+              :rounded="isMobile ? 'lg' : 'xl'"
+            >
               <div class="text-center">
                 <div class="d-flex align-center justify-center mb-2">
-                  <v-icon :color="getCurrentStatusDisplay().color" :size="isMobile ? 20 : 24" class="mr-2">
+                  <v-icon
+                    :color="getCurrentStatusDisplay().color"
+                    :size="isMobile ? 20 : 24"
+                    class="mr-2"
+                  >
                     {{ getCurrentStatusDisplay().icon }}
                   </v-icon>
                   <span class="text-body-1 font-weight-medium">{{
                     getCurrentStatusDisplay().text
-                    }}</span>
+                  }}</span>
                 </div>
 
-                <v-btn :color="getCurrentStatusDisplay().buttonColor" :loading="loading" @click="toggleShopStatus"
-                  class="status-toggle-btn" :size="isMobile ? 'small' : 'large'" :rounded="isMobile ? 'md' : 'lg'"
-                  variant="flat" block>
+                <v-btn
+                  :color="getCurrentStatusDisplay().buttonColor"
+                  :loading="loading"
+                  @click="toggleShopStatus"
+                  class="status-toggle-btn"
+                  :size="isMobile ? 'small' : 'large'"
+                  :rounded="isMobile ? 'md' : 'lg'"
+                  variant="flat"
+                  block
+                >
                   <v-icon :start="!isMobile">{{ getCurrentStatusDisplay().icon }}</v-icon>
                   <span class="ml-1">{{ getCurrentStatusDisplay().buttonText }}</span>
                 </v-btn>
@@ -1153,11 +1195,21 @@ const getOrderDeliveryDisplay = (order: any): string => {
       <v-container :class="isMobile ? 'px-3 py-1' : 'py-2'">
         <v-row>
           <v-col cols="12">
-            <v-btn @click="goToProducts" color="secondary" :size="isMobile ? 'large' : 'x-large'" class="action-btn"
-              :rounded="isMobile ? 'lg' : 'xl'" variant="flat" block :height="isMobile ? 50 : 60">
+            <v-btn
+              @click="goToProducts"
+              color="secondary"
+              :size="isMobile ? 'large' : 'x-large'"
+              class="action-btn"
+              :rounded="isMobile ? 'lg' : 'xl'"
+              variant="flat"
+              block
+              :height="isMobile ? 50 : 60"
+            >
               <v-icon :start="!isMobile" :size="isMobile ? 20 : 28">mdi-package-variant</v-icon>
               <div class="text-left flex-grow-1">
-                <div :class="isMobile ? 'text-body-2 font-weight-bold' : 'text-h6 font-weight-bold'">
+                <div
+                  :class="isMobile ? 'text-body-2 font-weight-bold' : 'text-h6 font-weight-bold'"
+                >
                   Product Management
                 </div>
                 <div class="text-caption d-none d-sm-block">Manage your inventory and products</div>
@@ -1172,12 +1224,20 @@ const getOrderDeliveryDisplay = (order: any): string => {
       <v-container :class="isMobile ? 'px-3 py-3' : 'py-2'">
         <v-card class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
           <v-card-title class="d-flex align-center" :class="isMobile ? 'pa-3' : 'pa-4'">
-            <v-icon color="warning" :size="isMobile ? 20 : 24" class="mr-2">mdi-clipboard-list</v-icon>
-            <span :class="isMobile ? 'text-subtitle-2 font-weight-bold' : 'text-h5 font-weight-bold'">
+            <v-icon color="warning" :size="isMobile ? 20 : 24" class="mr-2"
+              >mdi-clipboard-list</v-icon
+            >
+            <span
+              :class="isMobile ? 'text-subtitle-2 font-weight-bold' : 'text-h5 font-weight-bold'"
+            >
               Order Approval
             </span>
-            <v-chip v-if="pendingApprovalOrders.length" color="warning" class="ml-2"
-              :size="isMobile ? 'small' : 'default'">
+            <v-chip
+              v-if="pendingApprovalOrders.length"
+              color="warning"
+              class="ml-2"
+              :size="isMobile ? 'small' : 'default'"
+            >
               {{ pendingApprovalOrders.length }} Pending
             </v-chip>
           </v-card-title>
@@ -1197,8 +1257,14 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
             <!-- Pending Orders List -->
             <div v-else>
-              <v-card v-for="order in pendingApprovalOrders" :key="order.id" class="mb-3"
-                :rounded="isMobile ? 'lg' : 'xl'" variant="outlined" :style="{ borderLeft: '4px solid #ff9800' }">
+              <v-card
+                v-for="order in pendingApprovalOrders"
+                :key="order.id"
+                class="mb-3"
+                :rounded="isMobile ? 'lg' : 'xl'"
+                variant="outlined"
+                :style="{ borderLeft: '4px solid #ff9800' }"
+              >
                 <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                   <!-- Order Header -->
                   <div class="d-flex justify-space-between align-start mb-2">
@@ -1225,16 +1291,27 @@ const getOrderDeliveryDisplay = (order: any): string => {
                     </v-avatar>
                     <div>
                       <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
-                      <div class="text-caption text-medium-emphasis">{{ order.customer_phone }}</div>
+                      <div class="text-caption text-medium-emphasis">
+                        {{ order.customer_phone }}
+                      </div>
                     </div>
                   </div>
 
                   <!-- Items Summary -->
                   <div class="mb-2">
                     <div class="text-caption font-weight-bold">Items:</div>
-                    <div v-for="item in order.items.slice(0, 2)" :key="item.id" class="d-flex align-center mt-1">
-                      <v-img :src="item.image || '/placeholder-product.png'" width="28" height="28" cover
-                        class="rounded mr-2" />
+                    <div
+                      v-for="item in order.items.slice(0, 2)"
+                      :key="item.id"
+                      class="d-flex align-center mt-1"
+                    >
+                      <v-img
+                        :src="item.image || '/placeholder-product.png'"
+                        width="28"
+                        height="28"
+                        cover
+                        class="rounded mr-2"
+                      />
                       <div class="flex-grow-1">
                         <div class="text-caption">{{ item.name }}</div>
                         <div class="text-caption text-medium-emphasis">
@@ -1242,7 +1319,10 @@ const getOrderDeliveryDisplay = (order: any): string => {
                         </div>
                       </div>
                     </div>
-                    <div v-if="order.items.length > 2" class="text-caption text-medium-emphasis mt-1">
+                    <div
+                      v-if="order.items.length > 2"
+                      class="text-caption text-medium-emphasis mt-1"
+                    >
                       +{{ order.items.length - 2 }} more items
                     </div>
                   </div>
@@ -1257,17 +1337,35 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                   <!-- Action Buttons -->
                   <div class="d-flex gap-2">
-                    <v-btn color="success" size="small" variant="flat" @click="approveOrder(order)"
-                      :loading="approvingOrderId === order.id" :block="isMobile" class="flex-grow-1">
+                    <v-btn
+                      color="success"
+                      size="small"
+                      variant="flat"
+                      @click="approveOrder(order)"
+                      :loading="approvingOrderId === order.id"
+                      :block="isMobile"
+                      class="flex-grow-1"
+                    >
                       <v-icon start size="14">mdi-check-circle</v-icon>
                       Approve
                     </v-btn>
-                    <v-btn color="error" size="small" variant="outlined" @click="rejectOrder(order)" :block="isMobile"
-                      class="flex-grow-1">
+                    <v-btn
+                      color="error"
+                      size="small"
+                      variant="outlined"
+                      @click="rejectOrder(order)"
+                      :block="isMobile"
+                      class="flex-grow-1"
+                    >
                       <v-icon start size="14">mdi-close-circle</v-icon>
                       Reject
                     </v-btn>
-                    <v-btn color="primary" size="small" variant="outlined" @click="viewOrderDetails(order.id)">
+                    <v-btn
+                      color="primary"
+                      size="small"
+                      variant="outlined"
+                      @click="viewOrderDetails(order.id)"
+                    >
                       <v-icon size="14">mdi-eye</v-icon>
                     </v-btn>
                   </div>
@@ -1283,11 +1381,17 @@ const getOrderDeliveryDisplay = (order: any): string => {
         <v-card class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
           <v-card-title class="d-flex align-center" :class="isMobile ? 'pa-3' : 'pa-4'">
             <v-icon color="primary" :size="isMobile ? 20 : 24" class="mr-2">mdi-motorbike</v-icon>
-            <span :class="isMobile ? 'text-subtitle-2 font-weight-bold' : 'text-h5 font-weight-bold'">
+            <span
+              :class="isMobile ? 'text-subtitle-2 font-weight-bold' : 'text-h5 font-weight-bold'"
+            >
               Active Deliveries
             </span>
-            <v-chip v-if="activeOrdersWithRiders.length" color="primary" class="ml-2"
-              :size="isMobile ? 'small' : 'default'">
+            <v-chip
+              v-if="activeOrdersWithRiders.length"
+              color="primary"
+              class="ml-2"
+              :size="isMobile ? 'small' : 'default'"
+            >
               {{ activeOrdersWithRiders.length }}
             </v-chip>
           </v-card-title>
@@ -1303,8 +1407,13 @@ const getOrderDeliveryDisplay = (order: any): string => {
             </div>
 
             <div v-else>
-              <v-card v-for="order in activeOrdersWithRiders" :key="order.id" class="mb-3"
-                :rounded="isMobile ? 'lg' : 'xl'" variant="outlined">
+              <v-card
+                v-for="order in activeOrdersWithRiders"
+                :key="order.id"
+                class="mb-3"
+                :rounded="isMobile ? 'lg' : 'xl'"
+                variant="outlined"
+              >
                 <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                   <div class="d-flex justify-space-between align-start mb-2">
                     <div>
@@ -1321,20 +1430,24 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </div>
 
                   <!-- Rider Info -->
-                  <div v-if="order.rider_details" class="mb-2 pa-2 rounded-lg" style="background: #e3f2fd">
+                  <div
+                    v-if="order.rider_details"
+                    class="mb-2 pa-2 rounded-lg"
+                    style="background: #e3f2fd"
+                  >
                     <div class="d-flex align-center">
                       <v-icon color="primary" size="18" class="mr-2">mdi-motorbike</v-icon>
                       <div>
-                        <div class="text-caption font-weight-bold">Rider: {{ order.rider_details.name }}</div>
+                        <div class="text-caption font-weight-bold">
+                          Rider: {{ order.rider_details.name }}
+                        </div>
                         <div class="text-caption">📞 {{ order.rider_details.phone }}</div>
                       </div>
                     </div>
                   </div>
 
                   <div class="d-flex justify-space-between align-center">
-                    <div class="text-caption">
-                      {{ order.items.length }} item(s)
-                    </div>
+                    <div class="text-caption">{{ order.items.length }} item(s)</div>
                     <div class="text-caption font-weight-bold text-primary">
                       ₱{{ Number(order.total_amount).toLocaleString() }}
                     </div>
@@ -1363,18 +1476,30 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
         <!-- Status Cards Grid -->
         <v-row class="mb-4">
-          <v-col v-for="section in orderSections" :key="section.id" :cols="isMobile ? 6 : 2" class="pb-2">
-            <v-card 
+          <v-col
+            v-for="section in orderSections"
+            :key="section.id"
+            :cols="isMobile ? 6 : 2"
+            class="pb-2"
+          >
+            <v-card
               :color="activeOrderTab === section.id ? `${section.color}-lighten-4` : 'white'"
               :class="['status-section-card', { 'active-tab': activeOrderTab === section.id }]"
               :rounded="isMobile ? 'lg' : 'xl'"
               elevation="1"
               @click="activeOrderTab = section.id"
-              style="cursor: pointer; transition: all 0.2s ease;"
+              style="cursor: pointer; transition: all 0.2s ease"
             >
               <v-card-text :class="isMobile ? 'pa-2 text-center' : 'pa-3 text-center'">
-                <v-icon :color="section.color" :size="isMobile ? 28 : 36" class="mb-1">{{ section.icon }}</v-icon>
-                <div :class="isMobile ? 'text-caption font-weight-bold' : 'text-subtitle-2 font-weight-bold'" :style="{ color: `var(--v-${section.color}-base)` }">
+                <v-icon :color="section.color" :size="isMobile ? 28 : 36" class="mb-1">{{
+                  section.icon
+                }}</v-icon>
+                <div
+                  :class="
+                    isMobile ? 'text-caption font-weight-bold' : 'text-subtitle-2 font-weight-bold'
+                  "
+                  :style="{ color: `var(--v-${section.color}-base)` }"
+                >
                   {{ section.title }}
                 </div>
                 <div :class="isMobile ? 'text-h6 font-weight-bold' : 'text-h4 font-weight-bold'">
@@ -1386,9 +1511,19 @@ const getOrderDeliveryDisplay = (order: any): string => {
         </v-row>
 
         <!-- Desktop Select for Order Filter -->
-        <v-select v-if="!isMobile" v-model="activeOrderTab" :items="transactionOptions" item-title="title" item-value="value"
-          label="Filter Orders" variant="outlined" density="comfortable" prepend-icon="mdi-filter" class="mb-6"
-          rounded="lg" />
+        <v-select
+          v-if="!isMobile"
+          v-model="activeOrderTab"
+          :items="transactionOptions"
+          item-title="title"
+          item-value="value"
+          label="Filter Orders"
+          variant="outlined"
+          density="comfortable"
+          prepend-icon="mdi-filter"
+          class="mb-6"
+          rounded="lg"
+        />
 
         <!-- Orders Loading State -->
         <div v-if="loadingOrders" class="text-center" :class="isMobile ? 'py-8' : 'py-12'">
@@ -1397,7 +1532,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
         </div>
 
         <!-- Orders Error State -->
-        <v-alert v-else-if="ordersError" type="error" class="mb-3" :rounded="isMobile ? 'md' : 'lg'">
+        <v-alert
+          v-else-if="ordersError"
+          type="error"
+          class="mb-3"
+          :rounded="isMobile ? 'md' : 'lg'"
+        >
           <div class="d-flex align-center">
             <v-icon :size="isMobile ? 18 : 20" class="mr-2">mdi-alert-circle</v-icon>
             <div class="text-caption">{{ ordersError }}</div>
@@ -1412,8 +1552,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
         <div v-else class="orders-list">
           <!-- Pending Approval Section Orders -->
           <template v-if="activeOrderTab === 'pending_approval'">
-            <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
-              :rounded="isMobile ? 'lg' : 'xl'">
+            <v-card
+              v-for="order in filteredOrders"
+              :key="order.id"
+              class="mb-3 order-card elevation-1"
+              :rounded="isMobile ? 'lg' : 'xl'"
+            >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                 <div class="d-flex justify-space-between align-start mb-3">
                   <div>
@@ -1437,7 +1581,11 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                 <div class="d-flex align-center mb-3">
                   <v-avatar size="36" color="primary" class="mr-2">
-                    <v-img v-if="order.user?.avatar_url" :src="order.user.avatar_url" alt="Customer" />
+                    <v-img
+                      v-if="order.user?.avatar_url"
+                      :src="order.user.avatar_url"
+                      alt="Customer"
+                    />
                     <span v-else class="text-white text-caption">
                       {{ order.user?.first_name?.[0] }}{{ order.user?.last_name?.[0] }}
                     </span>
@@ -1454,9 +1602,18 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                 <div class="mb-3">
                   <div class="text-caption font-weight-bold mb-1">Items:</div>
-                  <div v-for="item in order.items.slice(0, 2)" :key="item.id" class="d-flex align-center mt-1">
-                    <v-img :src="item.image || '/placeholder-product.png'" width="36" height="36" cover
-                      class="rounded mr-2" />
+                  <div
+                    v-for="item in order.items.slice(0, 2)"
+                    :key="item.id"
+                    class="d-flex align-center mt-1"
+                  >
+                    <v-img
+                      :src="item.image || '/placeholder-product.png'"
+                      width="36"
+                      height="36"
+                      cover
+                      class="rounded mr-2"
+                    />
                     <div class="flex-grow-1">
                       <div class="text-caption line-clamp-1">{{ item.name }}</div>
                       <div class="text-caption text-medium-emphasis">
@@ -1477,17 +1634,36 @@ const getOrderDeliveryDisplay = (order: any): string => {
                 </div>
 
                 <div class="action-buttons-wrapper">
-                  <v-btn color="success" size="small" variant="flat" @click="approveOrder(order)"
-                    :loading="approvingOrderId === order.id" :block="isMobile" class="action-btn-small">
+                  <v-btn
+                    color="success"
+                    size="small"
+                    variant="flat"
+                    @click="approveOrder(order)"
+                    :loading="approvingOrderId === order.id"
+                    :block="isMobile"
+                    class="action-btn-small"
+                  >
                     <v-icon start size="14">mdi-check-circle</v-icon>
                     Approve
                   </v-btn>
-                  <v-btn color="error" size="small" variant="outlined" @click="rejectOrder(order)" :block="isMobile"
-                    class="action-btn-small">
+                  <v-btn
+                    color="error"
+                    size="small"
+                    variant="outlined"
+                    @click="rejectOrder(order)"
+                    :block="isMobile"
+                    class="action-btn-small"
+                  >
                     <v-icon start size="14">mdi-close-circle</v-icon>
                     Reject
                   </v-btn>
-                  <v-btn color="primary" size="small" variant="outlined" @click="viewOrderDetails(order.id)" class="action-btn-icon">
+                  <v-btn
+                    color="primary"
+                    size="small"
+                    variant="outlined"
+                    @click="viewOrderDetails(order.id)"
+                    class="action-btn-icon"
+                  >
                     <v-icon size="14">mdi-eye</v-icon>
                   </v-btn>
                 </div>
@@ -1497,8 +1673,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
           <!-- Waiting for Rider Section -->
           <template v-else-if="activeOrderTab === 'waiting_for_rider'">
-            <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
-              :rounded="isMobile ? 'lg' : 'xl'">
+            <v-card
+              v-for="order in filteredOrders"
+              :key="order.id"
+              class="mb-3 order-card elevation-1"
+              :rounded="isMobile ? 'lg' : 'xl'"
+            >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                 <div class="d-flex justify-space-between align-start mb-2">
                   <div>
@@ -1517,7 +1697,9 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                 <div class="d-flex align-center mb-2">
                   <v-avatar size="28" color="info" class="mr-2">
-                    <span class="text-white text-caption">{{ order.customer_name?.charAt(0) || 'C' }}</span>
+                    <span class="text-white text-caption">{{
+                      order.customer_name?.charAt(0) || 'C'
+                    }}</span>
                   </v-avatar>
                   <div>
                     <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
@@ -1533,7 +1715,13 @@ const getOrderDeliveryDisplay = (order: any): string => {
                 </div>
 
                 <div class="mt-3">
-                  <v-btn color="primary" size="x-small" variant="outlined" @click="viewOrderDetails(order.id)" block>
+                  <v-btn
+                    color="primary"
+                    size="x-small"
+                    variant="outlined"
+                    @click="viewOrderDetails(order.id)"
+                    block
+                  >
                     View Details
                   </v-btn>
                 </div>
@@ -1543,8 +1731,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
           <!-- Active Deliveries Section -->
           <template v-else-if="activeOrderTab === 'active'">
-            <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
-              :rounded="isMobile ? 'lg' : 'xl'">
+            <v-card
+              v-for="order in filteredOrders"
+              :key="order.id"
+              class="mb-3 order-card elevation-1"
+              :rounded="isMobile ? 'lg' : 'xl'"
+            >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                 <div class="d-flex justify-space-between align-start mb-2">
                   <div>
@@ -1560,11 +1752,17 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </v-chip>
                 </div>
 
-                <div v-if="order.rider_details" class="mb-2 pa-2 rounded-lg" style="background: #e3f2fd">
+                <div
+                  v-if="order.rider_details"
+                  class="mb-2 pa-2 rounded-lg"
+                  style="background: #e3f2fd"
+                >
                   <div class="d-flex align-center">
                     <v-icon color="primary" size="18" class="mr-2">mdi-motorbike</v-icon>
                     <div>
-                      <div class="text-caption font-weight-bold">Rider: {{ order.rider_details.name }}</div>
+                      <div class="text-caption font-weight-bold">
+                        Rider: {{ order.rider_details.name }}
+                      </div>
                       <div class="text-caption">📞 {{ order.rider_details.phone }}</div>
                     </div>
                   </div>
@@ -1578,18 +1776,24 @@ const getOrderDeliveryDisplay = (order: any): string => {
                 </div>
 
                 <div class="mt-3 action-buttons-wrapper">
-                  <v-btn 
+                  <v-btn
                     v-if="order.status === 'picked_up'"
-                    color="success" 
-                    size="x-small" 
-                    variant="flat" 
+                    color="success"
+                    size="x-small"
+                    variant="flat"
                     @click="markAsDelivered(order.id)"
                     class="action-btn-small flex-grow-1"
                   >
                     <v-icon start size="12">mdi-truck-check</v-icon>
                     Mark Delivered
                   </v-btn>
-                  <v-btn color="primary" size="x-small" variant="outlined" @click="viewOrderDetails(order.id)" class="action-btn-small flex-grow-1">
+                  <v-btn
+                    color="primary"
+                    size="x-small"
+                    variant="outlined"
+                    @click="viewOrderDetails(order.id)"
+                    class="action-btn-small flex-grow-1"
+                  >
                     View Details
                   </v-btn>
                 </div>
@@ -1599,8 +1803,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
           <!-- Delivered Section -->
           <template v-else-if="activeOrderTab === 'delivered'">
-            <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
-              :rounded="isMobile ? 'lg' : 'xl'">
+            <v-card
+              v-for="order in filteredOrders"
+              :key="order.id"
+              class="mb-3 order-card elevation-1"
+              :rounded="isMobile ? 'lg' : 'xl'"
+            >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                 <div class="d-flex justify-space-between align-start mb-2">
                   <div>
@@ -1619,7 +1827,9 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                 <div class="d-flex align-center mb-2">
                   <v-avatar size="28" color="success" class="mr-2">
-                    <span class="text-white text-caption">{{ order.customer_name?.charAt(0) || 'C' }}</span>
+                    <span class="text-white text-caption">{{
+                      order.customer_name?.charAt(0) || 'C'
+                    }}</span>
                   </v-avatar>
                   <div>
                     <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
@@ -1635,7 +1845,13 @@ const getOrderDeliveryDisplay = (order: any): string => {
                 </div>
 
                 <div class="mt-3">
-                  <v-btn color="primary" size="x-small" variant="outlined" @click="viewOrderDetails(order.id)" block>
+                  <v-btn
+                    color="primary"
+                    size="x-small"
+                    variant="outlined"
+                    @click="viewOrderDetails(order.id)"
+                    block
+                  >
                     View Details
                   </v-btn>
                 </div>
@@ -1645,8 +1861,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
           <!-- Cancelled Section -->
           <template v-else-if="activeOrderTab === 'cancelled'">
-            <v-card v-for="order in filteredOrders" :key="order.id" class="mb-3 order-card elevation-1"
-              :rounded="isMobile ? 'lg' : 'xl'">
+            <v-card
+              v-for="order in filteredOrders"
+              :key="order.id"
+              class="mb-3 order-card elevation-1"
+              :rounded="isMobile ? 'lg' : 'xl'"
+            >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
                 <div class="d-flex justify-space-between align-start mb-2">
                   <div>
@@ -1665,7 +1885,9 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
                 <div class="d-flex align-center mb-2">
                   <v-avatar size="28" color="error" class="mr-2">
-                    <span class="text-white text-caption">{{ order.customer_name?.charAt(0) || 'C' }}</span>
+                    <span class="text-white text-caption">{{
+                      order.customer_name?.charAt(0) || 'C'
+                    }}</span>
                   </v-avatar>
                   <div>
                     <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
@@ -1681,7 +1903,13 @@ const getOrderDeliveryDisplay = (order: any): string => {
                 </div>
 
                 <div class="mt-3">
-                  <v-btn color="primary" size="x-small" variant="outlined" @click="viewOrderDetails(order.id)" block>
+                  <v-btn
+                    color="primary"
+                    size="x-small"
+                    variant="outlined"
+                    @click="viewOrderDetails(order.id)"
+                    block
+                  >
                     View Details
                   </v-btn>
                 </div>
@@ -1882,11 +2110,11 @@ const getOrderDeliveryDisplay = (order: any): string => {
   .v-main {
     padding-bottom: max(env(safe-area-inset-bottom), 0px);
   }
-  
+
   .action-buttons-wrapper {
     gap: 6px;
   }
-  
+
   .action-btn-small {
     font-size: 0.7rem;
     padding: 0 8px;
@@ -1907,11 +2135,11 @@ const getOrderDeliveryDisplay = (order: any): string => {
   .v-toolbar-title {
     font-size: 0.9rem;
   }
-  
+
   .action-buttons-wrapper {
     flex-direction: column;
   }
-  
+
   .action-btn-small,
   .action-btn-icon {
     width: 100%;
