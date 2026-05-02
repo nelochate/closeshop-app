@@ -18,6 +18,8 @@ interface RouteSummary {
   pickupToDeliveryText: string
 }
 
+type TrackingPointKey = 'rider' | 'pickup' | 'delivery'
+
 const props = withDefaults(
   defineProps<{
     orderId: string
@@ -28,10 +30,11 @@ const props = withDefaults(
     trackOwnLocation?: boolean
     subscribeToLiveLocation?: boolean
     fullscreen?: boolean
+    panelCollapsed?: boolean
     title?: string
     subtitle?: string
-    showExpandAction?: boolean
-    expandActionLabel?: string
+    showFullscreenButton?: boolean
+    fullscreenButtonLabel?: string
   }>(),
   {
     riderLocation: null,
@@ -39,15 +42,16 @@ const props = withDefaults(
     trackOwnLocation: false,
     subscribeToLiveLocation: true,
     fullscreen: false,
+    panelCollapsed: false,
     title: 'Order tracking',
     subtitle: '',
-    showExpandAction: false,
-    expandActionLabel: 'Open full map',
+    showFullscreenButton: false,
+    fullscreenButtonLabel: 'See full-screen map',
   },
 )
 
 const emit = defineEmits<{
-  (event: 'expand'): void
+  (event: 'open-fullscreen'): void
 }>()
 
 const mapContainer = ref<HTMLElement | null>(null)
@@ -68,6 +72,7 @@ let geolocationWatchId: number | null = null
 let routeRefreshTimeout: number | null = null
 let heartbeatInterval: number | null = null
 let hasFramedBounds = false
+let lastRenderedPointCount = 0
 
 const sourceId = `order-tracking-source-${props.orderId}`.replace(/[^a-zA-Z0-9_-]/g, '-')
 const outlineLayerId = `${sourceId}-outline`
@@ -75,9 +80,13 @@ const lineLayerId = `${sourceId}-line`
 
 const resolvedRiderLocation = computed(() => liveRiderLocation.value || props.riderLocation || null)
 
-const trackedPointCount = computed(() =>
-  [resolvedRiderLocation.value, props.pickupLocation, props.deliveryLocation].filter(Boolean).length,
+const trackedPointCount = computed(
+  () =>
+    [resolvedRiderLocation.value, props.pickupLocation, props.deliveryLocation].filter(Boolean)
+      .length,
 )
+
+const canFitMap = computed(() => mapReady.value && trackedPointCount.value > 0)
 
 const isRiderLocationFresh = computed(() => {
   const timestamp = resolvedRiderLocation.value?.updatedAt
@@ -179,10 +188,61 @@ const locationCards = computed(() => [
   },
 ])
 
-const getRouteWaypoints = () => {
-  const points = [resolvedRiderLocation.value, props.pickupLocation, props.deliveryLocation].filter(
+const getTrackedPoints = () =>
+  [resolvedRiderLocation.value, props.pickupLocation, props.deliveryLocation].filter(
     Boolean,
   ) as TrackingLocation[]
+
+const getMarkerDisplayLocations = () => {
+  const groupedPoints = new Map<
+    string,
+    Array<{ key: TrackingPointKey; location: TrackingLocation }>
+  >()
+  const displayLocations: Partial<Record<TrackingPointKey, TrackingLocation>> = {}
+
+  ;(
+    [
+      ['rider', resolvedRiderLocation.value],
+      ['pickup', props.pickupLocation],
+      ['delivery', props.deliveryLocation],
+    ] as Array<[TrackingPointKey, TrackingLocation | null]>
+  ).forEach(([key, location]) => {
+    if (!location) return
+
+    const groupKey = `${location.lat.toFixed(5)}:${location.lng.toFixed(5)}`
+    const group = groupedPoints.get(groupKey) || []
+    group.push({ key, location })
+    groupedPoints.set(groupKey, group)
+  })
+
+  groupedPoints.forEach((group) => {
+    if (group.length === 1) {
+      const [point] = group
+      displayLocations[point.key] = point.location
+      return
+    }
+
+    const baseRadius = 0.00012
+
+    group.forEach((point, index) => {
+      const angle = -Math.PI / 2 + (Math.PI * 2 * index) / group.length
+      const latOffset = baseRadius * Math.sin(angle)
+      const longitudeScale = Math.max(Math.cos((point.location.lat * Math.PI) / 180), 0.35)
+      const lngOffset = (baseRadius * Math.cos(angle)) / longitudeScale
+
+      displayLocations[point.key] = {
+        ...point.location,
+        lat: point.location.lat + latOffset,
+        lng: point.location.lng + lngOffset,
+      }
+    })
+  })
+
+  return displayLocations
+}
+
+const getRouteWaypoints = () => {
+  const points = getTrackedPoints()
 
   if (!props.pickupLocation || !props.deliveryLocation) return []
 
@@ -193,7 +253,12 @@ const getRouteWaypoints = () => {
   return points
 }
 
-const buildPopupHtml = (title: string, subtitle: string, address: string, updatedAt?: string | null) => {
+const buildPopupHtml = (
+  title: string,
+  subtitle: string,
+  address: string,
+  updatedAt?: string | null,
+) => {
   const updatedMarkup = updatedAt
     ? `<div class="tracking-popup__meta">Updated ${formatTrackingTimestamp(updatedAt)}</div>`
     : ''
@@ -244,8 +309,9 @@ const createMarkerElement = (key: 'rider' | 'pickup' | 'delivery') => {
 
 const ensureMarker = (
   existingMarker: mapboxgl.Marker | null,
-  key: 'rider' | 'pickup' | 'delivery',
+  key: TrackingPointKey,
   location: TrackingLocation | null,
+  displayLocation: TrackingLocation | null = location,
 ) => {
   if (!map || !mapReady.value) return existingMarker
 
@@ -255,7 +321,12 @@ const ensureMarker = (
   }
 
   const popup = new mapboxgl.Popup({ offset: 28 }).setHTML(
-    buildPopupHtml(getMarkerLabel(key), location.name, location.address || 'Address unavailable', location.updatedAt),
+    buildPopupHtml(
+      getMarkerLabel(key),
+      location.name,
+      location.address || 'Address unavailable',
+      location.updatedAt,
+    ),
   )
 
   if (!existingMarker) {
@@ -263,23 +334,43 @@ const ensureMarker = (
       element: createMarkerElement(key),
       anchor: 'bottom',
     })
-      .setLngLat([location.lng, location.lat])
+      .setLngLat([displayLocation?.lng ?? location.lng, displayLocation?.lat ?? location.lat])
       .setPopup(popup)
       .addTo(map)
 
     return marker
   }
 
-  existingMarker.setLngLat([location.lng, location.lat])
+  existingMarker.setLngLat([
+    displayLocation?.lng ?? location.lng,
+    displayLocation?.lat ?? location.lat,
+  ])
   existingMarker.setPopup(popup)
 
   return existingMarker
 }
 
 const renderMarkers = () => {
-  riderMarker = ensureMarker(riderMarker, 'rider', resolvedRiderLocation.value)
-  pickupMarker = ensureMarker(pickupMarker, 'pickup', props.pickupLocation)
-  deliveryMarker = ensureMarker(deliveryMarker, 'delivery', props.deliveryLocation)
+  const displayLocations = getMarkerDisplayLocations()
+
+  riderMarker = ensureMarker(
+    riderMarker,
+    'rider',
+    resolvedRiderLocation.value,
+    displayLocations.rider || resolvedRiderLocation.value,
+  )
+  pickupMarker = ensureMarker(
+    pickupMarker,
+    'pickup',
+    props.pickupLocation,
+    displayLocations.pickup || props.pickupLocation,
+  )
+  deliveryMarker = ensureMarker(
+    deliveryMarker,
+    'delivery',
+    props.deliveryLocation,
+    displayLocations.delivery || props.deliveryLocation,
+  )
 }
 
 const removeRoute = () => {
@@ -290,27 +381,56 @@ const removeRoute = () => {
   if (map.getSource(sourceId)) map.removeSource(sourceId)
 }
 
+const getFitPadding = () => {
+  if (!props.fullscreen) {
+    return { top: 32, right: 32, bottom: 32, left: 32 }
+  }
+
+  if (props.panelCollapsed) {
+    return { top: 48, right: 24, bottom: 48, left: 24 }
+  }
+
+  if (window.innerWidth <= 1080) {
+    return {
+      top: 72,
+      right: 24,
+      bottom: Math.min(Math.round(window.innerHeight * 0.38), 320),
+      left: 24,
+    }
+  }
+
+  return { top: 40, right: 32, bottom: 48, left: 32 }
+}
+
 const fitToAllPoints = () => {
   if (!map || !mapReady.value) return
 
   const bounds = new mapboxgl.LngLatBounds()
-  const points = [resolvedRiderLocation.value, props.pickupLocation, props.deliveryLocation].filter(
-    Boolean,
-  ) as TrackingLocation[]
+  const points = getTrackedPoints()
 
   if (!points.length) return
 
   points.forEach((point) => bounds.extend([point.lng, point.lat]))
 
   map.fitBounds(bounds, {
-    padding: props.fullscreen
-      ? { top: 40, right: 32, bottom: 40, left: 32 }
-      : { top: 32, right: 32, bottom: 32, left: 32 },
+    padding: getFitPadding(),
     duration: 900,
     maxZoom: points.length === 1 ? 15.5 : 14.5,
   })
 
   hasFramedBounds = true
+}
+
+const mapContainsAllPoints = () => {
+  if (!map || !mapReady.value) return false
+
+  const points = getTrackedPoints()
+  if (!points.length) return false
+
+  const bounds = map.getBounds()
+  if (!bounds) return false
+
+  return points.every((point) => bounds.contains([point.lng, point.lat]))
 }
 
 const focusPoint = (key: 'rider' | 'pickup' | 'delivery') => {
@@ -441,17 +561,32 @@ const scheduleRouteRefresh = () => {
   }, 250)
 }
 
-const syncMapScene = ({ fit = false }: { fit?: boolean } = {}) => {
+const syncMapScene = ({
+  fit = false,
+  fitIfPointCountIncreases = false,
+}: {
+  fit?: boolean
+  fitIfPointCountIncreases?: boolean
+} = {}) => {
   if (!map || !mapReady.value) return
+
+  const currentPointCount = trackedPointCount.value
+  const shouldFit =
+    fit ||
+    !hasFramedBounds ||
+    (fitIfPointCountIncreases && currentPointCount > lastRenderedPointCount) ||
+    (props.fullscreen && !mapContainsAllPoints())
 
   renderMarkers()
   scheduleRouteRefresh()
 
-  if (fit || !hasFramedBounds) {
+  if (shouldFit) {
     window.setTimeout(() => {
       fitToAllPoints()
     }, 120)
   }
+
+  lastRenderedPointCount = currentPointCount
 }
 
 const publishRiderLocation = async (location: TrackingLocation) => {
@@ -479,7 +614,7 @@ const handleTrackedPosition = async (position: GeolocationPosition) => {
 
   liveRiderLocation.value = location
   mapError.value = null
-  syncMapScene()
+  syncMapScene({ fitIfPointCountIncreases: true })
   await publishRiderLocation(location)
 }
 
@@ -503,7 +638,8 @@ const startOwnLocationTracking = async () => {
     },
     (error) => {
       console.error('Unable to watch rider location:', error)
-      mapError.value = 'Live rider tracking paused because the current location could not be refreshed.'
+      mapError.value =
+        'Live rider tracking paused because the current location could not be refreshed.'
     },
     { enableHighAccuracy: true, timeout: 10000, maximumAge: 15000 },
   )
@@ -532,19 +668,23 @@ const subscribeToTracking = async () => {
     },
   })
 
-  trackingChannel.on('broadcast', { event: 'rider-location' }, ({ payload }: { payload: TrackingLocation }) => {
-    if (!payload) return
+  trackingChannel.on(
+    'broadcast',
+    { event: 'rider-location' },
+    ({ payload }: { payload: TrackingLocation }) => {
+      if (!payload) return
 
-    liveRiderLocation.value = {
-      lat: Number(payload.lat),
-      lng: Number(payload.lng),
-      name: payload.name || 'Assigned rider',
-      address: payload.address,
-      updatedAt: payload.updatedAt || new Date().toISOString(),
-    }
+      liveRiderLocation.value = {
+        lat: Number(payload.lat),
+        lng: Number(payload.lng),
+        name: payload.name || 'Assigned rider',
+        address: payload.address,
+        updatedAt: payload.updatedAt || new Date().toISOString(),
+      }
 
-    syncMapScene()
-  })
+      syncMapScene({ fitIfPointCountIncreases: true })
+    },
+  )
 
   trackingChannel.subscribe((status: string) => {
     if (status === 'SUBSCRIBED' && props.trackOwnLocation && liveRiderLocation.value) {
@@ -600,6 +740,16 @@ const initMap = async () => {
   })
 }
 
+const handleWindowResize = () => {
+  if (!map) return
+
+  map.resize()
+
+  if (mapReady.value && !mapContainsAllPoints()) {
+    fitToAllPoints()
+  }
+}
+
 watch(
   () => props.riderLocation,
   (value) => {
@@ -616,7 +766,7 @@ watch(
       }
     }
 
-    syncMapScene()
+    syncMapScene({ fitIfPointCountIncreases: true })
   },
   { deep: true },
 )
@@ -624,9 +774,36 @@ watch(
 watch(
   () => [props.pickupLocation, props.deliveryLocation],
   () => {
-    syncMapScene()
+    syncMapScene({ fitIfPointCountIncreases: true })
   },
   { deep: true },
+)
+
+watch(
+  () => props.panelCollapsed,
+  () => {
+    window.setTimeout(() => {
+      map?.resize()
+      syncMapScene({ fit: true })
+    }, 120)
+  },
+)
+
+watch(
+  () => props.trackOwnLocation,
+  async (shouldTrack) => {
+    if (shouldTrack) {
+      await startOwnLocationTracking()
+
+      if (trackingChannel && liveRiderLocation.value) {
+        await publishRiderLocation(liveRiderLocation.value)
+      }
+
+      return
+    }
+
+    stopOwnLocationTracking()
+  },
 )
 
 onMounted(async () => {
@@ -636,11 +813,13 @@ onMounted(async () => {
 
   await Promise.all([subscribeToTracking(), initMap()])
   await startOwnLocationTracking()
+  window.addEventListener('resize', handleWindowResize)
 })
 
 onUnmounted(async () => {
   if (routeRefreshTimeout) window.clearTimeout(routeRefreshTimeout)
   if (heartbeatInterval) window.clearInterval(heartbeatInterval)
+  window.removeEventListener('resize', handleWindowResize)
 
   stopOwnLocationTracking()
 
@@ -669,25 +848,60 @@ onUnmounted(async () => {
 </script>
 
 <template>
-  <section class="tracking-card" :class="{ 'tracking-card--fullscreen': fullscreen }">
+  <section
+    class="tracking-card"
+    :class="{
+      'tracking-card--fullscreen': fullscreen,
+      'tracking-card--panel-collapsed': panelCollapsed,
+    }"
+  >
     <div class="tracking-stage">
       <div class="tracking-stage__map">
-        <div ref="mapContainer" class="tracking-map"></div>
+        <div class="tracking-stage__map-frame">
+          <div ref="mapContainer" class="tracking-map"></div>
 
-        <div v-if="mapLoading" class="tracking-overlay">
-          <v-progress-circular indeterminate color="#2f7de1" size="42" />
-          <p>Preparing the tracking map...</p>
+          <div v-if="mapLoading" class="tracking-overlay">
+            <v-progress-circular indeterminate color="#2f7de1" size="42" />
+            <p>Preparing the tracking map...</p>
+          </div>
+
+          <div v-if="fullscreen" class="tracking-map-floating-actions">
+            <v-btn
+              color="white"
+              variant="elevated"
+              size="small"
+              class="tracking-map-floating-btn"
+              :disabled="!canFitMap"
+              @click="fitToAllPoints"
+            >
+              <v-icon start size="16">mdi-fit-to-screen-outline</v-icon>
+              Fit map
+            </v-btn>
+          </div>
         </div>
 
-        <div class="tracking-map-actions">
+        <div v-if="!fullscreen" class="tracking-map-actions">
           <v-btn
-            size="small"
-            color="white"
+            v-if="showFullscreenButton"
+            color="primary"
             variant="flat"
-            class="tracking-map-action"
+            size="large"
+            class="tracking-map-action tracking-map-action--primary"
+            @click="emit('open-fullscreen')"
+          >
+            <v-icon start size="18">mdi-map-search-outline</v-icon>
+            {{ fullscreenButtonLabel }}
+          </v-btn>
+
+          <v-btn
+            color="primary"
+            variant="tonal"
+            size="large"
+            class="tracking-map-action tracking-map-action--secondary"
+            :disabled="!canFitMap"
             @click="fitToAllPoints"
           >
-            <v-icon start size="16">mdi-fit-to-page-outline</v-icon>
+            <v-icon start size="18">mdi-fit-to-screen-outline</v-icon>
             Fit map
           </v-btn>
         </div>
@@ -728,7 +942,10 @@ onUnmounted(async () => {
             v-for="card in locationCards"
             :key="card.key"
             class="tracking-location"
-            :class="[`tracking-location--${card.tone}`, { 'tracking-location--disabled': !card.location }]"
+            :class="[
+              `tracking-location--${card.tone}`,
+              { 'tracking-location--disabled': !card.location },
+            ]"
             type="button"
             :disabled="!card.location"
             @click="focusPoint(card.key as 'rider' | 'pickup' | 'delivery')"
@@ -756,21 +973,6 @@ onUnmounted(async () => {
         >
           {{ mapError }}
         </v-alert>
-
-        <div class="tracking-actions">
-          <v-btn variant="outlined" color="primary" size="small" @click="fitToAllPoints">
-            Recenter map
-          </v-btn>
-          <v-btn
-            v-if="showExpandAction"
-            color="primary"
-            size="small"
-            variant="flat"
-            @click="emit('expand')"
-          >
-            {{ expandActionLabel }}
-          </v-btn>
-        </div>
       </div>
     </div>
   </section>
@@ -789,7 +991,37 @@ onUnmounted(async () => {
 }
 
 .tracking-card--fullscreen {
-  min-height: calc(100dvh - 120px);
+  height: 100%;
+  min-height: 0;
+  border-radius: 0;
+  border: 0;
+  box-shadow: none;
+}
+
+.tracking-card--fullscreen .tracking-stage {
+  min-height: 100%;
+}
+
+.tracking-card--fullscreen .tracking-stage__map,
+.tracking-card--fullscreen .tracking-map {
+  min-height: 100%;
+}
+
+.tracking-card--fullscreen .tracking-panel {
+  max-height: 100%;
+  overflow: auto;
+  background: rgba(255, 255, 255, 0.94);
+  backdrop-filter: blur(18px);
+  border-left: 1px solid rgba(53, 77, 124, 0.08);
+  padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+}
+
+.tracking-card--panel-collapsed .tracking-stage {
+  grid-template-columns: 1fr;
+}
+
+.tracking-card--panel-collapsed .tracking-panel {
+  display: none;
 }
 
 .tracking-stage {
@@ -799,9 +1031,15 @@ onUnmounted(async () => {
 }
 
 .tracking-stage__map {
+  display: flex;
+  flex-direction: column;
+  background: #dbe7f8;
+}
+
+.tracking-stage__map-frame {
   position: relative;
   min-height: 360px;
-  background: #dbe7f8;
+  flex: 1 1 auto;
 }
 
 .tracking-map {
@@ -824,14 +1062,41 @@ onUnmounted(async () => {
 }
 
 .tracking-map-actions {
+  display: flex;
+  gap: 12px;
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border-top: 1px solid rgba(53, 77, 124, 0.08);
+}
+
+.tracking-map-action {
+  flex: 1 1 0;
+  min-width: 0;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.tracking-map-action--primary {
+  box-shadow: 0 16px 30px rgba(47, 125, 225, 0.18);
+}
+
+.tracking-map-action--secondary {
+  color: #1f4f8a;
+}
+
+.tracking-map-floating-actions {
   position: absolute;
   left: 16px;
   bottom: 16px;
   z-index: 3;
 }
 
-.tracking-map-action {
-  box-shadow: 0 12px 24px rgba(18, 48, 79, 0.16);
+.tracking-map-floating-btn {
+  font-weight: 700;
+  text-transform: none;
+  color: #12304f !important;
+  box-shadow: 0 14px 30px rgba(18, 48, 79, 0.18);
 }
 
 .tracking-panel {
@@ -1024,15 +1289,14 @@ onUnmounted(async () => {
   margin: 0;
 }
 
-.tracking-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
 :deep(.mapboxgl-ctrl-top-right) {
   top: 12px;
   right: 12px;
+}
+
+:deep(.mapboxgl-ctrl-bottom-right) {
+  right: 12px;
+  bottom: 12px;
 }
 
 :deep(.mapboxgl-ctrl-group) {
@@ -1148,8 +1412,33 @@ onUnmounted(async () => {
   }
 
   .tracking-stage__map,
+  .tracking-stage__map-frame,
   .tracking-map {
     min-height: 340px;
+  }
+
+  .tracking-card--fullscreen .tracking-stage {
+    position: relative;
+    height: 100%;
+  }
+
+  .tracking-card--fullscreen .tracking-stage__map,
+  .tracking-card--fullscreen .tracking-stage__map-frame,
+  .tracking-card--fullscreen .tracking-map {
+    min-height: 100%;
+  }
+
+  .tracking-card--fullscreen:not(.tracking-card--panel-collapsed) .tracking-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 4;
+    max-height: min(46dvh, 460px);
+    border-left: 0;
+    border-top: 1px solid rgba(53, 77, 124, 0.08);
+    border-radius: 28px 28px 0 0;
+    box-shadow: 0 -18px 46px rgba(18, 48, 79, 0.18);
   }
 }
 
@@ -1184,8 +1473,23 @@ onUnmounted(async () => {
   }
 
   .tracking-stage__map,
+  .tracking-stage__map-frame,
   .tracking-map {
     min-height: 300px;
+  }
+
+  .tracking-card--fullscreen {
+    border-radius: 0;
+  }
+
+  .tracking-map-actions {
+    flex-direction: column;
+    padding: 12px;
+  }
+
+  .tracking-card--fullscreen:not(.tracking-card--panel-collapsed) .tracking-panel {
+    max-height: min(52dvh, 500px);
+    padding: 16px 16px calc(18px + env(safe-area-inset-bottom, 0px));
   }
 
   :deep(.tracking-marker__bubble) {

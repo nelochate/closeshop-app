@@ -9,24 +9,38 @@
             </v-btn>
 
             <div>
-              <p class="location-header__eyebrow">Rider navigation</p>
-              <h1>Delivery Route Map</h1>
-              <p class="location-header__subtext">
-                Keep the pickup point, your current position, and the customer address in one view.
+              <p class="location-header__eyebrow">
+                {{ fullScreenViewerMode === 'rider' ? 'Rider navigation' : 'Order tracking' }}
               </p>
+              <h1>Full-Screen Delivery Map</h1>
+              <p class="location-header__subtext">{{ headerSummary }}</p>
             </div>
           </div>
 
-          <v-btn
-            variant="flat"
-            color="white"
-            class="refresh-btn"
-            :loading="refreshing"
-            @click="refreshAllData"
-          >
-            <v-icon start size="16">mdi-refresh</v-icon>
-            Refresh
-          </v-btn>
+          <div class="location-header__actions">
+            <v-btn
+              variant="tonal"
+              color="white"
+              class="details-btn"
+              @click="showMapDetails = !showMapDetails"
+            >
+              <v-icon start size="16">
+                {{ showMapDetails ? 'mdi-eye-off-outline' : 'mdi-eye-outline' }}
+              </v-icon>
+              {{ showMapDetails ? 'Hide details' : 'Show details' }}
+            </v-btn>
+
+            <v-btn
+              variant="flat"
+              color="white"
+              class="refresh-btn"
+              :loading="refreshing"
+              @click="refreshAllData({ showRefreshing: true })"
+            >
+              <v-icon start size="16">mdi-refresh</v-icon>
+              Refresh
+            </v-btn>
+          </div>
         </div>
       </header>
 
@@ -38,74 +52,30 @@
       <div v-else-if="errorMessage" class="state-container">
         <v-icon size="64" color="error">mdi-alert-circle-outline</v-icon>
         <p>{{ errorMessage }}</p>
-        <v-btn color="primary" @click="refreshAllData">Try Again</v-btn>
+        <v-btn color="primary" @click="refreshAllData({ showLoader: true })">Try Again</v-btn>
       </div>
 
       <div v-else class="location-shell">
         <OrderTrackingMap
+          class="location-map"
           :order-id="String(orderId)"
           :pickup-location="pickupTrackingLocation"
           :delivery-location="deliveryTrackingLocation"
           :rider-location="persistedRiderTrackingLocation"
-          viewer-mode="rider"
+          :viewer-mode="fullScreenViewerMode"
           :track-own-location="shouldTrackOwnLocation"
           :fullscreen="true"
-          title="Live delivery route"
-          subtitle="The rider marker uses a standard pin here, while pickup and customer locations stay distinct for faster navigation."
+          :panel-collapsed="!showMapDetails"
+          :title="trackingTitle"
+          :subtitle="trackingSubtitle"
         />
-
-        <div class="detail-grid">
-          <v-card class="detail-card" rounded="xl">
-            <v-card-title class="detail-card__title">
-              <v-icon start>mdi-receipt-text-outline</v-icon>
-              Order snapshot
-            </v-card-title>
-            <v-card-text>
-              <div class="detail-row">
-                <span>Order</span>
-                <strong>{{ orderData?.transaction_number || orderData?.id?.slice(0, 8) }}</strong>
-              </div>
-              <div class="detail-row">
-                <span>Status</span>
-                <strong>{{ statusText }}</strong>
-              </div>
-              <div class="detail-row">
-                <span>Shop</span>
-                <strong>{{ orderData?.shop?.business_name || 'Unavailable' }}</strong>
-              </div>
-              <div class="detail-row">
-                <span>Customer</span>
-                <strong>{{ customerDisplayName }}</strong>
-              </div>
-            </v-card-text>
-          </v-card>
-
-          <v-card class="detail-card" rounded="xl">
-            <v-card-title class="detail-card__title">
-              <v-icon start>mdi-map-marker-multiple-outline</v-icon>
-              Route notes
-            </v-card-title>
-            <v-card-text>
-              <div class="route-note">
-                <span class="route-note__label">Pickup</span>
-                <strong>{{ pickupTrackingLocation?.name || 'Pickup point' }}</strong>
-                <p>{{ pickupTrackingLocation?.address || 'Pickup address unavailable' }}</p>
-              </div>
-              <div class="route-note">
-                <span class="route-note__label">Delivery</span>
-                <strong>{{ deliveryTrackingLocation?.name || 'Customer location' }}</strong>
-                <p>{{ deliveryTrackingLocation?.address || 'Customer address unavailable' }}</p>
-              </div>
-            </v-card-text>
-          </v-card>
-        </div>
       </div>
     </v-main>
   </v-app>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
@@ -127,6 +97,9 @@ const orderData = ref(null)
 const currentRiderNumericId = ref(null)
 const pickupTrackingLocation = ref(null)
 const deliveryTrackingLocation = ref(null)
+const showMapDetails = ref(typeof window === 'undefined' ? true : window.innerWidth > 1080)
+
+let orderSubscription = null
 
 const statusMap = {
   pending_approval: 'Pending approval',
@@ -138,7 +111,10 @@ const statusMap = {
   cancelled: 'Cancelled',
 }
 
-const statusText = computed(() => statusMap[orderData.value?.status] || orderData.value?.status || 'Unknown')
+const statusText = computed(
+  () => statusMap[orderData.value?.status] || orderData.value?.status || 'Unknown',
+)
+
 const customerDisplayName = computed(() =>
   getCustomerDisplayName({
     address: orderData.value?.address,
@@ -146,11 +122,52 @@ const customerDisplayName = computed(() =>
   }),
 )
 
+const orderReference = computed(
+  () => orderData.value?.transaction_number || orderData.value?.id?.slice(0, 8) || 'Pending',
+)
+
+const headerSummary = computed(() => {
+  if (!orderData.value) {
+    return 'Keep pickup, delivery, and the live rider location in one focused full-screen view.'
+  }
+
+  return [
+    `Order ${orderReference.value}`,
+    statusText.value,
+    orderData.value?.shop?.business_name || 'Shop unavailable',
+    customerDisplayName.value,
+  ]
+    .filter(Boolean)
+    .join(' • ')
+})
+
+const trackingTitle = computed(() => {
+  if (orderData.value?.status === 'picked_up') return 'Delivering to customer'
+  if (orderData.value?.status === 'accepted_by_rider') return 'Heading to pickup'
+  if (orderData.value?.status === 'waiting_for_rider') return 'Ready for rider pickup'
+  return 'Live delivery route'
+})
+
+const trackingSubtitle = computed(() => {
+  if (showMapDetails.value) {
+    return 'The live rider position, the pickup point, and the delivery address update automatically in one place.'
+  }
+
+  return 'Map-only mode keeps the route clear while live rider, pickup, and delivery markers continue updating.'
+})
+
+const fullScreenViewerMode = computed(() => {
+  if (currentRiderNumericId.value && orderData.value?.rider_id === currentRiderNumericId.value) {
+    return 'rider'
+  }
+
+  return 'customer'
+})
+
 const shouldTrackOwnLocation = computed(() => {
   return (
     !!currentRiderNumericId.value &&
-    orderData.value?.rider_id === currentRiderNumericId.value &&
-    ['accepted_by_rider', 'picked_up'].includes(orderData.value?.status)
+    !['delivered', 'completed', 'cancelled'].includes(orderData.value?.status)
   )
 })
 
@@ -222,6 +239,7 @@ const loadTrackingLocations = async (data) => {
   ]
     .filter(Boolean)
     .join(', ')
+
   const deliveryQuery = [
     address.house_no,
     address.building,
@@ -251,14 +269,16 @@ const loadTrackingLocations = async (data) => {
   })
 }
 
-const fetchOrderDetails = async () => {
-  loading.value = true
-  errorMessage.value = ''
-
+const fetchOrderDetails = async ({ silent = false } = {}) => {
   try {
+    if (!silent) {
+      errorMessage.value = ''
+    }
+
     const { data, error } = await supabase
       .from('orders')
-      .select(`
+      .select(
+        `
         *,
         user:profiles!orders_user_id_fkey (
           id,
@@ -291,7 +311,8 @@ const fetchOrderDetails = async () => {
           latitude,
           longitude
         )
-      `)
+      `,
+      )
       .eq('id', orderId)
       .single()
 
@@ -301,30 +322,83 @@ const fetchOrderDetails = async () => {
     await loadTrackingLocations(data)
   } catch (error) {
     console.error('Unable to load order route details:', error)
-    errorMessage.value = error.message || 'Failed to load route details.'
-  } finally {
-    loading.value = false
+
+    if (!silent) {
+      errorMessage.value = error.message || 'Failed to load route details.'
+    }
   }
 }
 
-const refreshAllData = async () => {
-  refreshing.value = true
+const subscribeToOrderUpdates = () => {
+  if (!orderId) return
+
+  if (orderSubscription) {
+    supabase.removeChannel(orderSubscription)
+  }
+
+  orderSubscription = supabase
+    .channel(`location-to-deliver-${orderId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'orders',
+        filter: `id=eq.${orderId}`,
+      },
+      async () => {
+        await fetchOrderDetails({ silent: true })
+      },
+    )
+    .subscribe()
+}
+
+const refreshAllData = async ({ showLoader = false, showRefreshing = false } = {}) => {
+  if (showLoader) {
+    loading.value = true
+    errorMessage.value = ''
+  }
+
+  if (showRefreshing) {
+    refreshing.value = true
+  }
 
   try {
-    await Promise.all([fetchCurrentRider(), fetchOrderDetails()])
+    await Promise.all([
+      fetchCurrentRider(),
+      fetchOrderDetails({ silent: !showLoader && !showRefreshing }),
+    ])
   } finally {
-    refreshing.value = false
+    if (showLoader) {
+      loading.value = false
+    }
+
+    if (showRefreshing) {
+      refreshing.value = false
+    }
   }
 }
 
 onMounted(async () => {
-  await refreshAllData()
+  await refreshAllData({ showLoader: true })
+  subscribeToOrderUpdates()
+})
+
+onUnmounted(() => {
+  if (orderSubscription) {
+    supabase.removeChannel(orderSubscription)
+    orderSubscription = null
+  }
 })
 </script>
 
 <style scoped>
 .location-page {
+  height: 100dvh;
   min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
   background:
     radial-gradient(circle at top left, rgba(47, 125, 225, 0.12), transparent 28%),
     linear-gradient(180deg, #edf4ff 0%, #f7f9fc 28%, #f4f6fb 100%);
@@ -334,6 +408,7 @@ onMounted(async () => {
   position: sticky;
   top: 0;
   z-index: 20;
+  flex-shrink: 0;
   padding-top: env(safe-area-inset-top, 0px);
   background: rgba(11, 37, 69, 0.92);
   backdrop-filter: blur(16px);
@@ -341,9 +416,9 @@ onMounted(async () => {
 }
 
 .location-header__inner {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 14px 18px 16px;
+  width: 100%;
+  padding: 14px max(18px, env(safe-area-inset-left, 0px)) 16px
+    max(18px, env(safe-area-inset-right, 0px));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -355,6 +430,12 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 14px;
+}
+
+.location-header__actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .header-icon-btn {
@@ -384,92 +465,39 @@ onMounted(async () => {
   font-size: 0.88rem;
 }
 
+.details-btn {
+  color: white !important;
+  font-weight: 700;
+  background: rgba(255, 255, 255, 0.12) !important;
+}
+
 .refresh-btn {
   color: #102a43 !important;
   font-weight: 700;
 }
 
 .state-container {
-  min-height: calc(100dvh - 220px);
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 14px;
   text-align: center;
-  padding: 32px 20px 120px;
+  padding: 32px 20px calc(32px + env(safe-area-inset-bottom, 0px));
   color: #12304f;
 }
 
 .location-shell {
-  max-width: 1280px;
-  margin: 0 auto;
-  padding: 20px 18px calc(28px + env(safe-area-inset-bottom, 0px));
+  flex: 1;
+  min-height: 0;
   display: flex;
-  flex-direction: column;
-  gap: 18px;
 }
 
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 16px;
-}
-
-.detail-card {
-  border: 1px solid rgba(53, 77, 124, 0.08);
-  box-shadow: 0 18px 42px rgba(18, 48, 79, 0.08);
-}
-
-.detail-card__title {
-  padding: 18px 18px 0;
-  color: #12304f;
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.detail-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 14px;
-  padding: 0 0 12px;
-  border-bottom: 1px solid rgba(18, 48, 79, 0.06);
-  color: #12304f;
-}
-
-.detail-row:last-child {
-  border-bottom: 0;
-  padding-bottom: 0;
-}
-
-.detail-row span {
-  color: #627d98;
-  font-weight: 600;
-}
-
-.route-note + .route-note {
-  margin-top: 16px;
-}
-
-.route-note__label {
-  display: block;
-  margin-bottom: 6px;
-  font-size: 0.74rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: #5276b0;
-}
-
-.route-note strong {
-  display: block;
-  color: #12304f;
-}
-
-.route-note p {
-  margin: 8px 0 0;
-  line-height: 1.5;
-  color: #52667d;
+.location-map {
+  flex: 1;
+  min-height: 0;
 }
 
 @media (max-width: 840px) {
@@ -478,14 +506,17 @@ onMounted(async () => {
     flex-direction: column;
   }
 
-  .detail-grid {
-    grid-template-columns: 1fr;
+  .location-header__actions {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
 @media (max-width: 600px) {
   .location-header__inner {
-    padding: 12px 14px 14px;
+    padding: 12px max(14px, env(safe-area-inset-left, 0px)) 14px
+      max(14px, env(safe-area-inset-right, 0px));
   }
 
   .location-header h1 {
@@ -496,13 +527,8 @@ onMounted(async () => {
     font-size: 0.8rem;
   }
 
-  .location-shell {
-    padding: 14px 12px calc(24px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .detail-row {
-    flex-direction: column;
-    gap: 4px;
+  .location-header__actions {
+    grid-template-columns: 1fr;
   }
 }
 </style>
