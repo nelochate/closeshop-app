@@ -58,6 +58,7 @@ const mapContainer = ref<HTMLElement | null>(null)
 const mapReady = ref(false)
 const mapLoading = ref(true)
 const mapError = ref<string | null>(null)
+const mapInitError = ref<string | null>(null)
 const routeLoading = ref(false)
 const routeSummary = ref<RouteSummary | null>(null)
 const liveRiderLocation = ref<TrackingLocation | null>(props.riderLocation)
@@ -87,6 +88,7 @@ const trackedPointCount = computed(
 )
 
 const canFitMap = computed(() => mapReady.value && trackedPointCount.value > 0)
+const displayedMapError = computed(() => mapInitError.value || mapError.value)
 
 const isRiderLocationFresh = computed(() => {
   const timestamp = resolvedRiderLocation.value?.updatedAt
@@ -146,6 +148,20 @@ const routeSummaryCards = computed(() => [
     icon: 'mdi-store-marker-outline',
   },
 ])
+
+const getWebGlUnavailableMessage = () =>
+  'Interactive map is unavailable on this device or browser because WebGL could not be started. Tracking details are still available below.'
+
+const isMapboxWebGlSupported = () => {
+  if (typeof window === 'undefined') return false
+
+  try {
+    return mapboxgl.supported()
+  } catch (error) {
+    console.error('Unable to verify Mapbox WebGL support:', error)
+    return false
+  }
+}
 
 const locationCards = computed(() => [
   {
@@ -613,7 +629,9 @@ const handleTrackedPosition = async (position: GeolocationPosition) => {
   }
 
   liveRiderLocation.value = location
-  mapError.value = null
+  if (!mapInitError.value) {
+    mapError.value = null
+  }
   syncMapScene({ fitIfPointCountIncreases: true })
   await publishRiderLocation(location)
 }
@@ -697,7 +715,13 @@ const initMap = async () => {
   if (!mapContainer.value) return
 
   if (!MAPBOX_ACCESS_TOKEN) {
-    mapError.value = 'Mapbox access token is missing.'
+    mapInitError.value = 'Mapbox access token is missing.'
+    mapLoading.value = false
+    return
+  }
+
+  if (!isMapboxWebGlSupported()) {
+    mapInitError.value = getWebGlUnavailableMessage()
     mapLoading.value = false
     return
   }
@@ -706,13 +730,30 @@ const initMap = async () => {
 
   await nextTick()
 
-  map = new mapboxgl.Map({
-    container: mapContainer.value,
-    style: 'mapbox://styles/mapbox/streets-v12',
-    center: [121.774, 12.8797],
-    zoom: 11,
-    attributionControl: false,
-  })
+  try {
+    map = new mapboxgl.Map({
+      container: mapContainer.value,
+      style: 'mapbox://styles/mapbox/streets-v12',
+      center: [121.774, 12.8797],
+      zoom: 11,
+      attributionControl: false,
+    })
+  } catch (error) {
+    console.error('Unable to initialize tracking map:', error)
+    mapInitError.value = getWebGlUnavailableMessage()
+    mapLoading.value = false
+
+    if (map) {
+      try {
+        map.remove()
+      } catch (removeError) {
+        console.error('Unable to clean up failed tracking map instance:', removeError)
+      }
+      map = null
+    }
+
+    return
+  }
 
   map.addControl(
     new mapboxgl.NavigationControl({
@@ -724,6 +765,7 @@ const initMap = async () => {
   map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-right')
 
   map.on('load', () => {
+    mapInitError.value = null
     mapReady.value = true
     mapLoading.value = false
     syncMapScene({ fit: true })
@@ -735,7 +777,29 @@ const initMap = async () => {
 
   map.on('error', (error) => {
     console.error('Tracking map error:', error)
-    mapError.value = 'Map failed to initialize.'
+
+    const errorMessage =
+      error && typeof error === 'object' && 'error' in error
+        ? String((error as { error?: { message?: string } }).error?.message || '')
+        : ''
+
+    if (!mapReady.value && /webgl/i.test(errorMessage)) {
+      mapInitError.value = getWebGlUnavailableMessage()
+      mapLoading.value = false
+
+      if (map) {
+        try {
+          map.remove()
+        } catch (removeError) {
+          console.error('Unable to clean up Mapbox after WebGL failure:', removeError)
+        }
+        map = null
+      }
+
+      return
+    }
+
+    mapError.value = 'Unable to refresh the interactive map right now.'
     mapLoading.value = false
   })
 }
@@ -865,6 +929,11 @@ onUnmounted(async () => {
             <p>Preparing the tracking map...</p>
           </div>
 
+          <div v-else-if="mapInitError" class="tracking-overlay tracking-overlay--error">
+            <v-icon size="42" color="#d97706">mdi-map-off</v-icon>
+            <p>{{ mapInitError }}</p>
+          </div>
+
           <div v-if="fullscreen" class="tracking-map-floating-actions">
             <v-btn
               color="white"
@@ -965,13 +1034,13 @@ onUnmounted(async () => {
         </div>
 
         <v-alert
-          v-if="mapError"
+          v-if="displayedMapError"
           type="warning"
           variant="tonal"
           density="comfortable"
           class="tracking-alert"
         >
-          {{ mapError }}
+          {{ displayedMapError }}
         </v-alert>
       </div>
     </div>
@@ -1059,6 +1128,20 @@ onUnmounted(async () => {
   background: rgba(255, 255, 255, 0.75);
   border-radius: 20px;
   backdrop-filter: blur(12px);
+}
+
+.tracking-overlay--error {
+  padding: 24px;
+  align-content: center;
+  background: rgba(255, 248, 235, 0.92);
+  border: 1px solid rgba(217, 119, 6, 0.18);
+}
+
+.tracking-overlay--error p {
+  max-width: 440px;
+  margin: 0;
+  font-size: 0.94rem;
+  line-height: 1.5;
 }
 
 .tracking-map-actions {

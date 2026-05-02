@@ -2,6 +2,11 @@
 import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import {
+  calculateOrderItemsSubtotal,
+  calculateOrderTotalAmount,
+  resolveOrderDeliveryFee,
+} from '@/utils/deliveryPricing.js'
 
 interface AddressRecord {
   id?: string
@@ -37,6 +42,7 @@ interface ShopRecord {
 interface OrderRecord {
   id: string
   transaction_number?: string | null
+  delivery_fee?: number | null
   total_amount?: number | null
   status?: string | null
   payment_method?: string | null
@@ -238,11 +244,11 @@ const getStatusColor = (value?: string | null) => {
   return 'primary'
 }
 
-const totalAmount = computed(() => Number(order.value?.total_amount ?? 0))
-const subtotal = computed(() =>
-  items.value.reduce((sum, item) => sum + Number(item.price) * Number(item.quantity), 0),
+const subtotal = computed(() => calculateOrderItemsSubtotal(items.value))
+const deliveryFee = computed(() => resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value))
+const totalAmount = computed(() =>
+  Number(order.value?.total_amount ?? calculateOrderTotalAmount(subtotal.value, deliveryFee.value)),
 )
-const deliveryFee = computed(() => Math.max(0, totalAmount.value - subtotal.value))
 
 const buyerName = computed(() => getRecipientName(order.value?.address, order.value?.buyer))
 const buyerPhone = computed(
@@ -284,16 +290,7 @@ const loadOrderDetails = async () => {
       supabase
         .from('orders')
         .select(`
-          id,
-          transaction_number,
-          total_amount,
-          status,
-          payment_method,
-          delivery_option,
-          delivery_date,
-          delivery_time,
-          note,
-          created_at,
+          *,
           address:addresses!orders_address_id_fkey (
             id,
             recipient_name,

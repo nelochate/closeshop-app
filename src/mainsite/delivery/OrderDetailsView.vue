@@ -159,6 +159,20 @@
                   <span class="field-label">Order Date:</span>
                   <span class="field-value">{{ formatDateTime(order.created_at) }}</span>
                 </div>
+                <div class="payment-field" v-if="riderPayQuote && riderPayQuote.distanceKm !== null">
+                  <span class="field-label">Route:</span>
+                  <span class="field-value">{{
+                    formatRiderDistanceLabel(riderPayQuote.distanceKm)
+                  }}</span>
+                </div>
+                <div class="payment-field" v-if="riderPayQuote">
+                  <span class="field-label">Rider Pay:</span>
+                  <span class="field-value">
+                    {{ riderPayQuote.isEstimated ? 'Estimated ' : '' }}{{
+                      formatPhpAmount(riderPayQuote.totalPay)
+                    }}
+                  </span>
+                </div>
               </div>
             </v-card-text>
           </v-card>
@@ -425,6 +439,15 @@ import {
   extractPersistedRiderCoordinates,
   resolveTrackingLocation,
 } from '@/utils/orderTracking'
+import {
+  formatPhpAmount,
+  formatRiderDistanceLabel,
+  resolveOrderRiderEarningsQuote,
+} from '@/utils/riderEarnings.js'
+import {
+  calculateOrderItemsSubtotal,
+  resolveOrderDeliveryFee,
+} from '@/utils/deliveryPricing.js'
 
 const router = useRouter()
 const route = useRoute()
@@ -467,6 +490,8 @@ const formatDateTime = (dateString) => {
     year: 'auto',
   })
 }
+
+const riderPayQuote = computed(() => resolveOrderRiderEarningsQuote(order.value))
 
 const proofOfDeliveryUrl = computed(
   () => order.value?.proof_of_delivery_url || order.value?.delivery_proof_url || '',
@@ -751,8 +776,14 @@ const fetchOrderDetails = async () => {
         }
       })
 
-      const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-      const deliveryFee = data.total_amount - subtotal
+      const subtotal = calculateOrderItemsSubtotal(items)
+      const deliveryFee = resolveOrderDeliveryFee({
+        ...data,
+        pickup_lat: shop.latitude,
+        pickup_lng: shop.longitude,
+        delivery_lat: address.latitude,
+        delivery_lng: address.longitude,
+      }, undefined, subtotal)
 
       order.value = await ensureOrderAutoCompletionUpToDate({
         ...data,
@@ -1068,7 +1099,6 @@ const confirmUpdateStatus = async () => {
       updateData.picked_up_at = statusTimestamp
     } else if (statusToApply === 'delivered') {
       updateData.delivered_at = statusTimestamp
-      updateData.rider_earnings = Math.round((order.value.delivery_fee || 0) * 0.8)
     }
 
     const expectedCurrentStatus = statusToApply === 'picked_up' ? 'accepted_by_rider' : 'picked_up'

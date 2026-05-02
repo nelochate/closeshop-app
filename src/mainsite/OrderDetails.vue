@@ -19,6 +19,11 @@ import {
   type TrackingLocation,
   type TrackingViewerMode,
 } from '@/utils/orderTracking'
+import {
+  calculateOrderItemsSubtotal,
+  calculateOrderTotalAmount,
+  resolveOrderDeliveryFee,
+} from '@/utils/deliveryPricing.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -370,15 +375,16 @@ const loadTrackingLocations = async () => {
 
 // Computed properties
 const subtotal = computed(() => {
-  return orderItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
+  return calculateOrderItemsSubtotal(orderItems.value)
 })
 
 const deliveryFee = computed(() => {
-  const total = Number(order.value?.total_amount ?? subtotal.value)
-  return Math.max(0, total - subtotal.value)
+  return resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value)
 })
 
-const totalAmount = computed(() => order.value?.total_amount || subtotal.value)
+const totalAmount = computed(() =>
+  Number(order.value?.total_amount ?? calculateOrderTotalAmount(subtotal.value, deliveryFee.value)),
+)
 
 const shopDisplayName = computed(() => shop.value?.business_name || 'Shop unavailable')
 const orderReferenceText = computed(() => {
@@ -1082,7 +1088,6 @@ const markAsDelivered = async () => {
       delivered_at: deliveredAt,
       delivery_proof_url: proofImageUrl,
       updated_at: deliveredAt,
-      rider_earnings: Math.round((deliveryFee.value || 0) * 0.8),
     }
     const { data, error } = await supabase
       .from('orders')

@@ -4,6 +4,18 @@ import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime, getAppTimestampValue, parseAppTimestamp } from '@/utils/dateTime'
+import {
+  buildRiderEarningsRecordsFromOrders,
+  clearRiderEarningsLedgerMissingMark,
+  formatPhpAmount,
+  formatRiderDistanceLabel,
+  isMissingRiderEarningsTableError,
+  isRiderEarningsLedgerMarkedMissing,
+  markRiderEarningsLedgerMissing,
+  resolveOrderDeliveryDistanceKm,
+  resolveOrderRiderEarningsQuote,
+} from '@/utils/riderEarnings.js'
+import { calculateOrderItemsSubtotal, resolveOrderDeliveryFee } from '@/utils/deliveryPricing.js'
 
 const router = useRouter()
 
@@ -21,6 +33,9 @@ const locationWatchId = ref(null)
 // Orders data
 const orders = ref([])
 const ordersSubscription = ref(null)
+const earningsRecords = ref([])
+const earningsSubscription = ref(null)
+const usingOrdersEarningsFallback = ref(false)
 
 // Get current rider info
 const currentRider = ref(null)
@@ -153,10 +168,10 @@ const stats = computed(() => ({
   completedToday: completedOrders.value.filter((order) => {
     return isSameLocalDay(getOrderActivityTimestamp(order), currentTime.value)
   }).length,
-  totalEarnings: [...deliveredOrders.value, ...completedOrders.value].reduce(
-    (sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0),
-    0,
-  ),
+  todayEarnings: earningsRecords.value
+    .filter((record) => isSameLocalDay(record.earned_at, currentTime.value))
+    .reduce((sum, record) => sum + Number(record.amount || 0), 0),
+  totalEarnings: earningsRecords.value.reduce((sum, record) => sum + Number(record.amount || 0), 0),
 }))
 
 // Get filtered orders based on active filter
@@ -196,6 +211,123 @@ const formatOrderDateTime = (order) => {
     month: 'short',
     year: 'auto',
   })
+}
+
+function getOrderPayQuote(order) {
+  return resolveOrderRiderEarningsQuote(order)
+}
+
+function getPickupDistanceLabel(order) {
+  if (order?.pickup_distance_from_rider_km === null || order?.pickup_distance_from_rider_km === undefined) {
+    return ''
+  }
+
+  return formatRiderDistanceLabel(order.pickup_distance_from_rider_km)
+}
+
+function getDeliveryDistanceLabel(order) {
+  const distanceKm = resolveOrderDeliveryDistanceKm(order)
+
+  if (distanceKm === null) return ''
+
+  return formatRiderDistanceLabel(distanceKm)
+}
+
+const fetchEarningsRecords = async () => {
+  if (!currentRiderNumericId.value) {
+    earningsRecords.value = []
+    return
+  }
+
+  if (isRiderEarningsLedgerMarkedMissing()) {
+    await fetchFallbackEarningsRecords()
+    return
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('rider_earnings')
+      .select(
+        `
+        id,
+        order_id,
+        rider_id,
+        amount,
+        base_pay,
+        additional_distance_km,
+        additional_pay,
+        delivery_distance_km,
+        pay_rule,
+        status,
+        earned_at,
+        paid_at,
+        created_at,
+        order:orders!rider_earnings_order_id_fkey (
+          id,
+          transaction_number,
+          status
+        )
+      `,
+      )
+      .eq('rider_id', currentRiderNumericId.value)
+      .order('earned_at', { ascending: false })
+
+    if (error) {
+      if (isMissingRiderEarningsTableError(error)) {
+        markRiderEarningsLedgerMissing()
+        console.warn(
+          'rider_earnings table is not available in this Supabase project yet. Falling back to completed orders.',
+        )
+        await fetchFallbackEarningsRecords()
+        return
+      }
+
+      throw error
+    }
+
+    clearRiderEarningsLedgerMissingMark()
+    usingOrdersEarningsFallback.value = false
+    earningsRecords.value = (data || []).map((record) => ({
+      ...record,
+      amount: Number(record.amount || 0),
+      base_pay: Number(record.base_pay || 0),
+      additional_pay: Number(record.additional_pay || 0),
+      delivery_distance_km: Number(record.delivery_distance_km || 0),
+      additional_distance_km: Number(record.additional_distance_km || 0),
+    }))
+  } catch (error) {
+    console.error('Error fetching rider earnings:', error)
+    earningsRecords.value = []
+  }
+}
+
+const fetchFallbackEarningsRecords = async () => {
+  const { data, error } = await supabase
+    .from('orders')
+    .select(
+      `
+      *,
+      shop:shop_id (
+        latitude,
+        longitude
+      ),
+      address:address_id (
+        latitude,
+        longitude
+      )
+    `,
+    )
+    .eq('rider_id', currentRiderNumericId.value)
+    .or('completed_at.not.is.null,delivered_at.not.is.null,status.eq.completed')
+    .order('updated_at', { ascending: false })
+
+  if (error) throw error
+
+  usingOrdersEarningsFallback.value = true
+  earningsRecords.value = buildRiderEarningsRecordsFromOrders(
+    data || [],
+    currentRiderNumericId.value,
+  )
 }
 
 // Check rider approval status
@@ -323,7 +455,7 @@ const filterOrdersByDistance = (lat, lng) => {
   orders.value = orders.value.map((order) => {
     if (order.pickup_lat && order.pickup_lng) {
       const distance = calculateDistance(lat, lng, order.pickup_lat, order.pickup_lng)
-      return { ...order, distance: distance.toFixed(1) }
+      return { ...order, pickup_distance_from_rider_km: Number(distance.toFixed(2)) }
     }
     return order
   })
@@ -401,7 +533,9 @@ const fetchOrders = async () => {
           house_no,
           barangay_name,
           city_name,
-          province_name
+          province_name,
+          latitude,
+          longitude
         )
       `,
       )
@@ -455,10 +589,8 @@ const fetchOrders = async () => {
           }
         })
 
-        const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0)
-        const deliveryFee = order.total_amount - subtotal
-
-        return {
+        const subtotal = calculateOrderItemsSubtotal(items)
+        const hydratedOrder = {
           ...order,
           pickup_address: pickupAddress,
           delivery_address: deliveryAddress,
@@ -467,10 +599,24 @@ const fetchOrders = async () => {
           shop_name: shop.business_name || 'Shop',
           pickup_lat: shop.latitude,
           pickup_lng: shop.longitude,
+          delivery_lat: address.latitude,
+          delivery_lng: address.longitude,
           items: items,
           subtotal: subtotal,
-          delivery_fee: deliveryFee,
+          delivery_fee: resolveOrderDeliveryFee({
+            ...order,
+            pickup_lat: shop.latitude,
+            pickup_lng: shop.longitude,
+            delivery_lat: address.latitude,
+            delivery_lng: address.longitude,
+          }, undefined, subtotal),
           product_summary: items.map((item) => `${item.name} (x${item.quantity})`).join(', '),
+        }
+
+        return {
+          ...hydratedOrder,
+          delivery_distance_km:
+            order.delivery_distance_km ?? resolveOrderDeliveryDistanceKm(hydratedOrder),
         }
       })
 
@@ -504,14 +650,41 @@ const subscribeToOrders = () => {
       async () => {
         currentTime.value = Date.now()
         await fetchOrders()
+        if (usingOrdersEarningsFallback.value) {
+          await fetchFallbackEarningsRecords()
+        }
+      },
+    )
+    .subscribe()
+}
+
+const subscribeToEarnings = () => {
+  if (!currentRiderNumericId.value || usingOrdersEarningsFallback.value) return
+
+  if (earningsSubscription.value) {
+    supabase.removeChannel(earningsSubscription.value)
+  }
+
+  earningsSubscription.value = supabase
+    .channel(`rider-earnings-${currentRiderNumericId.value}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'rider_earnings',
+        filter: `rider_id=eq.${currentRiderNumericId.value}`,
+      },
+      async () => {
+        await fetchEarningsRecords()
       },
     )
     .subscribe()
 }
 
 // Refresh orders
-const refreshOrders = () => {
-  fetchOrders()
+const refreshOrders = async () => {
+  await Promise.all([fetchOrders(), fetchEarningsRecords()])
 }
 
 // Navigate to order details
@@ -521,6 +694,10 @@ const viewOrderDetails = (order) => {
 
 const goToRiderLocation = () => {
   router.push('/RiderLocation')
+}
+
+const goToRiderEarnings = () => {
+  router.push({ name: 'rider-earnings' })
 }
 
 const handleImageError = (event) => {
@@ -543,16 +720,20 @@ onMounted(async () => {
 
   await checkRiderApproval()
   if (isApproved.value && currentRiderNumericId.value) {
-    await fetchOrders()
+    await Promise.all([fetchOrders(), fetchEarningsRecords()])
     getCurrentLocation()
     startWatchingLocation()
     subscribeToOrders()
+    subscribeToEarnings()
   }
 })
 
 onUnmounted(() => {
   if (ordersSubscription.value) {
     supabase.removeChannel(ordersSubscription.value)
+  }
+  if (earningsSubscription.value) {
+    supabase.removeChannel(earningsSubscription.value)
   }
   if (currentTimeInterval) {
     clearInterval(currentTimeInterval)
@@ -692,12 +873,22 @@ onUnmounted(() => {
         </v-card>
 
         <!-- Earnings Card -->
-        <v-card class="stat-card" elevation="0">
+        <v-card
+          class="stat-card stat-card--earnings stat-card--interactive"
+          elevation="0"
+          role="button"
+          tabindex="0"
+          aria-label="View rider earnings statement"
+          @click="goToRiderEarnings"
+          @keydown.enter.prevent="goToRiderEarnings"
+          @keydown.space.prevent="goToRiderEarnings"
+        >
           <div class="stat-content">
             <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
             <div class="stat-info">
-              <div class="stat-value">{{ stats.totalEarnings.toLocaleString() }}</div>
+              <div class="stat-value">{{ formatPhpAmount(stats.totalEarnings) }}</div>
               <div class="stat-label">Total Earnings</div>
+              <div class="stat-caption">Today {{ formatPhpAmount(stats.todayEarnings) }}</div>
             </div>
           </div>
         </v-card>
@@ -856,13 +1047,22 @@ onUnmounted(() => {
             </div>
 
             <div class="order-footer">
-              <div class="order-distance" v-if="order.distance">
-                <v-icon size="14">mdi-map-marker-distance</v-icon>
-                {{ order.distance }} km
+              <div class="order-metrics">
+                <div class="order-distance" v-if="getPickupDistanceLabel(order)">
+                  <v-icon size="14">mdi-crosshairs-gps</v-icon>
+                  Pickup {{ getPickupDistanceLabel(order) }}
+                </div>
+                <div class="order-distance" v-if="getDeliveryDistanceLabel(order)">
+                  <v-icon size="14">mdi-map-marker-path</v-icon>
+                  Route {{ getDeliveryDistanceLabel(order) }}
+                </div>
               </div>
-              <div class="order-earnings" v-if="order.rider_earnings">
-                <v-icon size="14" color="#4caf50">mdi-cash</v-icon>
-                ₱{{ order.rider_earnings }}
+              <div class="order-earnings" v-if="getOrderPayQuote(order)">
+                <span class="order-earnings__label">
+                  {{ getOrderPayQuote(order).isEstimated ? 'Est. Pay' : 'Earned' }}
+                </span>
+                <strong>{{ formatPhpAmount(getOrderPayQuote(order).totalPay) }}</strong>
+                <span class="order-earnings__tier">{{ getOrderPayQuote(order).tierLabel }}</span>
               </div>
             </div>
           </v-card>
@@ -971,6 +1171,21 @@ onUnmounted(() => {
   transition: all 0.3s ease;
 }
 
+.stat-card--earnings {
+  background: linear-gradient(135deg, #fff8ef 0%, #ffffff 100%);
+  border: 1px solid rgba(255, 152, 0, 0.14);
+}
+
+.stat-card--interactive:focus-visible,
+.stat-card--interactive:hover {
+  border-color: rgba(217, 119, 6, 0.35);
+}
+
+.stat-card--interactive:active {
+  transform: translateY(0);
+  box-shadow: 0 10px 24px rgba(217, 119, 6, 0.18);
+}
+
 .stat-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
@@ -998,6 +1213,13 @@ onUnmounted(() => {
 .stat-label {
   font-size: 0.75rem;
   color: #666;
+}
+
+.stat-caption {
+  margin-top: 4px;
+  font-size: 0.72rem;
+  color: #8a5c00;
+  font-weight: 600;
 }
 
 /* Orders List */
@@ -1266,9 +1488,16 @@ onUnmounted(() => {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
   padding: 12px 16px;
   background: #f8fafc;
   border-top: 1px solid #eee;
+}
+
+.order-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
 }
 
 .order-amount {
@@ -1289,12 +1518,30 @@ onUnmounted(() => {
 }
 
 .order-earnings {
-  font-size: 0.75rem;
-  color: #4caf50;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  font-weight: 500;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  color: #2e7d32;
+  font-size: 0.75rem;
+}
+
+.order-earnings__label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5276b0;
+}
+
+.order-earnings strong {
+  font-size: 0.98rem;
+  line-height: 1.1;
+}
+
+.order-earnings__tier {
+  color: #5f6f82;
+  font-weight: 600;
 }
 
 .empty-state {
@@ -1453,6 +1700,15 @@ onUnmounted(() => {
   .order-products {
     margin: 4px 12px;
     padding: 6px 12px;
+  }
+
+  .order-footer {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .order-earnings {
+    align-items: flex-start;
   }
 }
 

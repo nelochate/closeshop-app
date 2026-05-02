@@ -2,6 +2,10 @@
 import express from 'express'
 import fetch from 'node-fetch'
 import cors from 'cors'
+import {
+  calculateHaversineDistanceKm,
+  calculateRiderBasePayQuote,
+} from './src/utils/riderEarnings.js'
 
 const app = express()
 const PORT = 3000
@@ -21,9 +25,9 @@ app.get('/api/geocode', async (req, res) => {
       {
         headers: {
           'User-Agent': 'YourAppName/1.0 (your@email.com)',
-          'Accept': 'application/json'
-        }
-      }
+          Accept: 'application/json',
+        },
+      },
     )
     const data = await response.json()
     res.json(data)
@@ -33,7 +37,7 @@ app.get('/api/geocode', async (req, res) => {
   }
 })
 
-// ADD THIS ENDPOINT: Reverse geocoding (coordinates to address)
+// Reverse geocoding (coordinates to address)
 app.get('/api/reverse-geocode', async (req, res) => {
   const { lat, lon } = req.query
   console.log('Reverse geocoding request for:', lat, lon)
@@ -46,9 +50,9 @@ app.get('/api/reverse-geocode', async (req, res) => {
       {
         headers: {
           'User-Agent': 'YourAppName/1.0 (your@email.com)',
-          'Accept': 'application/json'
-        }
-      }
+          Accept: 'application/json',
+        },
+      },
     )
 
     if (!response.ok) {
@@ -64,10 +68,42 @@ app.get('/api/reverse-geocode', async (req, res) => {
   }
 })
 
+// Rider earnings quote endpoint
+app.get('/api/rider-earnings', (req, res) => {
+  const distanceKmQuery = req.query.distanceKm ?? req.query.distance_km
+  const pickupLat = req.query.pickupLat ?? req.query.pickup_lat
+  const pickupLng = req.query.pickupLng ?? req.query.pickup_lng
+  const deliveryLat = req.query.deliveryLat ?? req.query.delivery_lat
+  const deliveryLng = req.query.deliveryLng ?? req.query.delivery_lng
+  const resolvedDistanceKm =
+    distanceKmQuery ??
+    calculateHaversineDistanceKm(pickupLat, pickupLng, deliveryLat, deliveryLng)
+  const quote = calculateRiderBasePayQuote(resolvedDistanceKm)
+
+  if (!quote) {
+    return res.status(400).json({
+      error: 'Provide either distanceKm or pickup/delivery coordinates.',
+      examples: [
+        '/api/rider-earnings?distanceKm=12',
+        '/api/rider-earnings?pickupLat=8.95&pickupLng=125.53&deliveryLat=8.97&deliveryLng=125.56',
+      ],
+    })
+  }
+
+  return res.json({
+    ...quote,
+    source: distanceKmQuery !== null && distanceKmQuery !== undefined ? 'distance' : 'coordinates',
+  })
+})
+
 // Start the server
 app.listen(PORT, () => {
-  console.log(`✅ Proxy server running on http://localhost:${PORT}`)
-  console.log(`✅ Available endpoints:`)
-  console.log(`   - GET /api/geocode?q=address`)
-  console.log(`   - GET /api/reverse-geocode?lat=latitude&lon=longitude`)
+  console.log(`Proxy server running on http://localhost:${PORT}`)
+  console.log('Available endpoints:')
+  console.log('   - GET /api/geocode?q=address')
+  console.log('   - GET /api/reverse-geocode?lat=latitude&lon=longitude')
+  console.log('   - GET /api/rider-earnings?distanceKm=12')
+  console.log(
+    '   - GET /api/rider-earnings?pickupLat=8.95&pickupLng=125.53&deliveryLat=8.97&deliveryLng=125.56',
+  )
 })

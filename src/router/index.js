@@ -245,6 +245,12 @@ const routes = [
     meta: { requiresAuth: true }
   },
    {
+    path: '/rider-earnings',
+    name: 'rider-earnings',
+    component:() => import('@/mainsite/delivery/RiderEarningsView.vue'),
+    meta: { requiresAuth: true }
+  },
+   {
     path: '/RiderLocation',
     name: 'RiderLocation',
     component:() => import('@/mainsite/delivery/RiderLocation.vue'),
