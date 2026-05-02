@@ -884,7 +884,7 @@ onUnmounted(() => {
   top: 0;
   z-index: 100;
   padding-top: env(safe-area-inset-top, 0px);
-  background: linear-gradient(135deg, #3f83c7, #2f6ca9);
+  background: rgba(11, 37, 69, 0.92);
   color: white;
   box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
 }
@@ -922,7 +922,6 @@ onUnmounted(() => {
 .menu-btn,
 .location-btn {
   color: white !important;
-  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 .page-title {

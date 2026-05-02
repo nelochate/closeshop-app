@@ -1967,7 +1967,7 @@ onMounted(async () => {
   top: 0;
   z-index: 20;
   padding-top: env(safe-area-inset-top, 0px);
-  background: linear-gradient(135deg, #3f83c7, #2f6ca9);
+  background: rgba(11, 37, 69, 0.92);
   box-shadow: 0 12px 28px rgba(20, 44, 73, 0.16);
 }
 
@@ -1989,7 +1989,6 @@ onMounted(async () => {
 
 .header-icon-btn {
   color: white !important;
-  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 .order-header h1 {
