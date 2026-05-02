@@ -74,6 +74,16 @@ const fetchConversations = async () => {
 
     console.log('📋 Current profile:', currentProfile)
 
+    const { data: currentUserShop, error: currentUserShopError } = await supabase
+      .from('shops')
+      .select('id, business_name, logo_url, owner_id')
+      .eq('owner_id', currentProfile.id)
+      .maybeSingle()
+
+    if (currentUserShopError) {
+      console.error('❌ Error fetching current user shop:', currentUserShopError)
+    }
+
     // First, fetch conversations without messages to avoid the relationship conflict
     const { data: conversationsData, error: convError } = await supabase
       .from('conversations')
@@ -151,7 +161,7 @@ const fetchConversations = async () => {
         // Get shop info for the other user (if they are a seller)
         const { data: shop } = await supabase
           .from('shops')
-          .select('business_name, logo_url, owner_id')
+          .select('id, business_name, logo_url, owner_id')
           .eq('owner_id', otherProfileId) // Shop owner_id should match profile id
           .maybeSingle()
 
@@ -159,8 +169,12 @@ const fetchConversations = async () => {
 
         const viewerRole = resolveConversationViewerRole({
           currentUserId: currentProfile.id,
+          otherUserId: otherProfileId,
           customerUserId: conv.user1,
           sellerUserId: conv.user2,
+          currentUserShop,
+          otherUserShop: shop,
+          messages,
         })
 
         // Determine display name and avatar

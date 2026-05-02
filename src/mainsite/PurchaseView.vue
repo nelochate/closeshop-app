@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { removeRecentMessageNotification } from '@/utils/chatNotifications'
+import { syncProfileFromAuthUser } from '@/utils/profileSync'
 
 const route = useRoute()
 const router = useRouter()
@@ -2135,12 +2136,25 @@ const getOrCreateProfile = async (userId: string) => {
     // If profile doesn't exist, create one
     console.log('📝 Creating new profile for user:', userId)
 
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser()
+
+    if (authUser?.id === userId) {
+      const syncedProfile = await syncProfileFromAuthUser({
+        user: authUser,
+        defaultRole: 'customer',
+      })
+
+      if (syncedProfile) {
+        return syncedProfile
+      }
+    }
+
     const { data: newProfile, error: createError } = await supabase
       .from('profiles')
       .insert({
         id: userId,
-        first_name: 'User',
-        last_name: 'Profile',
         role: 'customer',
         created_at: new Date().toISOString(),
       })

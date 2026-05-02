@@ -1155,7 +1155,7 @@ const confirmOrderReceived = async () => {
     const { data, error } = await supabase
       .from('orders')
       .update({
-        status: 'completed',
+        status: 'delivered',
         completed_at: completedAt,
         updated_at: completedAt,
       })

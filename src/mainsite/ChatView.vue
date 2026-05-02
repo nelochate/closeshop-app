@@ -9,6 +9,7 @@ import {
 } from '@/utils/chatNotifications'
 import { formatLiveTimestamp } from '@/utils/dateTime'
 import {
+  getProfileDisplayName,
   resolveConversationViewerRole,
   resolveCounterpartyIdentity,
   type CounterpartyViewerRole,
@@ -27,8 +28,9 @@ const conversationId = ref<string | null>(null)
 const messages = ref<any[]>([])
 const newMessage = ref('')
 const otherUserProfile = ref<any>(null)
+const currentUserShop = ref<any>(null)
 const shopInfo = ref<any>(null)
-const viewerConversationRole = ref<CounterpartyViewerRole | null>(null)
+const conversationParticipants = ref<{ user1: string | null; user2: string | null } | null>(null)
 const loading = ref(true)
 const sending = ref(false)
 const isUpdatingMessage = ref(false)
@@ -60,9 +62,6 @@ const formatPrice = (value: number | string | null | undefined) => {
   return Number(value ?? 0).toFixed(2)
 }
 
-const getProfileDisplayName = (profile: any) =>
-  [profile?.first_name, profile?.last_name].filter(Boolean).join(' ').trim()
-
 const startTimeUpdates = () => {
   currentTime.value = Date.now()
   timeUpdateInterval = setInterval(() => {
@@ -82,6 +81,18 @@ const scrollToBottom = async (behavior: ScrollBehavior = 'auto') => {
     chatScrollEl.value.scrollTop = chatScrollEl.value.scrollHeight
   }
 }
+
+const viewerConversationRole = computed<CounterpartyViewerRole | null>(() =>
+  resolveConversationViewerRole({
+    currentUserId: userId.value,
+    otherUserId: otherUserId.value,
+    customerUserId: conversationParticipants.value?.user1,
+    sellerUserId: conversationParticipants.value?.user2,
+    currentUserShop: currentUserShop.value,
+    otherUserShop: shopInfo.value,
+    messages: messages.value,
+  }),
+)
 
 const otherUserIdentity = computed(() =>
   resolveCounterpartyIdentity({
@@ -188,7 +199,21 @@ const fetchOtherUserInfo = async () => {
     const currentUserId = await checkAuth()
     if (currentUserId) {
       userId.value = currentUserId
+
+      const { data: currentShop, error: currentShopError } = await supabase
+        .from('shops')
+        .select('id, business_name, logo_url, owner_id')
+        .eq('owner_id', currentUserId)
+        .maybeSingle()
+
+      if (currentShopError) {
+        console.error('Error fetching current user shop info:', currentShopError)
+      }
+
+      currentUserShop.value = currentShop
     }
+
+    conversationParticipants.value = null
 
     const conversationLookupId = requestedConversationId.value || routeTargetId.value
     if (conversationLookupId) {
@@ -206,15 +231,14 @@ const fetchOtherUserInfo = async () => {
         [existingConversation.user1, existingConversation.user2].includes(currentUserId)
       ) {
         conversationId.value = existingConversation.id
+        conversationParticipants.value = {
+          user1: existingConversation.user1 || null,
+          user2: existingConversation.user2 || null,
+        }
         otherUserId.value =
           existingConversation.user1 === currentUserId
             ? existingConversation.user2
             : existingConversation.user1
-        viewerConversationRole.value = resolveConversationViewerRole({
-          currentUserId,
-          customerUserId: existingConversation.user1,
-          sellerUserId: existingConversation.user2,
-        })
       }
     }
 
@@ -278,7 +302,7 @@ const fetchOtherUserInfo = async () => {
 
     const { data: shop, error: shopError } = await supabase
       .from('shops')
-      .select('*')
+      .select('id, business_name, logo_url, owner_id')
       .eq('owner_id', otherUserId.value)
       .maybeSingle()
 
@@ -501,11 +525,10 @@ const getOrCreateConversation = async () => {
 
     if (existing) {
       conversationId.value = existing.id
-      viewerConversationRole.value = resolveConversationViewerRole({
-        currentUserId,
-        customerUserId: existing.user1,
-        sellerUserId: existing.user2,
-      })
+      conversationParticipants.value = {
+        user1: existing.user1 || null,
+        user2: existing.user2 || null,
+      }
       console.log('✅ Existing conversation found:', existing.id)
     } else {
       if (!otherUserProfile.value) {
@@ -513,16 +536,24 @@ const getOrCreateConversation = async () => {
         return
       }
 
+      const shouldUseSellerOrdering =
+        Boolean(currentUserShop.value?.owner_id) && !Boolean(shopInfo.value?.owner_id)
+      const conversationPayload = shouldUseSellerOrdering
+        ? {
+            user1: otherUserId.value,
+            user2: userId.value,
+            created_at: new Date().toISOString(),
+          }
+        : {
+            user1: userId.value,
+            user2: otherUserId.value,
+            created_at: new Date().toISOString(),
+          }
+
       // Create new conversation
       const { data: created, error: createError } = await supabase
         .from('conversations')
-        .insert([
-          { 
-            user1: userId.value, 
-            user2: otherUserId.value,
-            created_at: new Date().toISOString()
-          }
-        ])
+        .insert([conversationPayload])
         .select('id, user1, user2')
         .single()
 
@@ -539,11 +570,10 @@ const getOrCreateConversation = async () => {
           
           if (retry) {
             conversationId.value = retry.id
-            viewerConversationRole.value = resolveConversationViewerRole({
-              currentUserId,
-              customerUserId: retry.user1,
-              sellerUserId: retry.user2,
-            })
+            conversationParticipants.value = {
+              user1: retry.user1 || null,
+              user2: retry.user2 || null,
+            }
           }
         }
         return
@@ -551,11 +581,10 @@ const getOrCreateConversation = async () => {
 
       if (created) {
         conversationId.value = created.id
-        viewerConversationRole.value = resolveConversationViewerRole({
-          currentUserId,
-          customerUserId: created.user1,
-          sellerUserId: created.user2,
-        })
+        conversationParticipants.value = {
+          user1: created.user1 || null,
+          user2: created.user2 || null,
+        }
         console.log('✅ New conversation created:', created.id)
       }
     }

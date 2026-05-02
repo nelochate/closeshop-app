@@ -2,6 +2,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { supabase } from '@/utils/supabase'
+import { syncProfileFromAuthUser } from '@/utils/profileSync'
 
 export const useAuthUserStore = defineStore('authUser ', () => {
   const userData = ref(null) // Store full user object including user_metadata
@@ -31,7 +32,7 @@ async function hydrateFromSession() {
     }
     // Store full user object with metadata
     userData.value = user
-    await loadProfile(user.id)
+    await loadProfile(user.id, user)
     return true
   } catch (e) {
     console.error('hydrateFromSession failed:', e)
@@ -43,9 +44,22 @@ async function hydrateFromSession() {
 }
 
 
-  async function loadProfile(uid) {
+  async function loadProfile(uid, authUser = userData.value) {
     if (!uid) uid = userId.value
     if (!uid) return
+
+    if (authUser?.id === uid) {
+      const syncedProfile = await syncProfileFromAuthUser({
+        user: authUser,
+        defaultRole: 'customer',
+      })
+
+      if (syncedProfile) {
+        profile.value = syncedProfile
+        return syncedProfile
+      }
+    }
+
     const { data, error: pErr } = await supabase
       .from('profiles')
       .select('*')
@@ -56,6 +70,7 @@ async function hydrateFromSession() {
       return
     }
     profile.value = data
+    return data
   }
 
   async function signIn(email, password) {
@@ -63,7 +78,7 @@ async function hydrateFromSession() {
     const { data, error: e } = await supabase.auth.signInWithPassword({ email, password })
     if (e) throw e
     userData.value = data.user
-    await loadProfile(data.user.id)
+    await loadProfile(data.user.id, data.user)
     return data
   }
 

@@ -5,6 +5,7 @@ import { supabase } from '@/utils/supabase'
 import { requiredValidator, emailValidator } from '@/utils/validators'
 import { Capacitor } from '@capacitor/core'
 import { GoogleSignIn } from '@capawesome/capacitor-google-sign-in'
+import { syncProfileFromAuthUser } from '@/utils/profileSync'
 
 const username = ref('')
 const password = ref('')
@@ -23,6 +24,15 @@ const isWeb = Capacitor.getPlatform() === 'web'
 
 // Store initialization promise to ensure it's only done once
 let initPromise: Promise<boolean> | null = null
+
+const getRedirectPathForUser = async (user: any) => {
+  const profile = await syncProfileFromAuthUser({
+    user,
+    defaultRole: 'customer',
+  })
+
+  return profile?.role === 'admin' ? '/admin-dashboard' : '/homepage'
+}
 
 // Initialize Google Sign-In
 const initializeGoogleSignIn = async (): Promise<boolean> => {
@@ -81,30 +91,7 @@ const login = async () => {
 
     const user = data.user
     console.log('Login success:', user)
-
-    let { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id, role')
-      .eq('id', user.id)
-      .single()
-
-    if (profileError && profileError.code === 'PGRST116') {
-      const { error: insertError } = await supabase.from('profiles').insert([
-        {
-          id: user.id,
-          role: 'customer',
-        },
-      ])
-      if (insertError) {
-        console.error('Failed to auto-create profile:', insertError.message)
-      }
-      profile = { id: user.id, role: 'customer' }
-    }
-
-    let redirectPath = '/homepage'
-    if (profile?.role === 'admin') {
-      redirectPath = '/admin-dashboard'
-    }
+    const redirectPath = await getRedirectPathForUser(user)
 
     successMessage.value = 'Redirecting...'
     showSuccess.value = true
@@ -143,30 +130,7 @@ const processGoogleSignInResult = async (result: any) => {
   if (supabaseError) throw supabaseError
 
   console.log('Supabase login success:', data.user)
-
-  let { data: profile, error: profileError } = await supabase
-    .from('profiles')
-    .select('id, role')
-    .eq('id', data.user.id)
-    .single()
-
-  if (profileError && profileError.code === 'PGRST116') {
-    const { error: insertError } = await supabase.from('profiles').insert([
-      {
-        id: data.user.id,
-        role: 'customer',
-      },
-    ])
-    if (insertError) {
-      console.error('Failed to auto-create profile:', insertError.message)
-    }
-    profile = { id: data.user.id, role: 'customer' }
-  }
-
-  let redirectPath = '/homepage'
-  if (profile?.role === 'admin') {
-    redirectPath = '/admin-dashboard'
-  }
+  const redirectPath = await getRedirectPathForUser(data.user)
 
   successMessage.value = 'Redirecting...'
   showSuccess.value = true

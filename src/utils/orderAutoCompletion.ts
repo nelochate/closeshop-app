@@ -56,7 +56,7 @@ export const shouldAutoCompleteDeliveredOrder = (order?: OrderLike | null, now =
 const mergeAutoCompletedOrder = <T extends OrderLike>(order: T, completedAt: string) =>
   ({
     ...order,
-    status: 'completed',
+    status: 'delivered',
     completed_at: completedAt,
     updated_at: completedAt,
   }) as T
@@ -114,7 +114,7 @@ export const ensureOrderAutoCompletionUpToDate = async <T extends OrderLike>(
     const { data, error } = await supabase
       .from('orders')
       .update({
-        status: 'completed',
+        status: 'delivered',
         completed_at: completedAt,
         updated_at: completedAt,
       })
