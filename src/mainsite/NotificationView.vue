@@ -716,7 +716,7 @@ onUnmounted(() => {
     <PullToRefreshWrapper :on-refresh="handleRefresh">
       <v-main>
         <!-- Top App Bar with Safe Area Support -->
-        <v-app-bar color="primary" density="compact" class="notification-app-bar">
+        <v-app-bar density="compact" class="top-nav">
           <v-app-bar-nav-icon @click="router.back()">
             <v-icon>mdi-arrow-left</v-icon>
           </v-app-bar-nav-icon>
@@ -759,7 +759,7 @@ onUnmounted(() => {
 
         <v-container class="notification-view">
           <!-- Stats Summary -->
-          <div v-if="!loading && notifications.length > 0" class="stats-summary mb-4">
+          <div v-if="!loading && notifications.length > 0" class="stats-summary">
             <v-card variant="flat" color="surface">
               <v-card-text class="d-flex justify-space-between align-center">
                 <div>
@@ -987,6 +987,7 @@ onUnmounted(() => {
 
 <style scoped>
 /* CSS Variables for safe area insets */
+/* CSS Variables for safe area insets */
 :root {
   --sat: env(safe-area-inset-top);
   --sar: env(safe-area-inset-right);
@@ -994,39 +995,74 @@ onUnmounted(() => {
   --sal: env(safe-area-inset-left);
 }
 
-/* Notification App Bar with Safe Area Support */
-.notification-app-bar {
-  position: fixed !important;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  padding-top: var(--sat, 0px);
-  height: calc(64px + var(--sat, 0px)) !important;
-  min-height: calc(64px + var(--sat, 0px)) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+  color: white !important;
 }
 
 /* For iOS devices with dynamic island */
 @supports (padding-top: env(safe-area-inset-top)) {
-  .notification-app-bar {
+  .top-nav {
     padding-top: env(safe-area-inset-top);
-    height: calc(64px + env(safe-area-inset-top)) !important;
+    height: calc(56px + env(safe-area-inset-top)) !important;
   }
 }
 
 /* For older iOS devices */
 @supports (padding-top: constant(safe-area-inset-top)) {
-  .notification-app-bar {
+  .top-nav {
     padding-top: constant(safe-area-inset-top);
-    height: calc(64px + constant(safe-area-inset-top)) !important;
+    height: calc(56px + constant(safe-area-inset-top)) !important;
   }
 }
 
 /* Ensure toolbar content is properly aligned */
-.notification-app-bar :deep(.v-toolbar__content) {
-  height: 64px !important;
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
   padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
+/* Main content area - accounts for the fixed header */
+.messages-view {
+  margin-top: calc(56px + var(--sat, 0px));
+  min-height: calc(100vh - 56px - var(--sat, 0px));
+  padding-bottom: 80px;
+}
+
+/* iOS support for margin-top */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .messages-view {
+    margin-top: calc(56px + env(safe-area-inset-top));
+  }
+}
+
+/* Landscape mode adjustment */
+@media (orientation: landscape) and (max-height: 500px) {
+  .top-nav {
+    height: 56px !important;
+    padding-top: 0 !important;
+  }
+
+  .messages-view {
+    margin-top: 56px;
+  }
 }
 
 /* Main content area - accounts for the fixed header */
@@ -1114,7 +1150,7 @@ onUnmounted(() => {
 }
 
 .stats-summary {
-  margin-top: -40px;
+  margin-top: -60px;
 }
 
 .stats-summary .v-card {

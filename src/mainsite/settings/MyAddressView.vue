@@ -41,7 +41,7 @@ const deleteAddress = async (id: string) => {
 const setDefaultAddress = async (id: string) => {
   const { data: userData } = await supabase.auth.getUser()
   if (!userData?.user) return
-  
+
   try {
     // First, remove default from all addresses
     await supabase
@@ -94,16 +94,16 @@ const useCurrentGPSLocation = () => {
     async (position) => {
       try {
         const { latitude, longitude } = position.coords
-        
+
         // Reverse geocoding to get address from coordinates
         const response = await fetch(
           `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}&addressdetails=1`
         )
         const data = await response.json()
-        
+
         if (data && data.address) {
           const address = data.address
-          
+
           // Map the OpenStreetMap address data to your schema (without latitude/longitude)
           const newAddress = {
             recipient_name: 'My Current Location',
@@ -135,7 +135,7 @@ const useCurrentGPSLocation = () => {
       console.error('Geolocation error:', error)
       isDetectingLocation.value = false
       showLocationOptions.value = false
-      
+
       switch (error.code) {
         case error.PERMISSION_DENIED:
           alert('Location access denied. Please enable location permissions in your browser settings.')
@@ -233,7 +233,7 @@ onMounted(loadAddresses)
 
 <template>
   <v-app>
-    <v-app-bar flat color="#3f83c7">
+    <v-app-bar flat color="#3f83c7" class="top-nav">
       <v-btn icon @click="router.back()"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title>My Addresses</v-toolbar-title>
     </v-app-bar>
@@ -250,7 +250,7 @@ onMounted(loadAddresses)
         <!-- Saved Addresses List -->
         <div v-if="addresses.length > 0">
           <div class="text-h6 font-weight-bold mb-3">Your Saved Addresses</div>
-          
+
           <v-row>
             <v-col cols="12" v-for="addr in addresses" :key="addr.id">
               <v-card class="mb-3" :class="{ 'border-primary': addr.is_default }" variant="outlined">
@@ -268,13 +268,13 @@ onMounted(loadAddresses)
                         <v-icon color="green" small class="me-1">mdi-crosshairs-gps</v-icon>
                         <span class="text-green font-weight-bold text-caption">CURRENT LOCATION</span>
                       </div>
-                      
+
                       <!-- Recipient Info -->
                       <div class="font-weight-medium text-body-1 mb-1">
-                        {{ addr.recipient_name || 'No name provided' }} 
+                        {{ addr.recipient_name || 'No name provided' }}
                         <span v-if="addr.phone">| {{ addr.phone }}</span>
                       </div>
-                      
+
                       <!-- Address Details - Updated for your schema -->
                       <div class="text-body-2 mb-1">
                         <span v-if="addr.house_no">{{ addr.house_no }}, </span>
@@ -291,23 +291,23 @@ onMounted(loadAddresses)
                         {{ addr.region_name }}
                       </div>
                     </div>
-                    
+
                     <!-- Action Buttons -->
                     <div class="d-flex flex-column align-end" style="gap: 8px;">
-                      <v-btn 
+                      <v-btn
                         v-if="addr.recipient_name !== 'My Current Location'"
-                        icon 
-                        size="small" 
-                        color="primary" 
+                        icon
+                        size="small"
+                        color="primary"
                         variant="text"
                         @click="editAddress(addr.id)"
                       >
                         <v-icon>mdi-pencil</v-icon>
                       </v-btn>
-                      <v-btn 
-                        icon 
-                        size="small" 
-                        color="red" 
+                      <v-btn
+                        icon
+                        size="small"
+                        color="red"
                         variant="text"
                         @click="deleteAddress(addr.id)"
                       >
@@ -376,10 +376,10 @@ onMounted(loadAddresses)
               <v-icon>mdi-close</v-icon>
             </v-btn>
           </v-card-title>
-          
+
           <v-card-text class="pt-4">
             <p class="text-body-1 mb-4">How would you like to set your delivery location?</p>
-            
+
             <div class="d-flex flex-column" style="gap: 12px;">
               <v-btn
                 color="primary"
@@ -391,7 +391,7 @@ onMounted(loadAddresses)
                 <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
                 {{ hasCurrentLocation() ? 'Update My Current Location' : 'Use My Current Location' }}
               </v-btn>
-              
+
               <v-btn
                 color="secondary"
                 variant="outlined"
@@ -410,6 +410,52 @@ onMounted(loadAddresses)
 </template>
 
 <style scoped>
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
 .border-primary {
   border: 2px solid rgb(63, 131, 199) !important;
 }

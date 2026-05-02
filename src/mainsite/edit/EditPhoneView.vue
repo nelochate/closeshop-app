@@ -26,7 +26,7 @@ const loadCurrentPhone = async () => {
       // Get phone from latest address
       const { data: userData } = await supabase.auth.getUser()
       if (!userData?.user) return
-      
+
       const { data: latestAddress } = await supabase
         .from('addresses')
         .select('phone')
@@ -34,7 +34,7 @@ const loadCurrentPhone = async () => {
         .order('updated_at', { ascending: false })
         .limit(1)
         .single()
-      
+
       if (latestAddress?.phone) {
         phone.value = latestAddress.phone
       }
@@ -132,12 +132,12 @@ const savePhone = async () => {
 
     // Redirect after 2 seconds
     setTimeout(() => {
-      router.replace({ 
-        name: 'edit-profile', 
-        query: { 
+      router.replace({
+        name: 'edit-profile',
+        query: {
           refreshed: Date.now(),
-          phoneUpdated: true 
-        } 
+          phoneUpdated: true
+        }
       })
     }, 2000)
 
@@ -164,13 +164,13 @@ const validatePhone = (phone) => {
       <v-btn icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title class="text-h6 font-weight-bold">Edit Number</v-toolbar-title>
+      <v-toolbar-title>Edit Number</v-toolbar-title>
     </v-app-bar>
 
     <v-main class="background-gradient">
-      <v-snackbar 
-        v-model="showSuccess" 
-        :timeout="4000" 
+      <v-snackbar
+        v-model="showSuccess"
+        :timeout="4000"
         color="success"
         location="top"
       >
@@ -186,11 +186,11 @@ const validatePhone = (phone) => {
             <v-icon color="primary" class="me-3">mdi-phone</v-icon>
             Update Your Number
           </v-card-title>
-          
+
           <v-card-text class="card-content">
-            <v-alert 
-              type="info" 
-              variant="tonal" 
+            <v-alert
+              type="info"
+              variant="tonal"
               class="mb-6"
               border="start"
             >
@@ -219,13 +219,13 @@ const validatePhone = (phone) => {
                 class="phone-input"
               />
 
-              <v-btn 
-                type="submit" 
-                color="primary" 
+              <v-btn
+                type="submit"
+                color="primary"
                 size="large"
                 :loading="isLoading"
                 :disabled="!phone"
-                block 
+                block
                 class="save-btn"
               >
                 <template #loader>
@@ -239,10 +239,10 @@ const validatePhone = (phone) => {
                 Update Phone Number
               </v-btn>
 
-              <v-btn 
-                variant="outlined" 
-                color="grey" 
-                block 
+              <v-btn
+                variant="outlined"
+                color="grey"
+                block
                 class="mt-3"
                 @click="router.back()"
                 :disabled="isLoading"
@@ -270,15 +270,56 @@ const validatePhone = (phone) => {
 </template>
 
 <style scoped>
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
 
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
 
 .background-gradient {
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
   min-height: 100vh;
-}
-
-.top-nav {
-  padding-top: 22px;
 }
 
 .container {
@@ -327,11 +368,11 @@ const validatePhone = (phone) => {
     margin-top: 20px;
     padding: 12px;
   }
-  
+
   .card-content {
     padding: 20px 16px;
   }
-  
+
   .card-title {
     padding: 16px 20px;
   }
