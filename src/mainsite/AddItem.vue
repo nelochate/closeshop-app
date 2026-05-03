@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { StatusBar, Style } from '@capacitor/status-bar'
 
 // ------------------ Router ------------------
 const router = useRouter()
@@ -31,6 +32,10 @@ const mainImagePreviews = ref<string[]>([])
 const mainPreviewDialog = ref(false)
 const selectedMainImage = ref<string | null>(null)
 const showPhotoPicker = ref(false)
+const isCameraActive = ref(false) // Track camera state
+
+// Track which variety we're adding images to
+const selectedVarietyForImage = ref<Variety | null>(null)
 
 // ------------------ Varieties ------------------
 type Variety = {
@@ -52,27 +57,409 @@ const showSnackbar = (message: string, type: 'success' | 'error') => {
   snackbar.value = true
 }
 
-// ------------------ Image helpers ------------------
-const pickProductImage = async (source: 'camera' | 'gallery') => {
-  const photo = await Camera.getPhoto({
-    quality: 90,
-    resultType: CameraResultType.Uri,
-    source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos
-  })
-  if (!photo?.webPath) return
-
-  if (mainProductImages.value.length >= 5) {
-    alert('Max 5 images allowed')
-    return
+// Helper to hide app bar and status bar
+const hideAppBar = async () => {
+  isCameraActive.value = true
+  document.body.classList.add('camera-active')
+  
+  try {
+    await StatusBar.hide()
+  } catch (error) {
+    console.log('StatusBar plugin not available on web')
   }
+}
 
-  const response = await fetch(photo.webPath)
-  const blob = await response.blob()
-  const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+const showAppBar = async () => {
+  isCameraActive.value = false
+  document.body.classList.remove('camera-active')
+  
+  try {
+    await StatusBar.show()
+    await StatusBar.setStyle({ style: Style.Light })
+  } catch (error) {
+    console.log('StatusBar plugin not available on web')
+  }
+}
 
-  mainProductImages.value.push(file)
-  mainImagePreviews.value.push(photo.webPath)
+// Helper to process multiple images
+const processImages = async (photos: any[], isVariety: boolean = false, variety?: Variety) => {
+  const maxImages = isVariety ? 3 : 5
+  const currentCount = isVariety ? (variety?.images.length || 0) : mainProductImages.value.length
+  
+  for (const photo of photos) {
+    if (currentCount + mainProductImages.value.length >= maxImages) {
+      showSnackbar(`Max ${maxImages} images allowed${isVariety ? ' per variety' : ''}`, 'error')
+      break
+    }
+    
+    if (photo?.webPath) {
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+      
+      if (isVariety && variety) {
+        variety.images.push(file)
+        variety.previews.push(photo.webPath)
+      } else {
+        mainProductImages.value.push(file)
+        mainImagePreviews.value.push(photo.webPath)
+      }
+    }
+  }
+  
+  showSnackbar(`Added ${photos.length} image(s) successfully`, 'success')
+}
+
+// ------------------ Main Image Helpers ------------------
+const openPhotoPickerForMain = async () => {
   showPhotoPicker.value = false
+  
+  setTimeout(async () => {
+    await pickProductImages()
+  }, 100)
+}
+
+const pickProductImages = async () => {
+  try {
+    await hideAppBar()
+    
+    // First try to pick multiple photos from gallery
+    const photos = await Camera.pickImages({
+      quality: 90,
+      limit: 5, // Max 5 images
+      presentationStyle: 'fullscreen'
+    })
+    
+    await showAppBar()
+    
+    if (photos && photos.photos && photos.photos.length > 0) {
+      await processImages(photos.photos, false)
+    }
+  } catch (error: any) {
+    await showAppBar()
+    console.error('Error picking images:', error)
+    
+    // If pickImages fails or user cancels, try single photo picker as fallback
+    if (error.message?.toLowerCase().includes('not implemented') || 
+        error.message?.toLowerCase().includes('unavailable')) {
+      // Fallback to single photo picker
+      await pickSingleProductImage()
+    } else if (!error.message?.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to pick images', 'error')
+    }
+  }
+}
+
+// Fallback: Single image picker for older devices or web
+const pickSingleProductImage = async () => {
+  try {
+    await hideAppBar()
+    
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      resultType: CameraResultType.Uri,
+      source: CameraSource.Photos,
+      allowEditing: false,
+      presentationStyle: 'fullscreen',
+      width: 1920,
+      height: 1080,
+      saveToGallery: false,
+      correctOrientation: true
+    })
+    
+    await showAppBar()
+    
+    if (photo?.webPath) {
+      if (mainProductImages.value.length >= 5) {
+        showSnackbar('Max 5 images allowed', 'error')
+        return
+      }
+      
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+      
+      mainProductImages.value.push(file)
+      mainImagePreviews.value.push(photo.webPath)
+      showSnackbar('Image added successfully', 'success')
+    }
+  } catch (error) {
+    await showAppBar()
+    console.error('Error picking single image:', error)
+    if (error instanceof Error && !error.message.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to pick image', 'error')
+    }
+  }
+}
+
+// Option to take photo with camera (single photo)
+const takePhotoWithCamera = async () => {
+  try {
+    await hideAppBar()
+    
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      resultType: CameraResultType.Uri,
+      source: CameraSource.Camera,
+      allowEditing: false,
+      presentationStyle: 'fullscreen',
+      width: 1920,
+      height: 1080,
+      saveToGallery: false,
+      correctOrientation: true
+    })
+    
+    await showAppBar()
+    
+    if (photo?.webPath) {
+      if (mainProductImages.value.length >= 5) {
+        showSnackbar('Max 5 images allowed', 'error')
+        return
+      }
+      
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+      
+      mainProductImages.value.push(file)
+      mainImagePreviews.value.push(photo.webPath)
+      showSnackbar('Image added successfully', 'success')
+    }
+  } catch (error) {
+    await showAppBar()
+    console.error('Error taking photo:', error)
+    if (error instanceof Error && !error.message.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to take photo', 'error')
+    }
+  }
+}
+
+// Show image source dialog for main images
+const showImageSourceDialog = () => {
+  // Create a custom dialog for image source selection
+  const actionSheet = document.createElement('div')
+  actionSheet.className = 'image-source-dialog'
+  actionSheet.innerHTML = `
+    <div class="image-source-overlay" onclick="this.parentElement.remove()"></div>
+    <div class="image-source-options">
+      <div class="image-source-title">Add Photos</div>
+      <button class="image-source-btn gallery-btn" id="galleryBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="2" width="20" height="20" rx="2"></rect>
+          <circle cx="8.5" cy="8.5" r="2.5"></circle>
+          <polyline points="2 17 8 11 13 16 17 12 22 17"></polyline>
+        </svg>
+        <span>Choose from Gallery (Multiple)</span>
+      </button>
+      <button class="image-source-btn camera-btn" id="cameraBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <span>Take Photo (Single)</span>
+      </button>
+      <button class="image-source-btn cancel-btn" id="cancelBtn">Cancel</button>
+    </div>
+  `
+  document.body.appendChild(actionSheet)
+  
+  document.getElementById('galleryBtn')?.addEventListener('click', () => {
+    actionSheet.remove()
+    pickProductImages()
+  })
+  
+  document.getElementById('cameraBtn')?.addEventListener('click', () => {
+    actionSheet.remove()
+    takePhotoWithCamera()
+  })
+  
+  document.getElementById('cancelBtn')?.addEventListener('click', () => {
+    actionSheet.remove()
+  })
+}
+
+// Variety Image Helpers - Multiple selection for variety images
+const openPhotoPickerForVariety = async (variety: Variety) => {
+  selectedVarietyForImage.value = variety
+  setTimeout(async () => {
+    await pickVarietyImages()
+  }, 100)
+}
+
+const pickVarietyImages = async () => {
+  if (!selectedVarietyForImage.value) return
+  
+  try {
+    await hideAppBar()
+    
+    const photos = await Camera.pickImages({
+      quality: 90,
+      limit: 3, // Max 3 images per variety
+      presentationStyle: 'fullscreen'
+    })
+    
+    await showAppBar()
+    
+    if (photos && photos.photos && photos.photos.length > 0) {
+      const variety = selectedVarietyForImage.value
+      const remainingSlots = 3 - variety.images.length
+      const photosToAdd = photos.photos.slice(0, remainingSlots)
+      
+      if (photosToAdd.length > 0) {
+        await processImages(photosToAdd, true, variety)
+      }
+      
+      if (photos.photos.length > remainingSlots) {
+        showSnackbar(`Only added ${remainingSlots} of ${photos.photos.length} images (max 3 per variety)`, 'error')
+      }
+    }
+  } catch (error: any) {
+    await showAppBar()
+    console.error('Error picking variety images:', error)
+    
+    // Fallback to single image picker
+    if (error.message?.toLowerCase().includes('not implemented') || 
+        error.message?.toLowerCase().includes('unavailable')) {
+      await pickSingleVarietyImage()
+    } else if (!error.message?.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to pick images', 'error')
+    }
+  } finally {
+    selectedVarietyForImage.value = null
+  }
+}
+
+// Fallback: Single image picker for variety
+const pickSingleVarietyImage = async () => {
+  if (!selectedVarietyForImage.value) return
+  
+  try {
+    await hideAppBar()
+    
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      resultType: CameraResultType.Uri,
+      source: CameraSource.Photos,
+      allowEditing: false,
+      presentationStyle: 'fullscreen',
+      width: 1920,
+      height: 1080,
+      saveToGallery: false,
+      correctOrientation: true
+    })
+    
+    await showAppBar()
+    
+    if (photo?.webPath) {
+      const variety = selectedVarietyForImage.value
+      if (variety.images.length >= 3) {
+        showSnackbar('Max 3 images per variety', 'error')
+        return
+      }
+      
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+      variety.images.push(file)
+      variety.previews.push(photo.webPath)
+      showSnackbar('Image added successfully', 'success')
+    }
+  } catch (error) {
+    await showAppBar()
+    console.error('Error picking variety image:', error)
+    if (error instanceof Error && !error.message.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to pick image', 'error')
+    }
+  }
+}
+
+// Take photo for variety (single)
+const takeVarietyPhoto = async (variety: Variety) => {
+  selectedVarietyForImage.value = variety
+  
+  try {
+    await hideAppBar()
+    
+    const photo = await Camera.getPhoto({
+      quality: 90,
+      resultType: CameraResultType.Uri,
+      source: CameraSource.Camera,
+      allowEditing: false,
+      presentationStyle: 'fullscreen',
+      width: 1920,
+      height: 1080,
+      saveToGallery: false,
+      correctOrientation: true
+    })
+    
+    await showAppBar()
+    
+    if (photo?.webPath) {
+      if (variety.images.length >= 3) {
+        showSnackbar('Max 3 images per variety', 'error')
+        return
+      }
+      
+      const response = await fetch(photo.webPath)
+      const blob = await response.blob()
+      const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
+      variety.images.push(file)
+      variety.previews.push(photo.webPath)
+      showSnackbar('Photo added successfully', 'success')
+    }
+  } catch (error) {
+    await showAppBar()
+    console.error('Error taking photo:', error)
+    if (error instanceof Error && !error.message.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to take photo', 'error')
+    }
+  } finally {
+    selectedVarietyForImage.value = null
+  }
+}
+
+// Show image source dialog for variety
+const showVarietyImageSourceDialog = (variety: Variety) => {
+  const actionSheet = document.createElement('div')
+  actionSheet.className = 'image-source-dialog'
+  actionSheet.innerHTML = `
+    <div class="image-source-overlay" onclick="this.parentElement.remove()"></div>
+    <div class="image-source-options">
+      <div class="image-source-title">Add Photos for ${variety.name || 'Variety'}</div>
+      <button class="image-source-btn gallery-btn" id="galleryBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <rect x="2" y="2" width="20" height="20" rx="2"></rect>
+          <circle cx="8.5" cy="8.5" r="2.5"></circle>
+          <polyline points="2 17 8 11 13 16 17 12 22 17"></polyline>
+        </svg>
+        <span>Choose from Gallery (Multiple)</span>
+      </button>
+      <button class="image-source-btn camera-btn" id="cameraBtn">
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path>
+          <circle cx="12" cy="13" r="4"></circle>
+        </svg>
+        <span>Take Photo (Single)</span>
+      </button>
+      <button class="image-source-btn cancel-btn" id="cancelBtn">Cancel</button>
+    </div>
+  `
+  document.body.appendChild(actionSheet)
+  
+  document.getElementById('galleryBtn')?.addEventListener('click', () => {
+    actionSheet.remove()
+    selectedVarietyForImage.value = variety
+    pickVarietyImages()
+  })
+  
+  document.getElementById('cameraBtn')?.addEventListener('click', () => {
+    actionSheet.remove()
+    takeVarietyPhoto(variety)
+  })
+  
+  document.getElementById('cancelBtn')?.addEventListener('click', () => {
+    actionSheet.remove()
+  })
 }
 
 const openMainPreview = (image: string) => {
@@ -82,36 +469,22 @@ const openMainPreview = (image: string) => {
 
 const removeMainImage = (index: number) => {
   if (confirm('Remove this image?')) {
-    URL.revokeObjectURL(mainImagePreviews.value[index])
+    if (mainImagePreviews.value[index] && mainImagePreviews.value[index].startsWith('blob:')) {
+      URL.revokeObjectURL(mainImagePreviews.value[index])
+    }
     mainProductImages.value.splice(index, 1)
     mainImagePreviews.value.splice(index, 1)
   }
 }
 
-// ------------------ Variety Image Helpers ------------------
-const pickVarietyImage = async (variety: Variety, source: 'camera' | 'gallery') => {
-  const photo = await Camera.getPhoto({
-    quality: 90,
-    resultType: CameraResultType.Uri,
-    source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos
-  })
-  if (!photo?.webPath) return
-  if (variety.images.length >= 3) {
-    alert('Max 3 images per variety')
-    return
-  }
-
-  const response = await fetch(photo.webPath)
-  const blob = await response.blob()
-  const file = new File([blob], `${Date.now()}.png`, { type: blob.type })
-  variety.images.push(file)
-  variety.previews.push(photo.webPath)
-}
-
 const removeVarietyImage = (variety: Variety, index: number) => {
-  URL.revokeObjectURL(variety.previews[index])
-  variety.images.splice(index, 1)
-  variety.previews.splice(index, 1)
+  if (confirm('Remove this image?')) {
+    if (variety.previews[index] && variety.previews[index].startsWith('blob:')) {
+      URL.revokeObjectURL(variety.previews[index])
+    }
+    variety.images.splice(index, 1)
+    variety.previews.splice(index, 1)
+  }
 }
 
 // ------------------ Upload images ------------------
@@ -146,11 +519,9 @@ const submitForm = async () => {
   isSubmitting.value = true
 
   try {
-    // 1️⃣ Get current user
     const { data: { user }, error: userError } = await supabase.auth.getUser()
     if (!user || userError) throw new Error('No user logged in')
 
-    // 2️⃣ Get shop id
     const { data: shop } = await supabase
       .from('shops')
       .select('id')
@@ -160,14 +531,12 @@ const submitForm = async () => {
 
     const shopId = shop.id
 
-    // 3️⃣ Upload main product images if new ones selected
     const newImageUrls = mainProductImages.value.length
       ? await uploadImages(mainProductImages.value, 'main', shopId)
       : []
 
     const finalImageUrls = newImageUrls.length ? newImageUrls : mainImagePreviews.value
 
-    // 4️⃣ Prepare variety data
     const varietyData: { name: string; price: number; images: string[] }[] = []
 
     for (const v of varieties.value) {
@@ -188,9 +557,7 @@ const submitForm = async () => {
       })
     }
 
-    // 5️⃣ Edit mode
     if (isEditMode.value && productId.value) {
-      // Fetch old product for image cleanup
       const { data: oldProduct, error: fetchError } = await supabase
         .from('products')
         .select('main_img_urls, varieties')
@@ -198,7 +565,6 @@ const submitForm = async () => {
         .single()
       if (fetchError) throw fetchError
 
-      // Update product
       const { error: updateError } = await supabase
         .from('products')
         .update({
@@ -213,12 +579,10 @@ const submitForm = async () => {
         .eq('id', productId.value)
       if (updateError) throw updateError
 
-      // Remove old main images if replaced
       if (newImageUrls.length && oldProduct?.main_img_urls) {
         await removeOldImages(oldProduct.main_img_urls)
       }
 
-      // Remove old variety images
       if (oldProduct?.varieties) {
         for (const oldVariety of oldProduct.varieties) {
           const newVariety = varietyData.find(v => v.name === oldVariety.name)
@@ -230,8 +594,7 @@ const submitForm = async () => {
 
       showSnackbar('✅ Product updated successfully!', 'success')
     } else {
-      // 6️⃣ Insert new product
-      await supabase.from('products').insert([{
+      const { error: insertError } = await supabase.from('products').insert([{
         shop_id: shopId,
         prod_name: productName.value,
         prod_description: description.value,
@@ -241,6 +604,8 @@ const submitForm = async () => {
         sizes: hasSizes.value ? selectedSizes.value : [],
         varieties: hasVarieties.value ? varietyData : [],
       }])
+
+      if (insertError) throw insertError
 
       showSnackbar('✅ Product added successfully!', 'success')
       resetForm()
@@ -252,7 +617,6 @@ const submitForm = async () => {
     isSubmitting.value = false
   }
 }
-
 
 // ------------------ Reset form ------------------
 const resetForm = () => {
@@ -315,26 +679,35 @@ const addVariety = () => {
 
 <template>
   <v-app>
-    <v-app-bar class="top-bar" flat color="primary" dark>
+    <!-- App bar with conditional hiding -->
+    <v-app-bar 
+      class="top-bar" 
+      flat 
+      color="primary" 
+      dark
+      :class="{ 'app-bar-hidden': isCameraActive }"
+    >
       <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title class="text-h6">{{
         isEditMode ? 'Edit Product' : 'Add Product'
       }}</v-toolbar-title>
     </v-app-bar>
 
-    <v-main>
+    <v-main :class="{ 'main-shifted': isCameraActive }">
       <v-container class="py-6">
         <v-form @submit.prevent="submitForm">
           <!-- Main Product Photos -->
-          <v-label class="mb-2 font-medium">Main Product Photos (max 5)</v-label>
-          <v-btn
-            color="primary"
-            prepend-icon="mdi-plus"
-            rounded="lg"
-            @click="showPhotoPicker = true"
-          >
-            Add Photo
-          </v-btn>
+          <v-label class="mb-2 font-weight-medium">Main Product Photos (max 5)</v-label>
+          <div class="d-flex gap-2 flex-wrap">
+            <v-btn
+              color="primary"
+              prepend-icon="mdi-image-multiple"
+              rounded="lg"
+              @click="showImageSourceDialog"
+            >
+              Add Photos
+            </v-btn>
+          </div>
 
           <v-row class="mt-3" dense>
             <v-col v-for="(image, index) in mainImagePreviews" :key="index" cols="6" sm="4" md="3">
@@ -353,23 +726,25 @@ const addVariety = () => {
 
           <!-- Fullscreen preview -->
           <v-dialog v-model="mainPreviewDialog" max-width="600">
-            <v-card><v-img :src="selectedMainImage" aspect-ratio="1" contain /></v-card>
-          </v-dialog>
-
-          <!-- Camera/Gallery Picker -->
-          <v-dialog v-model="showPhotoPicker" max-width="290">
             <v-card>
-              <v-card-title class="headline">Pick Image Source</v-card-title>
-              <v-card-actions>
-                <v-btn color="primary" @click="pickProductImage('camera')">Use Camera</v-btn>
-                <v-btn color="primary" @click="pickProductImage('gallery')">Use Gallery</v-btn>
-              </v-card-actions>
+              <v-img :src="selectedMainImage" aspect-ratio="1" contain />
             </v-card>
           </v-dialog>
 
           <!-- Product Info -->
-          <v-text-field v-model="productName" label="Product Name" variant="outlined" required />
-          <v-textarea v-model="description" label="Description" variant="outlined" rows="3" />
+          <v-text-field 
+            v-model="productName" 
+            label="Product Name" 
+            variant="outlined" 
+            required 
+            class="mt-4"
+          />
+          <v-textarea 
+            v-model="description" 
+            label="Description" 
+            variant="outlined" 
+            rows="3" 
+          />
           <v-text-field
             v-model="price"
             label="Price"
@@ -378,7 +753,12 @@ const addVariety = () => {
             variant="outlined"
             required
           />
-          <v-text-field v-model="stock" label="Stock / Quantity" type="number" variant="outlined" />
+          <v-text-field 
+            v-model="stock" 
+            label="Stock / Quantity" 
+            type="number" 
+            variant="outlined" 
+          />
 
           <!-- --- Sizes Option --- -->
           <v-switch v-model="hasSizes" label="Has Sizes?" color="primary" inset />
@@ -386,7 +766,7 @@ const addVariety = () => {
           <!-- Sizes Section -->
           <v-expand-transition>
             <div v-if="hasSizes">
-              <v-label class="mt-2 mb-2 font-medium">Available Sizes</v-label>
+              <v-label class="mt-2 mb-2 font-weight-medium">Available Sizes</v-label>
               <v-row dense>
                 <v-col v-for="size in availableSizes" :key="size" cols="6" sm="4" md="2">
                   <v-checkbox
@@ -447,26 +827,23 @@ const addVariety = () => {
                               prefix="₱"
                               variant="outlined"
                               hide-details
+                              class="mt-2"
                             />
                           </div>
                         </v-expand-transition>
 
                         <!-- Image inputs -->
-                        <v-label class="mt-2 font-medium">Images (max 3)</v-label>
-                        <v-btn
-                          size="small"
-                          color="primary"
-                          @click="pickVarietyImage(variety, 'camera')"
-                        >
-                          <v-icon start>mdi-camera</v-icon> Camera
-                        </v-btn>
-                        <v-btn
-                          size="small"
-                          color="primary"
-                          @click="pickVarietyImage(variety, 'gallery')"
-                        >
-                          <v-icon start>mdi-image</v-icon> Gallery
-                        </v-btn>
+                        <v-label class="mt-3 mb-2 font-weight-medium">Images (max 3)</v-label>
+                        <div class="d-flex gap-2">
+                          <v-btn
+                            size="small"
+                            color="primary"
+                            variant="tonal"
+                            @click="showVarietyImageSourceDialog(variety)"
+                          >
+                            <v-icon start>mdi-image-multiple</v-icon> Add Images
+                          </v-btn>
+                        </div>
 
                         <v-row class="mt-2" dense>
                           <v-col v-for="(img, idx) in variety.previews" :key="idx" cols="6">
@@ -510,7 +887,7 @@ const addVariety = () => {
           v-model="snackbar"
           :color="snackbarColor"
           timeout="3000"
-          location="bottom right"
+          location="bottom"
           rounded="lg"
         >
           {{ snackbarMessage }}
@@ -522,15 +899,169 @@ const addVariety = () => {
 
 <style scoped>
 .top-bar {
-  padding-top: 20px;
+  padding-top: env(safe-area-inset-top, 0px);
+  transition: transform 0.3s ease;
 }
-.font-medium {
+
+/* Hide app bar when camera is active */
+.top-bar.app-bar-hidden {
+  transform: translateY(-100%);
+  display: none;
+}
+
+.main-shifted {
+  margin-top: 0;
+}
+
+.font-weight-medium {
   font-weight: 500;
 }
+
 .remove-btn {
   position: absolute;
   top: 4px;
   right: 4px;
   z-index: 2;
+}
+
+.gap-2 {
+  gap: 8px;
+}
+</style>
+
+<style>
+/* Global styles to ensure app bar is hidden when camera is active */
+body.camera-active .v-app-bar {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  transform: translateY(-100%) !important;
+}
+
+body.camera-active {
+  overflow: hidden;
+}
+
+/* Image Source Dialog Styles */
+.image-source-dialog {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.image-source-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+}
+
+.image-source-options {
+  position: relative;
+  background: white;
+  border-radius: 20px;
+  width: 90%;
+  max-width: 320px;
+  overflow: hidden;
+  animation: slideUp 0.3s ease;
+}
+
+@keyframes slideUp {
+  from {
+    transform: translateY(100px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.image-source-title {
+  padding: 20px;
+  text-align: center;
+  font-weight: 600;
+  font-size: 1.1rem;
+  border-bottom: 1px solid #e5e7eb;
+  color: #1f2937;
+}
+
+.image-source-btn {
+  width: 100%;
+  padding: 16px 20px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border: none;
+  background: white;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  font-size: 1rem;
+  color: #374151;
+}
+
+.image-source-btn:hover {
+  background: #f3f4f6;
+}
+
+.image-source-btn:active {
+  transform: scale(0.98);
+}
+
+.gallery-btn {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.gallery-btn svg {
+  color: #3b82f6;
+}
+
+.camera-btn svg {
+  color: #10b981;
+}
+
+.cancel-btn {
+  border-top: 1px solid #e5e7eb;
+  color: #ef4444;
+  font-weight: 500;
+}
+
+/* Dark mode support */
+@media (prefers-color-scheme: dark) {
+  .image-source-options {
+    background: #1f2937;
+  }
+  
+  .image-source-title {
+    color: #f3f4f6;
+    border-bottom-color: #374151;
+  }
+  
+  .image-source-btn {
+    background: #1f2937;
+    color: #d1d5db;
+  }
+  
+  .image-source-btn:hover {
+    background: #374151;
+  }
+  
+  .gallery-btn,
+  .camera-btn {
+    border-bottom-color: #374151;
+  }
+  
+  .cancel-btn {
+    border-top-color: #374151;
+  }
 }
 </style>
