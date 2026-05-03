@@ -1791,9 +1791,8 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
             </v-chip>
           </v-card-title>
           <v-card-text>
-            <v-checkbox v-model="deliveryOptions" label="Deliver or Call a Rider" value="courier" />
+            <v-checkbox v-model="deliveryOptions" label="Deliver" value="courier" />
             <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
-            <v-checkbox v-model="deliveryOptions" label="Meet-up" value="meetup" />
             <v-text-field
               v-if="deliveryOptions.includes('meetup')"
               v-model="meetUpDetails"
