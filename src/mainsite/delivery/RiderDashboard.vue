@@ -172,17 +172,10 @@ const stats = computed(() => ({
   completedToday: completedOrders.value.filter((order) => {
     return isSameLocalDay(getOrderActivityTimestamp(order), currentTime.value)
   }).length,
-<<<<<<< HEAD
-  totalEarnings: [...deliveredOrders.value, ...completedOrders.value].reduce(
-    (sum, order) => sum + (order.rider_earnings || order.delivery_fee || 0),
-    0,
-  ),
-=======
   todayEarnings: earningsRecords.value
     .filter((record) => isSameLocalDay(record.earned_at, currentTime.value))
     .reduce((sum, record) => sum + Number(record.amount || 0), 0),
   totalEarnings: earningsRecords.value.reduce((sum, record) => sum + Number(record.amount || 0), 0),
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 }))
 
 // Get filtered orders based on active filter
@@ -224,8 +217,6 @@ const formatOrderDateTime = (order) => {
   })
 }
 
-<<<<<<< HEAD
-=======
 function getOrderPayQuote(order) {
   return resolveOrderRiderEarningsQuote(order)
 }
@@ -342,7 +333,6 @@ const fetchFallbackEarningsRecords = async () => {
     currentRiderNumericId.value,
   )
 }
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 
 // Check rider approval status
 const checkRiderApproval = async () => {
@@ -861,8 +851,6 @@ onUnmounted(() => {
             <div class="stat-info">
               <div class="stat-value">{{ stats.deliveredOrders }}</div>
               <div class="stat-label">Delivered</div>
-<<<<<<< HEAD
-=======
             </div>
           </div>
         </v-card>
@@ -878,18 +866,10 @@ onUnmounted(() => {
             <div class="stat-info">
               <div class="stat-value">{{ stats.completedToday }}</div>
               <div class="stat-label">Completed Today</div>
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
             </div>
           </div>
         </v-card>
 
-<<<<<<< HEAD
-        <v-card
-          class="stat-card"
-          elevation="2"
-          :class="{ 'active-filter': activeFilter === 'completed' }"
-          @click="activeFilter = 'completed'"
-=======
         <!-- Earnings Card -->
         <v-card
           class="stat-card stat-card--earnings stat-card--interactive"
@@ -900,19 +880,13 @@ onUnmounted(() => {
           @click="goToRiderEarnings"
           @keydown.enter.prevent="goToRiderEarnings"
           @keydown.space.prevent="goToRiderEarnings"
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
         >
           <div class="stat-content">
             <v-icon size="32" color="#4caf50">mdi-history</v-icon>
             <div class="stat-info">
-<<<<<<< HEAD
-              <div class="stat-value">{{ stats.completedToday }}</div>
-              <div class="stat-label">Completed Today</div>
-=======
               <div class="stat-value">{{ formatPhpAmount(stats.totalEarnings) }}</div>
               <div class="stat-label">Total Earnings</div>
               <div class="stat-caption">Today {{ formatPhpAmount(stats.todayEarnings) }}</div>
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
             </div>
           </div>
         </v-card>
@@ -952,13 +926,9 @@ onUnmounted(() => {
             <template v-if="activeFilter === 'accepted'">Accepted Orders</template>
             <template v-else-if="activeFilter === 'available'">Available Orders</template>
             <template v-else-if="activeFilter === 'pickedup'">Picked Up and Issue Orders</template>
-<<<<<<< HEAD
-            <template v-else-if="activeFilter === 'delivered'">Delivered Awaiting Confirmation</template>
-=======
             <template v-else-if="activeFilter === 'delivered'"
               >Delivered Awaiting Confirmation</template
             >
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
             <template v-else>Completed Orders</template>
           </span>
         </div>
@@ -981,12 +951,6 @@ onUnmounted(() => {
           </v-icon>
           <h3>No Orders</h3>
           <p>
-<<<<<<< HEAD
-            <template v-if="activeFilter === 'accepted'">You haven't accepted any orders yet.</template>
-            <template v-else-if="activeFilter === 'available'">No available orders at the moment.</template>
-            <template v-else-if="activeFilter === 'pickedup'">Picked up orders and re-delivery issues will appear here.</template>
-            <template v-else-if="activeFilter === 'delivered'">Orders waiting for customer confirmation will appear here.</template>
-=======
             <template v-if="activeFilter === 'accepted'"
               >You haven't accepted any orders yet.</template
             >
@@ -999,7 +963,6 @@ onUnmounted(() => {
             <template v-else-if="activeFilter === 'delivered'"
               >Orders waiting for customer confirmation will appear here.</template
             >
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
             <template v-else>Your completed deliveries will appear here.</template>
           </p>
         </div>
@@ -1010,14 +973,9 @@ onUnmounted(() => {
           <!-- Click Instruction Banner -->
           <div class="instruction-banner mx-4 mb-3">
             <div class="instruction-content">
-<<<<<<< HEAD
-              <span class="instruction-text">Tap on any order card to view full details and manage delivery
-                status</span>
-=======
               <span class="instruction-text"
                 >Tap on any order card to view full details and manage delivery status</span
               >
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
             </div>
           </div>
           <v-card
@@ -1029,11 +987,7 @@ onUnmounted(() => {
               'picked-card': activeFilter === 'pickedup',
               'delivered-card': activeFilter === 'delivered',
               'issue-card': hasDeliveryIssue(order),
-<<<<<<< HEAD
-              'completed-card': activeFilter === 'completed'
-=======
               'completed-card': activeFilter === 'completed',
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
             }"
             elevation="2"
             @click="viewOrderDetails(order)"
@@ -1041,13 +995,9 @@ onUnmounted(() => {
             <div class="order-header">
               <div class="order-number">
                 <span class="order-number-badge">#{{ getOrderNumber(index) }}</span>
-<<<<<<< HEAD
-                <span class="order-id">Order #{{ order.transaction_number || order.id.slice(-6) }}</span>
-=======
                 <span class="order-id"
                   >Order #{{ order.transaction_number || order.id.slice(-6) }}</span
                 >
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
               </div>
               <div class="order-time">
                 <v-icon size="16">mdi-clock-outline</v-icon>
@@ -1074,12 +1024,6 @@ onUnmounted(() => {
                 Products:
               </div>
               <div class="products-list">
-<<<<<<< HEAD
-                <div v-for="(item) in order.items.slice(0, 3)" :key="item.id" class="product-item">
-                  <div class="product-image-wrapper">
-                    <v-img v-if="item.image" :src="item.image" :alt="item.name" width="32" height="32"
-                      class="product-img" cover @error="handleImageError">
-=======
                 <div v-for="item in order.items.slice(0, 3)" :key="item.id" class="product-item">
                   <div class="product-image-wrapper">
                     <v-img
@@ -1092,7 +1036,6 @@ onUnmounted(() => {
                       cover
                       @error="handleImageError"
                     >
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
                       <template #placeholder>
                         <v-icon size="20">mdi-package</v-icon>
                       </template>
@@ -1111,15 +1054,6 @@ onUnmounted(() => {
             </div>
 
             <div class="order-footer">
-<<<<<<< HEAD
-              <div class="order-distance" v-if="order.distance">
-                <v-icon size="14">mdi-map-marker-distance</v-icon>
-                {{ order.distance }} km
-              </div>
-              <div class="order-earnings" v-if="order.rider_earnings">
-                <v-icon size="14" color="#4caf50">mdi-cash</v-icon>
-                ₱{{ order.rider_earnings }}
-=======
               <div class="order-metrics">
                 <div class="order-distance" v-if="getPickupDistanceLabel(order)">
                   <v-icon size="14">mdi-crosshairs-gps</v-icon>
@@ -1136,7 +1070,6 @@ onUnmounted(() => {
                 </span>
                 <strong>{{ formatPhpAmount(getOrderPayQuote(order).totalPay) }}</strong>
                 <span class="order-earnings__tier">{{ getOrderPayQuote(order).tierLabel }}</span>
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
               </div>
             </div>
           </v-card>
