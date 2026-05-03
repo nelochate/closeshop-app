@@ -682,6 +682,7 @@ const formattedProducts = computed(() => {
   }))
 })
 </script>
+
 <template>
   <v-app>
     <PullToRefreshWrapper :on-refresh="handleRefresh">
@@ -798,23 +799,32 @@ const formattedProducts = computed(() => {
                 v-for="item in products"
                 :key="item.id"
                 class="product-card"
-                :class="{ 'product-card--hot': item.sold >= 50 }"
+                :class="{ 
+                  'product-card--hot': item.sold >= 50 && item.stock > 0,
+                  'product-card--out-of-stock': item.stock === 0
+                }"
                 @click="goToProduct(item.id)"
               >
-                <!-- Hot Badge -->
-                <div v-if="item.sold >= 50" class="product-badge-hot">
+                <!-- Hot Badge (only show if in stock) -->
+                <div v-if="item.sold >= 50 && item.stock > 0" class="product-badge-hot">
                   <span class="badge-fire">🔥</span>
                   <span class="badge-text">HOT</span>
                 </div>
 
+                <!-- Out of Stock Badge -->
+                <div v-if="item.stock === 0" class="product-badge-oos">
+                  <v-icon size="12" class="mr-1">mdi-package-variant-closed</v-icon>
+                  Out of Stock
+                </div>
+
+                <!-- Low Stock Badge (only show if in stock and low) -->
+                <div v-else-if="item.stock < 5" class="product-badge-low">
+                  <v-icon size="12" class="mr-1">mdi-alert</v-icon>
+                  Only {{ item.stock }} left
+                </div>
+
                 <!-- Product Image -->
                 <v-img :src="item.img" class="product-img" cover />
-
-                <!-- Stock Status Badge -->
-                <div v-if="item.stock === 0" class="product-badge-oos">Out of Stock</div>
-                <div v-else-if="item.stock < 5" class="product-badge-low">
-                  Low Stock: {{ item.stock }}
-                </div>
 
                 <!-- Product Info -->
                 <div class="product-info">
@@ -1491,6 +1501,10 @@ const formattedProducts = computed(() => {
   margin-top: 24px;
 }
 
+/* =========================================== */
+/* ENHANCED PRODUCT GRID AND OUT OF STOCK UI */
+/* =========================================== */
+
 .product-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
@@ -1498,6 +1512,7 @@ const formattedProducts = computed(() => {
   margin-top: 12px;
 }
 
+/* Base Product Card */
 .product-card {
   position: relative;
   background: #fff;
@@ -1525,19 +1540,46 @@ const formattedProducts = computed(() => {
   box-shadow: 0 6px 20px rgba(255, 107, 107, 0.25);
 }
 
+/* Out of Stock Card Styling */
+.product-card--out-of-stock {
+  opacity: 0.85;
+  filter: grayscale(0.15);
+  background: #fafafa;
+}
+
+.product-card--out-of-stock:hover {
+  opacity: 0.9;
+  filter: grayscale(0.1);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.product-card--out-of-stock .product-title {
+  color: #6c757d;
+}
+
+.product-card--out-of-stock .product-price {
+  color: #adb5bd;
+  text-decoration: line-through;
+}
+
+.product-card--out-of-stock .product-sold {
+  color: #adb5bd;
+}
+
 /* Hot Badge */
 .product-badge-hot {
   position: absolute;
-  top: 4px;
-  right: 4px;
+  top: 8px;
+  right: 8px;
   display: flex;
   align-items: center;
-  gap: 2px;
-  background: linear-gradient(135deg, #ff6b6b, #ff8787);
+  gap: 4px;
+  background: linear-gradient(135deg, #ff6b6b, #ff4757);
   color: white;
-  padding: 4px 6px;
-  border-radius: 6px;
-  font-size: 10px;
+  padding: 5px 10px;
+  border-radius: 20px;
+  font-size: 11px;
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
   z-index: 10;
@@ -1552,34 +1594,89 @@ const formattedProducts = computed(() => {
   letter-spacing: 0.5px;
 }
 
-/* Out of Stock Badge */
+/* Out of Stock Badge - Enhanced */
 .product-badge-oos {
   position: absolute;
-  bottom: 40px;
-  left: 0;
-  right: 0;
-  background: rgba(0, 0, 0, 0.7);
+  top: 8px;
+  left: 8px;
+  right: auto;
+  bottom: auto;
+  background: linear-gradient(135deg, #6c757d, #495057);
   color: white;
-  padding: 4px 6px;
-  text-align: center;
+  padding: 6px 12px;
+  border-radius: 20px;
   font-size: 11px;
-  font-weight: 600;
-  z-index: 9;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  backdrop-filter: blur(2px);
+  animation: fadeInOut 0.5s ease-in-out;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
-/* Low Stock Badge */
+/* Low Stock Badge - Enhanced */
 .product-badge-low {
   position: absolute;
-  bottom: 40px;
+  top: 8px;
+  left: 8px;
+  right: auto;
+  bottom: auto;
+  background: linear-gradient(135deg, #ff9800, #f57c00);
+  color: white;
+  padding: 6px 12px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+  animation: pulseLowStock 1.5s infinite;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Overlay for Out of Stock Products */
+.product-card--out-of-stock .product-img {
+  position: relative;
+}
+
+.product-card--out-of-stock .product-img::after {
+  content: '';
+  position: absolute;
+  top: 0;
   left: 0;
   right: 0;
-  background: rgba(255, 152, 0, 0.85);
-  color: white;
-  padding: 4px 6px;
-  text-align: center;
-  font-size: 11px;
-  font-weight: 600;
-  z-index: 9;
+  bottom: 0;
+  background: rgba(0, 0, 0, 0.3);
+  pointer-events: none;
+}
+
+/* Sold Out Stamp Effect */
+.product-card--out-of-stock .product-info {
+  position: relative;
+}
+
+.product-card--out-of-stock .product-info::before {
+  content: 'SOLD OUT';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) rotate(-15deg);
+  font-size: 14px;
+  font-weight: 900;
+  color: rgba(220, 53, 69, 0.25);
+  letter-spacing: 2px;
+  white-space: nowrap;
+  pointer-events: none;
+  z-index: 5;
+  font-family: 'Arial Black', sans-serif;
+  text-transform: uppercase;
 }
 
 @keyframes hotPulse {
@@ -1589,6 +1686,28 @@ const formattedProducts = computed(() => {
   }
   50% {
     transform: scale(1.05);
+  }
+}
+
+@keyframes pulseLowStock {
+  0%, 100% {
+    transform: scale(1);
+    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
+  }
+  50% {
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.5);
+  }
+}
+
+@keyframes fadeInOut {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -1729,6 +1848,17 @@ const formattedProducts = computed(() => {
 
   .survey-bubble {
     max-width: 200px;
+  }
+  
+  .product-badge-oos,
+  .product-badge-low,
+  .product-badge-hot {
+    padding: 4px 8px;
+    font-size: 9px;
+  }
+  
+  .product-card--out-of-stock .product-info::before {
+    font-size: 10px;
   }
 }
 
