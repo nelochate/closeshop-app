@@ -3,7 +3,7 @@ import { ref, watch, onMounted, nextTick, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-
+import { StatusBar, Style } from '@capacitor/status-bar'
 // -------------------- MAPBOX --------------------
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -72,6 +72,31 @@ const prevStep = () => {
   }
 }
 
+//camera
+const isCameraActive = ref(false)
+// Helper to hide app bar and status bar
+const hideAppBar = async () => {
+  isCameraActive.value = true
+  document.body.classList.add('camera-active')
+
+  try {
+    await StatusBar.hide()
+  } catch (error) {
+    console.log('StatusBar plugin not available on web')
+  }
+}
+
+const showAppBar = async () => {
+  isCameraActive.value = false
+  document.body.classList.remove('camera-active')
+
+  try {
+    await StatusBar.show()
+    await StatusBar.setStyle({ style: Style.Light })
+  } catch (error) {
+    console.log('StatusBar plugin not available on web')
+  }
+}
 // -------------------- SHOP INFO --------------------
 const shopName = ref('')
 const description = ref('')
@@ -937,6 +962,32 @@ const showSnackbar = (message: string, color: 'success' | 'error' = 'success') =
   snackbar.value = true
 }
 
+// Close dialog function
+const closePickerDialog = () => {
+  showPicker.value = false
+}
+
+// Handle camera button click
+const handleCameraClick = async () => {
+  // Close the dialog first
+  showPicker.value = false
+
+  // Small delay to ensure dialog is fully closed before opening camera
+  setTimeout(() => {
+    pickImage('camera')
+  }, 200)
+}
+
+// Handle gallery button click
+const handleGalleryClick = async () => {
+  // Close the dialog first
+  showPicker.value = false
+
+  // Small delay to ensure dialog is fully closed before opening gallery
+  setTimeout(() => {
+    pickImage('gallery')
+  }, 200)
+}
 // -------------------- IMAGE UPLOAD --------------------
 const pickImage = async (source: 'camera' | 'gallery') => {
   try {
@@ -946,12 +997,24 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
 
+    // Hide app bar before opening camera
+    await hideAppBar()
+
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false,
       resultType: CameraResultType.Uri,
       source: source === 'camera' ? CameraSource.Camera : CameraSource.Photos,
+      presentationStyle: 'fullscreen',
+      width: 1920,
+      height: 1080,
+      saveToGallery: false,
+      correctOrientation: true,
     })
+
+    // Show app bar after camera closes
+    await showAppBar()
+
     if (!photo?.webPath) return
 
     uploading.value = true
@@ -1001,10 +1064,14 @@ const pickImage = async (source: 'camera' | 'gallery') => {
     }
 
     showSnackbar('Image uploaded successfully', 'success')
-    showPicker.value = false
   } catch (err) {
+    // Ensure app bar shows even if error occurs
+    await showAppBar()
     console.error(err)
-    showSnackbar('Failed to upload image', 'error')
+    // Don't show error if user cancelled
+    if (err instanceof Error && !err.message.toLowerCase().includes('cancel')) {
+      showSnackbar('Failed to upload image', 'error')
+    }
   } finally {
     uploading.value = false
     pickerTarget.value = null
@@ -1598,12 +1665,32 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
     city: city ? cities.value.find((c) => c.code === city)?.name : 'None',
   })
 })
+
+const isMobile = ref(window.innerWidth < 768)
+
+
+// Add resize handler if needed
+const updateMobileState = () => {
+  isMobile.value = window.innerWidth < 768
+}
+
+onMounted(() => {
+  window.addEventListener('resize', updateMobileState)
+})
+
 </script>
 
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable" :style="{ paddingTop: safeAreaTop }">
+    <v-app-bar
+      class="app-bar"
+      flat
+      color="#3f83c7"
+      dark
+      density="comfortable"
+      :class="{ 'app-bar-hidden': isCameraActive }"
+    >
       <v-btn icon @click="goBack" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -1611,7 +1698,6 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
         <strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong>
       </v-toolbar-title>
     </v-app-bar>
-
     <v-main class="pb-16">
       <!-- Progress Steps -->
       <v-card class="steps-card" flat>
@@ -2587,19 +2673,105 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       </v-snackbar>
 
       <!-- Image Picker Dialog -->
-      <v-dialog v-model="showPicker" max-width="400">
-        <v-card>
-          <v-card-title class="headline">Pick Image Source</v-card-title>
-          <v-card-text class="text-center"> Choose how you want to upload the image </v-card-text>
-          <v-card-actions class="justify-center pb-4">
-            <v-btn color="primary" @click="pickImage('camera')" class="mr-2">
-              <v-icon left>mdi-camera</v-icon>
-              Use Camera
-            </v-btn>
-            <v-btn color="primary" @click="pickImage('gallery')">
-              <v-icon left>mdi-image</v-icon>
-              Use Gallery
-            </v-btn>
+      <v-dialog
+        v-model="showPicker"
+        max-width="400"
+        :persistent="false"
+        @click:outside="closePickerDialog"
+      >
+        <v-card class="image-picker-dialog" :rounded="isMobile ? 'lg' : 'xl'">
+          <div class="dialog-header">
+            <div class="dialog-icon-wrapper">
+              <v-icon size="32" color="#3f83c7">mdi-image-plus</v-icon>
+            </div>
+            <v-card-title class="dialog-title">Add Photo</v-card-title>
+            <v-card-subtitle class="dialog-subtitle">Choose how you want to upload</v-card-subtitle>
+          </div>
+
+          <v-divider></v-divider>
+
+          <v-card-text class="dialog-buttons pa-4">
+            <button class="picker-btn camera-btn" @click="handleCameraClick">
+              <div class="btn-icon-wrapper">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                    fill="none"
+                  />
+                  <circle
+                    cx="12"
+                    cy="13"
+                    r="4"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                  />
+                </svg>
+              </div>
+              <div class="btn-content">
+                <span class="btn-title">Camera</span>
+                <span class="btn-description">Take a photo now</span>
+              </div>
+              <v-icon class="btn-arrow" size="20" color="grey">mdi-chevron-right</v-icon>
+            </button>
+
+            <button class="picker-btn gallery-btn" @click="handleGalleryClick">
+              <div class="btn-icon-wrapper">
+                <svg
+                  width="28"
+                  height="28"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <rect
+                    x="2"
+                    y="2"
+                    width="20"
+                    height="20"
+                    rx="2"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                  />
+                  <circle
+                    cx="8.5"
+                    cy="8.5"
+                    r="2.5"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                  />
+                  <polyline
+                    points="2 17 8 11 13 16 17 12 22 17"
+                    stroke="currentColor"
+                    stroke-width="1.5"
+                    fill="none"
+                  />
+                </svg>
+              </div>
+              <div class="btn-content">
+                <span class="btn-title">Gallery</span>
+                <span class="btn-description">Choose from existing photos</span>
+              </div>
+              <v-icon class="btn-arrow" size="20" color="grey">mdi-chevron-right</v-icon>
+            </button>
+          </v-card-text>
+
+          <v-divider></v-divider>
+
+          <v-card-actions class="dialog-footer pa-3">
+            <button class="cancel-btn" @click="closePickerDialog">Cancel</button>
           </v-card-actions>
         </v-card>
       </v-dialog>
@@ -2614,7 +2786,8 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   --sab: env(safe-area-inset-bottom);
   --sal: env(safe-area-inset-left);
 }
-/* Add these Mapbox-specific styles */
+
+/* Mapbox-specific styles */
 .map-container {
   position: relative;
   width: 100%;
@@ -2688,7 +2861,9 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   margin: 2px;
 }
 
+/* App Bar Styles */
 .app-bar {
+  transition: transform 0.3s ease;
   position: fixed !important;
   top: 0;
   left: 0;
@@ -2697,6 +2872,11 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   padding-top: var(--sat, 0px);
   height: calc(56px + var(--sat, 0px)) !important;
   min-height: calc(56px + var(--sat, 0px)) !important;
+}
+
+.app-bar.app-bar-hidden {
+  transform: translateY(-100%);
+  display: none;
 }
 
 .pb-16 {
@@ -2776,6 +2956,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   margin-top: 8px;
 }
 
+/* Cover Section Styles */
 .cover-section {
   position: relative;
   width: 100%;
@@ -2854,6 +3035,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   color: white !important;
 }
 
+/* Form Section */
 .form-section {
   margin-top: 70px;
   background: #fff;
@@ -2908,6 +3090,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
 }
 
+/* Search Section */
 .search-section {
   position: relative;
   margin-bottom: 16px;
@@ -2964,6 +3147,151 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   gap: 8px;
 }
 
+/* Image Picker Dialog Styles */
+.image-picker-dialog {
+  border-radius: 24px !important;
+  overflow: hidden;
+}
+
+.dialog-header {
+  text-align: center;
+  padding: 24px 20px 16px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+}
+
+.dialog-icon-wrapper {
+  width: 64px;
+  height: 64px;
+  margin: 0 auto 12px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border-radius: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.dialog-title {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: #1e293b;
+  padding: 0;
+  margin-bottom: 4px;
+}
+
+.dialog-subtitle {
+  font-size: 0.85rem;
+  color: #64748b;
+  padding: 0;
+}
+
+.dialog-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px !important;
+}
+
+.picker-btn {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: 100%;
+  padding: 16px;
+  border: 1px solid #e2e8f0;
+  border-radius: 16px;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: left;
+}
+
+.picker-btn:hover {
+  transform: translateY(-2px);
+  border-color: #3f83c7;
+  box-shadow: 0 4px 12px rgba(63, 131, 199, 0.15);
+}
+
+.picker-btn:active {
+  transform: translateY(0);
+}
+
+.btn-icon-wrapper {
+  width: 48px;
+  height: 48px;
+  background: #f8fafc;
+  border-radius: 24px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+.camera-btn:hover .btn-icon-wrapper {
+  background: #eff6ff;
+}
+
+.gallery-btn:hover .btn-icon-wrapper {
+  background: #eff6ff;
+}
+
+.btn-icon-wrapper svg {
+  stroke: #3f83c7;
+}
+
+.btn-content {
+  flex: 1;
+}
+
+.btn-title {
+  display: block;
+  font-weight: 600;
+  font-size: 1rem;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.btn-description {
+  display: block;
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.btn-arrow {
+  transition: transform 0.2s ease;
+}
+
+.picker-btn:hover .btn-arrow {
+  transform: translateX(4px);
+  color: #3f83c7 !important;
+}
+
+.dialog-footer {
+  padding: 12px 20px 20px !important;
+}
+
+.cancel-btn {
+  width: 100%;
+  padding: 12px;
+  background: #f1f5f9;
+  border: none;
+  border-radius: 12px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: #64748b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.cancel-btn:hover {
+  background: #e2e8f0;
+  color: #475569;
+}
+
+.cancel-btn:active {
+  transform: scale(0.98);
+}
+
+/* Responsive Styles */
 @media (max-width: 768px) {
   .steps {
     flex-wrap: wrap;
@@ -3020,6 +3348,66 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   .map-container {
     height: 350px;
   }
+
+  /* Dialog mobile styles */
+  .image-picker-dialog {
+    margin: 16px;
+    border-radius: 20px !important;
+  }
+  
+  .dialog-header {
+    padding: 20px 16px 12px;
+  }
+  
+  .dialog-icon-wrapper {
+    width: 56px;
+    height: 56px;
+  }
+  
+  .dialog-title {
+    font-size: 1.1rem;
+  }
+  
+  .dialog-subtitle {
+    font-size: 0.75rem;
+  }
+  
+  .dialog-buttons {
+    padding: 16px !important;
+    gap: 10px;
+  }
+  
+  .picker-btn {
+    padding: 12px;
+    gap: 12px;
+  }
+  
+  .btn-icon-wrapper {
+    width: 44px;
+    height: 44px;
+  }
+  
+  .btn-icon-wrapper svg {
+    width: 22px;
+    height: 22px;
+  }
+  
+  .btn-title {
+    font-size: 0.9rem;
+  }
+  
+  .btn-description {
+    font-size: 0.7rem;
+  }
+  
+  .dialog-footer {
+    padding: 10px 16px 16px !important;
+  }
+  
+  .cancel-btn {
+    padding: 10px;
+    font-size: 0.85rem;
+  }
 }
 
 @media (max-width: 480px) {
@@ -3056,8 +3444,26 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   .map-container {
     height: 300px;
   }
+  
+  /* Extra small devices */
+  .btn-description {
+    display: none;
+  }
+  
+  .picker-btn {
+    justify-content: center;
+  }
+  
+  .btn-content {
+    flex: none;
+  }
+  
+  .btn-title {
+    font-size: 0.85rem;
+  }
 }
 
+/* Animations */
 .logo-avatar,
 .logo-upload-btn,
 .cover-upload {
@@ -3081,6 +3487,82 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   to {
     opacity: 1;
     transform: translateY(0);
+  }
+}
+</style>
+
+<style>
+/* Global styles to hide app bar when camera is active */
+body.camera-active .v-app-bar {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  transform: translateY(-100%) !important;
+}
+
+body.camera-active {
+  overflow: hidden;
+}
+
+/* Hide dialog backdrop when camera is active */
+body.camera-active .v-overlay__scrim,
+body.camera-active .v-dialog {
+  display: none !important;
+  visibility: hidden !important;
+}
+
+/* Dark mode support for dialog */
+@media (prefers-color-scheme: dark) {
+  .image-picker-dialog {
+    background: #1e293b;
+  }
+  
+  .dialog-header {
+    background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%);
+  }
+  
+  .dialog-icon-wrapper {
+    background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
+  }
+  
+  .dialog-title {
+    color: #f1f5f9;
+  }
+  
+  .dialog-subtitle {
+    color: #94a3b8;
+  }
+  
+  .picker-btn {
+    background: #1e293b;
+    border-color: #334155;
+  }
+  
+  .picker-btn:hover {
+    border-color: #3f83c7;
+    background: #1e293b;
+  }
+  
+  .btn-icon-wrapper {
+    background: #0f172a;
+  }
+  
+  .btn-title {
+    color: #f1f5f9;
+  }
+  
+  .btn-description {
+    color: #64748b;
+  }
+  
+  .cancel-btn {
+    background: #1e293b;
+    color: #94a3b8;
+  }
+  
+  .cancel-btn:hover {
+    background: #334155;
+    color: #cbd5e1;
   }
 }
 </style>
