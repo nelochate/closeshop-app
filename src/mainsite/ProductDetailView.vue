@@ -1,6 +1,5 @@
-
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
@@ -39,7 +38,6 @@ const buyNowSelectedVariety = ref(null)
 const buyNowQuantity = ref(1)
 
 // Image states
-const currentImage = ref('')
 const openVarietyDialog = ref(false)
 const varietyPreviewIndex = ref(0)
 const varietyImages = ref([])
@@ -51,6 +49,9 @@ const snackbarColor = ref('success')
 
 // User
 const user = ref(null)
+
+// Real-time subscription
+let productSubscription = null
 
 // Fetch user
 const fetchUser = async () => {
@@ -103,13 +104,76 @@ const showSnackbar = (message, color = 'success') => {
   snackbar.value = true
 }
 
+// Setup real-time product updates
+const setupProductRealtimeSubscription = () => {
+  if (productSubscription) {
+    productSubscription.unsubscribe()
+  }
+
+  productSubscription = supabase
+    .channel(`product-${productId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'products',
+        filter: `id=eq.${productId}`,
+      },
+      (payload) => {
+        console.log('🔄 Product updated in real-time:', payload)
+        const updatedProduct = payload.new
+
+        // Update the product data
+        if (product.value) {
+          // Track previous values for notifications
+          const prevStock = product.value.stock
+          const prevSold = product.value.sold
+
+          // Update stock and sold
+          product.value.stock = updatedProduct.stock || 0
+          product.value.sold = updatedProduct.sold || 0
+
+          // If there are varieties, update their stock too
+          if (product.value.varieties && product.value.varieties.length > 0) {
+            product.value.varieties = product.value.varieties.map((variety) => {
+              // Find matching variety in updated data
+              const updatedVariety = updatedProduct.varieties?.find((v) => v.name === variety.name)
+              if (updatedVariety) {
+                return { ...variety, stock: updatedVariety.stock }
+              }
+              return variety
+            })
+          }
+
+          // Show notifications for stock change
+          if (updatedProduct.stock === 0 && prevStock > 0) {
+            showSnackbar('This product is now out of stock!', 'warning')
+          } else if (updatedProduct.stock > 0 && prevStock === 0) {
+            showSnackbar('This product is back in stock!', 'success')
+          }
+
+          // Show notification for sold count increase
+          if (updatedProduct.sold > prevSold) {
+            const soldIncrease = updatedProduct.sold - prevSold
+            showSnackbar(`🔥 ${soldIncrease} item${soldIncrease > 1 ? 's' : ''} just sold!`, 'info')
+          }
+        }
+      },
+    )
+    .subscribe()
+
+  console.log('📡 Subscribed to real-time product updates for product:', productId)
+}
+
 // Fetch product
 const fetchProduct = async () => {
   loading.value = true
   try {
     const { data, error: err } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         prod_description,
@@ -127,7 +191,8 @@ const fetchProduct = async () => {
           logo_url,
           owner_id
         )
-      `)
+      `,
+      )
       .eq('id', productId)
       .single()
 
@@ -158,6 +223,8 @@ const fetchProduct = async () => {
       buyNowSelectedSize.value = product.value.sizes[0]
     }
 
+    // Setup real-time subscription after product is loaded
+    setupProductRealtimeSubscription()
   } catch (e) {
     error.value = e.message || 'Failed to load product'
     console.error('Error loading product:', e)
@@ -385,7 +452,7 @@ const confirmAddToCart = async () => {
         quantity: finalQuantity,
         selected_size: finalSize,
         selected_variety: finalVariety ? finalVariety.name : null,
-        variety_data: varietyData
+        variety_data: varietyData,
       })
       .select()
       .single()
@@ -395,10 +462,9 @@ const confirmAddToCart = async () => {
     showSnackbar('Product added to cart successfully!', 'success')
     animateToCart()
     closeAddToCartDialog()
-    
+
     // Refresh cart count
     await fetchCartCount()
-
   } catch (err) {
     console.error('❌ Error adding to cart:', err)
     showSnackbar('Failed to add to cart. Please try again.', 'error')
@@ -547,11 +613,24 @@ const shareProduct = async () => {
   }
 }
 
+// Cleanup subscription
+const cleanup = () => {
+  if (productSubscription) {
+    productSubscription.unsubscribe()
+    console.log('📡 Unsubscribed from product updates')
+  }
+}
+
 // Initialize on mount
 onMounted(async () => {
   await fetchUser()
   await fetchProduct()
   await fetchCartCount()
+})
+
+// Cleanup on unmount
+onUnmounted(() => {
+  cleanup()
 })
 </script>
 
@@ -575,13 +654,7 @@ onMounted(async () => {
       <v-toolbar-title class="top-text"><strong>Product Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn icon ref="cartIconRef" @click="goToCart" :disabled="isAnimating">
-        <v-badge
-          v-if="cartCount > 0"
-          :content="cartCount"
-          color="red"
-          offset-x="-7"
-          offset-y="-3"
-        >
+        <v-badge v-if="cartCount > 0" :content="cartCount" color="red" offset-x="-7" offset-y="-3">
           <v-icon size="28">mdi-cart-outline</v-icon>
         </v-badge>
         <template v-else>
@@ -607,22 +680,21 @@ onMounted(async () => {
       <v-sheet v-else class="product-sheet pa-4">
         <!-- Product Images -->
         <div class="product-images mb-4">
-          <v-carousel
-            v-if="product.main_img_urls && product.main_img_urls.length > 1"
-            hide-delimiter-background
-            height="300"
-          >
-            <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
-              <v-img
-                :src="img"
-                height="300"
-                class="rounded-lg"
-                style="cursor: zoom-in"
-                @click="previewIndex = index; openImageDialog = true"
-              />
-            </v-carousel-item>
-          </v-carousel>
-
+        <v-carousel
+  v-if="product.main_img_urls && product.main_img_urls.length > 1"
+  hide-delimiter-background
+  height="300"
+>
+  <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
+    <v-img
+      :src="img"
+      height="300"
+      class="rounded-lg"
+      style="cursor: zoom-in"
+      @click="() => { previewIndex = index; openImageDialog = true; }"
+    />
+  </v-carousel-item>
+</v-carousel>
           <!-- Fallback: Single Image -->
           <v-img
             v-else
@@ -644,11 +716,11 @@ onMounted(async () => {
               </v-btn>
             </v-card-actions>
             <v-card-text class="text-center pa-0">
-              <v-img 
-                :src="product.main_img_urls[previewIndex]" 
-                max-height="600" 
-                contain 
-                class="rounded-b" 
+              <v-img
+                :src="product.main_img_urls[previewIndex]"
+                max-height="600"
+                contain
+                class="rounded-b"
               />
             </v-card-text>
           </v-card>
@@ -748,14 +820,6 @@ onMounted(async () => {
                         <div class="text-caption text-grey">
                           ₱{{ variety.price || product.price }}
                         </div>
-                        <div class="text-caption">
-                          <v-chip v-if="variety.stock === 0" size="x-small" color="red">
-                            Out of stock
-                          </v-chip>
-                          <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
-                            {{ variety.stock }} left
-                          </v-chip>
-                        </div>
                       </div>
                       <v-icon v-if="dialogSelectedVariety?.name === variety.name" color="primary">
                         mdi-check-circle
@@ -827,7 +891,7 @@ onMounted(async () => {
             <v-card-text>
               <!-- Product Info -->
               <div class="mb-4 d-flex align-center">
-                <v-avatar size="10" class="mr-3">
+                <v-avatar size="80" class="mr-3">
                   <v-img :src="mainImage(product.main_img_urls)" />
                 </v-avatar>
                 <div>
@@ -907,14 +971,6 @@ onMounted(async () => {
                         <div class="font-weight-medium">{{ variety.name }}</div>
                         <div class="text-caption text-grey">
                           ₱{{ variety.price || product.price }}
-                        </div>
-                        <div class="text-caption">
-                          <v-chip v-if="variety.stock === 0" size="x-small" color="red">
-                            Out of stock
-                          </v-chip>
-                          <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
-                            {{ variety.stock }} left
-                          </v-chip>
                         </div>
                       </div>
                       <v-icon v-if="buyNowSelectedVariety?.name === variety.name" color="primary">
@@ -999,12 +1055,6 @@ onMounted(async () => {
                   <div class="flex-grow-1">
                     <div class="d-flex justify-space-between align-center">
                       <span class="font-weight-medium">Standard Product</span>
-                      <v-chip v-if="product.stock === 0" size="small" color="red">
-                        Out of stock
-                      </v-chip>
-                      <v-chip v-else-if="product.stock < 10" size="small" color="orange">
-                        {{ product.stock }} left
-                      </v-chip>
                     </div>
                     <div class="d-flex justify-space-between align-center mt-1">
                       <span class="text-caption text-grey">Base option</span>
@@ -1063,17 +1113,6 @@ onMounted(async () => {
                         </div>
                       </div>
                     </div>
-
-                    <!-- Stock indicator -->
-                    <div class="d-flex justify-end">
-                      <v-chip v-if="variety.stock === 0" size="x-small" color="red">
-                        Out of stock
-                      </v-chip>
-                      <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
-                        {{ variety.stock }} left
-                      </v-chip>
-                      <v-chip v-else size="x-small" color="green"> In stock </v-chip>
-                    </div>
                   </v-card-text>
                 </v-card>
               </div>
@@ -1112,7 +1151,6 @@ onMounted(async () => {
           </div>
 
           <p class="product-description mb-2">{{ product.prod_description }}</p>
-          <p class="product-meta">Total Sold: {{ product.sold }}</p>
         </div>
 
         <!-- Shop Info -->
@@ -1231,7 +1269,7 @@ v-main,
 
 /* =========================================
    APP BAR
-========================================= */
+================================= */
 .app-bar {
   padding-top: env(safe-area-inset-top);
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
@@ -1269,7 +1307,7 @@ v-main,
   border-radius: 18px;
   overflow: hidden;
   background: white;
-  box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
 }
 
 .product-img :deep(img),
@@ -1285,7 +1323,7 @@ v-main,
   background: white;
   border-radius: 20px;
   padding: 24px;
-  box-shadow: 0 6px 20px rgba(0,0,0,0.05);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
 }
 
 .product-title {
@@ -1329,7 +1367,7 @@ v-main,
 .option-card:hover,
 .variety-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 18px rgba(0,0,0,0.06);
+  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.06);
 }
 
 .option-card--selected,
@@ -1350,7 +1388,7 @@ v-main,
 .shop-card {
   border-radius: 18px;
   background: white;
-  box-shadow: 0 5px 14px rgba(0,0,0,0.05);
+  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.05);
   margin-top: 20px;
 }
 
@@ -1364,7 +1402,7 @@ v-main,
 ================================= */
 .bottom-nav {
   border-top: 1px solid #e5e7eb;
-  background: rgba(255,255,255,0.96) !important;
+  background: rgba(255, 255, 255, 0.96) !important;
   backdrop-filter: blur(12px);
 }
 

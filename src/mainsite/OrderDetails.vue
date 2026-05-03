@@ -189,6 +189,102 @@ const startCancelTimer = () => {
   }
 }
 
+// Function to update order status after cancellation window and update product stock/sold
+const confirmOrderAndUpdateStock = async () => {
+  try {
+    // Get all pending_approval orders that are older than 5 minutes
+    const cutoffTime = new Date(Date.now() - CANCEL_WINDOW_SECONDS * 1000).toISOString()
+
+    const { data: pendingOrders, error: fetchError } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('status', 'pending_approval')
+      .lt('created_at', cutoffTime)
+
+    if (fetchError) throw fetchError
+
+    if (pendingOrders && pendingOrders.length > 0) {
+      const orderIds = pendingOrders.map((o: any) => o.id)
+
+      // 📦 Fetch all order items for these orders to update product stock
+      const { data: orderItemsData, error: itemsError } = await supabase
+        .from('order_items')
+        .select('product_id, quantity, selected_variety')
+        .in('order_id', orderIds)
+
+      if (itemsError) throw itemsError
+
+      // 📊 Update product stock and sold counts
+      if (orderItemsData && orderItemsData.length > 0) {
+        // Group items by product_id to handle multiple items of same product
+        const productUpdates: { [key: string]: { quantity: number; variety: string | null } } = {}
+
+        orderItemsData.forEach((item: any) => {
+          const productId = item.product_id
+          if (!productUpdates[productId]) {
+            productUpdates[productId] = { quantity: 0, variety: item.selected_variety }
+          }
+          productUpdates[productId].quantity += item.quantity
+        })
+
+        // Update each product's stock (decrease) and sold (increase)
+        for (const [productId, { quantity }] of Object.entries(productUpdates)) {
+          try {
+            // Get current product data
+            const { data: productData, error: fetchProdError } = await supabase
+              .from('products')
+              .select('stock, sold, varieties')
+              .eq('id', productId)
+              .single()
+
+            if (fetchProdError) {
+              console.error(`Error fetching product ${productId}:`, fetchProdError)
+              continue
+            }
+
+            // Calculate new stock and sold values
+            const newStock = Math.max(0, (productData.stock || 0) - quantity)
+            const newSold = (productData.sold || 0) + quantity
+
+            // Update the product
+            const { error: updateProdError } = await supabase
+              .from('products')
+              .update({
+                stock: newStock,
+                sold: newSold,
+              })
+              .eq('id', productId)
+
+            if (updateProdError) {
+              console.error(`Error updating product ${productId}:`, updateProdError)
+            } else {
+              console.log(`✅ Updated product ${productId}: sold +${quantity}, stock ${newStock}`)
+            }
+          } catch (err) {
+            console.error(`Error processing product ${productId}:`, err)
+          }
+        }
+      }
+
+      // Update all expired pending orders to waiting_for_rider
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          status: 'waiting_for_rider',
+          approved_at: new Date().toISOString(),
+        })
+        .in('id', orderIds)
+        .eq('status', 'pending_approval')
+
+      if (updateError) throw updateError
+      console.log(
+        `✅ Updated ${pendingOrders.length} orders from pending_approval to waiting_for_rider`,
+      )
+    }
+  } catch (err) {
+    console.error('❌ Error confirming expired orders:', err)
+  }
+}
 const cancelOrder = async () => {
   const remaining = calculateTimeRemaining()
   if (remaining <= 0 || isCancelDisabled.value) {
@@ -199,12 +295,25 @@ const cancelOrder = async () => {
   if (!confirm(`Cancel this order? You have ${formatTimeRemaining()} left.`)) return
 
   try {
+    // First, get the order items to calculate stock restoration
+    const { data: orderItemsData, error: itemsError } = await supabase
+      .from('order_items')
+      .select('product_id, quantity')
+      .eq('order_id', orderId)
+
+    if (itemsError) throw itemsError
+
+    // Update order status to cancelled
     const { error } = await supabase
       .from('orders')
-      .update({ status: 'cancelled', cancelled_at: new Date().toISOString() })
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+      })
       .eq('id', orderId)
 
     if (error) throw error
+
     if (timerInterval) clearInterval(timerInterval)
     await fetchOrderDetails()
     alert('Order cancelled successfully.')
@@ -238,7 +347,7 @@ const subscribeToOrderUpdates = () => {
     .subscribe()
 }
 
-// Fetch order details
+// Modified fetchOrderDetails to include product stock info
 const fetchOrderDetails = async () => {
   try {
     loading.value = true
@@ -252,8 +361,21 @@ const fetchOrderDetails = async () => {
         `
         *,
         order_items (
-          id, product_id, quantity, price, selected_size, selected_variety,
-          products (id, prod_name, main_img_urls, description, shop_id)
+          id, 
+          product_id, 
+          quantity, 
+          price, 
+          selected_size, 
+          selected_variety,
+          products (
+            id, 
+            prod_name, 
+            main_img_urls, 
+            description, 
+            shop_id,
+            stock,
+            sold
+          )
         ),
         buyer:profiles!orders_user_id_fkey (id, first_name, last_name, avatar_url, phone),
         address:addresses!orders_address_id_fkey ( * )
@@ -279,7 +401,6 @@ const fetchOrderDetails = async () => {
     }
 
     await loadTrackingLocations()
-
     await getCurrentUserAndRole()
 
     if (!userRole.value) {
@@ -295,8 +416,15 @@ const fetchOrderDetails = async () => {
       return
     }
 
-    if (order.value?.status === 'pending_approval') startCancelTimer()
-    else {
+    if (order.value?.status === 'pending_approval') {
+      startCancelTimer()
+      // Check if this specific order has expired
+      const timeRemainingCalc = calculateTimeRemaining()
+      if (timeRemainingCalc <= 0) {
+        await confirmOrderAndUpdateStock()
+        await fetchOrderDetails() // Refresh after update
+      }
+    } else {
       canCancel.value = false
       timeRemaining.value = 0
     }
@@ -309,6 +437,19 @@ const fetchOrderDetails = async () => {
     loading.value = false
   }
 }
+
+// Update onMounted
+onMounted(async () => {
+  await fetchOrderDetails()
+  startExpiryCheck() // Start periodic check for expired orders
+})
+
+// Update onUnmounted
+onUnmounted(() => {
+  if (timerInterval) clearInterval(timerInterval)
+  if (statusSubscription) supabase.removeChannel(statusSubscription)
+  cleanupExpiryCheck() // Clean up expiry check interval
+})
 
 // Fetch shop details
 const fetchShopDetails = async (shopId: string) => {
@@ -782,7 +923,7 @@ const timelineProgress = computed(() => {
   return ((currentIndex + 1) / statusOrder.length) * 100
 })
 
-// Action functions based on role
+// Modified approveOrder function
 const approveOrder = async () => {
   if (!isSeller.value) return
   if (!confirm('Approve this order? It will be made available for riders.')) return
@@ -795,13 +936,38 @@ const approveOrder = async () => {
         approved_at: new Date().toISOString(),
       })
       .eq('id', orderId)
+      .eq('status', 'pending_approval') // Only approve if still pending
 
     if (error) throw error
-    alert('Order approved! Riders can now accept it.')
+
+    alert('Order approved! Stock has been deducted and riders can now accept it.')
     await fetchOrderDetails()
   } catch (err) {
     console.error('Error approving order:', err)
     alert('Failed to approve order.')
+  }
+}
+
+// Add a function to check and process expired orders periodically
+let expiryCheckInterval: ReturnType<typeof setInterval> | null = null
+
+// Add this to your onMounted
+const startExpiryCheck = () => {
+  if (expiryCheckInterval) clearInterval(expiryCheckInterval)
+
+  // Check for expired orders every minute
+  expiryCheckInterval = setInterval(() => {
+    if (userRole.value === 'seller' || userRole.value === 'buyer') {
+      confirmOrderAndUpdateStock()
+    }
+  }, 60000) // Check every minute
+}
+
+// Add to your onUnmounted
+const cleanupExpiryCheck = () => {
+  if (expiryCheckInterval) {
+    clearInterval(expiryCheckInterval)
+    expiryCheckInterval = null
   }
 }
 
@@ -1141,6 +1307,8 @@ const markAsDelivered = async () => {
     uploadingProof.value = false
   }
 }
+
+//stock management
 
 const confirmOrderReceived = async () => {
   if (!showCustomerDeliveryActions.value || !currentUser.value?.id) return
