@@ -1221,246 +1221,10 @@ const getOrderDeliveryDisplay = (order: any): string => {
         </v-row>
       </v-container>
 
-      <!-- NEW: Seller Order Approval Section -->
-      <v-container :class="isMobile ? 'px-3 py-3' : 'py-2'">
-        <v-card class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
-          <v-card-title class="d-flex align-center" :class="isMobile ? 'pa-3' : 'pa-4'">
-            <v-icon color="warning" :size="isMobile ? 20 : 24" class="mr-2"
-              >mdi-clipboard-list</v-icon
-            >
-            <span
-              :class="isMobile ? 'text-subtitle-2 font-weight-bold' : 'text-h5 font-weight-bold'"
-            >
-              Order Approval
-            </span>
-            <v-chip
-              v-if="pendingApprovalOrders.length"
-              color="warning"
-              class="ml-2"
-              :size="isMobile ? 'small' : 'default'"
-            >
-              {{ pendingApprovalOrders.length }} Pending
-            </v-chip>
-          </v-card-title>
+      <!-- ========== DELETED: Order Approval Section ========== -->
+      <!-- ========== DELETED: Active Deliveries Section ========== -->
 
-          <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-            <!-- Loading State -->
-            <div v-if="loadingOrders" class="text-center py-4">
-              <v-progress-circular indeterminate color="warning" :size="40" />
-              <p class="mt-2 text-caption">Loading pending orders...</p>
-            </div>
-
-            <!-- No Pending Orders -->
-            <div v-else-if="pendingApprovalOrders.length === 0" class="text-center py-6">
-              <v-icon size="48" color="grey-lighten-2">mdi-check-circle-outline</v-icon>
-              <p class="mt-2 text-caption text-grey">No orders waiting for approval</p>
-            </div>
-
-            <!-- Pending Orders List -->
-            <div v-else>
-              <v-card
-                v-for="order in pendingApprovalOrders"
-                :key="order.id"
-                class="mb-3"
-                :rounded="isMobile ? 'lg' : 'xl'"
-                variant="outlined"
-                :style="{ borderLeft: '4px solid #ff9800' }"
-              >
-                <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-                  <!-- Order Header -->
-                  <div class="d-flex justify-space-between align-start mb-2">
-                    <div>
-                      <span class="text-subtitle-2 font-weight-bold text-primary">
-                        #{{ getTransactionNumber(order) }}
-                      </span>
-                      <div class="text-caption text-medium-emphasis">
-                        {{ formatDate(order.created_at) }}
-                      </div>
-                    </div>
-                    <v-chip color="warning" size="x-small">
-                      <v-icon start size="10">mdi-clock-outline</v-icon>
-                      Pending Approval
-                    </v-chip>
-                  </div>
-
-                  <!-- Customer Info -->
-                  <div class="d-flex align-center mb-2">
-                    <v-avatar size="28" color="primary" class="mr-2">
-                      <span class="text-white text-caption">
-                        {{ order.customer_name?.charAt(0) || 'C' }}
-                      </span>
-                    </v-avatar>
-                    <div>
-                      <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
-                      <div class="text-caption text-medium-emphasis">
-                        {{ order.customer_phone }}
-                      </div>
-                    </div>
-                  </div>
-
-                  <!-- Items Summary -->
-                  <div class="mb-2">
-                    <div class="text-caption font-weight-bold">Items:</div>
-                    <div
-                      v-for="item in order.items.slice(0, 2)"
-                      :key="item.id"
-                      class="d-flex align-center mt-1"
-                    >
-                      <v-img
-                        :src="item.image || '/placeholder-product.png'"
-                        width="28"
-                        height="28"
-                        cover
-                        class="rounded mr-2"
-                      />
-                      <div class="flex-grow-1">
-                        <div class="text-caption">{{ item.name }}</div>
-                        <div class="text-caption text-medium-emphasis">
-                          {{ item.quantity }} × ₱{{ Number(item.price).toLocaleString() }}
-                        </div>
-                      </div>
-                    </div>
-                    <div
-                      v-if="order.items.length > 2"
-                      class="text-caption text-medium-emphasis mt-1"
-                    >
-                      +{{ order.items.length - 2 }} more items
-                    </div>
-                  </div>
-
-                  <!-- Total -->
-                  <div class="d-flex justify-space-between align-center mb-3 pt-2 border-top">
-                    <span class="text-caption font-weight-bold">Total Amount:</span>
-                    <span class="text-subtitle-2 font-weight-bold text-primary">
-                      ₱{{ Number(order.total_amount).toLocaleString() }}
-                    </span>
-                  </div>
-
-                  <!-- Action Buttons -->
-                  <div class="d-flex gap-2">
-                    <v-btn
-                      color="success"
-                      size="small"
-                      variant="flat"
-                      @click="approveOrder(order)"
-                      :loading="approvingOrderId === order.id"
-                      :block="isMobile"
-                      class="flex-grow-1"
-                    >
-                      <v-icon start size="14">mdi-check-circle</v-icon>
-                      Approve
-                    </v-btn>
-                    <v-btn
-                      color="error"
-                      size="small"
-                      variant="outlined"
-                      @click="rejectOrder(order)"
-                      :block="isMobile"
-                      class="flex-grow-1"
-                    >
-                      <v-icon start size="14">mdi-close-circle</v-icon>
-                      Reject
-                    </v-btn>
-                    <v-btn
-                      color="primary"
-                      size="small"
-                      variant="outlined"
-                      @click="viewOrderDetails(order.id)"
-                    >
-                      <v-icon size="14">mdi-eye</v-icon>
-                    </v-btn>
-                  </div>
-                </v-card-text>
-              </v-card>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-container>
-
-      <!-- Also add this section to show active orders with riders (optional, after your existing orders) -->
-      <v-container :class="isMobile ? 'px-3 py-3' : 'py-2'">
-        <v-card class="elevation-1" :rounded="isMobile ? 'lg' : 'xl'">
-          <v-card-title class="d-flex align-center" :class="isMobile ? 'pa-3' : 'pa-4'">
-            <v-icon color="primary" :size="isMobile ? 20 : 24" class="mr-2">mdi-motorbike</v-icon>
-            <span
-              :class="isMobile ? 'text-subtitle-2 font-weight-bold' : 'text-h5 font-weight-bold'"
-            >
-              Active Deliveries
-            </span>
-            <v-chip
-              v-if="activeOrdersWithRiders.length"
-              color="primary"
-              class="ml-2"
-              :size="isMobile ? 'small' : 'default'"
-            >
-              {{ activeOrdersWithRiders.length }}
-            </v-chip>
-          </v-card-title>
-
-          <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-            <div v-if="loadingOrders" class="text-center py-4">
-              <v-progress-circular indeterminate color="primary" :size="40" />
-            </div>
-
-            <div v-else-if="activeOrdersWithRiders.length === 0" class="text-center py-6">
-              <v-icon size="48" color="grey-lighten-2">mdi-truck-off</v-icon>
-              <p class="mt-2 text-caption text-grey">No active deliveries</p>
-            </div>
-
-            <div v-else>
-              <v-card
-                v-for="order in activeOrdersWithRiders"
-                :key="order.id"
-                class="mb-3"
-                :rounded="isMobile ? 'lg' : 'xl'"
-                variant="outlined"
-              >
-                <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-                  <div class="d-flex justify-space-between align-start mb-2">
-                    <div>
-                      <span class="text-subtitle-2 font-weight-bold text-primary">
-                        #{{ getTransactionNumber(order) }}
-                      </span>
-                      <div class="text-caption text-medium-emphasis">
-                        {{ formatDate(order.created_at) }}
-                      </div>
-                    </div>
-                    <v-chip :color="getOrderStatusColor(order)" size="x-small">
-                      {{ getOrderStatusText(order) }}
-                    </v-chip>
-                  </div>
-
-                  <!-- Rider Info -->
-                  <div
-                    v-if="order.rider_details"
-                    class="mb-2 pa-2 rounded-lg"
-                    style="background: #e3f2fd"
-                  >
-                    <div class="d-flex align-center">
-                      <v-icon color="primary" size="18" class="mr-2">mdi-motorbike</v-icon>
-                      <div>
-                        <div class="text-caption font-weight-bold">
-                          Rider: {{ order.rider_details.name }}
-                        </div>
-                        <div class="text-caption">📞 {{ order.rider_details.phone }}</div>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div class="d-flex justify-space-between align-center">
-                    <div class="text-caption">{{ order.items.length }} item(s)</div>
-                    <div class="text-caption font-weight-bold text-primary">
-                      ₱{{ Number(order.total_amount).toLocaleString() }}
-                    </div>
-                  </div>
-                </v-card-text>
-              </v-card>
-            </div>
-          </v-card-text>
-        </v-card>
-      </v-container>
-
-      <!-- Orders Section - Mobile Optimized -->
+      <!-- Orders Section - Mobile Optimized (KEEP THIS ONE) -->
       <v-container :class="isMobile ? 'px-3 py-3' : 'py-4'">
         <!-- Section Header -->
         <div class="d-flex align-center justify-space-between mb-4">
@@ -1549,7 +1313,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
           </div>
         </v-alert>
 
-        <!-- Orders List - FIXED: Removed max-height to prevent cutting off content -->
+        <!-- Orders List - Keep all this content -->
         <div v-else class="orders-list">
           <!-- Pending Approval Section Orders -->
           <template v-if="activeOrderTab === 'pending_approval'">
@@ -1558,51 +1322,43 @@ const getOrderDeliveryDisplay = (order: any): string => {
               :key="order.id"
               class="mb-3 order-card elevation-1"
               :rounded="isMobile ? 'lg' : 'xl'"
+              :style="{ borderLeft: '4px solid #ff9800' }"
             >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-                <div class="d-flex justify-space-between align-start mb-3">
+                <!-- Order Header -->
+                <div class="d-flex justify-space-between align-start mb-2">
                   <div>
-                    <div class="d-flex align-center mb-1">
-                      <h4 class="text-subtitle-2 font-weight-bold text-primary mr-2">
-                        #{{ getTransactionNumber(order) }}
-                      </h4>
-                      <v-chip color="warning" size="x-small">
-                        <v-icon start size="10">mdi-clock-outline</v-icon>
-                        Pending Approval
-                      </v-chip>
-                    </div>
-                    <div class="d-flex align-center flex-wrap gap-1">
-                      <p class="text-caption text-medium-emphasis">
-                        <v-icon :size="isMobile ? 12 : 14" class="mr-1">mdi-calendar</v-icon>
-                        {{ formatDate(order.created_at) }}
-                      </p>
+                    <span class="text-subtitle-2 font-weight-bold text-primary">
+                      #{{ getTransactionNumber(order) }}
+                    </span>
+                    <div class="text-caption text-medium-emphasis">
+                      {{ formatDate(order.created_at) }}
                     </div>
                   </div>
+                  <v-chip color="warning" size="x-small">
+                    <v-icon start size="10">mdi-clock-outline</v-icon>
+                    Pending Approval
+                  </v-chip>
                 </div>
 
-                <div class="d-flex align-center mb-3">
-                  <v-avatar size="36" color="primary" class="mr-2">
-                    <v-img
-                      v-if="order.user?.avatar_url"
-                      :src="order.user.avatar_url"
-                      alt="Customer"
-                    />
-                    <span v-else class="text-white text-caption">
-                      {{ order.user?.first_name?.[0] }}{{ order.user?.last_name?.[0] }}
+                <!-- Customer Info -->
+                <div class="d-flex align-center mb-2">
+                  <v-avatar size="28" color="primary" class="mr-2">
+                    <span class="text-white text-caption">
+                      {{ order.customer_name?.charAt(0) || 'C' }}
                     </span>
                   </v-avatar>
                   <div>
-                    <div class="text-caption font-weight-medium">
-                      {{ order.user?.first_name }} {{ order.user?.last_name }}
-                    </div>
+                    <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
                     <div class="text-caption text-medium-emphasis">
-                      {{ order.address?.phone || order.user?.phone || 'N/A' }}
+                      {{ order.customer_phone }}
                     </div>
                   </div>
                 </div>
 
-                <div class="mb-3">
-                  <div class="text-caption font-weight-bold mb-1">Items:</div>
+                <!-- Items Summary -->
+                <div class="mb-2">
+                  <div class="text-caption font-weight-bold">Items:</div>
                   <div
                     v-for="item in order.items.slice(0, 2)"
                     :key="item.id"
@@ -1610,23 +1366,27 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   >
                     <v-img
                       :src="item.image || '/placeholder-product.png'"
-                      width="36"
-                      height="36"
+                      width="28"
+                      height="28"
                       cover
                       class="rounded mr-2"
                     />
                     <div class="flex-grow-1">
-                      <div class="text-caption line-clamp-1">{{ item.name }}</div>
+                      <div class="text-caption">{{ item.name }}</div>
                       <div class="text-caption text-medium-emphasis">
                         {{ item.quantity }} × ₱{{ Number(item.price).toLocaleString() }}
                       </div>
                     </div>
                   </div>
-                  <div v-if="order.items.length > 2" class="text-caption text-medium-emphasis mt-1">
+                  <div
+                    v-if="order.items.length > 2"
+                    class="text-caption text-medium-emphasis mt-1"
+                  >
                     +{{ order.items.length - 2 }} more items
                   </div>
                 </div>
 
+                <!-- Total -->
                 <div class="d-flex justify-space-between align-center mb-3 pt-2 border-top">
                   <span class="text-caption font-weight-bold">Total Amount:</span>
                   <span class="text-subtitle-2 font-weight-bold text-primary">
@@ -1634,6 +1394,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </span>
                 </div>
 
+                <!-- Action Buttons -->
                 <div class="action-buttons-wrapper">
                   <v-btn
                     color="success"
@@ -1748,11 +1509,12 @@ const getOrderDeliveryDisplay = (order: any): string => {
                       {{ formatDate(order.created_at) }}
                     </div>
                   </div>
-                  <v-chip :color="getOrderStatusColor(order.status)" size="x-small">
-                    {{ getOrderStatusText(order.status) }}
+                  <v-chip :color="getOrderStatusColor(order)" size="x-small">
+                    {{ getOrderStatusText(order) }}
                   </v-chip>
                 </div>
 
+                <!-- Rider Info -->
                 <div
                   v-if="order.rider_details"
                   class="mb-2 pa-2 rounded-lg"
@@ -1922,7 +1684,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
     </v-main>
   </v-app>
 </template>
-
 <style scoped>
 /* Base Styles */
 .background-gradient {
