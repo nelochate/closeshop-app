@@ -3,6 +3,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { removeRecentMessageNotification } from '@/utils/chatNotifications'
+import { syncProfileFromAuthUser } from '@/utils/profileSync'
+import {
+  calculateCheckoutDeliveryPricing,
+  calculateOrderItemsSubtotal,
+  calculateOrderTotalAmount,
+  isMissingDeliveryFeeColumnError,
+} from '@/utils/deliveryPricing.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -40,6 +47,7 @@ const contactEmail = ref('')
 // 🚫 VALIDATION STATE
 const validationErrors = ref<string[]>([])
 const isProcessing = ref(false)
+const shopDetails = ref<any>(null)
 
 // 🏪 SHOP STATE
 const shopSchedule = ref({
@@ -133,6 +141,7 @@ const loadShopData = async () => {
 
     if (!shopId) {
       console.warn('⚠️ No shop ID found, using default schedule')
+      shopDetails.value = null
       shopSchedule.value = {
         openDays: [0, 1, 2, 3, 4, 5, 6], // Include Sunday (0)
         openHour: 9,
@@ -148,12 +157,15 @@ const loadShopData = async () => {
 
     const { data: shop, error } = await supabase
       .from('shops')
-      .select('open_time, close_time, open_days, manual_status, physical_store, meetup_details, payment_options')
+      .select(
+        'id, business_name, latitude, longitude, open_time, close_time, open_days, manual_status, physical_store, meetup_details, payment_options',
+      )
       .eq('id', shopId)
       .single()
 
     if (error) {
       console.error('❌ Error fetching shop data:', error)
+      shopDetails.value = null
       // Use default that includes Sunday
       shopSchedule.value = {
         openDays: [0, 1, 2, 3, 4, 5, 6],
@@ -167,6 +179,7 @@ const loadShopData = async () => {
     }
 
     console.log('📊 Raw shop data:', shop)
+    shopDetails.value = shop
 
     // Parse open days - CRITICAL FIX
     let openDays = [0, 1, 2, 3, 4, 5, 6] // Default includes Sunday
@@ -226,6 +239,7 @@ const loadShopData = async () => {
     console.log('💰 Available payment options:', shopSchedule.value.paymentOptions)
   } catch (err) {
     console.error('❌ Error loading shop data:', err)
+    shopDetails.value = null
     // Always include Sunday in fallback
     shopSchedule.value = {
       openDays: [0, 1, 2, 3, 4, 5, 6],
@@ -1675,12 +1689,49 @@ const handleImageError = (event: Event) => {
   img.onerror = null // Prevent infinite loop
 }
 
-// 💰 COMPUTED: TOTAL PRICE
-const totalPrice = computed(() => {
-  return items.value.reduce((sum, item) => {
-    return sum + item.price * (item.quantity || 1)
-  }, 0)
+// 💰 COMPUTED: ORDER PRICING
+const currencyFormatter = new Intl.NumberFormat('en-PH', {
+  style: 'currency',
+  currency: 'PHP',
+  minimumFractionDigits: 0,
+  maximumFractionDigits: 0,
 })
+
+const formatCurrency = (value: number | string | null | undefined) =>
+  currencyFormatter.format(Number(value ?? 0))
+
+const subtotal = computed(() => calculateOrderItemsSubtotal(items.value))
+
+const deliveryPricing = computed(() =>
+  calculateCheckoutDeliveryPricing({
+    pickupLat:
+      shopDetails.value?.latitude ??
+      items.value[0]?.product?.shop?.latitude ??
+      items.value[0]?.shop?.latitude,
+    pickupLng:
+      shopDetails.value?.longitude ??
+      items.value[0]?.product?.shop?.longitude ??
+      items.value[0]?.shop?.longitude,
+    deliveryLat: address.value?.latitude,
+    deliveryLng: address.value?.longitude,
+  }),
+)
+
+const deliveryFee = computed(() => deliveryPricing.value.deliveryFee)
+
+const deliveryFeeHelperText = computed(() => {
+  if (deliveryPricing.value.fallbackApplied) {
+    return 'Fixed delivery fee applied while delivery distance is unavailable.'
+  }
+
+  if (deliveryPricing.value.distanceKm !== null) {
+    return `Calculated from approximately ${deliveryPricing.value.distanceKm.toFixed(1)} km distance.`
+  }
+
+  return 'Delivery fee included in your final total.'
+})
+
+const totalPrice = computed(() => calculateOrderTotalAmount(subtotal.value, deliveryFee.value))
 
 // ➕/➖ QUANTITY CONTROLS
 const increaseQty = (item: any) => {
@@ -1788,23 +1839,38 @@ const handleCheckout = async () => {
     console.log('🏪 Creating order for shop:', shopId)
 
     // 1. Create the order in database
-    const { data: order, error: orderError } = await supabase
+    const baseOrderPayload = {
+      user_id: buyer.value.id,
+      address_id: address.value.id,
+      total_amount: totalPrice.value,
+      status: 'pending_approval',
+      payment_method: paymentMethod.value,
+      transaction_number: transactionNumber.value,
+      delivery_option: deliveryOption.value,
+      delivery_date: deliveryDate.value,
+      delivery_time: deliveryTime.value,
+      note: note.value,
+      shop_id: shopId,
+    }
+
+    let orderResponse = await supabase
       .from('orders')
       .insert({
-        user_id: buyer.value.id,
-        address_id: address.value.id,
-        total_amount: totalPrice.value,
-        status: 'pending_approval',
-        payment_method: paymentMethod.value,
-        transaction_number: transactionNumber.value,
-        delivery_option: deliveryOption.value,
-        delivery_date: deliveryDate.value,
-        delivery_time: deliveryTime.value,
-        note: note.value,
-        shop_id: shopId,
+        ...baseOrderPayload,
+        delivery_fee: deliveryFee.value,
       })
       .select()
       .single()
+
+    if (orderResponse.error && isMissingDeliveryFeeColumnError(orderResponse.error)) {
+      console.warn(
+        'delivery_fee column is not available in this Supabase project yet. Retrying order creation without the column.',
+      )
+
+      orderResponse = await supabase.from('orders').insert(baseOrderPayload).select().single()
+    }
+
+    const { data: order, error: orderError } = orderResponse
 
     if (orderError) {
       console.error('❌ Order creation error:', orderError)
@@ -1838,10 +1904,22 @@ const handleCheckout = async () => {
 
     console.log('✅ Order items created')
 
+    const { data: persistedOrderTotals, error: persistedOrderTotalsError } = await supabase
+      .from('orders')
+      .select('id, total_amount')
+      .eq('id', order.id)
+      .single()
+
+    if (persistedOrderTotalsError) {
+      console.warn('Could not refresh persisted order totals:', persistedOrderTotalsError)
+    }
+
+    const finalOrderTotal = Number(persistedOrderTotals?.total_amount ?? totalPrice.value)
+
     // 3. Create payment record
     const { error: paymentError } = await supabase.from('payments').insert({
       order_id: order.id,
-      amount: totalPrice.value,
+      amount: finalOrderTotal,
       status: 'pending',
       method: paymentMethod.value,
     })
@@ -1887,7 +1965,7 @@ const handleCheckout = async () => {
       params: { orderId: order.id },
       state: {
         orderNumber: transactionNumber.value,
-        totalAmount: totalPrice.value,
+        totalAmount: finalOrderTotal,
       },
     })
   } catch (err) {
@@ -2069,7 +2147,7 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
     // Format payment method for display
     const paymentMethodDisplay = paymentMethod.value === 'cod' ? 'Cash on Delivery' : 'GCash'
     const customerName = getBuyerDisplayName(buyerProfile)
-    const shopTotal = shopItems.reduce((sum, item) => sum + item.price * item.quantity, 0)
+    const shopTotal = totalPrice.value
 
     const orderMessage = `🛍️ New Order Received!\n\nCustomer: ${customerName}\nShop: ${shopName}\nOrder ID: ${orderId}\nTransaction #: ${transactionNumber.value}\nTotal Amount: ₱${shopTotal.toFixed(2)}\n\nItems:\n${itemsSummary}\n\nDelivery: ${deliveryOption.value}\nPayment: ${paymentMethodDisplay}\nSchedule: ${formattedDate.value} at ${deliveryTime.value}\n\nNote: ${note.value || 'No message'}`
 
@@ -2135,12 +2213,25 @@ const getOrCreateProfile = async (userId: string) => {
     // If profile doesn't exist, create one
     console.log('📝 Creating new profile for user:', userId)
 
+    const {
+      data: { user: authUser },
+    } = await supabase.auth.getUser()
+
+    if (authUser?.id === userId) {
+      const syncedProfile = await syncProfileFromAuthUser({
+        user: authUser,
+        defaultRole: 'customer',
+      })
+
+      if (syncedProfile) {
+        return syncedProfile
+      }
+    }
+
     const { data: newProfile, error: createError } = await supabase
       .from('profiles')
       .insert({
         id: userId,
-        first_name: 'User',
-        last_name: 'Profile',
         role: 'customer',
         created_at: new Date().toISOString(),
       })
@@ -2271,7 +2362,17 @@ watch(
               <div>
                 <div class="text-subtitle-2 text-white">Order Summary</div>
                 <div class="text-h5 font-weight-bold text-white">
-                  ₱{{ totalPrice.toLocaleString() }}
+                  {{ formatCurrency(totalPrice) }}
+                </div>
+                <div class="summary-breakdown mt-2">
+                  <div class="summary-breakdown__row">
+                    <span>Subtotal</span>
+                    <strong>{{ formatCurrency(subtotal) }}</strong>
+                  </div>
+                  <div class="summary-breakdown__row">
+                    <span>Delivery Fee</span>
+                    <strong>{{ formatCurrency(deliveryFee) }}</strong>
+                  </div>
                 </div>
               </div>
 
@@ -2595,12 +2696,21 @@ watch(
           <v-divider></v-divider>
 
           <v-card-text class="total-section">
-            <div class="d-flex justify-space-between align-center">
-              <div class="text-subtitle-1 font-weight-medium">Total Amount</div>
-              <div class="text-h5 font-weight-bold text-primary">
-                ₱{{ totalPrice.toLocaleString() }}
+            <div class="total-breakdown">
+              <div class="total-breakdown__row">
+                <span>Product Subtotal</span>
+                <strong>{{ formatCurrency(subtotal) }}</strong>
+              </div>
+              <div class="total-breakdown__row">
+                <span>Delivery Fee</span>
+                <strong>{{ formatCurrency(deliveryFee) }}</strong>
+              </div>
+              <div class="total-breakdown__row total-breakdown__row--grand">
+                <span>Total Amount</span>
+                <strong>{{ formatCurrency(totalPrice) }}</strong>
               </div>
             </div>
+            <div class="text-caption text-grey mt-2">{{ deliveryFeeHelperText }}</div>
           </v-card-text>
         </v-card>
 
@@ -2695,7 +2805,10 @@ watch(
             <div class="order-summary">
               <div class="text-caption text-grey">Total Amount</div>
               <div class="text-h5 font-weight-bold text-white">
-                ₱{{ totalPrice.toLocaleString() }}
+                {{ formatCurrency(totalPrice) }}
+              </div>
+              <div class="text-caption text-white">
+                {{ `Includes ${formatCurrency(deliveryFee)} delivery fee` }}
               </div>
             </div>
             <v-btn
@@ -3236,9 +3349,43 @@ watch(
   font-size: 0.95rem;
 }
 
+.summary-breakdown {
+  display: grid;
+  gap: 4px;
+}
+
+.summary-breakdown__row,
+.total-breakdown__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.summary-breakdown__row {
+  font-size: 0.78rem;
+  color: rgba(255, 255, 255, 0.9);
+}
+
 .total-section {
   background: linear-gradient(to right, #f8fafc, #ffffff);
   border-radius: 0 0 12px 12px;
+}
+
+.total-breakdown {
+  display: grid;
+  gap: 10px;
+}
+
+.total-breakdown__row {
+  color: #334155;
+}
+
+.total-breakdown__row--grand {
+  padding-top: 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.22);
+  font-size: 1rem;
+  color: #1e3a8a;
 }
 
 /* Options Grid */

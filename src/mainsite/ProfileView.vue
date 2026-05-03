@@ -9,6 +9,7 @@ import {
   getVisibleUnreadNotificationCount,
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
+import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 
 const activeTab = ref('account')
 
@@ -124,7 +125,7 @@ const setupShopRealtimeSubscription = () => {
         event: 'UPDATE',
         schema: 'public',
         table: 'shops',
-        filter: `owner_id=eq.${user.value.id}`
+        filter: `owner_id=eq.${user.value.id}`,
       },
       (payload) => {
         console.log('Shop status changed:', payload)
@@ -140,7 +141,7 @@ const setupShopRealtimeSubscription = () => {
 
           console.log('Updated shop status:', {
             hasShop: hasShop.value,
-            status: shopCreationStatus.value
+            status: shopCreationStatus.value,
           })
 
           // Show toast notification if status changed to approved
@@ -148,7 +149,7 @@ const setupShopRealtimeSubscription = () => {
             showApprovalNotification()
           }
         }
-      }
+      },
     )
     .subscribe()
 }
@@ -289,7 +290,7 @@ const checkUserShop = async () => {
         id: shop.id,
         status: shop.status,
         business_name: shop.business_name,
-        isApproved: shop.status === 'approved'
+        isApproved: shop.status === 'approved',
       })
 
       // Check if this is a recent approval
@@ -311,15 +312,14 @@ const checkUserShop = async () => {
 
 // Debug function to check current user
 const debugCurrentUser = async () => {
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   console.log('Current user:', user)
   console.log('User ID:', user?.id)
 
   // Check if there's a shop for this user
-  const { data: shop } = await supabase
-    .from('shops')
-    .select('*')
-    .eq('owner_id', user?.id)
+  const { data: shop } = await supabase.from('shops').select('*').eq('owner_id', user?.id)
 
   console.log('Shops found for this user:', shop)
 }
@@ -337,7 +337,7 @@ const getGoogleAvatarUrl = (userData) => {
 
   // Check identities array first (most reliable for Google)
   if (userData.identities && userData.identities.length > 0) {
-    const identity = userData.identities.find(i => i.provider === 'google')
+    const identity = userData.identities.find((i) => i.provider === 'google')
     if (identity && identity.identity_data) {
       const identityData = identity.identity_data
 
@@ -446,7 +446,7 @@ const checkRiderStatus = async () => {
 
     console.log('Rider status check result:', {
       isRider: isRider.value,
-      status: riderStatus.value
+      status: riderStatus.value,
     })
 
     if (isRider.value && riderStatus.value === 'approved') {
@@ -472,7 +472,10 @@ const goToRiderDashboard = () => {
 
 const getSupabaseAuthAvatar = async () => {
   try {
-    const { data: { user }, error } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser()
     if (error) throw error
 
     // Check in user_metadata
@@ -499,8 +502,10 @@ const loadUser = async () => {
     fullName.value = getUserDisplayName(authStore.userData)
 
     // Priority 1: Check if user has custom avatar in profiles table
-    if (authStore.profile.avatar_url &&
-      !authStore.profile.avatar_url.includes('googleusercontent.com')) {
+    if (
+      authStore.profile.avatar_url &&
+      !authStore.profile.avatar_url.includes('googleusercontent.com')
+    ) {
       avatarUrl.value = authStore.profile.avatar_url
       console.log('Using custom profile avatar')
     }
@@ -538,8 +543,10 @@ const loadUser = async () => {
     fullName.value = getUserDisplayName(userData.user)
 
     // Same avatar logic as above
-    if (authStore.profile?.avatar_url &&
-      !authStore.profile.avatar_url.includes('googleusercontent.com')) {
+    if (
+      authStore.profile?.avatar_url &&
+      !authStore.profile.avatar_url.includes('googleusercontent.com')
+    ) {
       avatarUrl.value = authStore.profile.avatar_url
     } else {
       const supabaseAvatar = await getSupabaseAuthAvatar()
@@ -555,7 +562,7 @@ const loadUser = async () => {
     console.log('Avatar loading debug:', {
       fullName: fullName.value,
       hasGoogleAvatar: !!getGoogleAvatarUrl(userData.user),
-      avatarUrl: avatarUrl.value
+      avatarUrl: avatarUrl.value,
     })
 
     await checkUserShop()
@@ -578,43 +585,41 @@ const loadOrderCounts = async () => {
       return
     }
 
-    console.log('📊 All orders for counts:', orders)
+    const currentOrders = await reconcileAutoCompletedOrders(orders || [])
+
+    console.log('📊 All orders for counts:', currentOrders)
 
     navItems.value = navItems.value.map((item) => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
           // Show ALL orders regardless of status
-          count = orders.filter(
-            (o) => o.status !== 'cancelled'
-          ).length
+          count = currentOrders.filter((o) => o.status !== 'cancelled').length
           break
         case 'to-receive':
-          count = orders.filter(
-            (o) => isOrderPendingDelivery(o) || isOrderAwaitingCustomerConfirmation(o)
+          count = currentOrders.filter(
+            (o) => isOrderPendingDelivery(o) || isOrderAwaitingCustomerConfirmation(o),
           ).length
           break
         case 'reviews':
-          count = orders.filter(
-            (o) => isOrderDeliveredState(o) && o.status !== 'cancelled'
+          count = currentOrders.filter(
+            (o) => isOrderDeliveredState(o) && o.status !== 'cancelled',
           ).length
           break
         case 'completed':
-          count = orders.filter(
-            (o) => isOrderCompleted(o)
-          ).length
+          count = currentOrders.filter((o) => isOrderCompleted(o)).length
           break
         case 'cancelled':
-          count = orders.filter(
-            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled'
+          count = currentOrders.filter(
+            (o) => o.status === 'cancelled' || o.payment_status === 'cancelled',
           ).length
           break
         case 'failed':
-          count = orders.filter(
+          count = currentOrders.filter(
             (o) =>
               o.payment_status === 'failed' ||
               o.status === 'failed' ||
-              (o.payment_status === 'rejected' && o.status !== 'cancelled')
+              (o.payment_status === 'rejected' && o.status !== 'cancelled'),
           ).length
           break
         default:
@@ -637,7 +642,9 @@ const isOrderCompleted = (order) => !!order?.completed_at || order?.status === '
 
 const isOrderAwaitingCustomerConfirmation = (order) => {
   if (!order) return false
-  return ['picked_up', 'delivered'].includes(order.status) && !!order.delivered_at && !order.completed_at
+  return (
+    ['picked_up', 'delivered'].includes(order.status) && !!order.delivered_at && !order.completed_at
+  )
 }
 
 const isOrderDeliveredState = (order) => {
@@ -692,8 +699,13 @@ const loadSectionItems = async (sectionId) => {
     // Apply filters based on section
     switch (sectionId) {
       case 'to-receive':
-        query = query
-          .in('status', ['waiting_for_rider', 'accepted_by_rider', 'picked_up', 'completed', 'delivered'])
+        query = query.in('status', [
+          'waiting_for_rider',
+          'accepted_by_rider',
+          'picked_up',
+          'completed',
+          'delivered',
+        ])
         break
       case 'reviews':
         query = query
@@ -712,8 +724,7 @@ const loadSectionItems = async (sectionId) => {
         query = query.or('payment_status.eq.failed,status.eq.failed')
         break
       case 'my-purchases':
-        query = query
-          .neq('status', 'cancelled')
+        query = query.neq('status', 'cancelled')
         break
     }
 
@@ -723,9 +734,11 @@ const loadSectionItems = async (sectionId) => {
       console.error('Error loading section items:', error)
       sectionItems.value = []
     } else {
-      console.log(`📦 ${sectionId} items:`, data)
+      const currentOrders = await reconcileAutoCompletedOrders(data || [])
 
-      const filteredData = (data || []).filter((order) => {
+      console.log(`📦 ${sectionId} items:`, currentOrders)
+
+      const filteredData = currentOrders.filter((order) => {
         switch (sectionId) {
           case 'to-receive':
             return isOrderPendingDelivery(order) || isOrderAwaitingCustomerConfirmation(order)
@@ -784,11 +797,11 @@ const loadSectionItems = async (sectionId) => {
 const getStatusColor = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
   if (isOrderDeliveredState(order)) return 'success'
-  if (order.status === 'waiting_for_rider') return 'warning'     // Orange/Yellow
-  if (order.status === 'accepted_by_rider') return 'info'        // Blue
-  if (order.status === 'picked_up') return 'warning'             // Orange/Yellow
+  if (order.status === 'waiting_for_rider') return 'warning' // Orange/Yellow
+  if (order.status === 'accepted_by_rider') return 'info' // Blue
+  if (order.status === 'picked_up') return 'warning' // Orange/Yellow
   if (order.payment_status === 'paid') return 'primary'
-  if (order.status === 'pending_approval') return 'warning'      // Orange/Yellow
+  if (order.status === 'pending_approval') return 'warning' // Orange/Yellow
   if (order.payment_status === 'pending') return 'warning'
   if (order.payment_status === 'failed') return 'error'
   return 'grey'
@@ -799,11 +812,11 @@ const getStatusText = (order) => {
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
   if (isOrderCompleted(order)) return 'Completed'
   if (isOrderDeliveredState(order)) return 'Delivered'
-  if (order.status === 'waiting_for_rider') return 'Waiting for Rider'  // Added
-  if (order.status === 'accepted_by_rider') return 'Rider Accepted'     // Added
-  if (order.status === 'picked_up') return 'Picked Up'                  // Added
+  if (order.status === 'waiting_for_rider') return 'Waiting for Rider' // Added
+  if (order.status === 'accepted_by_rider') return 'Rider Accepted' // Added
+  if (order.status === 'picked_up') return 'Picked Up' // Added
   if (order.payment_status === 'paid') return 'To Receive'
-  if (order.status === 'pending_approval') return 'Pending Approval'    // Added
+  if (order.status === 'pending_approval') return 'Pending Approval' // Added
   if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
   return 'Processing'
@@ -828,7 +841,7 @@ const setupOrderSubscription = () => {
         // Refresh counts and current section
         await loadOrderCounts()
         await loadSectionItems(selectedSection.value)
-      }
+      },
     )
     .subscribe()
 
@@ -851,12 +864,10 @@ const viewOrder = (orderId) => {
   }
 }
 
-
-
 const goShopOrBuild = () => {
   console.log('Shop button clicked:', {
     hasShop: hasShop.value,
-    status: shopCreationStatus.value
+    status: shopCreationStatus.value,
   })
 
   // If user has a shop
@@ -951,7 +962,7 @@ const goNotifications = () => {
 onMounted(async () => {
   await loadUser()
   await loadOrderCounts()
-   await debugCurrentUser()
+  await debugCurrentUser()
   await loadSectionItems(selectedSection.value)
   setupShopRealtimeSubscription()
   await setupNotificationListener()
@@ -1004,7 +1015,7 @@ watch(
       }
     }
   },
-  { immediate: true, deep: true }
+  { immediate: true, deep: true },
 )
 
 // Reload user if route changes but component is reused
@@ -1017,228 +1028,277 @@ onBeforeRouteUpdate((to, from, next) => {
 <template>
   <v-app>
     <PullToRefreshWrapper :on-refresh="handleRefresh">
-    <!-- Main Profile Content -->
-    <v-main class="profile-main">
+      <!-- Main Profile Content -->
+      <v-main class="profile-main">
+        <!-- Action Buttons Container -->
+        <div class="top-actions-container">
+          <!-- Shop Button - Left -->
+          <v-btn @click="goShopOrBuild" class="action-btn shop-btn" elevation="2">
+            <v-icon start size="20">mdi-storefront-outline</v-icon>
+            {{ hasShop ? 'My Shop' : 'Create Shop' }}
+          </v-btn>
 
-    <!-- Action Buttons Container -->
-    <div class="top-actions-container">
-      <!-- Shop Button - Left -->
-      <v-btn @click="goShopOrBuild" class="action-btn shop-btn" elevation="2">
-        <v-icon start size="20">mdi-storefront-outline</v-icon>
-        {{ hasShop ? 'My Shop' : 'Create Shop' }}
-      </v-btn>
+          <!-- Right Side Buttons Container -->
+          <div class="right-buttons-container">
+            <!-- Rider Dashboard Icon - Only shows for approved riders -->
+            <v-btn
+              v-if="isRider && riderStatus === 'approved'"
+              variant="text"
+              icon
+              class="rider-dashboard-btn"
+              @click="goToRiderDashboard"
+              title="Rider Dashboard"
+            >
+              <v-icon size="28">mdi-motorbike</v-icon>
+              <span v-if="hasAvailableRiderOrders" class="rider-available-dot"></span>
+            </v-btn>
 
-    <!-- Right Side Buttons Container -->
-    <div class="right-buttons-container">
-      <!-- Rider Dashboard Icon - Only shows for approved riders -->
-      <v-btn
-        v-if="isRider && riderStatus === 'approved'"
-        variant="text"
-        icon
-        class="rider-dashboard-btn"
-        @click="goToRiderDashboard"
-        title="Rider Dashboard"
-      >
-        <v-icon size="28">mdi-motorbike</v-icon>
-        <span v-if="hasAvailableRiderOrders" class="rider-available-dot"></span>
-      </v-btn>
-
-      <!-- Notification Button with Badge -->
-      <div class="notification-wrapper-profile">
-        <v-btn class="notif2-btn" @click="goNotifications">
-          <v-icon size="22">mdi-bell-outline</v-icon>
-        </v-btn>
-        <!-- Badge -->
-        <div
-          v-if="unreadNotifications > 0"
-          class="notification-badge-profile"
-          :class="{ 'badge-large-profile': unreadNotifications > 9 }"
-        >
-          {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}
-        </div>
-      </div>
-
-  <!-- Settings Icon -->
-  <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
-    <v-icon size="28">mdi-cog</v-icon>
-  </v-btn>
-</div>
-      </div>
-
-      <!-- Profile Header -->
-      <div class="profile-header">
-        <div class="profile-inline">
-          <div class="avatar-container">
-            <v-avatar size="80" color="primary" class="avatar-glow">
-              <!-- Show Google/Custom avatar if available -->
-              <v-img v-if="avatarUrl" :src="avatarUrl" cover @error="handleAvatarError" />
-              <!-- Show initials if no avatar or avatar failed to load -->
-              <div v-else class="initials-avatar">
-                {{ getUserInitials(fullName || user?.email?.split('@')[0] || 'U') }}
+            <!-- Notification Button with Badge -->
+            <div class="notification-wrapper-profile">
+              <v-btn class="notif2-btn" @click="goNotifications">
+                <v-icon size="22">mdi-bell-outline</v-icon>
+              </v-btn>
+              <!-- Badge -->
+              <div
+                v-if="unreadNotifications > 0"
+                class="notification-badge-profile"
+                :class="{ 'badge-large-profile': unreadNotifications > 9 }"
+              >
+                {{ unreadNotifications > 99 ? '99+' : unreadNotifications }}
               </div>
-            </v-avatar>
-            <v-btn class="edit-btn" color="primary" icon elevation="4" @click="router.push('/edit-profile')">
-              <v-icon class="edit-icon">mdi-pencil</v-icon>
+            </div>
+
+            <!-- Settings Icon -->
+            <v-btn variant="text" icon class="settings-btn" @click="router.push('/settings')">
+              <v-icon size="28">mdi-cog</v-icon>
             </v-btn>
           </div>
-
-          <!-- Name above Email -->
-          <div class="info-block">
-            <h2 class="name-row">{{ fullName || (user?.email?.split('@')[0]) || 'User' }}</h2>
-            <p class="email-row">{{ user?.email || '...' }}</p>
-          </div>
         </div>
-      </div>
 
-      <v-divider thickness="2" class="my-4"></v-divider>
-
-      <!-- Enhanced Icon Navigation -->
-      <div class="shopee-nav-section">
-        <div class="nav-grid">
-          <div v-for="item in navItems" :key="item.id" class="nav-item" :class="{ active: selectedSection === item.id }"
-            @click="handleNavClick(item.id)">
-            <div class="nav-icon-container">
-              <div class="nav-icon-wrapper" :class="{ active: selectedSection === item.id }">
-                <v-icon :color="selectedSection === item.id ? 'white' : item.color" size="24">
-                  {{ item.icon }}
-                </v-icon>
-              </div>
-              <div v-if="item.count > 0" class="badge">
-                {{ item.count > 99 ? '99+' : item.count }}
-              </div>
-            </div>
-            <span class="nav-title">{{ item.title }}</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- Enhanced Content Section -->
-      <div class="content-section">
-        <v-expand-transition>
-          <div v-if="isLoadingSection" class="section-loading">
-            <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
-            <p class="loading-text">Loading your orders...</p>
-          </div>
-
-          <div v-else class="section-content">
-
-            <!-- Enhanced Order Cards -->
-            <div v-if="sectionItems.length > 0" class="orders-container">
-              <v-card v-for="order in sectionItems" :key="order.id" class="order-card elevation-2" rounded="lg">
-                <v-card-title class="order-header">
-                  <div class="order-info">
-                    <div class="order-number">Order #{{ order.transaction_number }}</div>
-                    <div class="order-date">{{ formatDate(order.created_at) }}</div>
-                  </div>
-                  <v-chip :color="getStatusColor(order)" variant="flat" size="small">
-                    {{ getStatusText(order) }}
-                  </v-chip>
-                </v-card-title>
-
-                <v-divider></v-divider>
-
-                <!-- Order Items with Fixed Image Container -->
-                <div class="order-items">
-                  <div v-for="item in order.items" :key="item.id" class="order-item">
-                    <!-- Fixed Image Container -->
-                    <div class="product-image-container">
-                      <v-img :src="item.product_img || '/placeholder-product.png'"
-                        :lazy-src="'/placeholder-product.png'" cover class="product-image"
-                        @click="viewOrder(order.id)" aspect-ratio="1">
-                        <template v-slot:placeholder>
-                          <v-row class="fill-height ma-0" align="center" justify="center">
-                            <v-progress-circular indeterminate color="primary"></v-progress-circular>
-                          </v-row>
-                        </template>
-                      </v-img>
-                    </div>
-
-                    <div class="item-details">
-                      <h4 class="product-name" @click="viewOrder(order.id)">
-                        {{ item.product_name || 'Product' }}
-                      </h4>
-                      <div class="item-specs">
-                        <span class="quantity">Qty: {{ item.quantity }}</span>
-                        <span class="price">₱{{ item.price?.toLocaleString() }}</span>
-                      </div>
-                      <div v-if="item.selected_size || item.selected_variety" class="variants">
-                        <v-chip v-if="item.selected_size" size="x-small" class="mr-1">
-                          {{ item.selected_size }}
-                        </v-chip>
-                        <v-chip v-if="item.selected_variety" size="x-small">
-                          {{ item.selected_variety }}
-                        </v-chip>
-                      </div>
-                    </div>
-                  </div>
+        <!-- Profile Header -->
+        <div class="profile-header">
+          <div class="profile-inline">
+            <div class="avatar-container">
+              <v-avatar size="80" color="primary" class="avatar-glow">
+                <!-- Show Google/Custom avatar if available -->
+                <v-img v-if="avatarUrl" :src="avatarUrl" cover @error="handleAvatarError" />
+                <!-- Show initials if no avatar or avatar failed to load -->
+                <div v-else class="initials-avatar">
+                  {{ getUserInitials(fullName || user?.email?.split('@')[0] || 'U') }}
                 </div>
-
-                <v-divider></v-divider>
-
-                <v-card-actions class="order-actions">
-                  <div class="order-total">
-                    <strong>Total: ₱{{ order.total_amount?.toLocaleString() }}</strong>
-                  </div>
-                  <div class="action-buttons">
-                    <v-btn color="primary" variant="outlined" size="small" @click="viewOrder(order.id)">
-                      <v-icon left small>mdi-receipt</v-icon>
-                      View Order
-                    </v-btn>
-                    <v-btn v-if="isOrderDeliveredState(order)" color="secondary" variant="flat" size="small"
-                      @click="rateOrder(order.id)">
-                      <v-icon left small>mdi-star</v-icon>
-                      Review
-                    </v-btn>
-                  </div>
-                </v-card-actions>
-              </v-card>
-            </div>
-
-            <!-- Enhanced Empty State -->
-            <div v-else class="empty-state">
-              <div class="empty-icon">
-                <v-icon size="80" color="grey-lighten-2">mdi-cart-off</v-icon>
-              </div>
-              <h3 class="empty-title">No orders found</h3>
-              <p class="empty-text">
-                {{
-                  selectedSection === 'my-purchases'
-                    ? "You haven't made any purchases yet."
-                    : `No ${selectedSection.replace('-', ' ')} orders.`
-                }}
-              </p>
-
-              <v-btn v-if="selectedSection === 'my-purchases'" color="primary" class="empty-action-btn"
-                @click="router.push('/')" size="large">
-                <v-icon left>mdi-shopping</v-icon>
-                Start Shopping
+              </v-avatar>
+              <v-btn
+                class="edit-btn"
+                color="primary"
+                icon
+                elevation="4"
+                @click="router.push('/edit-profile')"
+              >
+                <v-icon class="edit-icon">mdi-pencil</v-icon>
               </v-btn>
             </div>
+
+            <!-- Name above Email -->
+            <div class="info-block">
+              <h2 class="name-row">{{ fullName || user?.email?.split('@')[0] || 'User' }}</h2>
+              <p class="email-row">{{ user?.email || '...' }}</p>
+            </div>
           </div>
-        </v-expand-transition>
-      </div>
-    </v-main>
-
-    <!-- Success Toast Notification -->
-    <v-snackbar v-model="showApprovalToast" :color="toastColor" :timeout="6000" location="top" rounded="lg"
-      elevation="24">
-      <template v-slot:activator>
-        <!-- This is just for the snackbar itself -->
-      </template>
-
-      <div class="d-flex align-center">
-        <v-icon :icon="toastIcon" size="28" class="mr-3" color="white"></v-icon>
-        <div class="flex-grow-1">
-          <strong class="text-white">Shop Approved!</strong>
-          <div class="text-white text-caption">{{ toastMessage }}</div>
         </div>
-        <v-btn variant="text" icon="mdi-close" color="white" @click="showApprovalToast = false" size="small"></v-btn>
-      </div>
-    </v-snackbar>
 
-    <!-- Reusable BottomNav -->
-    <BottomNav v-model="activeTab" />
-  </PullToRefreshWrapper>
+        <v-divider thickness="2" class="my-4"></v-divider>
+
+        <!-- Enhanced Icon Navigation -->
+        <div class="shopee-nav-section">
+          <div class="nav-grid">
+            <div
+              v-for="item in navItems"
+              :key="item.id"
+              class="nav-item"
+              :class="{ active: selectedSection === item.id }"
+              @click="handleNavClick(item.id)"
+            >
+              <div class="nav-icon-container">
+                <div class="nav-icon-wrapper" :class="{ active: selectedSection === item.id }">
+                  <v-icon :color="selectedSection === item.id ? 'white' : item.color" size="24">
+                    {{ item.icon }}
+                  </v-icon>
+                </div>
+                <div v-if="item.count > 0" class="badge">
+                  {{ item.count > 99 ? '99+' : item.count }}
+                </div>
+              </div>
+              <span class="nav-title">{{ item.title }}</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Enhanced Content Section -->
+        <div class="content-section">
+          <v-expand-transition>
+            <div v-if="isLoadingSection" class="section-loading">
+              <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
+              <p class="loading-text">Loading your orders...</p>
+            </div>
+
+            <div v-else class="section-content">
+              <!-- Enhanced Order Cards -->
+              <div v-if="sectionItems.length > 0" class="orders-container">
+                <v-card
+                  v-for="order in sectionItems"
+                  :key="order.id"
+                  class="order-card elevation-2"
+                  rounded="lg"
+                >
+                  <v-card-title class="order-header">
+                    <div class="order-info">
+                      <div class="order-number">Order #{{ order.transaction_number }}</div>
+                      <div class="order-date">{{ formatDate(order.created_at) }}</div>
+                    </div>
+                    <v-chip :color="getStatusColor(order)" variant="flat" size="small">
+                      {{ getStatusText(order) }}
+                    </v-chip>
+                  </v-card-title>
+
+                  <v-divider></v-divider>
+
+                  <!-- Order Items with Fixed Image Container -->
+                  <div class="order-items">
+                    <div v-for="item in order.items" :key="item.id" class="order-item">
+                      <!-- Fixed Image Container -->
+                      <div class="product-image-container">
+                        <v-img
+                          :src="item.product_img || '/placeholder-product.png'"
+                          :lazy-src="'/placeholder-product.png'"
+                          cover
+                          class="product-image"
+                          @click="viewOrder(order.id)"
+                          aspect-ratio="1"
+                        >
+                          <template v-slot:placeholder>
+                            <v-row class="fill-height ma-0" align="center" justify="center">
+                              <v-progress-circular
+                                indeterminate
+                                color="primary"
+                              ></v-progress-circular>
+                            </v-row>
+                          </template>
+                        </v-img>
+                      </div>
+
+                      <div class="item-details">
+                        <h4 class="product-name" @click="viewOrder(order.id)">
+                          {{ item.product_name || 'Product' }}
+                        </h4>
+                        <div class="item-specs">
+                          <span class="quantity">Qty: {{ item.quantity }}</span>
+                          <span class="price">₱{{ item.price?.toLocaleString() }}</span>
+                        </div>
+                        <div v-if="item.selected_size || item.selected_variety" class="variants">
+                          <v-chip v-if="item.selected_size" size="x-small" class="mr-1">
+                            {{ item.selected_size }}
+                          </v-chip>
+                          <v-chip v-if="item.selected_variety" size="x-small">
+                            {{ item.selected_variety }}
+                          </v-chip>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <v-divider></v-divider>
+
+                  <v-card-actions class="order-actions">
+                    <div class="order-total">
+                      <strong>Total: ₱{{ order.total_amount?.toLocaleString() }}</strong>
+                    </div>
+                    <div class="action-buttons">
+                      <v-btn
+                        color="primary"
+                        variant="outlined"
+                        size="small"
+                        @click="viewOrder(order.id)"
+                      >
+                        <v-icon left small>mdi-receipt</v-icon>
+                        View Order
+                      </v-btn>
+                      <v-btn
+                        v-if="isOrderDeliveredState(order)"
+                        color="secondary"
+                        variant="flat"
+                        size="small"
+                        @click="rateOrder(order.id)"
+                      >
+                        <v-icon left small>mdi-star</v-icon>
+                        Review
+                      </v-btn>
+                    </div>
+                  </v-card-actions>
+                </v-card>
+              </div>
+
+              <!-- Enhanced Empty State -->
+              <div v-else class="empty-state">
+                <div class="empty-icon">
+                  <v-icon size="80" color="grey-lighten-2">mdi-cart-off</v-icon>
+                </div>
+                <h3 class="empty-title">No orders found</h3>
+                <p class="empty-text">
+                  {{
+                    selectedSection === 'my-purchases'
+                      ? "You haven't made any purchases yet."
+                      : `No ${selectedSection.replace('-', ' ')} orders.`
+                  }}
+                </p>
+
+                <v-btn
+                  v-if="selectedSection === 'my-purchases'"
+                  color="primary"
+                  class="empty-action-btn"
+                  @click="router.push('/')"
+                  size="large"
+                >
+                  <v-icon left>mdi-shopping</v-icon>
+                  Start Shopping
+                </v-btn>
+              </div>
+            </div>
+          </v-expand-transition>
+        </div>
+      </v-main>
+
+      <!-- Success Toast Notification -->
+      <v-snackbar
+        v-model="showApprovalToast"
+        :color="toastColor"
+        :timeout="6000"
+        location="top"
+        rounded="lg"
+        elevation="24"
+      >
+        <template v-slot:activator>
+          <!-- This is just for the snackbar itself -->
+        </template>
+
+        <div class="d-flex align-center">
+          <v-icon :icon="toastIcon" size="28" class="mr-3" color="white"></v-icon>
+          <div class="flex-grow-1">
+            <strong class="text-white">Shop Approved!</strong>
+            <div class="text-white text-caption">{{ toastMessage }}</div>
+          </div>
+          <v-btn
+            variant="text"
+            icon="mdi-close"
+            color="white"
+            @click="showApprovalToast = false"
+            size="small"
+          ></v-btn>
+        </div>
+      </v-snackbar>
+
+      <!-- Reusable BottomNav -->
+      <BottomNav v-model="activeTab" />
+    </PullToRefreshWrapper>
   </v-app>
 </template>
 
@@ -1293,20 +1353,20 @@ onBeforeRouteUpdate((to, from, next) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: max(16px, env(safe-area-inset-top)) 16px 0 0;  /* Changed: removed left padding */
+  padding: max(16px, env(safe-area-inset-top)) 16px 0 0; /* Changed: removed left padding */
   width: 100%;
   background: transparent;
 
   /* For devices with notches, add extra padding */
   padding-top: max(20px, env(safe-area-inset-top));
   padding-right: max(16px, env(safe-area-inset-right));
-  padding-left: 0;  /* Added: no left padding */
+  padding-left: 0; /* Added: no left padding */
 }
 
 /* Shop Button - Left side */
 .shop-btn {
   text-transform: none;
-  border-radius: 0 20px 20px 0 !important;  /* Changed: only top-right and bottom-right rounded */
+  border-radius: 0 20px 20px 0 !important; /* Changed: only top-right and bottom-right rounded */
   transition: all 0.3s ease;
   font-weight: 600;
   font-size: 0.9rem;
@@ -1317,7 +1377,7 @@ onBeforeRouteUpdate((to, from, next) => {
   background: linear-gradient(135deg, #ffffff, #f8f9faf7) !important;
   color: #464749 !important;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
-  margin-left: 0;  /* Ensure no margin */
+  margin-left: 0; /* Ensure no margin */
   margin-right: 0;
   position: relative;
   box-shadow: 2px 4px 12px rgba(0, 0, 0, 0.15) !important;
@@ -1371,7 +1431,7 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 .notif2-btn {
-  color:white;
+  color: white;
   background: transparent !important;
   border-radius: 0 !important;
   box-shadow: none !important;
@@ -1423,7 +1483,6 @@ onBeforeRouteUpdate((to, from, next) => {
     box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
   }
 }
-
 
 /* Update settings-btn for consistent sizing */
 .settings-btn {
@@ -1760,7 +1819,8 @@ onBeforeRouteUpdate((to, from, next) => {
   flex-wrap: wrap;
 }
 
-.quantity, .price {
+.quantity,
+.price {
   font-size: 0.85rem;
 }
 
@@ -1894,13 +1954,13 @@ onBeforeRouteUpdate((to, from, next) => {
     right: -5px;
   }
 
-    .profile-inline {
+  .profile-inline {
     margin-top: -20px !important;
     gap: 16px;
   }
   .top-actions-container {
     padding-top: max(16px, env(safe-area-inset-top));
-    padding-left: 0;  /* Added: no left padding on mobile */
+    padding-left: 0; /* Added: no left padding on mobile */
     padding-right: max(12px, env(safe-area-inset-right));
   }
 
@@ -1909,7 +1969,7 @@ onBeforeRouteUpdate((to, from, next) => {
     font-size: 0.85rem;
     height: 35px !important;
     min-width: 115px;
-    border-radius: 0 16px 16px 0 !important;  /* Smaller radius on mobile */
+    border-radius: 0 16px 16px 0 !important; /* Smaller radius on mobile */
   }
 
   .rider-dashboard-btn {
@@ -1971,7 +2031,7 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 600px) {
-   .notification-badge-profile {
+  .notification-badge-profile {
     min-width: 16px;
     height: 16px;
     font-size: 9px;
@@ -1987,13 +2047,13 @@ onBeforeRouteUpdate((to, from, next) => {
     right: -4px;
   }
 
-    .profile-inline {
+  .profile-inline {
     margin-top: -15px !important;
     gap: 14px;
   }
   .top-actions-container {
     padding-top: max(12px, env(safe-area-inset-top));
-    padding-left: 0;  /* Added: no left padding */
+    padding-left: 0; /* Added: no left padding */
     padding-right: max(12px, env(safe-area-inset-right));
   }
 
@@ -2105,13 +2165,13 @@ onBeforeRouteUpdate((to, from, next) => {
 }
 
 @media (max-width: 480px) {
-    .profile-inline {
+  .profile-inline {
     margin-top: -10px !important;
     gap: 12px;
   }
   .top-actions-container {
     padding-top: max(10px, env(safe-area-inset-top));
-    padding-left: 0;  /* Added: no left padding */
+    padding-left: 0; /* Added: no left padding */
     padding-right: max(10px, env(safe-area-inset-right));
   }
 
@@ -2154,7 +2214,7 @@ onBeforeRouteUpdate((to, from, next) => {
     font-size: 0.65rem;
   }
 
-   .order-item {
+  .order-item {
     gap: 12px;
   }
 
@@ -2171,7 +2231,8 @@ onBeforeRouteUpdate((to, from, next) => {
     font-size: 0.85rem;
   }
 
-  .quantity, .price {
+  .quantity,
+  .price {
     font-size: 0.75rem;
   }
 }

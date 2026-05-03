@@ -2,10 +2,7 @@
 import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import {
-  filterVisibleNotifications,
-  resolveVisibleNotification,
-} from '@/utils/chatNotifications'
+import { filterVisibleNotifications, resolveVisibleNotification } from '@/utils/chatNotifications'
 import { formatLiveTimestamp, formatRelativeDayLabel } from '@/utils/dateTime'
 
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
@@ -20,17 +17,17 @@ const showDeleteAllDialog = ref(false)
 const deleting = ref(false)
 const deleteOption = ref('read')
 const currentTime = ref(Date.now())
+const currentRiderNumericId = ref(null)
+const routingContextLoaded = ref(false)
 let notificationSubscription
 let timeUpdateInterval
 
 // Computed for unread notifications
-const unreadNotifications = computed(() => 
-  notifications.value.filter((n) => !n.is_read)
-)
+const unreadNotifications = computed(() => notifications.value.filter((n) => !n.is_read))
 
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing notifications...')
-  
+
   try {
     loading.value = true
     await fetchNotifications()
@@ -173,6 +170,74 @@ async function fetchNotifications() {
   } finally {
     loading.value = false
   }
+}
+
+async function ensureRoutingContextLoaded() {
+  if (routingContextLoaded.value) {
+    return
+  }
+
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+
+  currentRiderNumericId.value = null
+
+  if (!user) {
+    routingContextLoaded.value = true
+    return
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('Rider_Registration')
+      .select('rider_id')
+      .eq('profile_id', user.id)
+      .maybeSingle()
+
+    if (error) {
+      throw error
+    }
+
+    currentRiderNumericId.value = data?.rider_id ?? null
+  } catch (error) {
+    console.warn('Could not load rider routing context for notifications:', error)
+    currentRiderNumericId.value = null
+  } finally {
+    routingContextLoaded.value = true
+  }
+}
+
+async function resolveOrderNotificationRoute(orderId) {
+  if (!orderId) {
+    return { name: 'profileview' }
+  }
+
+  await ensureRoutingContextLoaded()
+
+  if (!currentRiderNumericId.value) {
+    return { name: 'order-details', params: { id: orderId } }
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('rider_id')
+      .eq('id', orderId)
+      .maybeSingle()
+
+    if (error) {
+      throw error
+    }
+
+    if (Number(data?.rider_id) === Number(currentRiderNumericId.value)) {
+      return { name: 'rider-order-details', params: { id: orderId } }
+    }
+  } catch (error) {
+    console.warn('Could not resolve rider order notification target:', error)
+  }
+
+  return { name: 'order-details', params: { id: orderId } }
 }
 
 function showBrowserNotification(notification) {
@@ -423,7 +488,7 @@ async function navigateToNotificationTarget(notification) {
     case 'order_cancelled':
     case 'shipping_update':
       if (related_id) {
-        router.push({ name: 'order-details', params: { id: related_id } })
+        router.push(await resolveOrderNotificationRoute(related_id))
       } else {
         router.push({ name: 'profileview' }) // Fallback to profile/orders
       }
@@ -473,7 +538,7 @@ async function navigateToNotificationTarget(notification) {
     case 'payment_successful':
       if (related_id) {
         // If payment is related to an order
-        router.push({ name: 'order-details', params: { id: related_id } })
+        router.push(await resolveOrderNotificationRoute(related_id))
       } else {
         router.push({ name: 'profileview' })
       }
@@ -630,6 +695,7 @@ onMounted(() => {
   timeUpdateInterval = setInterval(() => {
     currentTime.value = Date.now()
   }, 30000)
+  ensureRoutingContextLoaded()
   setupNotificationListener()
   fetchNotifications()
   requestNotificationPermission()
@@ -648,278 +714,279 @@ onUnmounted(() => {
 <template>
   <v-app>
     <PullToRefreshWrapper :on-refresh="handleRefresh">
-    <v-main>
-      <!-- Top App Bar with Safe Area Support -->
-      <v-app-bar color="primary" density="compact" class="notification-app-bar">
-        <v-app-bar-nav-icon @click="router.back()">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-app-bar-nav-icon>
-        <v-app-bar-title>Notifications</v-app-bar-title>
-        <v-spacer></v-spacer>
+      <v-main>
+        <!-- Top App Bar with Safe Area Support -->
+        <v-app-bar density="compact" class="top-nav">
+          <v-app-bar-nav-icon @click="router.back()">
+            <v-icon>mdi-arrow-left</v-icon>
+          </v-app-bar-nav-icon>
+          <v-app-bar-title>Notifications</v-app-bar-title>
+          <v-spacer></v-spacer>
 
-        <!-- Action buttons -->
-        <v-menu v-if="notifications.length > 0">
-          <template v-slot:activator="{ props }">
-            <v-btn icon v-bind="props" :disabled="loading">
-              <v-icon>mdi-dots-vertical</v-icon>
-            </v-btn>
-          </template>
-          <v-list density="compact">
-            <v-list-item @click="markAllAsRead" :disabled="unreadCount === 0">
-              <template v-slot:prepend>
-                <v-icon>mdi-check-all</v-icon>
-              </template>
-              <v-list-item-title>Mark all as read</v-list-item-title>
-            </v-list-item>
-            <v-list-item
-              @click="confirmDeleteAllRead"
-              :disabled="unreadCount === notifications.length"
-            >
-              <template v-slot:prepend>
-                <v-icon>mdi-delete-sweep</v-icon>
-              </template>
-              <v-list-item-title>Delete all read</v-list-item-title>
-            </v-list-item>
-            <v-divider></v-divider>
-            <v-list-item @click="showDeleteAllDialog = true">
-              <template v-slot:prepend>
-                <v-icon color="error">mdi-delete-forever</v-icon>
-              </template>
-              <v-list-item-title class="text-error">Delete all notifications</v-list-item-title>
-            </v-list-item>
-          </v-list>
-        </v-menu>
-      </v-app-bar>
+          <!-- Action buttons -->
+          <v-menu v-if="notifications.length > 0">
+            <template v-slot:activator="{ props }">
+              <v-btn icon v-bind="props" :disabled="loading">
+                <v-icon>mdi-dots-vertical</v-icon>
+              </v-btn>
+            </template>
+            <v-list density="compact">
+              <v-list-item @click="markAllAsRead" :disabled="unreadCount === 0">
+                <template v-slot:prepend>
+                  <v-icon>mdi-check-all</v-icon>
+                </template>
+                <v-list-item-title>Mark all as read</v-list-item-title>
+              </v-list-item>
+              <v-list-item
+                @click="confirmDeleteAllRead"
+                :disabled="unreadCount === notifications.length"
+              >
+                <template v-slot:prepend>
+                  <v-icon>mdi-delete-sweep</v-icon>
+                </template>
+                <v-list-item-title>Delete all read</v-list-item-title>
+              </v-list-item>
+              <v-divider></v-divider>
+              <v-list-item @click="showDeleteAllDialog = true">
+                <template v-slot:prepend>
+                  <v-icon color="error">mdi-delete-forever</v-icon>
+                </template>
+                <v-list-item-title class="text-error">Delete all notifications</v-list-item-title>
+              </v-list-item>
+            </v-list>
+          </v-menu>
+        </v-app-bar>
 
-      <v-container class="notification-view">
-        <!-- Stats Summary -->
-        <div v-if="!loading && notifications.length > 0" class="stats-summary mb-4">
-          <v-card variant="flat" color="surface">
-            <v-card-text class="d-flex justify-space-between align-center">
-              <div>
-                <div class="text-h6">{{ notifications.length }}</div>
-                <div class="text-caption text-grey">Total</div>
-              </div>
-              <v-divider vertical></v-divider>
-              <div>
-                <div class="text-h6 text-primary">{{ unreadCount }}</div>
-                <div class="text-caption text-grey">Unread</div>
-              </div>
-              <v-divider vertical></v-divider>
-              <div>
-                <div class="text-h6">{{ notifications.length - unreadCount }}</div>
-                <div class="text-caption text-grey">Read</div>
-              </div>
-            </v-card-text>
-          </v-card>
-        </div>
+        <v-container class="notification-view">
+          <!-- Stats Summary -->
+          <div v-if="!loading && notifications.length > 0" class="stats-summary">
+            <v-card variant="flat" color="surface">
+              <v-card-text class="d-flex justify-space-between align-center">
+                <div>
+                  <div class="text-h6">{{ notifications.length }}</div>
+                  <div class="text-caption text-grey">Total</div>
+                </div>
+                <v-divider vertical></v-divider>
+                <div>
+                  <div class="text-h6 text-primary">{{ unreadCount }}</div>
+                  <div class="text-caption text-grey">Unread</div>
+                </div>
+                <v-divider vertical></v-divider>
+                <div>
+                  <div class="text-h6">{{ notifications.length - unreadCount }}</div>
+                  <div class="text-caption text-grey">Read</div>
+                </div>
+              </v-card-text>
+            </v-card>
+          </div>
 
-        <!-- Loading State -->
-        <div v-if="loading" class="text-center py-8">
-          <v-progress-circular indeterminate color="primary"></v-progress-circular>
-          <div class="mt-2">Loading notifications...</div>
-        </div>
+          <!-- Loading State -->
+          <div v-if="loading" class="text-center py-8">
+            <v-progress-circular indeterminate color="primary"></v-progress-circular>
+            <div class="mt-2">Loading notifications...</div>
+          </div>
 
-        <!-- Empty State -->
-        <div v-else-if="notifications.length === 0" class="text-center py-8">
-          <v-icon size="64" color="grey-lighten-2">mdi-bell-off-outline</v-icon>
-          <div class="text-h6 mt-4 text-grey">No notifications yet</div>
-          <div class="text-grey">We'll notify you when something arrives</div>
-        </div>
+          <!-- Empty State -->
+          <div v-else-if="notifications.length === 0" class="text-center py-8">
+            <v-icon size="64" color="grey-lighten-2">mdi-bell-off-outline</v-icon>
+            <div class="text-h6 mt-4 text-grey">No notifications yet</div>
+            <div class="text-grey">We'll notify you when something arrives</div>
+          </div>
 
-        <!-- Notifications List -->
-        <div v-else class="notifications-list">
-          <v-card variant="flat">
-            <v-list lines="two">
-              <template v-for="(notification, index) in notifications" :key="notification.id">
-                <v-list-item
-                  :class="['notification-item', { 'notification-unread': !notification.is_read }]"
-                  @click="handleNotificationClick(notification)"
-                >
-                  <template #prepend>
-                    <v-avatar v-if="getNotificationAvatar(notification)" size="40">
-                      <v-img
-                        :src="getNotificationAvatar(notification)"
-                        :alt="getNotificationTitle(notification)"
-                        cover
-                      />
-                    </v-avatar>
-                    <v-avatar v-else :color="getNotificationColor(notification.type)" size="40">
-                      <v-icon :icon="getNotificationIcon(notification.type)" color="white" />
-                    </v-avatar>
-                  </template>
-
-                  <v-list-item-title
-                    :class="{ 'text-bold': !notification.is_read }"
-                    class="text-body-1 d-flex align-center"
+          <!-- Notifications List -->
+          <div v-else class="notifications-list">
+            <v-card variant="flat">
+              <v-list lines="two">
+                <template v-for="(notification, index) in notifications" :key="notification.id">
+                  <v-list-item
+                    :class="['notification-item', { 'notification-unread': !notification.is_read }]"
+                    @click="handleNotificationClick(notification)"
                   >
-                    {{ getNotificationTitle(notification) }}
-                    <v-chip
-                      v-if="notification.priority !== 'normal'"
-                      :color="getPriorityColor(notification.priority)"
-                      size="x-small"
-                      class="ml-2"
+                    <template #prepend>
+                      <v-avatar v-if="getNotificationAvatar(notification)" size="40">
+                        <v-img
+                          :src="getNotificationAvatar(notification)"
+                          :alt="getNotificationTitle(notification)"
+                          cover
+                        />
+                      </v-avatar>
+                      <v-avatar v-else :color="getNotificationColor(notification.type)" size="40">
+                        <v-icon :icon="getNotificationIcon(notification.type)" color="white" />
+                      </v-avatar>
+                    </template>
+
+                    <v-list-item-title
+                      :class="{ 'text-bold': !notification.is_read }"
+                      class="text-body-1 d-flex align-center"
                     >
-                      {{ getPriorityLabel(notification.priority) }}
-                    </v-chip>
-                  </v-list-item-title>
+                      {{ getNotificationTitle(notification) }}
+                      <v-chip
+                        v-if="notification.priority !== 'normal'"
+                        :color="getPriorityColor(notification.priority)"
+                        size="x-small"
+                        class="ml-2"
+                      >
+                        {{ getPriorityLabel(notification.priority) }}
+                      </v-chip>
+                    </v-list-item-title>
 
-                  <v-list-item-subtitle class="text-caption">
-                    {{ getNotificationSubtitle(notification) }}
-                  </v-list-item-subtitle>
+                    <v-list-item-subtitle class="text-caption">
+                      {{ getNotificationSubtitle(notification) }}
+                    </v-list-item-subtitle>
 
-                  <template #append>
-                    <div class="notification-actions">
+                    <template #append>
+                      <div class="notification-actions">
                         <!-- Add time display using formatTime -->
                         <div class="notification-time text-caption text-grey mb-1">
                           {{ formatTime(notification.created_at) }}
                         </div>
- 
-                      <v-menu location="bottom">
-                        <template v-slot:activator="{ props }">
-                          <v-btn icon size="small" variant="text" v-bind="props" @click.stop>
-                            <v-icon size="small">mdi-dots-vertical</v-icon>
-                          </v-btn>
-                        </template>
-                        <v-list density="compact">
-                          <v-list-item
-                            @click="markAsRead(notification.id)"
-                            v-if="!notification.is_read"
-                          >
-                            <template v-slot:prepend>
-                              <v-icon size="small">mdi-check</v-icon>
-                            </template>
-                            <v-list-item-title>Mark as read</v-list-item-title>
-                          </v-list-item>
-                          <v-list-item @click="markAsRead(notification.id)" v-else>
-                            <template v-slot:prepend>
-                              <v-icon size="small">mdi-email-open</v-icon>
-                            </template>
-                            <v-list-item-title>Mark as unread</v-list-item-title>
-                          </v-list-item>
-                          <v-divider></v-divider>
-                          <v-list-item @click="confirmDelete(notification)">
-                            <template v-slot:prepend>
-                              <v-icon size="small" color="error">mdi-delete</v-icon>
-                            </template>
-                            <v-list-item-title class="text-error">Delete</v-list-item-title>
-                          </v-list-item>
-                        </v-list>
-                      </v-menu>
+
+                        <v-menu location="bottom">
+                          <template v-slot:activator="{ props }">
+                            <v-btn icon size="small" variant="text" v-bind="props" @click.stop>
+                              <v-icon size="small">mdi-dots-vertical</v-icon>
+                            </v-btn>
+                          </template>
+                          <v-list density="compact">
+                            <v-list-item
+                              @click="markAsRead(notification.id)"
+                              v-if="!notification.is_read"
+                            >
+                              <template v-slot:prepend>
+                                <v-icon size="small">mdi-check</v-icon>
+                              </template>
+                              <v-list-item-title>Mark as read</v-list-item-title>
+                            </v-list-item>
+                            <v-list-item @click="markAsRead(notification.id)" v-else>
+                              <template v-slot:prepend>
+                                <v-icon size="small">mdi-email-open</v-icon>
+                              </template>
+                              <v-list-item-title>Mark as unread</v-list-item-title>
+                            </v-list-item>
+                            <v-divider></v-divider>
+                            <v-list-item @click="confirmDelete(notification)">
+                              <template v-slot:prepend>
+                                <v-icon size="small" color="error">mdi-delete</v-icon>
+                              </template>
+                              <v-list-item-title class="text-error">Delete</v-list-item-title>
+                            </v-list-item>
+                          </v-list>
+                        </v-menu>
+                      </div>
+                    </template>
+                  </v-list-item>
+
+                  <!-- Date separator -->
+                  <v-divider
+                    v-if="
+                      index < notifications.length - 1 &&
+                      getNotificationAge(notification.created_at) !==
+                        getNotificationAge(notifications[index + 1].created_at)
+                    "
+                    :key="`divider-${notification.id}`"
+                    class="my-2"
+                  >
+                    <v-chip size="small" variant="outlined" color="grey" class="mx-2">
+                      {{ getNotificationAge(notifications[index + 1].created_at) }}
+                    </v-chip>
+                  </v-divider>
+                </template>
+              </v-list>
+            </v-card>
+          </div>
+        </v-container>
+
+        <!-- Delete Single Notification Dialog -->
+        <v-dialog v-model="showDeleteDialog" max-width="400">
+          <v-card>
+            <v-card-title class="text-h6">Delete Notification</v-card-title>
+            <v-card-text>
+              Are you sure you want to delete this notification?
+              <div class="mt-2 text-body-2 text-grey">
+                "{{ notificationToDelete?.message?.substring(0, 100)
+                }}{{ notificationToDelete?.message?.length > 100 ? '...' : '' }}"
+              </div>
+            </v-card-text>
+            <v-card-actions>
+              <v-spacer></v-spacer>
+              <v-btn
+                color="grey"
+                variant="text"
+                @click="showDeleteDialog = false"
+                :disabled="deleting"
+              >
+                Cancel
+              </v-btn>
+              <v-btn
+                color="error"
+                variant="flat"
+                @click="deleteNotification(notificationToDelete?.id)"
+                :loading="deleting"
+              >
+                Delete
+              </v-btn>
+            </v-card-actions>
+          </v-card>
+        </v-dialog>
+
+        <!-- Delete All Read Dialog -->
+        <v-dialog v-model="showDeleteAllDialog" max-width="400">
+          <v-card>
+            <v-card-title class="text-h6">Delete Notifications</v-card-title>
+            <v-card-text>
+              <v-radio-group v-model="deleteOption">
+                <v-radio value="read">
+                  <template v-slot:label>
+                    <div>
+                      <div class="font-weight-medium">Delete all read notifications</div>
+                      <div class="text-caption text-grey">
+                        {{ notifications.filter((n) => n.is_read).length }} notifications will be
+                        deleted
+                      </div>
                     </div>
                   </template>
-                </v-list-item>
-
-                <!-- Date separator -->
-                <v-divider
-                  v-if="
-                    index < notifications.length - 1 &&
-                    getNotificationAge(notification.created_at) !==
-                      getNotificationAge(notifications[index + 1].created_at)
-                  "
-                  :key="`divider-${notification.id}`"
-                  class="my-2"
-                >
-                  <v-chip size="small" variant="outlined" color="grey" class="mx-2">
-                    {{ getNotificationAge(notifications[index + 1].created_at) }}
-                  </v-chip>
-                </v-divider>
-              </template>
-            </v-list>
+                </v-radio>
+                <v-radio value="all">
+                  <template v-slot:label>
+                    <div>
+                      <div class="font-weight-medium text-error">Delete ALL notifications</div>
+                      <div class="text-caption text-grey">
+                        {{ notifications.length }} notifications will be deleted. This cannot be
+                        undone.
+                      </div>
+                    </div>
+                  </template>
+                </v-radio>
+              </v-radio-group>
+            </v-card-text>
+            <v-card-actions>
+              <v-spacer></v-spacer>
+              <v-btn
+                color="grey"
+                variant="text"
+                @click="showDeleteAllDialog = false"
+                :disabled="deleting"
+              >
+                Cancel
+              </v-btn>
+              <v-btn
+                :color="deleteOption === 'all' ? 'error' : 'primary'"
+                variant="flat"
+                @click="deleteOption === 'all' ? deleteAllNotifications() : deleteAllRead()"
+                :loading="deleting"
+              >
+                {{ deleteOption === 'all' ? 'Delete All' : 'Delete Read' }}
+              </v-btn>
+            </v-card-actions>
           </v-card>
-        </div>
-      </v-container>
-
-      <!-- Delete Single Notification Dialog -->
-      <v-dialog v-model="showDeleteDialog" max-width="400">
-        <v-card>
-          <v-card-title class="text-h6">Delete Notification</v-card-title>
-          <v-card-text>
-            Are you sure you want to delete this notification?
-            <div class="mt-2 text-body-2 text-grey">
-              "{{ notificationToDelete?.message?.substring(0, 100)
-              }}{{ notificationToDelete?.message?.length > 100 ? '...' : '' }}"
-            </div>
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer></v-spacer>
-            <v-btn
-              color="grey"
-              variant="text"
-              @click="showDeleteDialog = false"
-              :disabled="deleting"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              color="error"
-              variant="flat"
-              @click="deleteNotification(notificationToDelete?.id)"
-              :loading="deleting"
-            >
-              Delete
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-
-      <!-- Delete All Read Dialog -->
-      <v-dialog v-model="showDeleteAllDialog" max-width="400">
-        <v-card>
-          <v-card-title class="text-h6">Delete Notifications</v-card-title>
-          <v-card-text>
-            <v-radio-group v-model="deleteOption">
-              <v-radio value="read">
-                <template v-slot:label>
-                  <div>
-                    <div class="font-weight-medium">Delete all read notifications</div>
-                    <div class="text-caption text-grey">
-                      {{ notifications.filter((n) => n.is_read).length }} notifications will be
-                      deleted
-                    </div>
-                  </div>
-                </template>
-              </v-radio>
-              <v-radio value="all">
-                <template v-slot:label>
-                  <div>
-                    <div class="font-weight-medium text-error">Delete ALL notifications</div>
-                    <div class="text-caption text-grey">
-                      {{ notifications.length }} notifications will be deleted. This cannot be
-                      undone.
-                    </div>
-                  </div>
-                </template>
-              </v-radio>
-            </v-radio-group>
-          </v-card-text>
-          <v-card-actions>
-            <v-spacer></v-spacer>
-            <v-btn
-              color="grey"
-              variant="text"
-              @click="showDeleteAllDialog = false"
-              :disabled="deleting"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              :color="deleteOption === 'all' ? 'error' : 'primary'"
-              variant="flat"
-              @click="deleteOption === 'all' ? deleteAllNotifications() : deleteAllRead()"
-              :loading="deleting"
-            >
-              {{ deleteOption === 'all' ? 'Delete All' : 'Delete Read' }}
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
-    </v-main>
-  </PullToRefreshWrapper>
+        </v-dialog>
+      </v-main>
+    </PullToRefreshWrapper>
   </v-app>
 </template>
 
 <style scoped>
+/* CSS Variables for safe area insets */
 /* CSS Variables for safe area insets */
 :root {
   --sat: env(safe-area-inset-top);
@@ -928,39 +995,74 @@ onUnmounted(() => {
   --sal: env(safe-area-inset-left);
 }
 
-/* Notification App Bar with Safe Area Support */
-.notification-app-bar {
-  position: fixed !important;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  padding-top: var(--sat, 0px);
-  height: calc(64px + var(--sat, 0px)) !important;
-  min-height: calc(64px + var(--sat, 0px)) !important;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+  color: white !important;
 }
 
 /* For iOS devices with dynamic island */
 @supports (padding-top: env(safe-area-inset-top)) {
-  .notification-app-bar {
+  .top-nav {
     padding-top: env(safe-area-inset-top);
-    height: calc(64px + env(safe-area-inset-top)) !important;
+    height: calc(56px + env(safe-area-inset-top)) !important;
   }
 }
 
 /* For older iOS devices */
 @supports (padding-top: constant(safe-area-inset-top)) {
-  .notification-app-bar {
+  .top-nav {
     padding-top: constant(safe-area-inset-top);
-    height: calc(64px + constant(safe-area-inset-top)) !important;
+    height: calc(56px + constant(safe-area-inset-top)) !important;
   }
 }
 
 /* Ensure toolbar content is properly aligned */
-.notification-app-bar :deep(.v-toolbar__content) {
-  height: 64px !important;
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
   padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
+/* Main content area - accounts for the fixed header */
+.messages-view {
+  margin-top: calc(56px + var(--sat, 0px));
+  min-height: calc(100vh - 56px - var(--sat, 0px));
+  padding-bottom: 80px;
+}
+
+/* iOS support for margin-top */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+
+  .messages-view {
+    margin-top: calc(56px + env(safe-area-inset-top));
+  }
+}
+
+/* Landscape mode adjustment */
+@media (orientation: landscape) and (max-height: 500px) {
+  .top-nav {
+    height: 56px !important;
+    padding-top: 0 !important;
+  }
+
+  .messages-view {
+    margin-top: 56px;
+  }
 }
 
 /* Main content area - accounts for the fixed header */
@@ -984,7 +1086,7 @@ onUnmounted(() => {
     height: 64px !important;
     padding-top: 0 !important;
   }
-  
+
   .notification-view {
     padding-top: 64px;
   }
@@ -1048,7 +1150,7 @@ onUnmounted(() => {
 }
 
 .stats-summary {
-  margin-top: -40px;
+  margin-top: -60px;
 }
 
 .stats-summary .v-card {

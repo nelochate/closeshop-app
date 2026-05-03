@@ -96,7 +96,7 @@ const loadUserAddress = async () => {
       // ✅ Set phone number from latest address if not set already
       if (!formData.value.phone && a.phone) {
         formData.value.phone = a.phone
-        
+
       }
     } else {
       userAddress.value = 'Add address'
@@ -123,11 +123,11 @@ async function uploadAvatar(file) {
 
     const { error: uploadError } = await supabase.storage
       .from('avatars')
-      .upload(filePath, file, { 
+      .upload(filePath, file, {
         upsert: true,
         cacheControl: '3600'
       })
-    
+
     if (uploadError) throw uploadError
 
     const {
@@ -161,7 +161,7 @@ const showSuccessMessage = (message) => {
 const pickImage = async (source) => {
   try {
     showPicker.value = false // Close picker immediately when option is selected
-    
+
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false, // Set to false for better UX
@@ -176,13 +176,13 @@ const pickImage = async (source) => {
       // Convert DataUrl to blob
       const response = await fetch(photo.dataUrl)
       const blob = await response.blob()
-      
+
       // Create a file object with proper name and type
-      const file = new File([blob], `avatar-${Date.now()}.jpg`, { 
+      const file = new File([blob], `avatar-${Date.now()}.jpg`, {
         type: 'image/jpeg',
         lastModified: Date.now()
       })
-      
+
       await uploadAvatar(file)
     }
   } catch (error) {
@@ -256,9 +256,14 @@ const displayPhone = computed(() => {
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar flat density="comfortable" color="#3f83c7" class="app-bar">
-      <v-btn icon @click="goBack"><v-icon>mdi-arrow-left</v-icon></v-btn>
-      <v-toolbar-title class="text-h6 font-bold">Edit Profile</v-toolbar-title>
+    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+      <v-btn variant="text" icon @click="goBack" class="back-btn">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title class="font-bold">
+        <strong>Edit Profile</strong>
+      </v-toolbar-title>
+      <v-spacer />
     </v-app-bar>
 
     <v-main class="modern-font">
@@ -272,7 +277,7 @@ const displayPhone = computed(() => {
 
       <v-container>
         <!-- Avatar Section -->
-        <v-card class="mb-5 pa-4 avatar-card" flat>
+        <v-card class="mb-4 pa-2 avatar-card" flat>
           <v-card-text class="d-flex justify-center">
             <div class="avatar-container">
               <v-avatar size="120" class="elevation-3" color="grey-lighten-3">
@@ -318,7 +323,7 @@ const displayPhone = computed(() => {
                       <!-- Phone -->
                       <v-list-item class="list-item" @click="router.push({ name: 'edit-phone' })">
                         <v-list-item-title class="font-medium">Phone</v-list-item-title>
-                        <v-list-item-subtitle 
+                        <v-list-item-subtitle
                           :class="{ 'text-grey': !formData.phone }"
                         >
                           {{ displayPhone }}
@@ -344,7 +349,7 @@ const displayPhone = computed(() => {
                       <!-- Address -->
                       <v-list-item class="list-item" @click="router.push({ name: 'my-address' })">
                         <v-list-item-title class="font-medium">Address</v-list-item-title>
-                        <v-list-item-subtitle 
+                        <v-list-item-subtitle
                           :class="{ 'text-grey': userAddress === 'Add address' }"
                         >
                           {{ userAddress }}
@@ -376,7 +381,7 @@ const displayPhone = computed(() => {
         <v-divider></v-divider>
 
         <v-list class="py-0">
-          <v-list-item 
+          <v-list-item
             @click="pickImage('camera')"
             class="pa-4 list-item-action"
           >
@@ -391,7 +396,7 @@ const displayPhone = computed(() => {
 
           <v-divider />
 
-          <v-list-item 
+          <v-list-item
             @click="pickImage('gallery')"
             class="pa-4 list-item-action"
           >
@@ -406,9 +411,9 @@ const displayPhone = computed(() => {
         </v-list>
 
         <v-card-actions class="pa-4">
-          <v-btn 
-            block 
-            variant="text" 
+          <v-btn
+            block
+            variant="text"
             @click="showPicker = false"
             class="cancel-btn"
           >
@@ -421,8 +426,51 @@ const displayPhone = computed(() => {
 </template>
 
 <style scoped>
-.app-bar {
-  padding-top: 22px;
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
 }
 .modern-font {
   font-family: 'Inter', 'Roboto', 'Helvetica Neue', sans-serif;
@@ -435,7 +483,7 @@ const displayPhone = computed(() => {
   background: linear-gradient(135deg, #5276b0, #354d7c);
   color: white;
   border-radius: 16px;
-  margin-top: 18px;
+  margin-top: 5px;
 }
 .info-card {
   border-radius: 16px;

@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { notifyCustomerOrderStatus } from '@/utils/orderNotifications'
+import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime } from '@/utils/dateTime'
 
 const router = useRouter()
@@ -386,7 +387,7 @@ const fetchOrders = async () => {
       }),
     )
 
-    orders.value = ordersWithInfo
+    orders.value = await reconcileAutoCompletedOrders(ordersWithInfo)
   } catch (err) {
     console.error('❌ Error in fetchOrders:', err)
     ordersError.value = 'Error loading orders. Please try again.'

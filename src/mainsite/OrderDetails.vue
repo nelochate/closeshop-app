@@ -7,6 +7,7 @@ import {
   notifyCustomerOrderStatus,
   notifySellerOrderStatus,
 } from '@/utils/orderNotifications'
+import { ensureOrderAutoCompletionUpToDate } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime, getAppTimestampValue } from '@/utils/dateTime'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import OrderTrackingMap from '@/components/OrderTrackingMap.vue'
@@ -18,6 +19,11 @@ import {
   type TrackingLocation,
   type TrackingViewerMode,
 } from '@/utils/orderTracking'
+import {
+  calculateOrderItemsSubtotal,
+  calculateOrderTotalAmount,
+  resolveOrderDeliveryFee,
+} from '@/utils/deliveryPricing.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -156,8 +162,14 @@ const calculateTimeRemaining = () => {
   if (!orderCreatedAt) return CANCEL_WINDOW_SECONDS
   const currentTime = Date.now()
   const timeElapsed = (currentTime - orderCreatedAt) / 1000
+<<<<<<< HEAD
 
   return Math.max(0, CANCEL_WINDOW_SECONDS - timeElapsed)
+=======
+  const maxCancelTime = 5 * 60
+
+  return Math.max(0, maxCancelTime - timeElapsed)
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 }
 
 const formatTimeRemaining = () => {
@@ -387,7 +399,7 @@ const fetchOrderDetails = async () => {
     if (orderError) throw orderError
     if (!orderData) throw new Error('Order not found')
 
-    order.value = orderData
+    order.value = await ensureOrderAutoCompletionUpToDate(orderData)
     orderItems.value = orderData.order_items || []
     shippingAddress.value = orderData.address
     buyer.value = orderData.buyer
@@ -401,6 +413,10 @@ const fetchOrderDetails = async () => {
     }
 
     await loadTrackingLocations()
+<<<<<<< HEAD
+=======
+
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
     await getCurrentUserAndRole()
 
     if (!userRole.value) {
@@ -416,6 +432,7 @@ const fetchOrderDetails = async () => {
       return
     }
 
+<<<<<<< HEAD
     if (order.value?.status === 'pending_approval') {
       startCancelTimer()
       // Check if this specific order has expired
@@ -425,6 +442,10 @@ const fetchOrderDetails = async () => {
         await fetchOrderDetails() // Refresh after update
       }
     } else {
+=======
+    if (order.value?.status === 'pending_approval') startCancelTimer()
+    else {
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
       canCancel.value = false
       timeRemaining.value = 0
     }
@@ -510,15 +531,20 @@ const loadTrackingLocations = async () => {
 
 // Computed properties
 const subtotal = computed(() => {
+<<<<<<< HEAD
   return orderItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
+=======
+  return calculateOrderItemsSubtotal(orderItems.value)
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 })
 
 const deliveryFee = computed(() => {
-  const total = Number(order.value?.total_amount ?? subtotal.value)
-  return Math.max(0, total - subtotal.value)
+  return resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value)
 })
 
-const totalAmount = computed(() => order.value?.total_amount || subtotal.value)
+const totalAmount = computed(() =>
+  Number(order.value?.total_amount ?? calculateOrderTotalAmount(subtotal.value, deliveryFee.value)),
+)
 
 const shopDisplayName = computed(() => shop.value?.business_name || 'Shop unavailable')
 const orderReferenceText = computed(() => {
@@ -670,9 +696,13 @@ const shouldTrackOwnLocation = computed(
   () =>
     isRider.value &&
     !!currentRiderId.value &&
+<<<<<<< HEAD
     order.value?.rider_id === currentRiderId.value &&
     (order.value?.status === 'accepted_by_rider' ||
       (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)),
+=======
+    !['delivered', 'completed', 'cancelled'].includes(order.value?.status),
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 )
 const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
   const persisted = extractPersistedRiderCoordinates(order.value)
@@ -706,6 +736,9 @@ const trackingMapSubtitle = computed(() => {
   }
   if (order.value?.status === 'pending_approval') {
     return 'The map is ready, and live rider tracking will appear after approval and assignment.'
+  }
+  if (isRider.value && !order.value?.rider_id && currentRiderId.value) {
+    return 'Your current rider location is shown right away so you can compare it with the pickup and delivery points before accepting.'
   }
   if (!order.value?.rider_id) {
     return 'Pickup and delivery addresses are available now. Live rider sharing starts once the order is assigned.'
@@ -936,7 +969,10 @@ const approveOrder = async () => {
         approved_at: new Date().toISOString(),
       })
       .eq('id', orderId)
+<<<<<<< HEAD
       .eq('status', 'pending_approval') // Only approve if still pending
+=======
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 
     if (error) throw error
 
@@ -1246,7 +1282,6 @@ const markAsDelivered = async () => {
       delivered_at: deliveredAt,
       delivery_proof_url: proofImageUrl,
       updated_at: deliveredAt,
-      rider_earnings: Math.round((deliveryFee.value || 0) * 0.8),
     }
     const { data, error } = await supabase
       .from('orders')
@@ -1321,6 +1356,7 @@ const confirmOrderReceived = async () => {
     const { data, error } = await supabase
       .from('orders')
       .update({
+        status: 'delivered',
         completed_at: completedAt,
         updated_at: completedAt,
       })
@@ -1455,6 +1491,10 @@ const buildFullAddress = computed(() => {
 })
 
 const goBack = () => router.back()
+<<<<<<< HEAD
+=======
+const goToFullscreenMap = () => router.push({ name: 'LocationToDeliver', params: { orderId } })
+>>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 const viewProduct = (productId: string) =>
   router.push({ name: 'product-detail', params: { id: productId } })
 const contactSeller = () =>
@@ -1619,6 +1659,8 @@ onMounted(async () => {
                 :track-own-location="shouldTrackOwnLocation"
                 :title="trackingMapTitle"
                 :subtitle="trackingMapSubtitle"
+                :show-fullscreen-button="true"
+                @open-fullscreen="goToFullscreenMap"
               />
 
               <div class="content-grid">
@@ -2129,14 +2171,15 @@ onMounted(async () => {
   top: 0;
   z-index: 20;
   padding-top: env(safe-area-inset-top, 0px);
-  background: linear-gradient(135deg, #3f83c7, #295f8d);
+  background: rgba(11, 37, 69, 0.92);
   box-shadow: 0 12px 28px rgba(20, 44, 73, 0.16);
 }
 
 .order-header__inner {
   max-width: 960px;
   margin: 0 auto;
-  padding: 10px 16px 12px;
+  padding: 10px max(16px, env(safe-area-inset-left, 0px)) 12px
+    max(16px, env(safe-area-inset-right, 0px));
   display: flex;
   align-items: center;
 }
@@ -2150,7 +2193,6 @@ onMounted(async () => {
 
 .header-icon-btn {
   color: white !important;
-  background: rgba(255, 255, 255, 0.1) !important;
 }
 
 .order-header h1 {
@@ -2788,7 +2830,8 @@ onMounted(async () => {
   }
 
   .order-header__inner {
-    padding: 8px 12px 10px;
+    padding: 8px max(12px, env(safe-area-inset-left, 0px)) 10px
+      max(12px, env(safe-area-inset-right, 0px));
   }
 
   .order-header h1 {

@@ -182,11 +182,11 @@ const cancelEdit = () => {
 
 <template>
   <v-app>
-    <v-app-bar class="top-nav" flat color="#3f83c7">
+    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
       <v-btn icon @click="cancelEdit" :disabled="isLoading">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title class="text-h6 font-weight-bold">Edit Name</v-toolbar-title>
+      <v-toolbar-title>Edit Name</v-toolbar-title>
       <v-spacer></v-spacer>
       <v-btn
         icon
@@ -324,13 +324,56 @@ const cancelEdit = () => {
 </template>
 
 <style scoped>
+/* CSS Variables for safe area insets */
+:root {
+  --sat: env(safe-area-inset-top);
+  --sar: env(safe-area-inset-right);
+  --sab: env(safe-area-inset-bottom);
+  --sal: env(safe-area-inset-left);
+}
+
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
 .background-gradient {
   background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
   min-height: 100vh;
-}
-
-.top-nav {
-  padding-top: 22px;
 }
 
 .edit-name-container {

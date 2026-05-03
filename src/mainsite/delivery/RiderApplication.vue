@@ -108,7 +108,7 @@ const rules = {
     if (v === null || v === undefined || v === '') {
       return 'Birthdate is required'
     }
-    
+
     const birthDate = new Date(v)
     const today = new Date()
     let age = today.getFullYear() - birthDate.getFullYear()
@@ -153,7 +153,7 @@ const fetchCities = async (provinceCode) => {
   barangays.value = []
   personalInfo.value.barangay_code = ''
   personalInfo.value.barangay_name = ''
-  
+
   try {
     const response = await fetch(`https://psgc.gitlab.io/api/provinces/${provinceCode}/cities-municipalities/`)
     const data = await response.json()
@@ -171,7 +171,7 @@ const fetchBarangays = async (cityCode) => {
   barangays.value = []
   personalInfo.value.barangay_code = ''
   personalInfo.value.barangay_name = ''
-  
+
   try {
     const response = await fetch(`https://psgc.gitlab.io/api/cities-municipalities/${cityCode}/barangays/`)
     const data = await response.json()
@@ -259,7 +259,7 @@ const nextStep = () => {
       alert('Please enter your birthdate')
       return
     }
-    
+
     const birthDate = new Date(personalInfo.value.birthdate)
     const today = new Date()
     let age = today.getFullYear() - birthDate.getFullYear()
@@ -278,7 +278,7 @@ const nextStep = () => {
       return
     }
   }
-  
+
   if (currentStep.value < 4) {
     currentStep.value++
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -464,7 +464,7 @@ const submitApplication = async () => {
   if (!documents.value.validId) missingDocs.push('Valid ID')
   if (!documents.value.driversLicense) missingDocs.push("Driver's License")
   if (!documents.value.orCr) missingDocs.push('OR/CR')
-  
+
   if (missingDocs.length > 0) {
     const confirmSubmit = confirm(
       `⚠️ WARNING: You are missing the following required documents:\n\n` +
@@ -474,50 +474,50 @@ const submitApplication = async () => {
     )
     if (!confirmSubmit) return
   }
-  
+
   submitting.value = true
-  
+
   try {
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) throw new Error('User not authenticated')
-    
+
     const { data: profile, error: profileError } = await supabase
       .from('profiles')
       .select('id')
       .eq('id', user.id)
       .single()
-    
+
     if (profileError) throw new Error('Profile not found')
-    
+
     if (!personalInfo.value.birthdate || personalInfo.value.birthdate === '') {
       throw new Error('Birthdate is required. Please go back to Step 1 and enter your birthdate.')
     }
-    
+
     const userFolder = `users/${user.id}`
-    
+
     let validIdUrl = null
     let driversLicenseUrl = null
     let orCrUrl = null
     let nbiClearanceUrl = null
-    
+
     if (documents.value.validId) {
       validIdUrl = await uploadFile(documents.value.validId, userFolder, 'valid_id')
     }
-    
+
     if (documents.value.driversLicense) {
       driversLicenseUrl = await uploadFile(documents.value.driversLicense, userFolder, 'drivers_license')
     }
-    
+
     if (documents.value.orCr) {
       orCrUrl = await uploadFile(documents.value.orCr, userFolder, 'or_cr')
     }
-    
+
     if (documents.value.nbiClearance) {
       nbiClearanceUrl = await uploadFile(documents.value.nbiClearance, userFolder, 'nbi_clearance')
     }
-    
+
     const fullAddress = getFullAddress()
-    
+
     const { data, error } = await supabase
       .from('Rider_Registration')
       .insert([
@@ -551,12 +551,12 @@ const submitApplication = async () => {
       ])
       .select()
       .single()
-    
+
     if (error) throw error
-    
+
     applicationId.value = data.rider_id
     showSuccessDialog.value = true
-    
+
   } catch (error) {
     console.error('Error submitting application:', error)
     alert(`Failed to submit application: ${error.message || 'Please try again.'}`)
@@ -573,7 +573,7 @@ const goToProfile = () => {
 onMounted(async () => {
   // Load provinces from PSGC API
   await fetchProvinces()
-  
+
   if (authStore.userData) {
     personalInfo.value.firstName = authStore.userData.user_metadata?.first_name || ''
     personalInfo.value.lastName = authStore.userData.user_metadata?.last_name || ''
@@ -1183,9 +1183,9 @@ onMounted(async () => {
                             <tr>
                               <td class="font-weight-bold">Address:</td>
                               <td>
-                                {{ personalInfo.address }}, 
-                                {{ personalInfo.barangay_name }}, 
-                                {{ personalInfo.city_name }}, 
+                                {{ personalInfo.address }},
+                                {{ personalInfo.barangay_name }},
+                                {{ personalInfo.city_name }},
                                 {{ personalInfo.province_name }}
                               </td>
                             </tr>

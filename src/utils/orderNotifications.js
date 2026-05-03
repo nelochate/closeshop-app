@@ -25,7 +25,11 @@ const getCustomerName = (orderData = {}) => {
 const normalizeOrderContext = (orderData = {}) => {
   return {
     customerUserId:
-      orderData.user_id || orderData.customer_id || orderData.user?.id || orderData.buyer?.id || null,
+      orderData.user_id ||
+      orderData.customer_id ||
+      orderData.user?.id ||
+      orderData.buyer?.id ||
+      null,
     sellerUserId: orderData.shop_owner_id || orderData.shop?.owner_id || null,
     riderRegistrationId: orderData.rider_id || orderData.rider?.rider_id || null,
     shopName: getShopName(orderData),
@@ -41,7 +45,8 @@ const mergeOrderContext = (primaryContext = {}, fallbackContext = {}) => {
     riderRegistrationId:
       primaryContext.riderRegistrationId || fallbackContext.riderRegistrationId || null,
     shopName: primaryContext.shopName || fallbackContext.shopName || '',
-    transactionNumber: primaryContext.transactionNumber || fallbackContext.transactionNumber || null,
+    transactionNumber:
+      primaryContext.transactionNumber || fallbackContext.transactionNumber || null,
     customerName: primaryContext.customerName || fallbackContext.customerName || '',
   }
 }
@@ -49,7 +54,8 @@ const mergeOrderContext = (primaryContext = {}, fallbackContext = {}) => {
 const fetchOrderContext = async (orderId) => {
   const { data, error } = await supabase
     .from('orders')
-    .select(`
+    .select(
+      `
       id,
       user_id,
       rider_id,
@@ -66,7 +72,8 @@ const fetchOrderContext = async (orderId) => {
         business_name,
         owner_id
       )
-    `)
+    `,
+    )
     .eq('id', orderId)
     .single()
 
@@ -106,6 +113,12 @@ const buildCustomerOrderStatusNotification = ({ status, shopName, transactionNum
         title: 'Order Delivered',
         message: `${orderLabel}${shopLabel} has been marked as delivered.`,
       }
+    case 'auto_completed':
+      return {
+        type: 'shipping_update',
+        title: 'Order Automatically Completed',
+        message: `${orderLabel}${shopLabel} has been automatically completed after 24 hours.`,
+      }
     default:
       return null
   }
@@ -140,6 +153,12 @@ const buildSellerOrderStatusNotification = ({ status, transactionNumber, custome
         title: 'Delivery Issue Reported',
         message: `Customer reported ${orderLabel}${customerLabel} was not received.`,
       }
+    case 'auto_completed':
+      return {
+        type: 'shipping_update',
+        title: 'Order Automatically Completed',
+        message: `${orderLabel.charAt(0).toUpperCase()}${orderLabel.slice(1)}${customerLabel} has been automatically completed after 24 hours.`,
+      }
     default:
       return null
   }
@@ -155,6 +174,12 @@ const buildAssignedRiderOrderStatusNotification = ({ status, transactionNumber, 
         type: 'shipping_update',
         title: 'Delivery Issue Reported',
         message: `Customer reported ${orderLabel}${customerLabel} was not received. Please reattempt delivery.`,
+      }
+    case 'auto_completed':
+      return {
+        type: 'shipping_update',
+        title: 'Delivery Marked as Completed',
+        message: `${orderLabel.charAt(0).toUpperCase()}${orderLabel.slice(1)}${customerLabel} was marked as completed automatically after 24 hours.`,
       }
     default:
       return null
@@ -243,7 +268,12 @@ export const notifySellerOrderStatus = async ({
 
   let context = normalizeOrderContext(orderData || {})
 
-  if (!context.sellerUserId || !context.shopName || !context.transactionNumber || !context.customerName) {
+  if (
+    !context.sellerUserId ||
+    !context.shopName ||
+    !context.transactionNumber ||
+    !context.customerName
+  ) {
     const fetchedContext = await fetchOrderContext(orderId)
     context = mergeOrderContext(context, fetchedContext)
   }
