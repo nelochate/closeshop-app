@@ -124,20 +124,15 @@ const setupProductRealtimeSubscription = () => {
         console.log('🔄 Product updated in real-time:', payload)
         const updatedProduct = payload.new
 
-        // Update the product data
         if (product.value) {
-          // Track previous values for notifications
           const prevStock = product.value.stock
           const prevSold = product.value.sold
 
-          // Update stock and sold
           product.value.stock = updatedProduct.stock || 0
           product.value.sold = updatedProduct.sold || 0
 
-          // If there are varieties, update their stock too
           if (product.value.varieties && product.value.varieties.length > 0) {
             product.value.varieties = product.value.varieties.map((variety) => {
-              // Find matching variety in updated data
               const updatedVariety = updatedProduct.varieties?.find((v) => v.name === variety.name)
               if (updatedVariety) {
                 return { ...variety, stock: updatedVariety.stock }
@@ -146,14 +141,12 @@ const setupProductRealtimeSubscription = () => {
             })
           }
 
-          // Show notifications for stock change
           if (updatedProduct.stock === 0 && prevStock > 0) {
             showSnackbar('This product is now out of stock!', 'warning')
           } else if (updatedProduct.stock > 0 && prevStock === 0) {
             showSnackbar('This product is back in stock!', 'success')
           }
 
-          // Show notification for sold count increase
           if (updatedProduct.sold > prevSold) {
             const soldIncrease = updatedProduct.sold - prevSold
             showSnackbar(`🔥 ${soldIncrease} item${soldIncrease > 1 ? 's' : ''} just sold!`, 'info')
@@ -199,7 +192,6 @@ const fetchProduct = async () => {
     if (err) throw err
     product.value = data
 
-    // Parse JSON safely
     if (product.value.sizes && typeof product.value.sizes === 'string') {
       try {
         product.value.sizes = JSON.parse(product.value.sizes)
@@ -216,14 +208,12 @@ const fetchProduct = async () => {
       }
     }
 
-    // Auto-select if only one option
     if (product.value?.sizes?.length === 1) {
       selectedSize.value = product.value.sizes[0]
       dialogSelectedSize.value = product.value.sizes[0]
       buyNowSelectedSize.value = product.value.sizes[0]
     }
 
-    // Setup real-time subscription after product is loaded
     setupProductRealtimeSubscription()
   } catch (e) {
     error.value = e.message || 'Failed to load product'
@@ -282,12 +272,10 @@ const isOwner = computed(() => {
   return user.value.id === product.value.shop.owner_id
 })
 
-// Check if variety is selected
 const isVarietySelected = (variety) => {
   return selectedVariety.value && selectedVariety.value.name === variety.name
 }
 
-// Get variety image
 const getVarietyImage = (variety) => {
   if (variety.images && variety.images.length) {
     return variety.images[0]
@@ -298,7 +286,6 @@ const getVarietyImage = (variety) => {
   return mainImage(product.value?.main_img_urls)
 }
 
-// Navigation functions
 const goToCart = () => {
   router.push('/cartview')
 }
@@ -313,7 +300,6 @@ const goToChat = () => {
   }
 }
 
-// Selection functions
 const selectMainProduct = () => {
   selectedVariety.value = null
 }
@@ -325,7 +311,6 @@ const previewVarietyImages = (images, index = 0) => {
   openVarietyDialog.value = true
 }
 
-// Quantity functions
 const incrementQuantity = () => {
   if (dialogQuantity.value < dialogDisplayStock.value) {
     dialogQuantity.value++
@@ -350,7 +335,6 @@ const decrementBuyNowQuantity = () => {
   }
 }
 
-// Dialog functions
 const openAddToCartDialog = () => {
   if (!product.value) {
     showSnackbar('Product not loaded', 'error')
@@ -400,7 +384,6 @@ const closeBuyNowDialog = () => {
   buyNowQuantity.value = 1
 }
 
-// Add to cart function
 const confirmAddToCart = async () => {
   console.log('🛒 Adding to cart...')
 
@@ -418,7 +401,6 @@ const confirmAddToCart = async () => {
   const finalVariety = dialogSelectedVariety.value
   const finalQuantity = dialogQuantity.value
 
-  // Validate selections
   if (product.value.has_sizes && !finalSize) {
     showSnackbar('Please select a size', 'warning')
     return
@@ -433,7 +415,6 @@ const confirmAddToCart = async () => {
   addingToCart.value = true
 
   try {
-    // Prepare variety data
     const varietyData = finalVariety
       ? {
           name: finalVariety.name,
@@ -443,7 +424,6 @@ const confirmAddToCart = async () => {
         }
       : null
 
-    // Add to cart in Supabase
     const { data, error } = await supabase
       .from('cart_items')
       .insert({
@@ -462,8 +442,6 @@ const confirmAddToCart = async () => {
     showSnackbar('Product added to cart successfully!', 'success')
     animateToCart()
     closeAddToCartDialog()
-
-    // Refresh cart count
     await fetchCartCount()
   } catch (err) {
     console.error('❌ Error adding to cart:', err)
@@ -473,7 +451,6 @@ const confirmAddToCart = async () => {
   }
 }
 
-// Buy now function
 const proceedToCheckout = () => {
   if (!product.value) {
     showSnackbar('Product not loaded', 'error')
@@ -484,7 +461,6 @@ const proceedToCheckout = () => {
   const finalVariety = buyNowSelectedVariety.value
   const finalQuantity = buyNowQuantity.value
 
-  // Validate selections
   if (product.value.has_sizes && !finalSize) {
     showSnackbar('Please select a size', 'warning')
     return
@@ -514,7 +490,6 @@ const proceedToCheckout = () => {
     shop_id: product.value.shop?.id,
   }
 
-  // Navigate to checkout
   router.push({
     name: 'purchaseview',
     query: {
@@ -533,7 +508,6 @@ const proceedToCheckout = () => {
   })
 }
 
-// Animation function
 const animateToCart = () => {
   if (isAnimating.value) return
   isAnimating.value = true
@@ -595,7 +569,6 @@ const animateToCart = () => {
   }, 800)
 }
 
-// Share product
 const shareProduct = async () => {
   if (navigator.share) {
     try {
@@ -613,7 +586,6 @@ const shareProduct = async () => {
   }
 }
 
-// Cleanup subscription
 const cleanup = () => {
   if (productSubscription) {
     productSubscription.unsubscribe()
@@ -621,14 +593,12 @@ const cleanup = () => {
   }
 }
 
-// Initialize on mount
 onMounted(async () => {
   await fetchUser()
   await fetchProduct()
   await fetchCartCount()
 })
 
-// Cleanup on unmount
 onUnmounted(() => {
   cleanup()
 })
@@ -668,34 +638,29 @@ onUnmounted(() => {
     </v-app-bar>
 
     <v-main class="product-page">
-      <!-- Loading -->
       <v-skeleton-loader v-if="loading" type="image, text, text, text" class="mb-6" />
-
-      <!-- Error -->
       <v-alert v-else-if="error" type="error" variant="tonal" class="mb-6 mx-4">
         {{ error }}
       </v-alert>
 
-      <!-- Product Details -->
       <v-sheet v-else class="product-sheet pa-4">
         <!-- Product Images -->
         <div class="product-images mb-4">
-        <v-carousel
-  v-if="product.main_img_urls && product.main_img_urls.length > 1"
-  hide-delimiter-background
-  height="300"
->
-  <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
-    <v-img
-      :src="img"
-      height="300"
-      class="rounded-lg"
-      style="cursor: zoom-in"
-      @click="() => { previewIndex = index; openImageDialog = true; }"
-    />
-  </v-carousel-item>
-</v-carousel>
-          <!-- Fallback: Single Image -->
+          <v-carousel
+            v-if="product.main_img_urls && product.main_img_urls.length > 1"
+            hide-delimiter-background
+            height="300"
+          >
+            <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
+              <v-img
+                :src="img"
+                height="300"
+                class="rounded-lg"
+                style="cursor: zoom-in"
+                @click="() => { previewIndex = index; openImageDialog = true; }"
+              />
+            </v-carousel-item>
+          </v-carousel>
           <v-img
             v-else
             ref="productImgRef"
@@ -737,7 +702,6 @@ onUnmounted(() => {
             </v-card-title>
 
             <v-card-text>
-              <!-- Product Info -->
               <div class="mb-4 d-flex align-center">
                 <v-avatar size="80" class="mr-3">
                   <v-img :src="mainImage(product.main_img_urls)" />
@@ -753,7 +717,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Size Selection -->
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Size:</p>
                 <v-btn-toggle
@@ -776,11 +739,9 @@ onUnmounted(() => {
                 </v-btn-toggle>
               </div>
 
-              <!-- Variety Selection -->
               <div v-if="product.varieties && product.varieties.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Variety:</p>
                 <div class="varieties-list">
-                  <!-- Main Product Option -->
                   <v-card
                     class="mb-2"
                     :class="{ 'option-selected': !dialogSelectedVariety }"
@@ -801,7 +762,6 @@ onUnmounted(() => {
                     </v-card-text>
                   </v-card>
 
-                  <!-- Varieties -->
                   <v-card
                     v-for="variety in product.varieties"
                     :key="variety.name"
@@ -829,7 +789,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Quantity Selector -->
               <div class="mb-4">
                 <p class="font-weight-medium mb-2">Quantity:</p>
                 <div class="d-flex align-center">
@@ -850,7 +809,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Total Price -->
               <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa">
                 <div class="d-flex justify-space-between">
                   <span>Total:</span>
@@ -889,7 +847,6 @@ onUnmounted(() => {
             </v-card-title>
 
             <v-card-text>
-              <!-- Product Info -->
               <div class="mb-4 d-flex align-center">
                 <v-avatar size="80" class="mr-3">
                   <v-img :src="mainImage(product.main_img_urls)" />
@@ -905,7 +862,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Size Selection -->
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Size:</p>
                 <v-btn-toggle
@@ -928,11 +884,9 @@ onUnmounted(() => {
                 </v-btn-toggle>
               </div>
 
-              <!-- Variety Selection -->
               <div v-if="product.varieties && product.varieties.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Variety:</p>
                 <div class="varieties-list">
-                  <!-- Main Product Option -->
                   <v-card
                     class="mb-2"
                     :class="{ 'option-selected': !buyNowSelectedVariety }"
@@ -953,7 +907,6 @@ onUnmounted(() => {
                     </v-card-text>
                   </v-card>
 
-                  <!-- Varieties -->
                   <v-card
                     v-for="variety in product.varieties"
                     :key="variety.name"
@@ -981,7 +934,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Quantity Selector -->
               <div class="mb-4">
                 <p class="font-weight-medium mb-2">Quantity:</p>
                 <div class="d-flex align-center">
@@ -1002,7 +954,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Total Price -->
               <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa">
                 <div class="d-flex justify-space-between">
                   <span>Total:</span>
@@ -1031,16 +982,26 @@ onUnmounted(() => {
 
         <!-- Product Info -->
         <div class="product-info mb-4">
-          <h2 class="product-title mb-2">{{ product.prod_name }}</h2>
-          <p class="product-price mb-2">₱{{ displayPrice }}</p>
+          <div class="product-header">
+            <h1 class="product-title">{{ product.prod_name }}</h1>
+            <div class="product-price-wrapper">
+              <span class="product-price">₱{{ displayPrice }}</span>
+              <span v-if="displayStock > 0" class="stock-badge in-stock">
+                <v-icon size="14" class="mr-1">mdi-check-circle</v-icon>
+                In Stock
+              </span>
+              <span v-else class="stock-badge out-of-stock">
+                <v-icon size="14" class="mr-1">mdi-close-circle</v-icon>
+                Out of Stock
+              </span>
+            </div>
+          </div>
 
           <!-- Selection Options -->
           <div class="selection-options mb-4">
-            <!-- Main Product Option -->
             <div class="option-section mb-4">
-              <p class="font-weight-medium mb-2">Choose your option:</p>
+              <p class="selection-label">Choose your option:</p>
 
-              <!-- Main Product Card -->
               <v-card
                 class="option-card mb-2"
                 :class="{ 'option-card--selected': isMainProductSelected }"
@@ -1053,31 +1014,25 @@ onUnmounted(() => {
                     <v-img :src="mainImage(product.main_img_urls)" />
                   </v-avatar>
                   <div class="flex-grow-1">
-                    <div class="d-flex justify-space-between align-center">
-                      <span class="font-weight-medium">Standard Product</span>
-                    </div>
-                    <div class="d-flex justify-space-between align-center mt-1">
-                      <span class="text-caption text-grey">Base option</span>
-                      <span class="font-weight-medium text-primary">₱{{ product.price }}</span>
-                    </div>
+                    <div class="option-title">Standard Product</div>
+                    <div class="option-subtitle">Base option</div>
                   </div>
-                  <v-icon v-if="isMainProductSelected" color="primary" class="ml-2">
+                  <div class="option-price">₱{{ product.price }}</div>
+                  <v-icon v-if="isMainProductSelected" color="primary" class="ml-3">
                     mdi-check-circle
                   </v-icon>
                 </v-card-text>
               </v-card>
 
-              <!-- OR Separator - Only show if there are varieties -->
-              <div v-if="product.varieties && product.varieties.length" class="text-center my-3">
+              <div v-if="product.varieties && product.varieties.length" class="or-divider">
                 <v-divider />
-                <span class="text-caption text-grey bg-white px-3">OR</span>
+                <span class="or-text">OR</span>
                 <v-divider />
               </div>
             </div>
 
-            <!-- Varieties Section -->
             <div v-if="product.varieties && product.varieties.length" class="varieties-section">
-              <p class="font-weight-medium mb-2">Available Varieties:</p>
+              <p class="selection-label">Available Varieties:</p>
 
               <div class="varieties-grid">
                 <v-card
@@ -1090,7 +1045,7 @@ onUnmounted(() => {
                   :disabled="variety.stock === 0"
                 >
                   <v-card-text class="pa-3">
-                    <div class="d-flex align-center mb-2">
+                    <div class="variety-content">
                       <v-avatar size="48" class="mr-3">
                         <v-img
                           :src="getVarietyImage(variety)"
@@ -1098,20 +1053,14 @@ onUnmounted(() => {
                           style="cursor: zoom-in"
                         />
                       </v-avatar>
-                      <div class="flex-grow-1">
-                        <div class="d-flex justify-space-between align-center">
-                          <span class="font-weight-medium">{{ variety.name }}</span>
-                          <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">
-                            mdi-check-circle
-                          </v-icon>
-                        </div>
-                        <div class="d-flex justify-space-between align-center mt-1">
-                          <span class="text-caption text-grey">Special variant</span>
-                          <span class="font-weight-medium text-primary">
-                            ₱{{ variety.price || product.price }}
-                          </span>
-                        </div>
+                      <div class="variety-info">
+                        <div class="variety-name">{{ variety.name }}</div>
+                        <div class="variety-type">Special variant</div>
                       </div>
+                      <div class="variety-price">₱{{ variety.price || product.price }}</div>
+                      <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">
+                        mdi-check-circle
+                      </v-icon>
                     </div>
                   </v-card-text>
                 </v-card>
@@ -1120,424 +1069,517 @@ onUnmounted(() => {
           </div>
 
           <!-- Sizes -->
-          <div v-if="product.sizes && product.sizes.length" class="mb-3">
-            <p class="font-weight-medium mb-1">Size:</p>
-            <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap" style="gap: 6px">
-              <v-btn
+          <div v-if="product.sizes && product.sizes.length" class="size-section mb-4">
+            <p class="selection-label">Select Size:</p>
+            <div class="size-buttons">
+              <button
                 v-for="size in product.sizes"
                 :key="size"
-                :value="size"
-                variant="outlined"
-                class="ma-1 rounded-pill text-capitalize"
-                color="primary"
-                size="small"
+                class="size-btn"
+                :class="{ 'size-btn--active': selectedSize === size }"
+                @click="selectedSize = size"
               >
                 {{ size }}
-              </v-btn>
-            </v-btn-toggle>
+              </button>
+            </div>
           </div>
 
           <!-- Selection Summary -->
-          <div class="selection-summary mb-3 pa-3 rounded-lg" style="background: #f8f9fa">
-            <p class="text-caption text-grey mb-1">Your selection:</p>
-            <p class="font-weight-medium mb-1">
+          <div class="selection-summary">
+            <p class="summary-label">Your selection:</p>
+            <p class="summary-value">
               {{ selectedVariety ? selectedVariety.name : 'Standard Product' }}
               <span v-if="selectedSize"> • {{ selectedSize }}</span>
             </p>
-            <p class="text-caption text-grey">
-              Price: <span class="font-weight-medium text-primary">₱{{ displayPrice }}</span> •
-              Stock: <span class="font-weight-medium">{{ displayStock }} available</span>
-            </p>
+            <div class="summary-details">
+              <span>Price: <strong>₱{{ displayPrice }}</strong></span>
+              <span>Stock: <strong :class="{ 'low-stock': displayStock < 5 && displayStock > 0 }">{{ displayStock }} available</strong></span>
+            </div>
           </div>
 
-          <p class="product-description mb-2">{{ product.prod_description }}</p>
+          <p class="product-description">{{ product.prod_description }}</p>
         </div>
 
         <!-- Shop Info -->
         <v-card
           v-if="product.shop"
           flat
-          class="shop-card pa-2 d-flex align-center mb-4"
+          class="shop-card pa-3 d-flex align-center"
           @click="goToShop(product.shop.id)"
-          style="cursor: pointer"
         >
-          <v-avatar size="48">
+          <v-avatar size="48" class="mr-3">
             <v-img :src="product.shop.logo_url || '/placeholder.png'" />
           </v-avatar>
-          <div class="shop-info ml-3">
+          <div class="shop-info">
             <p class="shop-name">{{ product.shop.business_name }}</p>
+            <p class="shop-link">View Shop <v-icon size="14">mdi-chevron-right</v-icon></p>
           </div>
         </v-card>
       </v-sheet>
     </v-main>
 
     <!-- Bottom Nav -->
-    <v-bottom-navigation class="bottom-nav" fixed>
-      <v-row class="w-full pa-0 ma-0" no-gutters>
-        <template v-if="isOwner">
-          <v-col cols="12" class="pa-0">
-            <v-btn block color="primary" class="bottom-btn" @click="goToShop(product.shop.id)">
-              <v-icon left size="20">mdi-storefront-outline</v-icon>
-              Visit Shop
-            </v-btn>
-          </v-col>
-        </template>
+    <div class="bottom-bar">
+      <template v-if="isOwner">
+        <button class="bottom-action-btn primary-btn" @click="goToShop(product.shop.id)">
+          <v-icon size="20">mdi-storefront-outline</v-icon>
+          <span>Visit Shop</span>
+        </button>
+      </template>
 
-        <template v-else>
-          <!-- Chat Now -->
-          <v-col cols="4" class="pa-0">
-            <v-btn block class="bottom-btn chat-now-btn" color="#4caf50" @click="goToChat()">
-              <v-icon left size="20">mdi-chat-outline</v-icon>
-              Chat Now
-            </v-btn>
-          </v-col>
+      <template v-else>
+        <button class="bottom-action-btn chat-btn" @click="goToChat()">
+          <v-icon size="20">mdi-chat-outline</v-icon>
+          <span>Chat</span>
+        </button>
 
-          <!-- Add to Cart - Opens Dialog -->
-          <v-col cols="4" class="pa-0">
-            <v-btn
-              block
-              class="bottom-btn cart-btn"
-              color="#4caf50"
-              @click="openAddToCartDialog()"
-              :disabled="displayStock === 0"
-            >
-              <v-icon left size="20">mdi-cart-outline</v-icon>
-              {{ displayStock === 0 ? 'Out of Stock' : 'Add to Cart' }}
-            </v-btn>
-          </v-col>
+        <button
+          class="bottom-action-btn cart-btn"
+          @click="openAddToCartDialog()"
+          :disabled="displayStock === 0"
+        >
+          <v-icon size="20">mdi-cart-outline</v-icon>
+          <span>{{ displayStock === 0 ? 'Out of Stock' : 'Add to Cart' }}</span>
+        </button>
 
-          <!-- Buy Now - Opens Dialog -->
-          <v-col cols="4" class="pa-0">
-            <v-btn
-              block
-              class="bottom-btn buy-now-btn"
-              color="#438fda"
-              @click="openBuyNowDialog()"
-              :disabled="isActionDisabled"
-            >
-              Buy Now
-            </v-btn>
-          </v-col>
-        </template>
-      </v-row>
-    </v-bottom-navigation>
+        <button
+          class="bottom-action-btn buy-btn"
+          @click="openBuyNowDialog()"
+          :disabled="isActionDisabled"
+        >
+          <span>Buy Now</span>
+        </button>
+      </template>
+    </div>
   </v-app>
 </template>
 
 <style scoped>
-/* ===============================
-   GLOBAL LAYOUT
-================================= */
-.v-application {
-  background: #f6f8fb;
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
 }
 
 .product-page {
-  background: #f6f8fb;
+  background: linear-gradient(180deg, #f8fafc 0%, #f1f5f9 100%);
   min-height: 100vh;
   padding-bottom: 90px;
 }
 
 .product-sheet {
-  width: 100%;
-  max-width: 1180px;
-  margin: auto;
-  padding: 20px;
+  max-width: 800px;
+  margin: 0 auto;
+  padding: 16px;
 }
 
-/* =========================================
-   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
-========================================= */
-:root {
-  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
-}
-
-.v-application {
-  background: #f5f7fb;
-}
-
-v-main,
-.v-main {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: max(0px, env(safe-area-inset-left));
-  padding-right: max(0px, env(safe-area-inset-right));
-  background: #f5f7fb;
-  min-height: 100vh;
-  margin-top: 30px;
-}
-
-/* =========================================
-   APP BAR
-================================= */
+/* App Bar */
 .app-bar {
-  padding-top: env(safe-area-inset-top);
-  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
-  color: white !important;
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+  background: linear-gradient(135deg, #3f83c7, #2c5f8a) !important;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1) !important;
 }
 
-.app-bar :deep(.v-toolbar-title) {
-  font-size: 1.05rem;
-  font-weight: 700;
-  letter-spacing: 0.2px;
-}
-
-.app-bar :deep(.v-btn) {
-  color: white !important;
-}
-
-/* ===============================
-   PRODUCT IMAGE SECTION
-================================= */
+/* Product Images */
 .product-images {
-  width: 100%;
-  display: flex;
-  justify-content: center;
-  margin-bottom: 24px;
+  margin-bottom: 16px;
 }
 
 .product-img,
 .product-images :deep(.v-carousel),
-.product-images :deep(.v-window),
 .product-images :deep(.v-carousel-item) {
-  width: 100%;
-  max-width: 620px;
-  height: 420px !important;
-  border-radius: 18px;
+  border-radius: 24px;
   overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.product-img :deep(img) {
+  object-fit: contain;
   background: white;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
+  padding: 20px;
 }
 
-.product-img :deep(img),
-.product-images :deep(img) {
-  object-fit: contain !important;
-  padding: 18px;
-}
-
-/* ===============================
-   PRODUCT INFO
-================================= */
+/* Product Info Card */
 .product-info {
   background: white;
-  border-radius: 20px;
+  border-radius: 28px;
   padding: 24px;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+  box-shadow: 0 8px 28px rgba(0, 0, 0, 0.06);
+}
+
+.product-header {
+  margin-bottom: 20px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #eef2f6;
 }
 
 .product-title {
-  font-size: 1.7rem;
+  font-size: 1.8rem;
   font-weight: 700;
-  color: #1e293b;
-  line-height: 1.35;
-  margin-bottom: 8px;
+  color: #1a2c3e;
+  line-height: 1.3;
+  margin-bottom: 12px;
+}
+
+.product-price-wrapper {
+  display: flex;
+ align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .product-price {
   font-size: 2rem;
   font-weight: 800;
   color: #e53935;
-  margin-bottom: 16px;
 }
 
-.product-description {
-  font-size: 0.96rem;
-  color: #475569;
-  line-height: 1.7;
-  margin-top: 16px;
+.stock-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 100px;
+  font-size: 0.8rem;
+  font-weight: 600;
 }
 
-.product-meta {
-  margin-top: 12px;
-  color: #64748b;
+.in-stock {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+
+.out-of-stock {
+  background: #ffebee;
+  color: #c62828;
+}
+
+/* Selection Labels */
+.selection-label {
   font-size: 0.9rem;
+  font-weight: 600;
+  color: #475569;
+  margin-bottom: 12px;
+  letter-spacing: -0.2px;
 }
 
-/* ===============================
-   OPTION / VARIETY CARDS
-================================= */
+/* Option Cards */
 .option-card,
 .variety-card {
   border-radius: 16px !important;
-  border: 1px solid #e5e7eb;
-  transition: 0.25s ease;
+  border: 1.5px solid #e2e8f0;
+  transition: all 0.2s ease;
+  cursor: pointer;
 }
 
 .option-card:hover,
 .variety-card:hover {
   transform: translateY(-2px);
-  box-shadow: 0 10px 18px rgba(0, 0, 0, 0.06);
+  border-color: #3f83c7;
+  box-shadow: 0 6px 16px rgba(63, 131, 199, 0.1);
 }
 
 .option-card--selected,
 .variety-card--selected {
-  border: 2px solid #3f83c7 !important;
-  background: #eef6ff;
+  border-color: #3f83c7 !important;
+  background: #f0f7ff;
+}
+
+.option-title {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 4px;
+}
+
+.option-subtitle {
+  font-size: 0.75rem;
+  color: #94a3b8;
+}
+
+.option-price {
+  font-weight: 700;
+  color: #e53935;
+  margin-right: 12px;
+}
+
+.or-divider {
+  position: relative;
+  text-align: center;
+  margin: 20px 0;
+}
+
+.or-text {
+  position: relative;
+  top: -12px;
+  background: white;
+  padding: 0 12px;
+  font-size: 0.8rem;
+  color: #94a3b8;
+  font-weight: 600;
+  text-transform: uppercase;
 }
 
 .varieties-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
-/* ===============================
-   SHOP CARD
-================================= */
-.shop-card {
-  border-radius: 18px;
+.variety-content {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.variety-info {
+  flex: 1;
+}
+
+.variety-name {
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 2px;
+}
+
+.variety-type {
+  font-size: 0.7rem;
+  color: #94a3b8;
+}
+
+.variety-price {
+  font-weight: 700;
+  color: #e53935;
+}
+
+/* Size Buttons */
+.size-section {
+  margin: 20px 0;
+}
+
+.size-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.size-btn {
+  min-width: 56px;
+  padding: 10px 16px;
+  border: 1.5px solid #e2e8f0;
   background: white;
-  box-shadow: 0 5px 14px rgba(0, 0, 0, 0.05);
-  margin-top: 20px;
+  border-radius: 100px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: #475569;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.size-btn:hover {
+  border-color: #3f83c7;
+  background: #f0f7ff;
+}
+
+.size-btn--active {
+  background: #3f83c7;
+  border-color: #3f83c7;
+  color: white;
+}
+
+/* Selection Summary */
+.selection-summary {
+  background: linear-gradient(135deg, #f8fafc, #f1f5f9);
+  border-radius: 20px;
+  padding: 16px;
+  margin: 20px 0;
+}
+
+.summary-label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: #64748b;
+  margin-bottom: 6px;
+}
+
+.summary-value {
+  font-weight: 700;
+  color: #1e293b;
+  font-size: 1rem;
+  margin-bottom: 8px;
+}
+
+.summary-details {
+  display: flex;
+  gap: 20px;
+  font-size: 0.85rem;
+  color: #475569;
+}
+
+.summary-details strong {
+  color: #3f83c7;
+}
+
+.low-stock {
+  color: #f59e0b !important;
+}
+
+/* Product Description */
+.product-description {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: #475569;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #eef2f6;
+}
+
+/* Shop Card */
+.shop-card {
+  border-radius: 20px !important;
+  background: white;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.04);
+}
+
+.shop-card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
 }
 
 .shop-name {
   font-weight: 700;
-  font-size: 1rem;
+  color: #1e293b;
+  margin-bottom: 2px;
 }
 
-/* ===============================
-   BOTTOM NAV
-================================= */
-.bottom-nav {
-  border-top: 1px solid #e5e7eb;
-  background: rgba(255, 255, 255, 0.96) !important;
-  backdrop-filter: blur(12px);
+.shop-link {
+  font-size: 0.75rem;
+  color: #3f83c7;
+  display: flex;
+  align-items: center;
+  gap: 2px;
 }
 
-.bottom-btn {
-  height: 64px !important;
+/* Bottom Bar */
+.bottom-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: rgba(255, 255, 255, 0.98);
+  backdrop-filter: blur(20px);
+  border-top: 1px solid #eef2f6;
+  display: flex;
+  padding: 12px 16px;
+  gap: 12px;
+  z-index: 100;
+  padding-bottom: max(12px, env(safe-area-inset-bottom));
+}
+
+.bottom-action-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 14px 12px;
+  border: none;
+  border-radius: 60px;
+  font-size: 0.9rem;
   font-weight: 700;
-  text-transform: none !important;
-  border-radius: 0 !important;
-  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.chat-now-btn {
-  background: #43a047 !important;
-  color: white !important;
+.bottom-action-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.chat-btn {
+  background: #f0fdf4;
+  color: #22c55e;
+}
+
+.chat-btn:active {
+  transform: scale(0.97);
 }
 
 .cart-btn {
-  background: #fb8c00 !important;
-  color: white !important;
+  background: #fff7ed;
+  color: #f97316;
 }
 
-.buy-now-btn {
-  background: #3f83c7 !important;
-  color: white !important;
+.cart-btn:active {
+  transform: scale(0.97);
 }
 
-/* ===============================
-   TABLET
-================================= */
-@media (max-width: 1024px) {
-  .product-sheet {
-    padding: 16px;
-  }
-
-  .product-img,
-  .product-images :deep(.v-carousel),
-  .product-images :deep(.v-window),
-  .product-images :deep(.v-carousel-item) {
-    max-width: 100%;
-    height: 360px !important;
-  }
-
-  .product-title {
-    font-size: 1.45rem;
-  }
-
-  .product-price {
-    font-size: 1.7rem;
-  }
+.buy-btn {
+  background: linear-gradient(135deg, #3f83c7, #2c5f8a);
+  color: white;
+  box-shadow: 0 4px 12px rgba(63, 131, 199, 0.3);
 }
 
-/* ===============================
-   MOBILE
-================================= */
+.buy-btn:active {
+  transform: scale(0.97);
+}
+
+.primary-btn {
+  background: linear-gradient(135deg, #3f83c7, #2c5f8a);
+  color: white;
+}
+
+/* Dialog Styles */
+:deep(.v-dialog .v-card) {
+  border-radius: 28px !important;
+}
+
+/* Responsive */
 @media (max-width: 768px) {
   .product-sheet {
     padding: 12px;
   }
-
+  
   .product-info {
-    padding: 18px;
-    border-radius: 18px;
+    padding: 20px;
   }
-
-  .product-img,
-  .product-images :deep(.v-carousel),
-  .product-images :deep(.v-window),
-  .product-images :deep(.v-carousel-item) {
-    height: 260px !important;
-    border-radius: 16px;
-  }
-
-  .product-img :deep(img),
-  .product-images :deep(img) {
-    padding: 12px;
-  }
-
+  
   .product-title {
-    font-size: 1.15rem;
+    font-size: 1.4rem;
   }
-
+  
   .product-price {
-    font-size: 1.45rem;
+    font-size: 1.5rem;
   }
-
-  .product-description {
-    font-size: 0.9rem;
+  
+  .bottom-action-btn {
+    padding: 12px 10px;
+    font-size: 0.8rem;
   }
-
-  .varieties-grid {
-    grid-template-columns: 1fr;
-    gap: 10px;
-  }
-
-  .bottom-btn {
-    height: 58px !important;
-    font-size: 11px;
+  
+  .size-btn {
+    min-width: 48px;
+    padding: 8px 14px;
+    font-size: 0.8rem;
   }
 }
 
-/* ===============================
-   SMALL MOBILE
-================================= */
 @media (max-width: 480px) {
-  .product-img,
-  .product-images :deep(.v-carousel),
-  .product-images :deep(.v-window),
-  .product-images :deep(.v-carousel-item) {
-    height: 220px !important;
+  .product-price-wrapper {
+    flex-direction: column;
+    align-items: flex-start;
   }
-
-  .product-title {
-    font-size: 1rem;
+  
+  .bottom-action-btn span {
+    font-size: 0.75rem;
   }
-
-  .product-price {
-    font-size: 1.25rem;
+  
+  .variety-content {
+    flex-wrap: wrap;
   }
-
-  .bottom-btn {
-    font-size: 10px;
+  
+  .variety-price {
+    margin-left: auto;
   }
-}
-
-/* ===============================
-   DIALOG
-================================= */
-:deep(.v-dialog .v-card) {
-  border-radius: 18px !important;
-}
-
-/* ===============================
-   SCROLL
-================================= */
-html {
-  scroll-behavior: smooth;
 }
 </style>

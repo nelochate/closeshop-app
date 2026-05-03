@@ -162,14 +162,9 @@ const calculateTimeRemaining = () => {
   if (!orderCreatedAt) return CANCEL_WINDOW_SECONDS
   const currentTime = Date.now()
   const timeElapsed = (currentTime - orderCreatedAt) / 1000
-<<<<<<< HEAD
-
-  return Math.max(0, CANCEL_WINDOW_SECONDS - timeElapsed)
-=======
   const maxCancelTime = 5 * 60
 
   return Math.max(0, maxCancelTime - timeElapsed)
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 }
 
 const formatTimeRemaining = () => {
@@ -413,10 +408,6 @@ const fetchOrderDetails = async () => {
     }
 
     await loadTrackingLocations()
-<<<<<<< HEAD
-=======
-
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
     await getCurrentUserAndRole()
 
     if (!userRole.value) {
@@ -432,20 +423,8 @@ const fetchOrderDetails = async () => {
       return
     }
 
-<<<<<<< HEAD
-    if (order.value?.status === 'pending_approval') {
-      startCancelTimer()
-      // Check if this specific order has expired
-      const timeRemainingCalc = calculateTimeRemaining()
-      if (timeRemainingCalc <= 0) {
-        await confirmOrderAndUpdateStock()
-        await fetchOrderDetails() // Refresh after update
-      }
-    } else {
-=======
     if (order.value?.status === 'pending_approval') startCancelTimer()
     else {
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
       canCancel.value = false
       timeRemaining.value = 0
     }
@@ -531,11 +510,7 @@ const loadTrackingLocations = async () => {
 
 // Computed properties
 const subtotal = computed(() => {
-<<<<<<< HEAD
-  return orderItems.value.reduce((sum, item) => sum + item.price * item.quantity, 0)
-=======
   return calculateOrderItemsSubtotal(orderItems.value)
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 })
 
 const deliveryFee = computed(() => {
@@ -696,13 +671,7 @@ const shouldTrackOwnLocation = computed(
   () =>
     isRider.value &&
     !!currentRiderId.value &&
-<<<<<<< HEAD
-    order.value?.rider_id === currentRiderId.value &&
-    (order.value?.status === 'accepted_by_rider' ||
-      (order.value?.status === 'picked_up' && !isAwaitingCustomerConfirmation.value)),
-=======
     !['delivered', 'completed', 'cancelled'].includes(order.value?.status),
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 )
 const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
   const persisted = extractPersistedRiderCoordinates(order.value)
@@ -969,10 +938,6 @@ const approveOrder = async () => {
         approved_at: new Date().toISOString(),
       })
       .eq('id', orderId)
-<<<<<<< HEAD
-      .eq('status', 'pending_approval') // Only approve if still pending
-=======
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 
     if (error) throw error
 
@@ -1491,10 +1456,7 @@ const buildFullAddress = computed(() => {
 })
 
 const goBack = () => router.back()
-<<<<<<< HEAD
-=======
 const goToFullscreenMap = () => router.push({ name: 'LocationToDeliver', params: { orderId } })
->>>>>>> ddeef43bf9472034e0f125edfd24c97058d5503a
 const viewProduct = (productId: string) =>
   router.push({ name: 'product-detail', params: { id: productId } })
 const contactSeller = () =>
