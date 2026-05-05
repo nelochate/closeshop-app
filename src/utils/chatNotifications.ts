@@ -81,7 +81,10 @@ const MESSAGE_NOTIFICATION_SOURCE_MAX_ATTEMPTS = 4
 const shopCache = new Map<string, ShopRecord | null>()
 const profileCache = new Map<string, ProfileRecord | null>()
 const conversationCache = new Map<string, ConversationRecord | null>()
-let supportsConversationNotificationState: boolean | null = null
+// Keep client-side notification decisions schema-safe.
+// We derive the one-time message milestones from conversation history
+// instead of probing optional conversation columns that may not exist yet.
+let supportsConversationNotificationState = false
 
 const getNotificationRelatedIds = ({
   conversationId,

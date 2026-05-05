@@ -1510,9 +1510,13 @@ const saveShop = async () => {
 
     setTimeout(() => {
       localStorage.setItem('lastCreatedShopId', savedShopId)
-      router.push({
+      router.replace({
         path: '/statusshopcreation',
-        query: { shopId: savedShopId },
+        query: {
+          shopId: savedShopId,
+          from: 'shop-build',
+          returnTo: 'usershop',
+        },
       })
     }, 1500)
   } catch (err) {
@@ -1603,7 +1607,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
 <template>
   <v-app>
     <!-- Top App Bar -->
-    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable" :style="{ paddingTop: safeAreaTop }">
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn icon @click="goBack" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -1612,7 +1616,7 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
       </v-toolbar-title>
     </v-app-bar>
 
-    <v-main class="pb-16">
+    <v-main class="shop-build-main">
       <!-- Progress Steps -->
       <v-card class="steps-card" flat>
         <v-card-text class="steps-container">
@@ -2696,12 +2700,76 @@ watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city
   right: 0;
   z-index: 1000;
   padding-top: var(--sat, 0px);
-  height: calc(56px + var(--sat, 0px)) !important;
-  min-height: calc(56px + var(--sat, 0px)) !important;
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
-.pb-16 {
-  padding-top: calc(75px + env(safe-area-inset-top, 0px)) !important;
+.app-bar :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding: 0 max(8px, var(--sar, 0px)) 0 max(8px, var(--sal, 0px));
+  padding-top: 0 !important;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .app-bar {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+    min-height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .app-bar {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+    min-height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+.shop-build-main {
+  min-height: 100vh;
+  padding-top: calc(56px + var(--sat, 0px)) !important;
+  padding-right: max(0px, var(--sar, 0px));
+  padding-bottom: calc(64px + var(--sab, 0px));
+  padding-left: max(0px, var(--sal, 0px));
+  background: #f5f7fb;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .shop-build-main {
+    padding-top: calc(56px + env(safe-area-inset-top)) !important;
+    padding-bottom: calc(64px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .shop-build-main {
+    padding-top: calc(56px + constant(safe-area-inset-top)) !important;
+    padding-bottom: calc(64px + constant(safe-area-inset-bottom)) !important;
+  }
+}
+
+@media (orientation: landscape) and (max-height: 500px) {
+  .app-bar {
+    height: 56px !important;
+    min-height: 56px !important;
+    padding-top: 0 !important;
+  }
+
+  .shop-build-main {
+    padding-top: 56px !important;
+  }
 }
 
 /* Steps Card Styles */
