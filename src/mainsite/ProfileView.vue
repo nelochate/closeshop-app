@@ -10,6 +10,7 @@ import {
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
+import { normalizeOrderStatus } from '@/utils/orderStatus'
 
 const activeTab = ref('account')
 
@@ -795,13 +796,16 @@ const loadSectionItems = async (sectionId) => {
 
 // Helper function to get status color
 const getStatusColor = (order) => {
+  const status = normalizeOrderStatus(order.status)
+
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
   if (isOrderDeliveredState(order)) return 'success'
-  if (order.status === 'waiting_for_rider') return 'warning' // Orange/Yellow
-  if (order.status === 'accepted_by_rider') return 'info' // Blue
-  if (order.status === 'picked_up') return 'warning' // Orange/Yellow
+  if (status === 'cancel_requested') return 'warning'
+  if (status === 'waiting_for_rider') return 'warning' // Orange/Yellow
+  if (status === 'accepted_by_rider') return 'info' // Blue
+  if (status === 'picked_up') return 'warning' // Orange/Yellow
   if (order.payment_status === 'paid') return 'primary'
-  if (order.status === 'pending_approval') return 'warning' // Orange/Yellow
+  if (status === 'pending_approval') return 'warning' // Orange/Yellow
   if (order.payment_status === 'pending') return 'warning'
   if (order.payment_status === 'failed') return 'error'
   return 'grey'
@@ -809,14 +813,17 @@ const getStatusColor = (order) => {
 
 // Helper function to get status text
 const getStatusText = (order) => {
+  const status = normalizeOrderStatus(order.status)
+
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
   if (isOrderCompleted(order)) return 'Completed'
   if (isOrderDeliveredState(order)) return 'Delivered'
-  if (order.status === 'waiting_for_rider') return 'Waiting for Rider' // Added
-  if (order.status === 'accepted_by_rider') return 'Rider Accepted' // Added
-  if (order.status === 'picked_up') return 'Picked Up' // Added
+  if (status === 'cancel_requested') return 'Cancellation Requested'
+  if (status === 'waiting_for_rider') return 'Waiting for Rider' // Added
+  if (status === 'accepted_by_rider') return 'Rider Accepted' // Added
+  if (status === 'picked_up') return 'Picked Up' // Added
   if (order.payment_status === 'paid') return 'To Receive'
-  if (order.status === 'pending_approval') return 'Pending Approval' // Added
+  if (status === 'pending_approval') return 'Pending Approval' // Added
   if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
   return 'Processing'

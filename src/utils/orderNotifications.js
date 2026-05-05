@@ -1,4 +1,9 @@
 import { supabase } from '@/utils/supabase'
+import {
+  LEGACY_ORDER_CANCEL_REQUESTED_STATUS,
+  ORDER_CANCEL_REQUESTED_STATUS,
+  isOrderCancellationRequestedStatus,
+} from '@/utils/orderStatus'
 
 const getShopName = (orderData = {}) => {
   if (orderData.shop_name) return orderData.shop_name
@@ -101,6 +106,18 @@ const buildCustomerOrderStatusNotification = ({ status, shopName, transactionNum
   const shopLabel = shopName ? ` from ${shopName}` : ''
 
   switch (status) {
+    case 'cancelled':
+      return {
+        type: 'shipping_update',
+        title: 'Order Cancelled',
+        message: `${orderLabel}${shopLabel} was cancelled.`,
+      }
+    case 'cancellation_request_declined':
+      return {
+        type: 'shipping_update',
+        title: 'Cancellation Request Declined',
+        message: `The shop did not approve the cancellation request for ${orderLabel}${shopLabel}.`,
+      }
     case 'picked_up':
       return {
         type: 'shipping_update',
@@ -129,6 +146,13 @@ const buildSellerOrderStatusNotification = ({ status, transactionNumber, custome
   const customerLabel = customerName ? ` for ${customerName}` : ''
 
   switch (status) {
+    case ORDER_CANCEL_REQUESTED_STATUS:
+    case LEGACY_ORDER_CANCEL_REQUESTED_STATUS:
+      return {
+        type: 'shipping_update',
+        title: 'Cancellation Requested',
+        message: `Customer requested cancellation approval for ${orderLabel}${customerLabel}.`,
+      }
     case 'accepted_by_rider':
       return {
         type: 'shipping_update',
@@ -292,7 +316,7 @@ export const notifySellerOrderStatus = async ({
     return { created: false, reason: 'missing-context' }
   }
 
-  const skipDuplicateCheck = status === 'not_received'
+  const skipDuplicateCheck = status === 'not_received' || isOrderCancellationRequestedStatus(status)
   const exists = skipDuplicateCheck
     ? false
     : await notificationAlreadyExists({

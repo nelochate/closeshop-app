@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime } from '@/utils/dateTime'
+import { isOrderCancellationRequestedStatus, normalizeOrderStatus } from '@/utils/orderStatus'
 
 const router = useRouter()
 const goBack = () => router.back()
@@ -28,6 +29,7 @@ const manualStatus = ref('auto')
 const address = ref('')
 const loading = ref(false)
 const meetupDetails = ref('')
+const shopOwnerUserId = ref<string | null>(null)
 
 // Orders state
 const orders = ref<any[]>([])
@@ -57,8 +59,11 @@ const orderCounts = computed(() => {
 
   orders.value.forEach((order) => {
     if (order.status === 'pending_approval') counts.pending_approval++
-    else if (order.status === 'waiting_for_rider') counts.waiting_for_rider++
     else if (
+      order.status === 'waiting_for_rider' || isOrderCancellationRequestedStatus(order.status)
+    ) {
+      counts.waiting_for_rider++
+    } else if (
       order.status === 'accepted_by_rider' ||
       (order.status === 'picked_up' && !order.delivered_at)
     ) {
@@ -79,7 +84,10 @@ const pendingApprovalOrders = computed(() => {
 })
 
 const waitingForRiderOrders = computed(() => {
-  return orders.value.filter((order) => order.status === 'waiting_for_rider')
+  return orders.value.filter(
+    (order) =>
+      order.status === 'waiting_for_rider' || isOrderCancellationRequestedStatus(order.status),
+  )
 })
 
 const activeOrdersWithRiders = computed(() => {
@@ -109,10 +117,11 @@ const isOrderDeliveredState = (order: any = {}) =>
 const getOrderStatusText = (order: any = {}) => {
   if (isOrderDeliveredState(order)) return isOrderCompletedState(order) ? 'Completed' : 'Delivered'
 
-  const status = String(order.status || '')
+  const status = normalizeOrderStatus(order.status)
   const statusMap: Record<string, string> = {
     pending_approval: 'Pending Approval',
     waiting_for_rider: 'Waiting for Rider',
+    cancel_requested: 'Cancellation Requested',
     accepted_by_rider: 'Rider Accepted',
     picked_up: 'Picked Up',
     cancelled: 'Cancelled',
@@ -123,15 +132,84 @@ const getOrderStatusText = (order: any = {}) => {
 const getOrderStatusColor = (order: any = {}) => {
   if (isOrderDeliveredState(order)) return 'success'
 
-  const status = String(order.status || '')
+  const status = normalizeOrderStatus(order.status)
   const colorMap: Record<string, string> = {
     pending_approval: 'warning',
     waiting_for_rider: 'info',
+    cancel_requested: 'warning',
     accepted_by_rider: 'primary',
     picked_up: 'warning',
     cancelled: 'error',
   }
   return colorMap[status] || 'grey'
+}
+
+const getWaitingForRiderStatusProps = (order: any = {}) => {
+  if (isOrderCancellationRequestedStatus(order.status)) {
+    return {
+      color: 'warning',
+      icon: 'mdi-timer-sand',
+      text: 'Cancellation Requested',
+      subtitle: 'Buyer is waiting for your cancellation decision',
+    }
+  }
+
+  return {
+    color: 'info',
+    icon: 'mdi-bike-fast',
+    text: 'Waiting for Rider',
+    subtitle: 'Approved and ready for rider assignment',
+  }
+}
+
+const ensureSellerCancellationNotifications = async (ordersToCheck: any[] = []) => {
+  if (!shopOwnerUserId.value) return
+
+  const cancellationOrders = ordersToCheck.filter((order) =>
+    isOrderCancellationRequestedStatus(order.status),
+  )
+
+  if (cancellationOrders.length === 0) return
+
+  await Promise.all(
+    cancellationOrders.map(async (order) => {
+      const { data: existingNotification, error: lookupError } = await supabase
+        .from('notifications')
+        .select('id')
+        .eq('user_id', shopOwnerUserId.value)
+        .eq('type', 'shipping_update')
+        .eq('related_id', order.id)
+        .eq('related_type', 'order')
+        .eq('title', 'Cancellation Requested')
+        .limit(1)
+        .maybeSingle()
+
+      if (lookupError) {
+        console.warn('Could not check seller cancellation notification state:', lookupError)
+        return
+      }
+
+      if (existingNotification?.id) return
+
+      const orderLabel = order.transaction_number ? `order ${order.transaction_number}` : 'the order'
+      const customerLabel = order.customer_name ? ` for ${order.customer_name}` : ''
+
+      const { error: insertError } = await supabase.from('notifications').insert({
+        user_id: shopOwnerUserId.value,
+        type: 'shipping_update',
+        title: 'Cancellation Requested',
+        message: `Customer requested cancellation approval for ${orderLabel}${customerLabel}.`,
+        related_id: order.id,
+        related_type: 'order',
+        is_read: false,
+        created_at: order.updated_at || new Date().toISOString(),
+      })
+
+      if (insertError) {
+        console.warn('Could not backfill seller cancellation notification:', insertError)
+      }
+    }),
+  )
 }
 
 // Approve/reject functions
@@ -396,7 +474,9 @@ const fetchOrders = async () => {
       }),
     )
 
-    orders.value = await reconcileAutoCompletedOrders(ordersWithInfo)
+    const reconciledOrders = await reconcileAutoCompletedOrders(ordersWithInfo)
+    orders.value = reconciledOrders
+    await ensureSellerCancellationNotifications(reconciledOrders)
   } catch (err) {
     console.error('âŒ Error in fetchOrders:', err)
     ordersError.value = 'Error loading orders. Please try again.'
@@ -485,6 +565,7 @@ const fetchShopData = async () => {
     if (error) throw error
 
     console.log('ðŸª Shop info:', data)
+    shopOwnerUserId.value = user.id
     shopId.value = data?.id || null
     businessName.value = data?.business_name || 'No shop name'
     description.value = data?.description || 'No description provided'
@@ -1261,10 +1342,23 @@ const getOrderDeliveryDisplay = (order: any): string => {
                       {{ formatDate(order.created_at) }}
                     </div>
                   </div>
-                  <v-chip color="info" size="x-small">
-                    <v-icon start size="10">mdi-bike-fast</v-icon>
-                    Waiting for Rider
+                  <v-chip :color="getWaitingForRiderStatusProps(order).color" size="x-small">
+                    <v-icon start size="10">{{ getWaitingForRiderStatusProps(order).icon }}</v-icon>
+                    {{ getWaitingForRiderStatusProps(order).text }}
                   </v-chip>
+                </div>
+
+                <div
+                  v-if="isOrderCancellationRequestedStatus(order.status)"
+                  class="mb-2 pa-2 rounded-lg"
+                  style="background: #fff3cd"
+                >
+                  <div class="d-flex align-center">
+                    <v-icon color="warning" size="18" class="mr-2">mdi-alert-outline</v-icon>
+                    <div class="text-caption font-weight-medium">
+                      {{ getWaitingForRiderStatusProps(order).subtitle }}
+                    </div>
+                  </div>
                 </div>
 
                 <div class="d-flex align-center mb-2">

@@ -8,7 +8,6 @@ import {
   calculateCheckoutDeliveryPricing,
   calculateOrderItemsSubtotal,
   calculateOrderTotalAmount,
-  isMissingDeliveryFeeColumnError,
 } from '@/utils/deliveryPricing.js'
 
 const route = useRoute()
@@ -100,6 +99,99 @@ const generateUniqueTransactionNumber = async (): Promise<string> => {
   }
 
   return generateTransactionNumber() + '-' + Math.random().toString(36).substring(2, 4)
+}
+
+const getSupabaseErrorText = (error: any) => {
+  const message = String(error?.message || '')
+  const details = String(error?.details || '')
+  const hint = String(error?.hint || '')
+  return `${message} ${details} ${hint}`.toLowerCase()
+}
+
+const isMissingSchemaColumnError = (error: any, columnName: string) => {
+  const code = String(error?.code || '')
+  const combinedText = getSupabaseErrorText(error)
+  const normalizedColumnName = columnName.toLowerCase()
+
+  return (
+    combinedText.includes(normalizedColumnName) &&
+    (code === 'PGRST204' ||
+      code === '42703' ||
+      combinedText.includes('column') ||
+      combinedText.includes('schema cache'))
+  )
+}
+
+const createOrderWithSchemaFallback = async (payload: Record<string, any>) => {
+  const requiredColumns = new Set(['user_id', 'address_id', 'total_amount', 'status'])
+  const currentPayload: Record<string, any> = { ...payload }
+
+  while (true) {
+    const response = await supabase.from('orders').insert(currentPayload).select().single()
+
+    if (!response.error) {
+      return response
+    }
+
+    const missingColumn = Object.keys(currentPayload).find(
+      (columnName) =>
+        !requiredColumns.has(columnName) &&
+        isMissingSchemaColumnError(response.error, columnName),
+    )
+
+    if (!missingColumn) {
+      return response
+    }
+
+    console.warn(
+      `orders.${missingColumn} is not available in this Supabase project yet. Retrying order creation without that column.`,
+    )
+
+    delete currentPayload[missingColumn]
+  }
+}
+
+const createPaymentRecordWithSchemaFallback = async ({
+  orderId,
+  amount,
+  method,
+}: {
+  orderId: string
+  amount: number
+  method: string
+}) => {
+  const createdAt = new Date().toISOString()
+  const payloadVariants = [
+    { order_id: orderId, amount, status: 'pending', method, created_at: createdAt },
+    { order_id: orderId, amount, status: 'pending', method },
+    { order_id: orderId, amount, status: 'pending', payment_method: method, created_at: createdAt },
+    { order_id: orderId, amount, status: 'pending', payment_method: method },
+    { order_id: orderId, amount, status: 'pending', created_at: createdAt },
+    { order_id: orderId, amount, status: 'pending' },
+  ]
+
+  let lastError: any = null
+
+  for (const payload of payloadVariants) {
+    const { error } = await supabase.from('payments').insert(payload)
+
+    if (!error) {
+      return { error: null }
+    }
+
+    lastError = error
+
+    const attemptedColumns = Object.keys(payload)
+    const canRetryWithAnotherShape = attemptedColumns.some((columnName) =>
+      isMissingSchemaColumnError(error, columnName),
+    )
+
+    if (!canRetryWithAnotherShape) {
+      return { error }
+    }
+  }
+
+  return { error: lastError }
 }
 
 // 🔄 INITIALIZE PAGE
@@ -1844,6 +1936,7 @@ const handleCheckout = async () => {
       address_id: address.value.id,
       total_amount: totalPrice.value,
       status: 'pending_approval',
+      payment_status: 'pending',
       payment_method: paymentMethod.value,
       transaction_number: transactionNumber.value,
       delivery_option: deliveryOption.value,
@@ -1851,25 +1944,10 @@ const handleCheckout = async () => {
       delivery_time: deliveryTime.value,
       note: note.value,
       shop_id: shopId,
+      delivery_fee: deliveryFee.value,
     }
 
-    let orderResponse = await supabase
-      .from('orders')
-      .insert({
-        ...baseOrderPayload,
-        delivery_fee: deliveryFee.value,
-      })
-      .select()
-      .single()
-
-    if (orderResponse.error && isMissingDeliveryFeeColumnError(orderResponse.error)) {
-      console.warn(
-        'delivery_fee column is not available in this Supabase project yet. Retrying order creation without the column.',
-      )
-
-      orderResponse = await supabase.from('orders').insert(baseOrderPayload).select().single()
-    }
-
+    const orderResponse = await createOrderWithSchemaFallback(baseOrderPayload)
     const { data: order, error: orderError } = orderResponse
 
     if (orderError) {
@@ -1917,19 +1995,20 @@ const handleCheckout = async () => {
     const finalOrderTotal = Number(persistedOrderTotals?.total_amount ?? totalPrice.value)
 
     // 3. Create payment record
-    const { error: paymentError } = await supabase.from('payments').insert({
-      order_id: order.id,
+    const { error: paymentError } = await createPaymentRecordWithSchemaFallback({
+      orderId: order.id,
       amount: finalOrderTotal,
-      status: 'pending',
       method: paymentMethod.value,
     })
 
     if (paymentError) {
-      console.error('❌ Payment record creation error:', paymentError)
-      throw paymentError
+      console.warn(
+        '⚠️ Payment record creation failed, but the order was created successfully. Continuing checkout flow.',
+        paymentError,
+      )
+    } else {
+      console.log('✅ Payment record created')
     }
-
-    console.log('✅ Payment record created')
 
     // 4. Send message to seller
     try {

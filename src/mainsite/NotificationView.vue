@@ -485,6 +485,7 @@ async function navigateToNotificationTarget(notification) {
     case 'order_shipped':
     case 'order_delivered':
     case 'order_cancelled':
+    case 'order_update':
     case 'shipping_update':
       if (related_id) {
         router.push(await resolveOrderNotificationRoute(related_id))
@@ -570,6 +571,7 @@ function getNotificationIcon(type) {
     order_shipped: 'mdi-truck-delivery',
     order_delivered: 'mdi-package',
     order_cancelled: 'mdi-close-circle',
+    order_update: 'mdi-bell-badge-outline',
     payment_received: 'mdi-credit-card-check',
     payment_failed: 'mdi-credit-card-remove',
     payment_successful: 'mdi-credit-card-check',
@@ -594,6 +596,7 @@ function getNotificationColor(type) {
     order_shipped: 'orange',
     order_delivered: 'success',
     order_cancelled: 'error',
+    order_update: 'warning',
     payment_received: 'success',
     payment_failed: 'error',
     payment_successful: 'success',
@@ -645,6 +648,7 @@ function getNotificationTitle(notification) {
     order_shipped: 'Order Shipped',
     order_delivered: 'Order Delivered',
     order_cancelled: 'Order Cancelled',
+    order_update: 'Order Update',
     payment_received: 'Payment Received',
     payment_failed: 'Payment Failed',
     payment_successful: 'Payment Successful',

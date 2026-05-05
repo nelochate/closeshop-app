@@ -45,6 +45,7 @@ interface OrderRecord {
   delivery_fee?: number | null
   total_amount?: number | null
   status?: string | null
+  payment_status?: string | null
   payment_method?: string | null
   delivery_option?: string | null
   delivery_date?: string | null
@@ -60,7 +61,9 @@ interface PaymentRecord {
   id?: string
   status?: string | null
   method?: string | null
+  payment_method?: string | null
   amount?: number | null
+  created_at?: string | null
 }
 
 interface RawOrderItemRecord {
@@ -245,7 +248,9 @@ const getStatusColor = (value?: string | null) => {
 }
 
 const subtotal = computed(() => calculateOrderItemsSubtotal(items.value))
-const deliveryFee = computed(() => resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value))
+const deliveryFee = computed(() =>
+  resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value as any),
+)
 const totalAmount = computed(() =>
   Number(order.value?.total_amount ?? calculateOrderTotalAmount(subtotal.value, deliveryFee.value)),
 )
@@ -262,7 +267,9 @@ const orderStatusLabel = computed(() => formatLabel(order.value?.status, 'Pendin
 const paymentMethodLabel = computed(() =>
   formatLabel(order.value?.payment_method || payment.value?.method, 'Cash'),
 )
-const paymentStatusLabel = computed(() => formatLabel(payment.value?.status, 'Pending'))
+const paymentStatusLabel = computed(() =>
+  formatLabel(payment.value?.status || order.value?.payment_status, 'Pending'),
+)
 const orderReference = computed(
   () => normalizeText(order.value?.transaction_number) || normalizeText(order.value?.id) || 'N/A',
 )
@@ -274,6 +281,52 @@ const deliverySchedule = computed(() => {
   if (date && time) return `${formatDisplayDate(date)} at ${formatDisplayTime(time)}`
   return date ? formatDisplayDate(date) : formatDisplayTime(time)
 })
+
+const normalizePaymentRecord = (record: any): PaymentRecord | null => {
+  if (!record) return null
+
+  return {
+    id: normalizeText(record.id) || undefined,
+    status: normalizeText(record.status) || null,
+    method: normalizeText(record.method || record.payment_method) || null,
+    payment_method: normalizeText(record.payment_method) || null,
+    amount: record.amount === null || record.amount === undefined ? null : Number(record.amount),
+    created_at: normalizeText(record.created_at) || null,
+  }
+}
+
+const loadLatestPayment = async (currentOrderId: string) => {
+  try {
+    const { data, error: paymentError } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('order_id', currentOrderId)
+
+    if (paymentError) {
+      console.warn('Could not load payment details for this order:', paymentError)
+      return null
+    }
+
+    const paymentRows = Array.isArray(data) ? [...data] : []
+
+    paymentRows.sort((left: any, right: any) => {
+      const leftTimestamp = Date.parse(normalizeText(left?.created_at))
+      const rightTimestamp = Date.parse(normalizeText(right?.created_at))
+      const leftIsValid = Number.isFinite(leftTimestamp)
+      const rightIsValid = Number.isFinite(rightTimestamp)
+
+      if (leftIsValid && rightIsValid) return rightTimestamp - leftTimestamp
+      if (rightIsValid) return 1
+      if (leftIsValid) return -1
+      return 0
+    })
+
+    return normalizePaymentRecord(paymentRows[0])
+  } catch (paymentError) {
+    console.warn('Could not load payment details for this order:', paymentError)
+    return null
+  }
+}
 
 const loadOrderDetails = async () => {
   if (!orderId) {
@@ -332,20 +385,14 @@ const loadOrderDetails = async () => {
           )
         `)
         .eq('order_id', orderId),
-      supabase
-        .from('payments')
-        .select('id, status, method, amount')
-        .eq('order_id', orderId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      loadLatestPayment(orderId),
     ])
 
     if (orderResponse.error) throw orderResponse.error
     if (itemsResponse.error) throw itemsResponse.error
 
     order.value = orderResponse.data as OrderRecord
-    payment.value = paymentResponse.error ? null : (paymentResponse.data as PaymentRecord | null)
+    payment.value = paymentResponse
 
     const orderItems = (itemsResponse.data || []) as RawOrderItemRecord[]
     items.value = orderItems.map((item, index) => ({
@@ -517,7 +564,7 @@ onMounted(loadOrderDetails)
                   <span class="info-label">Payment Status</span>
                   <span class="info-value payment-status">
                     <v-chip
-                      :color="getStatusColor(payment?.status || 'pending')"
+                      :color="getStatusColor(payment?.status || order?.payment_status || 'pending')"
                       variant="tonal"
                       size="small"
                     >
