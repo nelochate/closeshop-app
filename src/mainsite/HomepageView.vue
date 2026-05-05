@@ -616,7 +616,7 @@ onMounted(() => {
             hide-details
             clearable
             density="comfortable"
-            placeholder="Search product or shop..."
+            placeholder="Looking for something?"
             prepend-inner-icon="mdi-magnify"
             append-inner-icon="mdi-earth"
             @focus="goToSearch"

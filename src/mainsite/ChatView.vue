@@ -467,6 +467,7 @@ const syncMessageNotificationAfterSend = async ({
     await removeRecentMessageNotification({
       receiverUserId: receiverId,
       conversationId: conversationId.value,
+      senderUserId: senderId,
       messageCreatedAt: createdAt,
     })
     return
@@ -487,6 +488,7 @@ const syncMessageNotificationAfterSend = async ({
   await removeRecentMessageNotification({
     receiverUserId: receiverId,
     conversationId: conversationId.value,
+    senderUserId: senderId,
     messageCreatedAt: createdAt,
   })
 }

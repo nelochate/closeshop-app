@@ -572,6 +572,7 @@ onMounted(() => {
     flex-direction: column;
     gap: 8px;
   }
+
   
   .edit-btn,
   .delete-btn {
@@ -583,18 +584,6 @@ onMounted(() => {
 @media (min-width: 769px) and (max-width: 1024px) {
   .product-col {
     margin-bottom: 16px;
-  }
-}
-
-/* Dark Mode Support */
-@media (prefers-color-scheme: dark) {
-  .background-gradient {
-    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
-  }
-  
-  .empty-state-card,
-  .product-card {
-    background: #1e1e2e;
   }
 }
 

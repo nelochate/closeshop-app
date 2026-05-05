@@ -2180,6 +2180,7 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
     await removeRecentMessageNotification({
       receiverUserId: sellerUserId,
       conversationId,
+      senderUserId: buyerUserId,
       messageCreatedAt,
       lookbackMs: 60000,
       maxAttempts: 12,

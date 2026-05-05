@@ -2,10 +2,12 @@ import { supabase } from '@/utils/supabase'
 import {
   resolveConversationViewerRole,
   resolveCounterpartyIdentity,
+  type CounterpartyViewerRole,
 } from '@/utils/chatIdentity'
 import { parseAppTimestamp } from '@/utils/dateTime'
 
 const ORDER_MESSAGE_MARKERS = ['New Order Received!', 'Order ID:', 'Transaction #:']
+const UNSENT_MESSAGE_TEXT = 'Message unsent'
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -17,12 +19,6 @@ type RecentMessageNotificationParams = {
   lookbackMs?: number
   maxAttempts?: number
   retryDelayMs?: number
-}
-
-type PriorSenderMessageParams = {
-  conversationId: string
-  senderId: string
-  beforeCreatedAt: string
 }
 
 type NotificationRecord = {
@@ -69,14 +65,50 @@ type ShopRecord = {
 type ConversationRecord = {
   user1?: string | null
   user2?: string | null
+  has_customer_messaged?: boolean | null
+  has_seller_replied?: boolean | null
+}
+
+type ConversationNotificationState = {
+  hasCustomerMessaged: boolean
+  hasSellerReplied: boolean
 }
 
 const ORDER_MESSAGE_NOTIFICATION_MATCH_WINDOW_MS = 2 * 60 * 1000
+const MESSAGE_NOTIFICATION_SOURCE_FUTURE_WINDOW_MS = 30 * 1000
+const MESSAGE_NOTIFICATION_SOURCE_RETRY_DELAY_MS = 200
+const MESSAGE_NOTIFICATION_SOURCE_MAX_ATTEMPTS = 4
 const shopCache = new Map<string, ShopRecord | null>()
 const profileCache = new Map<string, ProfileRecord | null>()
 const conversationCache = new Map<string, ConversationRecord | null>()
+let supportsConversationNotificationState: boolean | null = null
 
-const getConversationRoleForUser = (conversation?: ConversationRecord | null, userId?: string | null) => {
+const getNotificationRelatedIds = ({
+  conversationId,
+  senderUserId,
+}: {
+  conversationId?: string | null
+  senderUserId?: string | null
+}) =>
+  [...new Set([conversationId, senderUserId].filter((value): value is string => Boolean(value)))]
+
+export const isOrderChatMessage = (content?: string | null) => {
+  if (!content) return false
+  return ORDER_MESSAGE_MARKERS.some((marker) => content.includes(marker))
+}
+
+const isMissingConversationNotificationStateColumnError = (error: unknown) => {
+  const message = typeof error === 'object' && error && 'message' in error ? String(error.message) : ''
+
+  return ['has_customer_messaged', 'has_seller_replied'].some((column) =>
+    message.includes(column),
+  )
+}
+
+const getConversationRoleForUser = (
+  conversation?: ConversationRecord | null,
+  userId?: string | null,
+): CounterpartyViewerRole | null => {
   if (!conversation || !userId) {
     return null
   }
@@ -92,10 +124,38 @@ const getConversationRoleForUser = (conversation?: ConversationRecord | null, us
   return null
 }
 
-export const isOrderChatMessage = (content?: string | null) => {
-  if (!content) return false
-  return ORDER_MESSAGE_MARKERS.some((marker) => content.includes(marker))
-}
+const resolveNotificationRoleForUser = ({
+  conversation,
+  currentUserId,
+  otherUserId,
+  currentUserShop,
+  otherUserShop,
+  messages,
+}: {
+  conversation?: ConversationRecord | null
+  currentUserId?: string | null
+  otherUserId?: string | null
+  currentUserShop?: ShopRecord | null
+  otherUserShop?: ShopRecord | null
+  messages?: MessageRecord[] | null
+}) =>
+  getConversationRoleForUser(conversation, currentUserId) ||
+  resolveConversationViewerRole({
+    currentUserId,
+    otherUserId,
+    customerUserId: conversation?.user1,
+    sellerUserId: conversation?.user2,
+    currentUserShop,
+    otherUserShop,
+    messages,
+  })
+
+const hasConversationNotificationStateChanged = (
+  currentConversation: ConversationRecord | null,
+  nextState: ConversationNotificationState,
+) =>
+  Boolean(currentConversation?.has_customer_messaged) !== nextState.hasCustomerMessaged ||
+  Boolean(currentConversation?.has_seller_replied) !== nextState.hasSellerReplied
 
 const getShopByOwnerId = async (ownerId?: string | null) => {
   if (!ownerId) {
@@ -158,11 +218,38 @@ const getConversationById = async (conversationId?: string | null) => {
     return conversationCache.get(conversationId) || null
   }
 
-  const { data, error } = await supabase
-    .from('conversations')
-    .select('user1, user2')
-    .eq('id', conversationId)
-    .maybeSingle()
+  let data = null
+  let error = null as any
+
+  if (supportsConversationNotificationState !== false) {
+    const response = await supabase
+      .from('conversations')
+      .select('user1, user2, has_customer_messaged, has_seller_replied')
+      .eq('id', conversationId)
+      .maybeSingle()
+
+    data = response.data
+    error = response.error
+
+    if (error && isMissingConversationNotificationStateColumnError(error)) {
+      supportsConversationNotificationState = false
+      error = null
+      data = null
+    } else if (!error) {
+      supportsConversationNotificationState = true
+    }
+  }
+
+  if (!data && !error) {
+    const fallbackResponse = await supabase
+      .from('conversations')
+      .select('user1, user2')
+      .eq('id', conversationId)
+      .maybeSingle()
+
+    data = fallbackResponse.data
+    error = fallbackResponse.error
+  }
 
   if (error) {
     console.warn('Could not inspect conversation for notification labeling:', error)
@@ -173,6 +260,47 @@ const getConversationById = async (conversationId?: string | null) => {
   const conversation = data || null
   conversationCache.set(conversationId, conversation)
   return conversation
+}
+
+const persistConversationNotificationState = async ({
+  conversationId,
+  nextState,
+}: {
+  conversationId: string
+  nextState: ConversationNotificationState
+}) => {
+  if (supportsConversationNotificationState === false) {
+    return false
+  }
+
+  const payload = {
+    has_customer_messaged: nextState.hasCustomerMessaged,
+    has_seller_replied: nextState.hasSellerReplied,
+  }
+
+  const { error } = await supabase.from('conversations').update(payload).eq('id', conversationId)
+
+  if (error) {
+    if (isMissingConversationNotificationStateColumnError(error)) {
+      supportsConversationNotificationState = false
+      return false
+    }
+
+    console.warn('Could not persist conversation notification state:', error)
+    return false
+  }
+
+  supportsConversationNotificationState = true
+
+  const cachedConversation = conversationCache.get(conversationId)
+  if (cachedConversation) {
+    conversationCache.set(conversationId, {
+      ...cachedConversation,
+      ...payload,
+    })
+  }
+
+  return true
 }
 
 const findRecentMessageNotifications = async ({
@@ -189,21 +317,31 @@ const findRecentMessageNotifications = async ({
 
   const earliestCreatedAt = messageDate.toISOString()
   const latestCreatedAt = new Date(messageDate.getTime() + lookbackMs).toISOString()
-  const relatedId = conversationId || senderUserId
+  const relatedIds = getNotificationRelatedIds({
+    conversationId,
+    senderUserId,
+  })
 
-  if (!relatedId) {
+  if (relatedIds.length === 0) {
     return []
   }
 
-  const { data, error } = await supabase
+  let query = supabase
     .from('notifications')
     .select('id, title, message, created_at')
     .eq('user_id', receiverUserId)
     .eq('type', 'new_message')
-    .eq('related_id', relatedId)
     .gte('created_at', earliestCreatedAt)
     .lte('created_at', latestCreatedAt)
     .order('created_at', { ascending: false })
+
+  if (relatedIds.length === 1) {
+    query = query.eq('related_id', relatedIds[0])
+  } else {
+    query = query.in('related_id', relatedIds)
+  }
+
+  const { data, error } = await query
 
   if (error) {
     console.warn('Could not inspect recent message notifications:', error)
@@ -268,51 +406,166 @@ const deleteNotificationsByIds = async (notificationIds: string[]) => {
   }
 }
 
-export const hasPriorSenderChatMessages = async ({
+const isUnsentChatMessage = (content?: string | null) => content?.trim() === UNSENT_MESSAGE_TEXT
+
+const isIgnoredMessageNotificationContent = (content?: string | null) =>
+  isUnsentChatMessage(content) || isOrderChatMessage(content)
+
+const isActualConversationMessage = (content?: string | null) =>
+  !isIgnoredMessageNotificationContent(content)
+
+const buildPendingMessageRecord = ({
   conversationId,
   senderId,
-  beforeCreatedAt,
-}: PriorSenderMessageParams) => {
-  const { count, error } = await supabase
-    .from('messages')
-    .select('id', { count: 'exact', head: true })
-    .eq('conversation_id', conversationId)
-    .eq('sender_id', senderId)
-    .lt('created_at', beforeCreatedAt)
-    .not('content', 'ilike', '%New Order Received!%')
-    .not('content', 'ilike', '%Order ID:%')
-    .not('content', 'ilike', '%Transaction #:%')
+  receiverUserId,
+  messageCreatedAt,
+  content,
+}: {
+  conversationId: string
+  senderId: string
+  receiverUserId: string
+  messageCreatedAt: string
+  content?: string | null
+}): MessageRecord => ({
+  id: 'pending-notification',
+  conversation_id: conversationId,
+  sender_id: senderId,
+  receiver_id: receiverUserId,
+  content: content || null,
+  created_at: messageCreatedAt,
+})
 
-  if (error) {
-    console.warn('Could not inspect prior sender messages:', error)
-    return false
-  }
-
-  return (count ?? 0) > 0
-}
-
-const hasPriorConversationChatMessages = async ({
+const findConversationMessagesBefore = async ({
   conversationId,
   beforeCreatedAt,
 }: {
   conversationId: string
   beforeCreatedAt: string
 }) => {
-  const { count, error } = await supabase
+  const { data, error } = await supabase
     .from('messages')
-    .select('id', { count: 'exact', head: true })
+    .select('id, conversation_id, sender_id, receiver_id, content, created_at')
     .eq('conversation_id', conversationId)
     .lt('created_at', beforeCreatedAt)
-    .not('content', 'ilike', '%New Order Received!%')
-    .not('content', 'ilike', '%Order ID:%')
-    .not('content', 'ilike', '%Transaction #:%')
+    .neq('content', UNSENT_MESSAGE_TEXT)
+    .order('created_at', { ascending: true })
 
   if (error) {
-    console.warn('Could not inspect prior conversation messages:', error)
-    return false
+    console.warn('Could not inspect previous conversation messages:', error)
+    return []
   }
 
-  return (count ?? 0) > 0
+  return (data as MessageRecord[] | null) || []
+}
+
+const evaluateMessageNotificationEvent = async ({
+  sourceMessage,
+  recipientUserId,
+}: {
+  sourceMessage?: MessageRecord | null
+  recipientUserId?: string | null
+}): Promise<{
+  shouldSuppress: boolean
+  event: 'conversation_start' | 'first_reply' | null
+  senderRole: CounterpartyViewerRole | null
+  recipientRole: CounterpartyViewerRole | null
+  nextState: ConversationNotificationState | null
+}> => {
+  if (!sourceMessage || !recipientUserId) {
+    return {
+      shouldSuppress: false,
+      event: null,
+      senderRole: null,
+      recipientRole: null,
+      nextState: null,
+    }
+  }
+
+  if (isIgnoredMessageNotificationContent(sourceMessage.content)) {
+    return {
+      shouldSuppress: true,
+      event: null,
+      senderRole: null,
+      recipientRole: null,
+      nextState: null,
+    }
+  }
+
+  const conversation = await getConversationById(sourceMessage.conversation_id)
+  const senderShop = await getShopByOwnerId(sourceMessage.sender_id)
+  const recipientShop = await getShopByOwnerId(recipientUserId)
+  const senderRole = resolveNotificationRoleForUser({
+    conversation,
+    currentUserId: sourceMessage.sender_id,
+    otherUserId: recipientUserId,
+    currentUserShop: senderShop,
+    otherUserShop: recipientShop,
+    messages: [sourceMessage],
+  })
+  const recipientRole = resolveNotificationRoleForUser({
+    conversation,
+    currentUserId: recipientUserId,
+    otherUserId: sourceMessage.sender_id,
+    currentUserShop: recipientShop,
+    otherUserShop: senderShop,
+    messages: [sourceMessage],
+  })
+
+  if (!senderRole || !recipientRole) {
+    return {
+      shouldSuppress: true,
+      event: null,
+      senderRole,
+      recipientRole,
+      nextState: null,
+    }
+  }
+
+  const customerUserId = senderRole === 'customer' ? sourceMessage.sender_id : recipientUserId
+  const sellerUserId = senderRole === 'seller' ? sourceMessage.sender_id : recipientUserId
+  const priorMessages = await findConversationMessagesBefore({
+    conversationId: sourceMessage.conversation_id,
+    beforeCreatedAt: sourceMessage.created_at,
+  })
+  const priorActualMessages = priorMessages.filter((message) =>
+    isActualConversationMessage(message.content),
+  )
+  const firstCustomerMessage =
+    priorActualMessages.find((message) => message.sender_id === customerUserId) || null
+  const hasPriorCustomerMessage = Boolean(firstCustomerMessage)
+  const hasPriorSellerReply = Boolean(
+    firstCustomerMessage &&
+      priorActualMessages.some(
+        (message) =>
+          message.sender_id === sellerUserId &&
+          message.created_at > firstCustomerMessage.created_at,
+      ),
+  )
+
+  const isFirstCustomerMessage =
+    senderRole === 'customer' && recipientRole === 'seller' && !hasPriorCustomerMessage
+  const isFirstSellerReply =
+    senderRole === 'seller' &&
+    recipientRole === 'customer' &&
+    hasPriorCustomerMessage &&
+    !hasPriorSellerReply
+  const event = isFirstCustomerMessage
+    ? 'conversation_start'
+    : isFirstSellerReply
+      ? 'first_reply'
+      : null
+
+  return {
+    shouldSuppress: !event,
+    event,
+    senderRole,
+    recipientRole,
+    nextState: {
+      hasCustomerMessaged:
+        hasPriorCustomerMessage || (senderRole === 'customer' && recipientRole === 'seller'),
+      hasSellerReplied: hasPriorSellerReply || isFirstSellerReply,
+    },
+  }
 }
 
 const findNotificationSourceMessage = async (notification?: NotificationRecord | null) => {
@@ -330,48 +583,63 @@ const findNotificationSourceMessage = async (notification?: NotificationRecord |
     return null
   }
 
-  const notificationCreatedAt = notificationDate.toISOString()
   const earliestCreatedAt = new Date(
     notificationDate.getTime() - ORDER_MESSAGE_NOTIFICATION_MATCH_WINDOW_MS,
   ).toISOString()
+  const latestCreatedAt = new Date(
+    notificationDate.getTime() + MESSAGE_NOTIFICATION_SOURCE_FUTURE_WINDOW_MS,
+  ).toISOString()
+  const notificationAgeMs = Math.max(0, Date.now() - notificationDate.getTime())
+  const maxAttempts =
+    notificationAgeMs <= 5000 ? MESSAGE_NOTIFICATION_SOURCE_MAX_ATTEMPTS : 1
 
-  const { data, error } = await supabase
-    .from('messages')
-    .select('id, conversation_id, sender_id, receiver_id, content, created_at')
-    .eq('conversation_id', notification.related_id)
-    .eq('receiver_id', notification.user_id)
-    .gte('created_at', earliestCreatedAt)
-    .lte('created_at', notificationCreatedAt)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const { data, error } = await supabase
+      .from('messages')
+      .select('id, conversation_id, sender_id, receiver_id, content, created_at')
+      .eq('conversation_id', notification.related_id)
+      .eq('receiver_id', notification.user_id)
+      .gte('created_at', earliestCreatedAt)
+      .lte('created_at', latestCreatedAt)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
 
-  if (error) {
-    console.warn('Could not inspect source message for notification decisions:', error)
-    return null
+    if (error) {
+      console.warn('Could not inspect source message for notification decisions:', error)
+      return null
+    }
+
+    if (data) {
+      return data as MessageRecord | null
+    }
+
+    const { data: fallbackData, error: fallbackError } = await supabase
+      .from('messages')
+      .select('id, conversation_id, sender_id, receiver_id, content, created_at')
+      .eq('sender_id', notification.related_id)
+      .eq('receiver_id', notification.user_id)
+      .gte('created_at', earliestCreatedAt)
+      .lte('created_at', latestCreatedAt)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (fallbackError) {
+      console.warn('Could not inspect legacy message notification source:', fallbackError)
+      return null
+    }
+
+    if (fallbackData) {
+      return fallbackData as MessageRecord | null
+    }
+
+    if (attempt < maxAttempts - 1) {
+      await wait(MESSAGE_NOTIFICATION_SOURCE_RETRY_DELAY_MS)
+    }
   }
 
-  if (data) {
-    return data as MessageRecord | null
-  }
-
-  const { data: fallbackData, error: fallbackError } = await supabase
-    .from('messages')
-    .select('id, conversation_id, sender_id, receiver_id, content, created_at')
-    .eq('sender_id', notification.related_id)
-    .eq('receiver_id', notification.user_id)
-    .gte('created_at', earliestCreatedAt)
-    .lte('created_at', notificationCreatedAt)
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (fallbackError) {
-    console.warn('Could not inspect legacy message notification source:', fallbackError)
-    return null
-  }
-
-  return fallbackData as MessageRecord | null
+  return null
 }
 
 const inspectSourceMessageNotification = async ({
@@ -394,33 +662,28 @@ const inspectSourceMessageNotification = async ({
     }
   }
 
-  const conversation = await getConversationById(sourceMessage.conversation_id)
-  const viewerRole = resolveConversationViewerRole({
-    currentUserId: recipientUserId,
-    customerUserId: conversation?.user1,
-    sellerUserId: conversation?.user2,
+  const evaluation = await evaluateMessageNotificationEvent({
+    sourceMessage,
+    recipientUserId,
   })
-  const senderRole = getConversationRoleForUser(conversation, sourceMessage.sender_id)
-  const recipientRole = getConversationRoleForUser(conversation, recipientUserId)
   const senderProfile = await getProfileById(sourceMessage.sender_id)
   const senderShop = await getShopByOwnerId(sourceMessage.sender_id)
-  const counterpartyIdentity =
-    viewerRole && conversation
-      ? resolveCounterpartyIdentity({
-          viewerRole,
-          profile: senderProfile,
-          shop: senderShop,
-        })
-      : null
+  const counterpartyIdentity = evaluation.recipientRole
+    ? resolveCounterpartyIdentity({
+        viewerRole: evaluation.recipientRole,
+        profile: senderProfile,
+        shop: senderShop,
+      })
+    : null
   const counterpartyDisplayName = counterpartyIdentity?.displayName || null
   const counterpartyAvatar = counterpartyIdentity?.avatar || null
   const customerFacingShopIdentity = !!counterpartyIdentity?.customerFacingShopIdentity
 
-  if (isOrderChatMessage(sourceMessage.content)) {
+  if (evaluation.shouldSuppress || !evaluation.event) {
     return {
-      shouldSuppress: true,
+      shouldSuppress: evaluation.shouldSuppress,
       sourceMessage,
-      event: null,
+      event: evaluation.event,
       counterpartyDisplayName: null,
       counterpartyAvatar: null,
       customerFacingShopIdentity: false,
@@ -429,49 +692,16 @@ const inspectSourceMessageNotification = async ({
     }
   }
 
-  const hasPriorSenderMessages = await hasPriorSenderChatMessages({
-    conversationId: sourceMessage.conversation_id,
-    senderId: sourceMessage.sender_id,
-    beforeCreatedAt: sourceMessage.created_at,
-  })
-  const hasPriorConversationMessages = await hasPriorConversationChatMessages({
-    conversationId: sourceMessage.conversation_id,
-    beforeCreatedAt: sourceMessage.created_at,
-  })
-
-  const isConversationStart =
-    senderRole === 'customer' && recipientRole === 'seller' && !hasPriorConversationMessages
-  const isFirstReply =
-    senderRole === 'seller' &&
-    recipientRole === 'customer' &&
-    hasPriorConversationMessages &&
-    !hasPriorSenderMessages
-
-  const event = isConversationStart ? 'conversation_start' : isFirstReply ? 'first_reply' : null
-
-  if (!event) {
-    return {
-      shouldSuppress: true,
-      sourceMessage,
-      event: null,
-      counterpartyDisplayName: null,
-      counterpartyAvatar: null,
-      customerFacingShopIdentity: false,
-      notificationTitle: null,
-      notificationMessage: null,
-    }
-  }
-
-  const fallbackName = event === 'conversation_start' ? 'Customer' : 'Shop'
+  const fallbackName = evaluation.event === 'conversation_start' ? 'Customer' : 'Shop'
   const notificationTitle =
-    event === 'conversation_start'
-      ? `New message from ${counterpartyDisplayName || fallbackName}`
-      : `${counterpartyDisplayName || fallbackName} replied`
+    evaluation.event === 'conversation_start'
+      ? `${counterpartyDisplayName || fallbackName} sent you a message`
+      : `${counterpartyDisplayName || fallbackName} replied to your message`
 
   return {
     shouldSuppress: false,
     sourceMessage,
-    event,
+    event: evaluation.event,
     counterpartyDisplayName,
     counterpartyAvatar,
     customerFacingShopIdentity,
@@ -524,19 +754,34 @@ export const shouldRetainMessageNotification = async ({
   messageCreatedAt: string
   content?: string | null
 }) => {
-  const insight = await inspectSourceMessageNotification({
+  if (isIgnoredMessageNotificationContent(content)) {
+    return false
+  }
+
+  const conversation = await getConversationById(conversationId)
+  const evaluation = await evaluateMessageNotificationEvent({
     recipientUserId: receiverUserId,
-    sourceMessage: {
-      id: 'pending-notification',
-      conversation_id: conversationId,
-      sender_id: senderId,
-      receiver_id: receiverUserId,
-      content: content || null,
-      created_at: messageCreatedAt,
-    },
+    sourceMessage: buildPendingMessageRecord({
+      conversationId,
+      senderId,
+      receiverUserId,
+      messageCreatedAt,
+      content,
+    }),
   })
 
-  return !insight.shouldSuppress
+  if (
+    supportsConversationNotificationState !== false &&
+    evaluation.nextState &&
+    hasConversationNotificationStateChanged(conversation, evaluation.nextState)
+  ) {
+    await persistConversationNotificationState({
+      conversationId,
+      nextState: evaluation.nextState,
+    })
+  }
+
+  return !evaluation.shouldSuppress
 }
 
 export const resolveVisibleNotification = async <T extends NotificationRecord>(
@@ -584,7 +829,7 @@ export const filterVisibleNotifications = async <T extends NotificationRecord>(n
     notifications.map((notification) => resolveVisibleNotification(notification)),
   )
 
-  return visibleNotifications.filter((notification): notification is T => !!notification)
+  return visibleNotifications.filter((notification) => !!notification) as T[]
 }
 
 export const getVisibleUnreadNotificationCount = async (userId: string) => {

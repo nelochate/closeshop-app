@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { filterVisibleNotifications, resolveVisibleNotification } from '@/utils/chatNotifications'
@@ -21,9 +21,6 @@ const currentRiderNumericId = ref(null)
 const routingContextLoaded = ref(false)
 let notificationSubscription
 let timeUpdateInterval
-
-// Computed for unread notifications
-const unreadNotifications = computed(() => notifications.value.filter((n) => !n.is_read))
 
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing notifications...')
@@ -241,9 +238,11 @@ async function resolveOrderNotificationRoute(orderId) {
 }
 
 function showBrowserNotification(notification) {
+  const notificationBody = getNotificationTitle(notification) || notification.message
+
   if ('Notification' in window && Notification.permission === 'granted') {
     new Notification('CloseShop', {
-      body: notification.message,
+      body: notificationBody,
       icon: notification.counterpartyAvatar || notification.senderShopAvatar || '/icon.png',
       tag: notification.id,
     })
@@ -612,8 +611,31 @@ function getNotificationColor(type) {
   return colors[type] || 'primary'
 }
 
+function getResolvedMessageNotificationTitle(notification) {
+  if (notification.type !== 'new_message' || !notification.counterpartyDisplayName) {
+    return null
+  }
+
+  if (notification.notificationEvent === 'conversation_start') {
+    return `${notification.counterpartyDisplayName} sent you a message`
+  }
+
+  if (notification.notificationEvent === 'first_reply') {
+    return `${notification.counterpartyDisplayName} replied to your message`
+  }
+
+  if (notification.customerFacingShopIdentity) {
+    return `${notification.counterpartyDisplayName} replied to your message`
+  }
+
+  return `${notification.counterpartyDisplayName} sent you a message`
+}
+
 // Helper to get human-readable notification title
 function getNotificationTitle(notification) {
+  const resolvedMessageTitle = getResolvedMessageNotificationTitle(notification)
+
+  if (resolvedMessageTitle) return resolvedMessageTitle
   if (notification.title) return notification.title
   if (notification.type === 'new_message' && notification.message) return notification.message
 
@@ -641,6 +663,12 @@ function getNotificationTitle(notification) {
 }
 
 function getNotificationSubtitle(notification) {
+  const resolvedMessageTitle = getResolvedMessageNotificationTitle(notification)
+
+  if (resolvedMessageTitle && notification.message === resolvedMessageTitle) {
+    return ''
+  }
+
   if (notification.type === 'new_message' && !notification.title) {
     return ''
   }
@@ -651,19 +679,6 @@ function getNotificationSubtitle(notification) {
 
   return notification.message || ''
 }
-
-// Group notifications by date
-const groupedNotifications = computed(() => {
-  const groups = {}
-  notifications.value.forEach((notification) => {
-    const date = new Date(notification.created_at).toLocaleDateString()
-    if (!groups[date]) {
-      groups[date] = []
-    }
-    groups[date].push(notification)
-  })
-  return groups
-})
 
 // Get notification age badge
 function getNotificationAge(createdAt) {

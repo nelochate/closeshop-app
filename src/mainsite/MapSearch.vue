@@ -2835,8 +2835,8 @@ onUnmounted(() => {
             hide-details
             clearable
             density="comfortable"
-            placeholder="Looking for something?"
-            append-inner-icon="mdi-magnify"
+            placeholder="Search product or shop"
+            append-inner-icon="mdi-cloud-outline"
             @keydown="onSearchKeydown"
             @click:clear="clearSearch"
             @click:append-inner="smartSearch"
@@ -2844,7 +2844,7 @@ onUnmounted(() => {
           <v-btn
             class="search-btn"
             @click="smartSearch"
-            :loading="loading"
+           
             :disabled="!search.trim()"
             elevation="2"
           >
