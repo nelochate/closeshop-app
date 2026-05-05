@@ -11,6 +11,12 @@ import {
 } from '@/utils/chatNotifications'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { normalizeOrderStatus } from '@/utils/orderStatus'
+import {
+  getAuthUserAvatarUrl as getStoredAuthAvatarUrl,
+  getAuthUserDisplayName as getStoredAuthDisplayName,
+  getProfileDisplayName,
+  normalizeIdentityText,
+} from '@/utils/accountIdentity'
 
 const activeTab = ref('account')
 
@@ -332,43 +338,6 @@ const handleAvatarError = () => {
   // The template will automatically show initials
 }
 
-// Helper function to get Google avatar URL (handles both custom and default avatars)
-const getGoogleAvatarUrl = (userData) => {
-  if (!userData) return null
-
-  // Check identities array first (most reliable for Google)
-  if (userData.identities && userData.identities.length > 0) {
-    const identity = userData.identities.find((i) => i.provider === 'google')
-    if (identity && identity.identity_data) {
-      const identityData = identity.identity_data
-
-      // Google provides avatar_url in identity_data
-      if (identityData.avatar_url) {
-        console.log('Found Google avatar URL:', identityData.avatar_url)
-        return identityData.avatar_url
-      }
-
-      // Sometimes Google uses 'picture' field
-      if (identityData.picture) {
-        console.log('Found Google picture URL:', identityData.picture)
-        return identityData.picture
-      }
-    }
-  }
-
-  // Check user_metadata as fallback
-  if (userData.user_metadata?.avatar_url) {
-    return userData.user_metadata.avatar_url
-  }
-
-  // Check raw_user_meta_data
-  if (userData.raw_user_meta_data?.avatar_url) {
-    return userData.raw_user_meta_data.avatar_url
-  }
-
-  return null
-}
-
 // Helper to get user initials for fallback avatar
 const getUserInitials = (fullName) => {
   if (!fullName || fullName === 'User') return '?'
@@ -380,36 +349,33 @@ const getUserInitials = (fullName) => {
   return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase()
 }
 
-// NEW HELPER FUNCTION: Get user display name from various auth provider formats
-const getUserDisplayName = (userData) => {
-  if (!userData) return 'User'
+const resolveDisplayedName = (authUser = authStore.userData, profileData = authStore.profile) => {
+  const profileName = normalizeIdentityText(getProfileDisplayName(profileData))
+  if (profileName) return profileName
 
-  // Check user_metadata first
-  if (userData.user_metadata) {
-    const metadata = userData.user_metadata
-    if (metadata.full_name) return metadata.full_name
-    if (metadata.name) return metadata.name
-    if (metadata.first_name && metadata.last_name) {
-      return `${metadata.first_name} ${metadata.last_name}`.trim()
-    }
-  }
+  const authName = normalizeIdentityText(getStoredAuthDisplayName(authUser))
+  if (authName) return authName
 
-  // Check identities array (Google stores full_name here)
-  if (userData.identities && userData.identities.length > 0) {
-    const identityData = userData.identities[0].identity_data
-    if (identityData) {
-      if (identityData.full_name) return identityData.full_name
-      if (identityData.name) return identityData.name
-    }
-  }
-
-  // Fallback to email username
-  if (userData.email) {
-    return userData.email.split('@')[0]
-  }
-
-  return 'User'
+  return normalizeIdentityText(authUser?.email)?.split('@')[0] || 'User'
 }
+
+const resolveDisplayedAvatar = (authUser = authStore.userData, profileData = authStore.profile) => {
+  const profileAvatar = normalizeIdentityText(profileData?.avatar_url)
+  if (profileAvatar) return profileAvatar
+
+  const authAvatar = normalizeIdentityText(getStoredAuthAvatarUrl(authUser))
+  return authAvatar || null
+}
+
+const syncProfileHeader = (authUser = authStore.userData, profileData = authStore.profile) => {
+  user.value = authUser || null
+  fullName.value = resolveDisplayedName(authUser, profileData)
+  avatarUrl.value = resolveDisplayedAvatar(authUser, profileData)
+}
+
+const displayedEmail = computed(
+  () => normalizeIdentityText(authStore.profile?.email) || normalizeIdentityText(user.value?.email) || '...',
+)
 
 // Check if user is a rider
 const checkRiderStatus = async () => {
@@ -471,105 +437,32 @@ const goToRiderDashboard = () => {
   }
 }
 
-const getSupabaseAuthAvatar = async () => {
-  try {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser()
-    if (error) throw error
-
-    // Check in user_metadata
-    if (user?.user_metadata?.avatar_url) {
-      return user.user_metadata.avatar_url
-    }
-
-    // Check raw_app_meta_data
-    if (user?.raw_app_meta_data?.avatar_url) {
-      return user.raw_app_meta_data.avatar_url
-    }
-
-    return null
-  } catch (err) {
-    console.error('Error getting avatar from Supabase auth:', err)
-    return null
-  }
-}
-
-// Updated loadUser function
 const loadUser = async () => {
-  if (authStore.userData && authStore.profile) {
-    user.value = authStore.userData
-    fullName.value = getUserDisplayName(authStore.userData)
+  let authUser = authStore.userData
 
-    // Priority 1: Check if user has custom avatar in profiles table
-    if (
-      authStore.profile.avatar_url &&
-      !authStore.profile.avatar_url.includes('googleusercontent.com')
-    ) {
-      avatarUrl.value = authStore.profile.avatar_url
-      console.log('Using custom profile avatar')
-    }
-    // Priority 2: Check Supabase auth user_metadata
-    else {
-      const supabaseAvatar = await getSupabaseAuthAvatar()
-      if (supabaseAvatar) {
-        avatarUrl.value = supabaseAvatar
-        console.log('Using avatar from Supabase auth:', supabaseAvatar)
-      }
-      // Priority 3: Use Google's avatar (even default ones)
-      else {
-        const googleAvatar = getGoogleAvatarUrl(authStore.userData)
-        if (googleAvatar) {
-          avatarUrl.value = googleAvatar
-          console.log('Using Google avatar (may be default):', googleAvatar)
-        } else {
-          avatarUrl.value = null // Will show initials avatar
-          console.log('No avatar found, will use initials')
-        }
-      }
-    }
-
-    // After loading user, check for shop status
-    await checkUserShop()
-    await checkRiderStatus()
-    setupShopRealtimeSubscription()
-  } else {
-    const { data: userData, error } = await supabase.auth.getUser()
-    if (error || !userData?.user) {
-      console.error('No user found:', error?.message)
-      return
-    }
-    user.value = userData.user
-    fullName.value = getUserDisplayName(userData.user)
-
-    // Same avatar logic as above
-    if (
-      authStore.profile?.avatar_url &&
-      !authStore.profile.avatar_url.includes('googleusercontent.com')
-    ) {
-      avatarUrl.value = authStore.profile.avatar_url
-    } else {
-      const supabaseAvatar = await getSupabaseAuthAvatar()
-      if (supabaseAvatar) {
-        avatarUrl.value = supabaseAvatar
-        console.log('Using avatar from Supabase auth:', supabaseAvatar)
-      } else {
-        const googleAvatar = getGoogleAvatarUrl(userData.user)
-        avatarUrl.value = googleAvatar || null
-      }
-    }
-
-    console.log('Avatar loading debug:', {
-      fullName: fullName.value,
-      hasGoogleAvatar: !!getGoogleAvatarUrl(userData.user),
-      avatarUrl: avatarUrl.value,
-    })
-
-    await checkUserShop()
-    await checkRiderStatus()
-    setupShopRealtimeSubscription()
+  if (!authUser?.id) {
+    await authStore.hydrateFromSession()
+    authUser = authStore.userData
   }
+
+  if (!authUser?.id) {
+    console.error('No authenticated user found for profile view')
+    user.value = null
+    fullName.value = ''
+    avatarUrl.value = null
+    return
+  }
+
+  let profile = authStore.profile
+  if (!profile?.id) {
+    profile = await authStore.loadProfile(authUser.id, authUser)
+  }
+
+  syncProfileHeader(authUser, profile)
+
+  await checkUserShop()
+  await checkRiderStatus()
+  setupShopRealtimeSubscription()
 }
 
 const loadOrderCounts = async () => {
@@ -1001,7 +894,7 @@ watch(
   () => authStore.userData,
   (newUser) => {
     if (newUser) {
-      fullName.value = getUserDisplayName(newUser)
+      syncProfileHeader(newUser, authStore.profile)
     }
   },
   { immediate: true },
@@ -1012,14 +905,7 @@ watch(
   () => authStore.profile,
   (newProfile) => {
     if (newProfile) {
-      fullName.value = getUserDisplayName(authStore.userData)
-      // Profile avatar takes precedence
-      if (newProfile.avatar_url) {
-        avatarUrl.value = newProfile.avatar_url
-      } else if (authStore.userData) {
-        // Fallback to Google avatar
-        avatarUrl.value = getGoogleAvatarUrl(authStore.userData)
-      }
+      syncProfileHeader(authStore.userData, newProfile)
     }
   },
   { immediate: true, deep: true },
@@ -1108,7 +994,7 @@ onBeforeRouteUpdate((to, from, next) => {
             <!-- Name above Email -->
             <div class="info-block">
               <h2 class="name-row">{{ fullName || user?.email?.split('@')[0] || 'User' }}</h2>
-              <p class="email-row">{{ user?.email || '...' }}</p>
+              <p class="email-row">{{ displayedEmail }}</p>
             </div>
           </div>
         </div>

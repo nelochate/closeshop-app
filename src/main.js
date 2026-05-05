@@ -42,17 +42,27 @@ router.isReady().then(() => {
   const authStore = useAuthUserStore()
 
   // ✅ Initial auth hydration
-  authStore.hydrateFromSession().then(() => {
-    console.log('Auth initialized')
-  }).catch(console.error)
+  if (!authStore.userData?.id) {
+    authStore
+      .hydrateFromSession()
+      .then(() => {
+        console.log('Auth initialized')
+      })
+      .catch(console.error)
+  }
 
   // ✅ Set up auth state change listener
-  supabase.auth.onAuthStateChange(async (_event, session) => {
-    if (session?.user) {
-      await authStore.hydrateFromSession()
-    } else {
-      authStore.$reset()
-    }
+  supabase.auth.onAuthStateChange((event, session) => {
+    window.setTimeout(async () => {
+      if (session?.user) {
+        await authStore.hydrateFromSession({
+          session,
+          force: event === 'SIGNED_IN' || event === 'USER_UPDATED',
+        })
+      } else {
+        authStore.$reset()
+      }
+    }, 0)
   })
 
   // ✅ Mount the app

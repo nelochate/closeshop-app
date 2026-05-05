@@ -12,6 +12,7 @@ type AuthUserLike = {
 }
 
 type ProfileIdentityLike = {
+  email?: NullableText
   first_name?: NullableText
   last_name?: NullableText
   full_name?: NullableText
@@ -145,10 +146,17 @@ export const deriveProfileIdentityFromAuthUser = (user?: AuthUserLike | null) =>
   }
 
   const avatarUrl = getAuthUserAvatarUrl(user)
+  const fullName = pickFirstText(
+    preferredName,
+    [firstName, lastName].filter(Boolean).join(' ').trim(),
+  )
+  const email = normalizeIdentityText(user?.email)
 
   return {
+    email: email || null,
     first_name: firstName || null,
     last_name: lastName || null,
+    full_name: fullName || null,
     avatar_url: avatarUrl || null,
   }
 }

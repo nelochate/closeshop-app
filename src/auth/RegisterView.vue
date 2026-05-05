@@ -8,6 +8,7 @@ import {
   confirmedValidator,
 } from '@/utils/validators'
 import { supabase, formActionDefault } from '@/utils/supabase'
+import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
 
 const router = useRouter()
 
@@ -53,11 +54,19 @@ const onSubmit = async () => {
       formAction.value.formErrorMessage = ''
     }, 3000)
   } else if (data?.user) {
+    const fullName = [formData.value.firstName, formData.value.lastName].filter(Boolean).join(' ').trim()
+
     // 2. Insert into profiles table
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: data.user.id, // link to auth.users.id
-      first_name: formData.value.firstName,
-      last_name: formData.value.lastName,
+    const { error: profileError } = await withSchemaColumnFallback({
+      payload: {
+        id: data.user.id, // link to auth.users.id
+        email: formData.value.email,
+        first_name: formData.value.firstName,
+        last_name: formData.value.lastName,
+        full_name: fullName || null,
+      },
+      requiredColumns: ['id', 'first_name', 'last_name'],
+      execute: (currentPayload) => supabase.from('profiles').insert(currentPayload),
     })
 
     if (profileError) {

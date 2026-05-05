@@ -9,6 +9,7 @@ export const useAuthUserStore = defineStore('authUser ', () => {
   const profile = ref(null) // Stores user profile from profiles table
   const isLoading = ref(false)
   const error = ref(null)
+  let hydrationPromise = null
 
   const isLoggedIn = computed(() => !!userData.value)
   const userId = computed(() => (userData.value ? userData.value.id : null))
@@ -20,28 +21,48 @@ export const useAuthUserStore = defineStore('authUser ', () => {
     error.value = null
   }
 
-async function hydrateFromSession() {
-  try {
-    isLoading.value = true
-    const { data, error: sessionError } = await supabase.auth.getSession()
-    if (sessionError) throw sessionError
-    const user = data.session?.user
-    if (!user) {
-      $reset()
-      return false
+  async function hydrateFromSession(options = {}) {
+    const { session = null, user = session?.user ?? null, force = false } = options
+
+    if (hydrationPromise) {
+      return hydrationPromise
     }
-    // Store full user object with metadata
-    userData.value = user
-    await loadProfile(user.id, user)
-    return true
-  } catch (e) {
-    console.error('hydrateFromSession failed:', e)
-    $reset()
-    return false
-  } finally {
-    isLoading.value = false
+
+    if (!force && userData.value?.id && profile.value?.id === userData.value.id && !user) {
+      return true
+    }
+
+    hydrationPromise = (async () => {
+      try {
+        isLoading.value = true
+
+        let resolvedUser = user
+        if (!resolvedUser?.id) {
+          const { data, error: sessionError } = await supabase.auth.getSession()
+          if (sessionError) throw sessionError
+          resolvedUser = data.session?.user || null
+        }
+
+        if (!resolvedUser) {
+          $reset()
+          return false
+        }
+
+        userData.value = resolvedUser
+        await loadProfile(resolvedUser.id, resolvedUser)
+        return true
+      } catch (e) {
+        console.error('hydrateFromSession failed:', e)
+        $reset()
+        return false
+      } finally {
+        isLoading.value = false
+        hydrationPromise = null
+      }
+    })()
+
+    return hydrationPromise
   }
-}
 
 
   async function loadProfile(uid, authUser = userData.value) {

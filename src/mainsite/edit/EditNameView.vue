@@ -3,6 +3,7 @@ import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
+import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
 
 const router = useRouter()
 const authStore = useAuthUserStore()
@@ -38,6 +39,7 @@ const saveName = async () => {
 
     const trimmedFirstName = firstName.value.trim()
     const trimmedLastName = lastName.value.trim()
+    const trimmedFullName = `${trimmedFirstName} ${trimmedLastName}`.trim()
 
     // Use existing user data instead of calling getUser() again
     const userId = authStore.userData?.id
@@ -51,14 +53,20 @@ const saveName = async () => {
     const updatePromises = []
 
     // 1️⃣ Update profiles table (most important - run first)
-    const profilePromise = supabase
-      .from('profiles')
-      .update({
+    const profilePromise = withSchemaColumnFallback({
+      payload: {
         first_name: trimmedFirstName,
         last_name: trimmedLastName,
+        full_name: trimmedFullName,
         updated_at: new Date().toISOString()
-      })
-      .eq('id', userId)
+      },
+      requiredColumns: ['first_name', 'last_name'],
+      execute: (currentPayload) =>
+        supabase
+          .from('profiles')
+          .update(currentPayload)
+          .eq('id', userId)
+    })
 
     updatePromises.push(profilePromise)
 
@@ -66,7 +74,8 @@ const saveName = async () => {
     const authPromise = supabase.auth.updateUser({
       data: {
         first_name: trimmedFirstName,
-        last_name: trimmedLastName
+        last_name: trimmedLastName,
+        full_name: trimmedFullName
       }
     })
 
@@ -128,6 +137,7 @@ const saveName = async () => {
       // Direct update instead of full re-hydration
       authStore.profile.first_name = trimmedFirstName
       authStore.profile.last_name = trimmedLastName
+      authStore.profile.full_name = trimmedFullName
       authStore.profile.updated_at = new Date().toISOString()
     }
 
@@ -135,6 +145,7 @@ const saveName = async () => {
     if (authStore.userData?.user_metadata) {
       authStore.userData.user_metadata.first_name = trimmedFirstName
       authStore.userData.user_metadata.last_name = trimmedLastName
+      authStore.userData.user_metadata.full_name = trimmedFullName
     }
 
     const endTime = Date.now()

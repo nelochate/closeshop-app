@@ -165,13 +165,6 @@ const routes = [
   },
 
   {
-    path: '/edit-phone', // Updated path
-    name: 'edit-phone',
-    component: () => import('@/mainsite/edit/EditPhoneView.vue'),
-    meta: { requiresAuth: true },
-  },
-
-  {
     path: '/edit-address/:id?',
     name: 'edit-address',
     component: () => import('@/mainsite/edit/EditAddressForm.vue'),
