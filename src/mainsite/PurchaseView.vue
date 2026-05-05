@@ -4,6 +4,7 @@ import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { removeRecentMessageNotification } from '@/utils/chatNotifications'
 import { syncProfileFromAuthUser } from '@/utils/profileSync'
+import { useCheckoutStore } from '@/stores/checkout'
 import {
   calculateCheckoutDeliveryPricing,
   calculateOrderItemsSubtotal,
@@ -23,10 +24,10 @@ const transactionNumber = ref('')
 const buyer = ref<any>(null)
 const address = ref<any>(null)
 const addresses = ref<any[]>([])
-const showAddressDialog = ref(false)
 const deliveryOption = ref('meetup')
 const paymentMethod = ref('')
 const note = ref('')
+const checkoutStore = useCheckoutStore()
 // 📋 CLIPBOARD STATE
 const showCopySuccess = ref(false)
 const copyButtonText = ref('Copy')
@@ -37,11 +38,6 @@ const deliveryTime = ref('')
 const selectedHour = ref('')
 const selectedMinute = ref('')
 const selectedPeriod = ref<'AM' | 'PM'>('AM')
-
-// 👤 CONTACT STATE
-const showContactDialog = ref(false)
-const contactPhone = ref('')
-const contactEmail = ref('')
 
 // 🚫 VALIDATION STATE
 const validationErrors = ref<string[]>([])
@@ -57,6 +53,54 @@ const shopSchedule = ref({
   manualStatus: 'auto',
   paymentOptions: ['cod'] as string[], // Default payment options
 })
+
+const normalizeContactNumber = (value: unknown) =>
+  typeof value === 'string' ? value.trim() : ''
+
+const isValidPhilippinePhoneNumber = (value: unknown) =>
+  /^(09|\+639)\d{9}$/.test(normalizeContactNumber(value).replace(/\s+/g, ''))
+
+const selectedAddressContactNumber = computed(() => normalizeContactNumber(address.value?.phone))
+const hasValidSelectedAddressContactNumber = computed(() =>
+  isValidPhilippinePhoneNumber(selectedAddressContactNumber.value),
+)
+const purchaseReturnPath = computed(() =>
+  router.resolve({
+    name: 'purchaseview',
+    params: route.params,
+    query: route.query,
+  }).fullPath,
+)
+
+const syncSelectedCheckoutAddress = (availableAddresses: any[] = addresses.value) => {
+  if (!availableAddresses.length) {
+    address.value = null
+    checkoutStore.clearSelectedAddress()
+    return
+  }
+
+  const storedAddressId = checkoutStore.selectedAddress?.id
+  const storedAddressMatch = storedAddressId
+    ? availableAddresses.find((savedAddress) => savedAddress.id === storedAddressId)
+    : null
+
+  const defaultAddress =
+    availableAddresses.find((savedAddress) => savedAddress.is_default) || availableAddresses[0]
+
+  address.value = storedAddressMatch || defaultAddress
+  checkoutStore.setSelectedAddress(address.value)
+}
+
+const goToAddressSelection = () => {
+  checkoutStore.setReturnPath(purchaseReturnPath.value)
+  router.push({
+    name: 'my-address',
+    query: {
+      mode: 'checkout',
+      returnTo: purchaseReturnPath.value,
+    },
+  })
+}
 
 // 🎫 GENERATE TRANSACTION NUMBER (BASE FUNCTION)
 const generateTransactionNumber = () => {
@@ -584,37 +628,6 @@ const fetchCartItems = async () => {
   }
 }
 
-// 📞 LOAD CONTACT INFO
-const loadContactInfo = async () => {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-
-    // Get contact info from profile - ONLY PHONE
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('phone')
-      .eq('id', user.id)
-      .single()
-
-    if (profile) {
-      contactPhone.value = profile.phone || ''
-    }
-
-    // Clear email since it's not in profile schema
-    contactEmail.value = user.email || ''
-
-    // Also check if address has phone
-    if (address.value?.phone) {
-      contactPhone.value = address.value.phone
-    }
-  } catch (err) {
-    console.error('❌ Error loading contact info:', err)
-  }
-}
-
 // 🎯 INITIALIZATION - FIXED VERSION
 onMounted(async () => {
   console.log('🚀 Purchase View Mounted')
@@ -906,66 +919,6 @@ const fetchAllCartItems = async () => {
   }
 }
 
-// 📞 UPDATE CONTACT INFO
-const updateContactInfo = async () => {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      alert('Please log in to update contact info')
-      return
-    }
-
-    // Validate phone
-    if (!contactPhone.value || contactPhone.value.trim() === '') {
-      alert('Please enter a valid phone number')
-      return
-    }
-
-    // Basic phone format validation
-    const phoneRegex = /^(09|\+639)\d{9}$/
-    const cleanPhone = contactPhone.value.replace(/\s+/g, '')
-    if (!phoneRegex.test(cleanPhone)) {
-      alert('Please enter a valid Philippine phone number (09xxxxxxxxx or +639xxxxxxxxx)')
-      return
-    }
-
-    // Update profile - ONLY PHONE (no email column)
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        phone: contactPhone.value,
-        // REMOVED: email: contactEmail.value || user.email
-      })
-      .eq('id', user.id)
-
-    if (profileError) {
-      console.error('❌ Profile update error:', profileError)
-      throw profileError
-    }
-
-    // Also update current address phone if address exists
-    if (address.value) {
-      const { error: addressError } = await supabase
-        .from('addresses')
-        .update({ phone: contactPhone.value })
-        .eq('id', address.value.id)
-
-      if (addressError) {
-        console.warn('⚠️ Could not update address phone:', addressError)
-      }
-    }
-
-    alert('Contact information updated successfully!')
-    showContactDialog.value = false
-    await loadUserData() // Refresh user data
-  } catch (err) {
-    console.error('❌ Error updating contact info:', err)
-    alert('Failed to update contact information')
-  }
-}
-
 // ✅ VALIDATE ALL FIELDS BEFORE CHECKOUT - UPDATED TO CHECK PAYMENT METHOD
 const validateAllFields = (): boolean => {
   validationErrors.value = []
@@ -986,11 +939,11 @@ const validateAllFields = (): boolean => {
   }
   // REMOVED: No need to check individual address fields since users can only pick from saved addresses
 
-  // 4. Check contact info - REQUIRED
-  if (!contactPhone.value || contactPhone.value.trim() === '') {
-    validationErrors.value.push('Contact phone number is required')
-  } else if (!/^(09|\+639)\d{9}$/.test(contactPhone.value.replace(/\s+/g, ''))) {
-    validationErrors.value.push('Please enter a valid Philippine phone number')
+  // 4. Check selected address contact info - REQUIRED
+  if (!selectedAddressContactNumber.value) {
+    validationErrors.value.push('Selected address must include a contact number')
+  } else if (!hasValidSelectedAddressContactNumber.value) {
+    validationErrors.value.push('Selected address needs a valid Philippine contact number')
   }
 
   // 5. Check delivery schedule
@@ -1043,9 +996,6 @@ const loadUserData = async () => {
 
     buyer.value = profile
 
-    // Load contact info
-    await loadContactInfo()
-
     // Load addresses
     await loadUserAddresses()
 
@@ -1078,44 +1028,13 @@ const loadUserAddresses = async () => {
     }
 
     addresses.value = userAddresses || []
-
-    if (addresses.value.length > 0) {
-      // Use the first default address (there should be only one due to unique constraint)
-      const defaultAddress = addresses.value.find((addr) => addr.is_default)
-
-      if (defaultAddress) {
-        address.value = defaultAddress
-        console.log('✅ Using default address:', defaultAddress)
-      } else {
-        // No default address, use the most recent
-        address.value = addresses.value[0]
-        console.log('ℹ️ No default address, using most recent:', address.value)
-      }
-    } else {
-      address.value = null
-      console.log('ℹ️ No addresses found for user')
-    }
+    syncSelectedCheckoutAddress(addresses.value)
 
     console.log('✅ Addresses loaded:', addresses.value)
     console.log('✅ Selected address:', address.value)
   } catch (err) {
     console.error('❌ Error loading addresses:', err)
   }
-}
-
-// 🏠 SELECT ADDRESS
-const selectAddress = (selectedAddress: any) => {
-  console.log('📍 Selecting address:', selectedAddress)
-  address.value = selectedAddress
-  showAddressDialog.value = false
-  console.log('✅ Address selected:', address.value)
-}
-
-// 🏠 ADD NEW ADDRESS
-const addNewAddress = () => {
-  showAddressDialog.value = false
-  // Navigate to add address page
-  router.push({ name: 'edit-address' })
 }
 
 // 🏠 FORMAT ADDRESS FOR DISPLAY - IMPROVED
@@ -1934,6 +1853,7 @@ const handleCheckout = async () => {
     const baseOrderPayload = {
       user_id: buyer.value.id,
       address_id: address.value.id,
+      contact_number: selectedAddressContactNumber.value,
       total_amount: totalPrice.value,
       status: 'pending_approval',
       payment_status: 'pending',
@@ -1952,7 +1872,13 @@ const handleCheckout = async () => {
 
     if (orderError) {
       console.error('❌ Order creation error:', orderError)
-      alert('Failed to create order. Please try again.')
+      if (isMissingSchemaColumnError(orderError, 'contact_number')) {
+        alert(
+          'Checkout needs the latest database update for orders.contact_number. Run the newest Supabase migration, then try again.',
+        )
+      } else {
+        alert('Failed to create order. Please try again.')
+      }
       isProcessing.value = false
       return
     }
@@ -2547,99 +2473,75 @@ watch(
           </v-card-text>
         </v-card>
 
-        <!-- Delivery Details Card -->
         <v-card class="mb-4 delivery-card" elevation="1" rounded="lg">
-          <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2" size="small">mdi-truck-fast</v-icon>
-            Delivery Details
+          <v-card-title class="card-title d-flex align-center justify-space-between">
+            <div class="d-flex align-center cursor-pointer" @click="goToAddressSelection">
+              <v-icon color="primary" class="mr-2" size="small">mdi-map-marker</v-icon>
+              Delivery Address
+            </div>
+            <v-btn
+              size="x-small"
+              variant="text"
+              color="primary"
+              @click.stop="goToAddressSelection"
+              class="edit-btn"
+            >
+              Select Address
+            </v-btn>
           </v-card-title>
 
           <v-card-text>
-            <!-- Buyer Info Section -->
-            <div class="info-section mb-4">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 text-grey-darken-2">Buyer Information</div>
-                <v-btn
-                  size="x-small"
-                  variant="text"
-                  color="primary"
-                  @click="showContactDialog = true"
-                  class="edit-btn"
+            <div
+              class="address-box pa-3 rounded-lg"
+              :class="{ 'border-warning': !address || !hasValidSelectedAddressContactNumber }"
+              @click="goToAddressSelection"
+            >
+              <div class="d-flex align-start">
+                <v-icon
+                  size="small"
+                  :color="address && hasValidSelectedAddressContactNumber ? 'success' : 'warning'"
+                  class="mr-2 mt-1"
                 >
-                  <v-icon size="small">mdi-pencil</v-icon>
-                </v-btn>
-              </div>
-
-              <v-list density="compact" class="info-list">
-                <v-list-item class="px-0">
-                  <template #prepend>
-                    <v-icon size="small" color="grey-darken-1">mdi-account</v-icon>
-                  </template>
-                  <v-list-item-title class="text-body-2">
-                    {{ buyer?.first_name || 'Loading...' }} {{ buyer?.last_name }}
-                  </v-list-item-title>
-                </v-list-item>
-
-                <v-list-item class="px-0">
-                  <template #prepend>
-                    <v-icon size="small" color="grey-darken-1">mdi-phone</v-icon>
-                  </template>
-                  <v-list-item-title
-                    class="text-body-2"
-                    :class="{ 'text-warning': !contactPhone }"
-                  >
-                    {{ contactPhone || 'Contact number required' }}
-                  </v-list-item-title>
-                </v-list-item>
-              </v-list>
-            </div>
-
-            <!-- Address Section -->
-            <div class="info-section mb-4">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 text-grey-darken-2">Delivery Address</div>
-                <v-btn
-                  size="x-small"
-                  variant="text"
-                  color="primary"
-                  @click="showAddressDialog = true"
-                  class="edit-btn"
-                >
-                  <v-icon size="small">mdi-pencil</v-icon>
-                </v-btn>
-              </div>
-
-              <div
-                class="address-box pa-3 rounded-lg"
-                :class="{ 'border-warning': !address }"
-                @click="showAddressDialog = true"
-              >
-                <div class="d-flex align-start">
-                  <v-icon
-                    size="small"
-                    :color="address ? 'success' : 'warning'"
-                    class="mr-2 mt-1"
-                  >
-                    {{ address ? 'mdi-map-marker-check' : 'mdi-map-marker-alert' }}
-                  </v-icon>
-                  <div class="flex-grow-1">
-                    <div class="text-body-2 font-weight-medium">
-                      {{ address ? formatAddress(address) : 'Select delivery address' }}
-                    </div>
-                    <div v-if="address?.phone" class="text-caption text-grey mt-1">
-                      <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
-                      {{ address.phone }}
-                    </div>
+                  {{ address ? 'mdi-map-marker-check' : 'mdi-map-marker-alert' }}
+                </v-icon>
+                <div class="flex-grow-1">
+                  <div class="text-body-2 font-weight-medium">
+                    {{ address ? formatAddress(address) : 'Select Address' }}
                   </div>
-                  <v-icon size="small" color="grey">mdi-chevron-right</v-icon>
+                  <div v-if="address?.recipient_name" class="text-caption text-grey-darken-1 mt-1">
+                    {{ address.recipient_name }}
+                  </div>
+                  <div
+                    v-if="selectedAddressContactNumber"
+                    class="text-caption mt-1"
+                    :class="hasValidSelectedAddressContactNumber ? 'text-grey' : 'text-warning'"
+                  >
+                    <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
+                    {{ selectedAddressContactNumber }}
+                  </div>
+                  <div v-if="selectedAddressContactNumber && !hasValidSelectedAddressContactNumber" class="text-caption text-warning mt-1">
+                    Update this number in My Addresses before placing this order.
+                  </div>
+                  <div v-else-if="!selectedAddressContactNumber" class="text-caption text-warning mt-1">
+                    Add a valid contact number in My Addresses before placing this order.
+                  </div>
                 </div>
+                <v-icon size="small" color="grey">mdi-chevron-right</v-icon>
               </div>
             </div>
+          </v-card-text>
+        </v-card>
 
-            <!-- Schedule Section -->
+        <v-card class="mb-4 delivery-card" elevation="1" rounded="lg">
+          <v-card-title class="card-title">
+            <v-icon color="primary" class="mr-2" size="small">mdi-clock-outline</v-icon>
+            Delivery Schedule
+          </v-card-title>
+
+          <v-card-text>
             <div class="info-section">
               <div class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 text-grey-darken-2">Delivery Schedule</div>
+                <div class="text-subtitle-2 text-grey-darken-2">Schedule</div>
                 <v-btn
                   size="x-small"
                   variant="text"
@@ -2895,7 +2797,7 @@ watch(
               color="white"
               size="large"
               @click="handleCheckout"
-              :disabled="!items.length || !buyer || !address || isProcessing"
+              :disabled="!items.length || !buyer || !address || !hasValidSelectedAddressContactNumber || isProcessing"
               :loading="isProcessing"
               class="checkout-btn"
               rounded="lg"
@@ -2923,124 +2825,6 @@ watch(
           <span>Transaction number copied to clipboard!</span>
         </div>
       </v-snackbar>
-
-      <!-- Address Selection Dialog -->
-      <v-dialog v-model="showAddressDialog" max-width="500" scrollable>
-        <v-card class="modern-dialog" rounded="lg">
-          <v-card-title class="dialog-header">
-            <div class="d-flex align-center">
-              <v-icon color="primary" class="mr-2">mdi-map-marker</v-icon>
-              <div>Select Delivery Address</div>
-            </div>
-          </v-card-title>
-
-          <v-card-text class="dialog-content">
-            <!-- Empty State -->
-            <div v-if="addresses.length === 0" class="empty-state text-center py-8">
-              <v-icon size="64" color="grey-lighten-2" class="mb-3">mdi-home-outline</v-icon>
-              <h3 class="text-h6 mb-2">No Addresses</h3>
-              <p class="text-body-2 text-grey mb-4">
-                Add a delivery address to continue with your order
-              </p>
-              <v-btn color="primary" @click="addNewAddress" prepend-icon="mdi-plus">
-                Add New Address
-              </v-btn>
-            </div>
-
-            <!-- Address List -->
-            <div v-else>
-              <div class="address-list">
-                <v-list class="px-0">
-                  <v-list-item
-                    v-for="addr in addresses"
-                    :key="addr.id"
-                    class="address-item mb-2"
-                    :class="{ 'address-item-selected': address?.id === addr.id }"
-                    @click="selectAddress(addr)"
-                    rounded="lg"
-                  >
-                    <template #prepend>
-                      <v-avatar
-                        :color="address?.id === addr.id ? 'primary' : 'grey-lighten-3'"
-                        size="40"
-                        class="address-icon"
-                      >
-                        <v-icon :color="address?.id === addr.id ? 'white' : 'grey'">
-                          mdi-home
-                        </v-icon>
-                      </v-avatar>
-                    </template>
-
-                    <v-list-item-title class="mb-1">
-                      <div class="d-flex align-center">
-                        <span class="font-weight-medium">{{ addr.recipient_name || 'No name' }}</span>
-                        <v-chip
-                          v-if="addr.is_default"
-                          size="x-small"
-                          color="primary"
-                          class="ml-2"
-                          density="compact"
-                        >
-                          Default
-                        </v-chip>
-                      </div>
-                    </v-list-item-title>
-
-                    <v-list-item-subtitle>
-                      <div class="text-body-2 mb-1">{{ formatAddress(addr) }}</div>
-                      <div v-if="addr.phone" class="text-caption text-grey">
-                        <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
-                        {{ addr.phone }}
-                      </div>
-                    </v-list-item-subtitle>
-
-                    <template #append>
-                      <v-icon
-                        v-if="address?.id === addr.id"
-                        color="primary"
-                        size="small"
-                      >
-                        mdi-check-circle
-                      </v-icon>
-                    </template>
-                  </v-list-item>
-                </v-list>
-              </div>
-
-              <v-divider class="my-4"></v-divider>
-
-              <v-btn
-                color="primary"
-                variant="outlined"
-                block
-                @click="addNewAddress"
-                prepend-icon="mdi-plus"
-              >
-                Add New Address
-              </v-btn>
-            </div>
-          </v-card-text>
-
-          <v-card-actions class="dialog-actions">
-            <v-btn
-              variant="text"
-              @click="showAddressDialog = false"
-              class="flex-grow-1"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              color="primary"
-              variant="flat"
-              @click="showAddressDialog = false"
-              class="flex-grow-1"
-              :disabled="!address"
-            >
-              Confirm
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
 
       <!-- DateTime Picker Dialog -->
       <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
@@ -3193,69 +2977,6 @@ watch(
         </v-card>
       </v-dialog>
 
-      <!-- Contact Dialog -->
-      <v-dialog v-model="showContactDialog" max-width="500">
-        <v-card class="modern-dialog" rounded="lg">
-          <v-card-title class="dialog-header">
-            <div class="d-flex align-center">
-              <v-icon color="primary" class="mr-2">mdi-phone</v-icon>
-              <div>Contact Information</div>
-            </div>
-          </v-card-title>
-
-          <v-card-text class="dialog-content">
-            <div class="contact-form">
-              <v-alert
-                :type="contactPhone ? 'info' : 'warning'"
-                density="compact"
-                variant="tonal"
-                class="mb-4"
-              >
-                Phone number is required for delivery coordination
-              </v-alert>
-
-              <v-text-field
-                v-model="contactPhone"
-                label="Phone Number *"
-                placeholder="09123456789 or +639123456789"
-                variant="outlined"
-                type="tel"
-                :rules="[
-                  (v) => !!v || 'Phone number is required',
-                  (v) =>
-                    /^(09|\+639)\d{9}$/.test(v.replace(/\s+/g, '')) ||
-                    'Valid format: 09123456789 or +639123456789',
-                ]"
-                class="mb-3"
-                hide-details="auto"
-              ></v-text-field>
-
-              <div class="text-caption text-grey">
-                We'll use this number to contact you about your delivery
-              </div>
-            </div>
-          </v-card-text>
-
-          <v-card-actions class="dialog-actions">
-            <v-btn
-              variant="text"
-              @click="showContactDialog = false"
-              class="flex-grow-1"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              color="primary"
-              variant="flat"
-              @click="updateContactInfo"
-              class="flex-grow-1"
-              :disabled="!contactPhone"
-            >
-              Save
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
     </v-main>
   </v-app>
 </template>

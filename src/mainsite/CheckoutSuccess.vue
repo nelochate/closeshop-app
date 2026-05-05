@@ -258,6 +258,7 @@ const totalAmount = computed(() =>
 const buyerName = computed(() => getRecipientName(order.value?.address, order.value?.buyer))
 const buyerPhone = computed(
   () =>
+    normalizeText((order.value as any)?.contact_number) ||
     normalizeText(order.value?.address?.phone) ||
     normalizeText(order.value?.buyer?.phone) ||
     'No phone number provided',

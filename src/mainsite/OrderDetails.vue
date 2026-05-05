@@ -347,6 +347,16 @@ const buyerDisplayName = computed(() => {
   )
 })
 
+const deliveryContactNumber = computed(() => {
+  const preferredNumber = [
+    order.value?.contact_number,
+    shippingAddress.value?.phone,
+    buyer.value?.phone,
+  ].find((value) => typeof value === 'string' && value.trim())
+
+  return preferredNumber?.trim() || ''
+})
+
 const riderDisplayName = computed(() => {
   if (!riderDetails.value) return 'Assigned rider'
   return getProfileDisplayName(riderDetails.value) || 'Assigned rider'
@@ -2003,7 +2013,7 @@ onMounted(async () => {
                   <v-card-text>
                     <div class="address-content">
                       <strong>{{ buyerDisplayName }}</strong>
-                      <span v-if="shippingAddress.phone"> - {{ shippingAddress.phone }}</span>
+                      <span v-if="deliveryContactNumber"> - {{ deliveryContactNumber }}</span>
                       <div class="address-details">{{ buildFullAddress }}</div>
                     </div>
                   </v-card-text>

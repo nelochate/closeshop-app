@@ -790,7 +790,7 @@ const fetchOrderDetails = async () => {
         pickup_address: pickupAddress,
         delivery_address: deliveryAddress,
         customer_name: customerName,
-        customer_phone: address.phone || user.phone || '',
+        customer_phone: data.contact_number || address.phone || user.phone || '',
         shop_name: shop.business_name || 'Shop',
         pickup_lat: shop.latitude,
         pickup_lng: shop.longitude,

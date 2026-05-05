@@ -468,7 +468,7 @@ const fetchOrders = async () => {
           ...order,
           items,
           customer_name: getCustomerDisplayName(order),
-          customer_phone: order.address?.phone || order.user?.phone || '',
+          customer_phone: order.contact_number || order.address?.phone || order.user?.phone || '',
           rider_details: riderInfo,
         }
       }),
@@ -1248,7 +1248,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
                       {{ order.user?.first_name }} {{ order.user?.last_name }}
                     </div>
                     <div class="text-caption text-medium-emphasis">
-                      {{ order.address?.phone || order.user?.phone || 'N/A' }}
+                      {{ order.contact_number || order.address?.phone || order.user?.phone || 'N/A' }}
                     </div>
                   </div>
                 </div>

@@ -595,7 +595,7 @@ const fetchOrders = async () => {
           pickup_address: pickupAddress,
           delivery_address: deliveryAddress,
           customer_name: customerName,
-          customer_phone: profile.phone || address.phone || '',
+          customer_phone: order.contact_number || address.phone || profile.phone || '',
           shop_name: shop.business_name || 'Shop',
           pickup_lat: shop.latitude,
           pickup_lng: shop.longitude,
