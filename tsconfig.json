@@ -1,14 +1,26 @@
 {
   "compilerOptions": {
+    "baseUrl": ".",
     "target": "esnext",
     "module": "esnext",
     "strict": true,
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
     "esModuleInterop": true,
     "skipLibCheck": true,
     "types": ["vite/client"],
     "jsx": "preserve",
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "allowJs": true,
+    "paths": {
+      "@/*": ["src/*"]
+    }
   },
-  "include": ["src/**/*.ts", "src/**/*.d.ts", "src/**/*.tsx", "src/**/*.vue"]
+  "include": [
+    "env.d.ts",
+    "src/**/*.ts",
+    "src/**/*.d.ts",
+    "src/**/*.tsx",
+    "src/**/*.js",
+    "src/**/*.vue"
+  ]
 }

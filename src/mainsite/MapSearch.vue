@@ -1,13 +1,12 @@
-
 <script setup lang="ts">
-import { ref, onMounted, watch, onUnmounted, nextTick } from 'vue'
+import { computed, ref, onMounted, watch, onUnmounted, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useGeolocation } from '@/composables/useGeolocation'
 import { Capacitor } from '@capacitor/core'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { Geolocation } from '@capacitor/geolocation'
-import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'  
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 // Import Mapbox - use dynamic import to avoid SSR issues
 let mapboxgl: any = null
@@ -25,23 +24,72 @@ interface RouteOption {
   type: 'driving' | 'walking' | 'cycling'
 }
 
+type AreaScope = 'province' | 'municipality'
+
+type LocationRelation = string | { code?: string; name?: string | null } | null
+
+interface LocationOption {
+  code: string
+  name: string
+  province?: LocationRelation
+  region?: LocationRelation
+}
+
+interface ResolvedLocationResult {
+  city: string | null
+  province: string | null
+  cityCode: string | null
+  provinceCode: string | null
+  isIndependentCity: boolean
+  query: string | null
+  feature: any | null
+  center: [number, number] | null
+  bounds: [number, number, number, number] | null
+}
+
 /* -------------------- STATE -------------------- */
 const activeTab = ref('map')
 const map = ref<any>(null)
 const router = useRouter()
 const search = ref('')
 const shops = ref<any[]>([])
+const rawShops = ref<any[]>([])
 const loading = ref(false)
 const errorMsg = ref<string | null>(null)
 const showShopMenu = ref(false)
 const shopDisplayMode = ref<'within' | 'outside'>('within')
 const userCity = ref<string | null>(null)
+const userProvince = ref<string | null>(null)
+const currentLocationCity = ref<string | null>(null)
+const currentLocationProvince = ref<string | null>(null)
+const currentLocationCityCode = ref<string | null>(null)
+const currentLocationProvinceCode = ref<string | null>(null)
+const activeLocationCenter = ref<[number, number] | null>(null)
+const activeLocationBounds = ref<[number, number, number, number] | null>(null)
+const activeBoundaryFeature = ref<any | null>(null)
+const activeAreaScope = ref<AreaScope | null>(null)
+const manualLocationBrowsing = ref(false)
+const activeAreaIsIndependentCity = ref(false)
+const provinces = ref<LocationOption[]>([])
+const citiesMunicipalities = ref<LocationOption[]>([])
+const citiesMunicipalitiesCatalog = ref<LocationOption[] | null>(null)
+const selectedProvinceCode = ref<string | null>(null)
+const selectedProvinceName = ref<string | null>(null)
+const selectedCityCode = ref<string | null>(null)
+const selectedCityName = ref<string | null>(null)
+const provincesLoading = ref(false)
+const citiesLoading = ref(false)
+const locationNavigationLoading = ref(false)
+const showDisplayOptionsMenu = ref(false)
+const primaryServiceAreaReminderDismissed = ref(false)
 const lastKnownKey = 'closeshop_last_location'
 const lastKnown = ref<[number, number] | null>(null)
 let lastUpdateTs = 0
 const productMatches = ref<any[]>([])
 const routeLoading = ref(false)
 const filteredShops = ref<any[]>([])
+const outsideSearchResults = ref<any[]>([])
+const showOutsideSearchResults = ref(true)
 const mapInitialized = ref(false)
 const isSearchMode = ref(false)
 const boundaryLoading = ref(false)
@@ -49,6 +97,15 @@ const hasValidLocation = ref(false)
 const selectedShopId = ref<string | null>(null)
 const showBoundary = ref(true)
 const heroPaddingTop = ref('env(safe-area-inset-top)')
+const boundaryQueryCache = new Map<string, any[]>()
+const reverseGeocodeCache = new Map<string, ResolvedLocationResult>()
+const PRIMARY_SERVICE_AREA = {
+  cityName: 'Butuan City',
+  provinceName: 'Agusan del Norte',
+} as const
+
+const ARCGIS_CITY_BOUNDARY_LAYER_URL =
+  'https://services.arcgis.com/yP8JAHhUybB6y4EL/ArcGIS/rest/services/Philippines_City_Municipality_Administrative_Boundary/FeatureServer/0'
 
 /* -------------------- ROUTE TYPE SELECTOR -------------------- */
 type RouteType = 'driving' | 'walking' | 'cycling'
@@ -82,30 +139,176 @@ const routeConfig = {
 const mapPullIgnoreSelectors =
   '#map, .map-container, .mapboxgl-map, .mapboxgl-canvas-container, .mapboxgl-canvas, .mapboxgl-ctrl, .map-controls-container'
 
+const activeLocationLabel = computed(() => {
+  const parts = [userCity.value, userProvince.value].filter(Boolean)
+  return parts.join(', ') || null
+})
+
+const activeLocationShortLabel = computed(() => userCity.value || userProvince.value || 'your area')
+
+const activeLocationModeLabel = computed(() =>
+  manualLocationBrowsing.value ? 'Selected Area' : 'My Area',
+)
+
+const shopDrawerContextLabel = computed(() =>
+  isSearchMode.value ? 'Search Mode' : activeLocationModeLabel.value,
+)
+
+const searchLocationLabel = computed(() => {
+  if (activeLocationShortLabel.value && activeLocationShortLabel.value !== 'your area') {
+    return activeLocationShortLabel.value
+  }
+
+  return 'your area'
+})
+
+const searchLocationLabelTitleCase = computed(() =>
+  searchLocationLabel.value === 'your area' ? 'Your Area' : searchLocationLabel.value,
+)
+
+const shopDrawerTitle = computed(() => (isSearchMode.value ? 'Search Results' : 'Shops & Products'))
+
+const shopDrawerSubtitle = computed(() => {
+  if (isSearchMode.value) return 'Shops & Products'
+  if (activeLocationLabel.value) return `Browsing ${activeLocationLabel.value}`
+  return 'Nearby shops and products'
+})
+
+const hasOutsideSearchResults = computed(() => outsideSearchResults.value.length > 0)
+
+const hasLocalSearchResults = computed(() => filteredShops.value.length > 0)
+
+const outsideSearchResultIds = computed(
+  () => new Set(outsideSearchResults.value.map((shop) => String(shop.id))),
+)
+
+const outsideSearchSectionTitle = computed(
+  () => `Available Outside ${searchLocationLabelTitleCase.value}`,
+)
+
+const shopDrawerResultSections = computed(() => {
+  if (!isSearchMode.value) {
+    return filteredShops.value.length
+      ? [
+          {
+            key: 'browse-results',
+            title: null,
+            subtitle: null,
+            shops: filteredShops.value,
+            tone: 'default',
+          },
+        ]
+      : []
+  }
+
+  if (hasLocalSearchResults.value) {
+    return [
+      {
+        key: 'local-results',
+        title:
+          searchLocationLabel.value === 'your area'
+            ? 'Results In Your Area'
+            : `Results In ${searchLocationLabel.value}`,
+        subtitle: `${filteredShops.value.length} matching shops or products nearby`,
+        shops: filteredShops.value,
+        tone: 'local',
+      },
+    ]
+  }
+
+  if (hasOutsideSearchResults.value && showOutsideSearchResults.value) {
+    return [
+      {
+        key: 'outside-results',
+        title: outsideSearchSectionTitle.value,
+        subtitle: `${outsideSearchResults.value.length} matching shops or products found elsewhere`,
+        shops: outsideSearchResults.value,
+        tone: 'outside',
+      },
+    ]
+  }
+
+  return []
+})
+
+const activeAreaScopeLabel = computed(() => {
+  if (activeAreaScope.value === 'province') return 'Province'
+  if (activeAreaScope.value === 'municipality') return 'Municipality'
+  return 'Area'
+})
+
+const distanceDisplayLabel = computed(() =>
+  manualLocationBrowsing.value ? 'from selected area' : 'away',
+)
+
+const locationOverlayMessage = computed(() =>
+  locationNavigationLoading.value ? 'Loading selected area...' : 'Loading area boundary...',
+)
+
+const currentLocationLabel = computed(() => {
+  const parts = [currentLocationCity.value, currentLocationProvince.value].filter(Boolean)
+  return parts.join(', ') || null
+})
+
+const canDeterminePrimaryServiceAreaStatus = computed(() => {
+  if (currentLocationCity.value) return true
+
+  return (
+    Boolean(currentLocationProvince.value) &&
+    !locationNamesMatch(currentLocationProvince.value, PRIMARY_SERVICE_AREA.provinceName)
+  )
+})
+
+const isCurrentLocationInPrimaryServiceArea = computed(() =>
+  isPrimaryServiceAreaLocation(currentLocationCity.value, currentLocationProvince.value),
+)
+
+const isActiveLocationInPrimaryServiceArea = computed(() =>
+  isPrimaryServiceAreaLocation(userCity.value, userProvince.value),
+)
+
+const primaryServiceAreaReminderLocationKey = computed(() => {
+  const city = normalizeLocationName(currentLocationCity.value)
+  const province = normalizeLocationName(currentLocationProvince.value)
+
+  if (!city && !province) return null
+
+  return [province, city].filter(Boolean).join('::')
+})
+
+const showPrimaryServiceAreaReminder = computed(() => {
+  if (showShopMenu.value) return false
+  if (primaryServiceAreaReminderDismissed.value) return false
+  if (!canDeterminePrimaryServiceAreaStatus.value) return false
+  if (isCurrentLocationInPrimaryServiceArea.value) return false
+  return !isActiveLocationInPrimaryServiceArea.value
+})
+
 /* -------------------- PULL TO REFRESH HANDLER -------------------- */
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing map data...')
-  
+
   try {
     // Clear any existing errors
     errorMsg.value = null
-    
+
     // Refresh shops data
     await doFetchShops()
-    
-    // Refresh boundary if we have location
-    if (latitude.value && longitude.value) {
-      await highlightUserCityBoundary(latitude.value, longitude.value)
+
+    if (showBoundary.value && activeBoundaryFeature.value) {
+      applyBoundaryVisibility()
+    } else if (!showBoundary.value) {
+      clearCityBoundary()
     }
-    
+
     // Refresh route if there's a selected shop
     if (selectedShopId.value) {
-      const shop = shops.value.find(s => s.id === selectedShopId.value)
+      const shop = shops.value.find((s) => s.id === selectedShopId.value)
       if (shop && shop.latitude && shop.longitude) {
         await focusOnShopMarker(selectedShopId.value)
       }
     }
-    
+
     console.log('✅ Map page refresh complete!')
   } catch (error) {
     console.error('❌ Refresh failed:', error)
@@ -250,16 +453,16 @@ const initializeMap = async (): Promise<void> => {
 /* -------------------- TIME FORMATTING FUNCTIONS -------------------- */
 const formatTime12Hour = (time24: string): string => {
   if (!time24) return ''
-  
+
   try {
     const [hours, minutes] = time24.split(':').map(Number)
-    
+
     if (isNaN(hours) || isNaN(minutes)) return time24
-    
+
     const period = hours >= 12 ? 'PM' : 'AM'
     const hours12 = hours % 12 || 12 // Convert 0 to 12 for midnight
     const minutesStr = minutes.toString().padStart(2, '0')
-    
+
     return `${hours12}:${minutesStr} ${period}`
   } catch (error) {
     console.warn('Error formatting time:', error)
@@ -272,96 +475,234 @@ const formatTimeRange = (openTime: string, closeTime: string): string => {
   return `${formatTime12Hour(openTime)} - ${formatTime12Hour(closeTime)}`
 }
 
-/* -------------------- CITY BOUNDARY DETECTION & DISPLAY -------------------- */
-const detectUserCity = async (lat: number, lng: number): Promise<string | null> => {
-  try {
-    console.log('Detecting city for:', lat, lng)
-
-    const response = await fetch(
-      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?types=place&access_token=${MAPBOX_ACCESS_TOKEN}`,
-    )
-
-    if (!response.ok) {
-      throw new Error(`Geocoding failed: ${response.status}`)
-    }
-
-    const data = await response.json()
-    console.log('Geocoding response:', data)
-
-    if (data.features && data.features.length > 0) {
-      // Find city feature
-      const cityFeature = data.features.find(
-        (feature: any) =>
-          feature.place_type.includes('place') || feature.place_type.includes('locality'),
-      )
-
-      if (cityFeature) {
-        console.log('Detected city:', cityFeature.text)
-        return cityFeature.text
-      }
-    }
-
-    console.warn('No city features found in response')
-    return null
-  } catch (error) {
-    console.error('City detection failed:', error)
-    return null
-  }
+/* -------------------- LOCATION LOOKUPS & AREA DISPLAY -------------------- */
+const buildLocationQuery = (city?: string | null, province?: string | null): string | null => {
+  const parts = [city, province, 'Philippines'].filter(Boolean)
+  return parts.length ? parts.join(', ') : null
 }
 
-const fetchCityBoundaryData = async (cityName: string): Promise<any> => {
-  try {
-    console.log('Fetching boundary data for:', cityName)
+const normalizeLocationName = (name: string | null | undefined) => {
+  if (!name) return ''
+  return name
+    .toLowerCase()
+    .replace(/\b(city|municipality|municipal|town|province)\s+of\b/g, '')
+    .replace(/\b(city|municipality|municipal|town|province)\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
 
-    // Use Nominatim OpenStreetMap API for city boundaries
-    const response = await fetch(
-      `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(cityName + ', Philippines')}&format=json&polygon_geojson=1&addressdetails=1`,
-    )
+const locationNamesMatch = (left: string | null | undefined, right: string | null | undefined) => {
+  const normalizedLeft = normalizeLocationName(left)
+  const normalizedRight = normalizeLocationName(right)
 
-    if (!response.ok) throw new Error('Boundary fetch failed')
+  if (!normalizedLeft || !normalizedRight) return false
 
-    const data = await response.json()
-    console.log('Boundary data from Nominatim:', data)
+  return normalizedLeft === normalizedRight
+}
 
-    if (data && data.length > 0) {
-      // Try to find a result with polygon data
-      const cityData = data.find(
-        (item: any) =>
-          item.geojson &&
-          (item.geojson.type === 'Polygon' || item.geojson.type === 'MultiPolygon') &&
-          (item.type === 'administrative' || item.class === 'boundary'),
-      )
+function isPrimaryServiceAreaLocation(
+  city: string | null | undefined,
+  province: string | null | undefined,
+) {
+  if (!locationNamesMatch(city, PRIMARY_SERVICE_AREA.cityName)) return false
+  if (province && !locationNamesMatch(province, PRIMARY_SERVICE_AREA.provinceName)) return false
+  return true
+}
 
-      if (cityData && cityData.geojson) {
-        return {
-          type: 'Feature',
-          geometry: cityData.geojson,
-          properties: {
-            name: cityData.display_name,
-            osm_type: cityData.osm_type,
-            osm_id: cityData.osm_id,
-          },
-        }
-      }
-    }
-
-    // Fallback to circular boundary
-    console.log('Using circular boundary as fallback')
-    return createCircularBoundary(latitude.value!, longitude.value!)
-  } catch (error) {
-    console.warn('City boundary fetch failed:', error)
-    return createCircularBoundary(latitude.value!, longitude.value!)
+const readHierarchyRelationName = (
+  relation: LocationOption['province'] | LocationOption['region'],
+) => {
+  if (typeof relation === 'string') return relation
+  if (relation && typeof relation === 'object' && typeof relation.name === 'string') {
+    return relation.name
   }
+  return null
+}
+
+const sanitizeLocationOptions = (data: unknown): LocationOption[] => {
+  if (!Array.isArray(data)) return []
+
+  return data.filter((item): item is LocationOption => {
+    return typeof item?.code === 'string' && typeof item?.name === 'string'
+  })
+}
+
+const sortLocationOptions = (items: LocationOption[]) =>
+  [...items].sort((a, b) => a.name.localeCompare(b.name))
+
+const mergeLocationOptions = (...groups: LocationOption[][]) => {
+  const merged = new Map<string, LocationOption>()
+
+  for (const group of groups) {
+    for (const item of group) {
+      const key = item.code || normalizeLocationName(item.name)
+      if (!key || merged.has(key)) continue
+      merged.set(key, item)
+    }
+  }
+
+  return sortLocationOptions(Array.from(merged.values()))
+}
+
+const escapeArcGisSql = (value: string) => value.replace(/'/g, "''")
+
+const getExactLocationVariants = (name: string | null | undefined) => {
+  if (!name) return []
+
+  const variants = new Set<string>()
+  const trimmed = name.trim()
+  if (!trimmed) return []
+
+  const lower = trimmed.toLowerCase()
+  variants.add(trimmed)
+
+  if (lower.endsWith(' city')) {
+    const base = trimmed.slice(0, -5).trim()
+    if (base) {
+      variants.add(base)
+      variants.add(`City of ${base}`)
+    }
+  }
+
+  if (lower.startsWith('city of ')) {
+    const base = trimmed.slice(8).trim()
+    if (base) {
+      variants.add(base)
+      variants.add(`${base} City`)
+    }
+  }
+
+  if (lower.endsWith(' municipality')) {
+    const base = trimmed.slice(0, -13).trim()
+    if (base) {
+      variants.add(base)
+      variants.add(`Municipality of ${base}`)
+    }
+  }
+
+  if (lower.startsWith('municipality of ')) {
+    const base = trimmed.slice(16).trim()
+    if (base) {
+      variants.add(base)
+      variants.add(`${base} Municipality`)
+    }
+  }
+
+  return Array.from(variants)
+}
+
+const buildArcGisEqualsClause = (field: string, values: string[]) => {
+  const exactValues = [...new Set(values.map((value) => value.trim()).filter(Boolean))]
+  if (!exactValues.length) return '1=0'
+  return `UPPER(${field}) IN (${exactValues
+    .map((value) => `'${escapeArcGisSql(value.toUpperCase())}'`)
+    .join(', ')})`
+}
+
+const isIndependentCityClass = (cityClass: string | null | undefined) => {
+  if (!cityClass) return false
+  const normalized = cityClass.toLowerCase()
+  return normalized.includes('highly urbanized') || normalized.includes('independent')
+}
+
+const getFeatureAttributes = (feature: any) => feature?.properties || feature?.attributes || {}
+
+const getFeatureCityLabels = (feature: any): string[] =>
+  [
+    getFeatureAttributes(feature).CITYMUN,
+    getFeatureAttributes(feature).OLD_NAME,
+    getFeatureAttributes(feature).SUBMUNI,
+  ].filter((label): label is string => typeof label === 'string' && Boolean(label.trim()))
+
+const getFeatureProvinceLabel = (feature: any): string | null => {
+  const province = getFeatureAttributes(feature).PROVINCE
+  return typeof province === 'string' ? province : null
+}
+
+const appendCoordinateBounds = (
+  bounds: { minLng: number; minLat: number; maxLng: number; maxLat: number },
+  coordinates: any,
+) => {
+  if (!Array.isArray(coordinates)) return
+
+  if (
+    coordinates.length >= 2 &&
+    typeof coordinates[0] === 'number' &&
+    typeof coordinates[1] === 'number'
+  ) {
+    const [lng, lat] = coordinates as [number, number]
+    bounds.minLng = Math.min(bounds.minLng, lng)
+    bounds.minLat = Math.min(bounds.minLat, lat)
+    bounds.maxLng = Math.max(bounds.maxLng, lng)
+    bounds.maxLat = Math.max(bounds.maxLat, lat)
+    return
+  }
+
+  coordinates.forEach((entry: any) => appendCoordinateBounds(bounds, entry))
+}
+
+const getGeoJsonBounds = (geojson: any): [number, number, number, number] | null => {
+  const bounds = {
+    minLng: Infinity,
+    minLat: Infinity,
+    maxLng: -Infinity,
+    maxLat: -Infinity,
+  }
+
+  const visitFeature = (feature: any) => {
+    if (!feature?.geometry) return
+    appendCoordinateBounds(bounds, feature.geometry.coordinates)
+  }
+
+  if (geojson?.type === 'FeatureCollection' && Array.isArray(geojson.features)) {
+    geojson.features.forEach(visitFeature)
+  } else if (geojson?.type === 'Feature') {
+    visitFeature(geojson)
+  } else if (geojson?.coordinates) {
+    appendCoordinateBounds(bounds, geojson.coordinates)
+  }
+
+  if (!isFinite(bounds.minLng) || !isFinite(bounds.minLat)) return null
+  return [bounds.minLng, bounds.minLat, bounds.maxLng, bounds.maxLat]
+}
+
+const getBoundsCenter = (
+  bounds: [number, number, number, number] | null,
+): [number, number] | null => {
+  if (!bounds) return null
+  const [minLng, minLat, maxLng, maxLat] = bounds
+  return [(minLat + maxLat) / 2, (minLng + maxLng) / 2]
+}
+
+const getKnownLocation = (): [number, number] | null => {
+  if (latitude.value != null && longitude.value != null) {
+    const userLat = Number(latitude.value)
+    const userLng = Number(longitude.value)
+    if (isFinite(userLat) && isFinite(userLng)) return [userLat, userLng]
+  }
+
+  if (lastKnown.value) return lastKnown.value
+  return activeLocationCenter.value
+}
+
+const flyToLocation = (lat: number, lng: number, zoom: number, duration: number = 900) => {
+  if (!map.value) return
+
+  map.value.flyTo({
+    center: [lng, lat],
+    zoom,
+    essential: true,
+    duration,
+  })
 }
 
 const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) => {
-  const points = 32
-  const coordinates = []
+  const points = 40
+  const coordinates: [number, number][] = []
 
   for (let i = 0; i < points; i++) {
     const angle = (i * 360) / points
     const bearing = (angle * Math.PI) / 180
-
     const latRad = (lat * Math.PI) / 180
     const lngRad = (lng * Math.PI) / 180
     const angularDistance = radiusKm / 6371
@@ -378,224 +719,850 @@ const createCircularBoundary = (lat: number, lng: number, radiusKm: number = 5) 
         Math.cos(angularDistance) - Math.sin(latRad) * Math.sin(newLat),
       )
 
-    coordinates.push([(newLng * 180) / Math.PI, (newLat * 180) / Math.PI]) // [lng, lat]
+    coordinates.push([(newLng * 180) / Math.PI, (newLat * 180) / Math.PI])
   }
 
-  coordinates.push(coordinates[0]) // Close polygon
+  coordinates.push(coordinates[0])
 
   return {
     type: 'Feature',
-    geometry: {
-      type: 'Polygon',
-      coordinates: [coordinates],
-    },
     properties: {
       name: 'Approximate Area',
       isFallback: true,
     },
+    geometry: {
+      type: 'Polygon',
+      coordinates: [coordinates],
+    },
   }
 }
 
-const highlightUserCityBoundary = async (lat: number, lng: number) => {
-  if (!map.value || !mapboxgl || !showBoundary.value) {
-    console.log('Boundary display is disabled or map not available')
+const buildFeatureCollection = (features: any[]) => ({
+  type: 'FeatureCollection',
+  features,
+})
+
+const queryArcGisBoundaryLayer = async ({
+  where,
+  point,
+}: {
+  where?: string
+  point?: [number, number]
+}) => {
+  const cacheKey = where
+    ? `where:${where}`
+    : point
+      ? `point:${point[0].toFixed(5)},${point[1].toFixed(5)}`
+      : null
+  if (cacheKey && boundaryQueryCache.has(cacheKey)) {
+    return boundaryQueryCache.get(cacheKey) || []
+  }
+
+  const params = new URLSearchParams({
+    outFields: 'CITYMUN,OLD_NAME,SUBMUNI,PROVINCE,GEOCODE10,GEOCODE_PROV,CITY_CLASS,REGION',
+    returnGeometry: 'true',
+    outSR: '4326',
+    f: 'geojson',
+  })
+
+  if (where) {
+    params.set('where', where)
+  } else {
+    params.set('where', '1=1')
+  }
+
+  if (point) {
+    params.set(
+      'geometry',
+      JSON.stringify({
+        x: point[1],
+        y: point[0],
+        spatialReference: { wkid: 4326 },
+      }),
+    )
+    params.set('geometryType', 'esriGeometryPoint')
+    params.set('spatialRel', 'esriSpatialRelIntersects')
+    params.set('inSR', '4326')
+  }
+
+  const response = await fetch(`${ARCGIS_CITY_BOUNDARY_LAYER_URL}/query?${params.toString()}`)
+  if (!response.ok) {
+    throw new Error(`ArcGIS boundary query failed: ${response.status}`)
+  }
+
+  const data = await response.json()
+  const features = Array.isArray(data?.features) ? data.features : []
+  if (cacheKey) {
+    boundaryQueryCache.set(cacheKey, features)
+  }
+  return features
+}
+
+const scoreArcGisBoundaryFeature = (
+  feature: any,
+  options: {
+    cityName?: string | null
+    provinceName?: string | null
+    cityCode?: string | null
+    provinceCode?: string | null
+  },
+) => {
+  const attributes = getFeatureAttributes(feature)
+  const cityLabels = getFeatureCityLabels(feature)
+  const provinceLabel = getFeatureProvinceLabel(feature)
+  const cityClass = typeof attributes.CITY_CLASS === 'string' ? attributes.CITY_CLASS : null
+  const independentCity = isIndependentCityClass(cityClass)
+
+  let score = 0
+
+  if (options.cityCode && attributes.GEOCODE10 === options.cityCode) {
+    score += 180
+  }
+
+  if (options.provinceCode && attributes.GEOCODE_PROV === options.provinceCode) {
+    score += 80
+  }
+
+  if (options.cityName) {
+    const cityMatches = cityLabels.some((label) => locationNamesMatch(label, options.cityName))
+    if (!cityMatches) return Number.NEGATIVE_INFINITY
+    score += 220
+
+    if (cityLabels.some((label) => label === options.cityName)) {
+      score += 25
+    }
+
+    if (options.provinceName) {
+      const provinceMatches = locationNamesMatch(provinceLabel, options.provinceName)
+      if (!provinceMatches && !independentCity) {
+        return Number.NEGATIVE_INFINITY
+      }
+      if (provinceMatches) score += 35
+      if (!provinceMatches && independentCity) score += 15
+    }
+  } else if (options.provinceName) {
+    if (!locationNamesMatch(provinceLabel, options.provinceName)) {
+      return Number.NEGATIVE_INFINITY
+    }
+    score += 180
+  }
+
+  return score
+}
+
+const pickBestArcGisFeature = (
+  features: any[],
+  options: {
+    cityName?: string | null
+    provinceName?: string | null
+    cityCode?: string | null
+    provinceCode?: string | null
+  },
+) => {
+  const scored = features
+    .map((feature) => ({
+      feature,
+      score: scoreArcGisBoundaryFeature(feature, options),
+    }))
+    .filter((entry) => entry.score > Number.NEGATIVE_INFINITY)
+    .sort((left, right) => right.score - left.score)
+
+  return scored[0]?.feature || null
+}
+
+const fetchBoundaryData = async ({
+  cityName,
+  provinceName,
+  cityCode,
+  provinceCode,
+  fallbackCenter,
+}: {
+  cityName?: string | null
+  provinceName?: string | null
+  cityCode?: string | null
+  provinceCode?: string | null
+  fallbackCenter?: [number, number] | null
+}) => {
+  if (cityName) {
+    const cityVariants = getExactLocationVariants(cityName)
+    const where = [
+      buildArcGisEqualsClause('CITYMUN', cityVariants),
+      buildArcGisEqualsClause('OLD_NAME', cityVariants),
+      buildArcGisEqualsClause('SUBMUNI', cityVariants),
+    ].join(' OR ')
+
+    const features = await queryArcGisBoundaryLayer({ where: `(${where})` })
+    const feature = pickBestArcGisFeature(features, {
+      cityName,
+      provinceName,
+      cityCode,
+      provinceCode,
+    })
+
+    if (feature) return feature
+  }
+
+  if (provinceName || provinceCode) {
+    const provinceWhereParts: string[] = []
+    if (provinceCode) {
+      provinceWhereParts.push(buildArcGisEqualsClause('GEOCODE_PROV', [provinceCode]))
+    }
+    if (provinceName) {
+      provinceWhereParts.push(buildArcGisEqualsClause('PROVINCE', [provinceName]))
+    }
+
+    const features = await queryArcGisBoundaryLayer({
+      where: provinceWhereParts.length ? provinceWhereParts.join(' OR ') : '1=0',
+    })
+
+    const provinceFeatures = features.filter((feature: any) => {
+      const attributes = getFeatureAttributes(feature)
+      if (provinceCode && attributes.GEOCODE_PROV === provinceCode) return true
+      if (provinceName && locationNamesMatch(attributes.PROVINCE, provinceName)) return true
+      return false
+    })
+
+    if (provinceFeatures.length) {
+      return buildFeatureCollection(provinceFeatures)
+    }
+  }
+
+  if (fallbackCenter) {
+    return createCircularBoundary(fallbackCenter[0], fallbackCenter[1])
+  }
+
+  return null
+}
+
+const fetchProvinces = async () => {
+  if (provincesLoading.value || provinces.value.length > 0) return
+
+  provincesLoading.value = true
+  try {
+    const response = await fetch('https://psgc.cloud/api/provinces')
+    if (!response.ok) throw new Error(`Province fetch failed: ${response.status}`)
+
+    const data = await response.json()
+    provinces.value = sortLocationOptions(sanitizeLocationOptions(data))
+  } catch (error) {
+    console.error('Failed to fetch provinces:', error)
+    setErrorMessage('Unable to load provinces right now.', 3000)
+  } finally {
+    provincesLoading.value = false
+  }
+}
+
+const fetchCitiesMunicipalitiesCatalog = async () => {
+  if (citiesMunicipalitiesCatalog.value) {
+    return citiesMunicipalitiesCatalog.value
+  }
+
+  const response = await fetch('https://psgc.cloud/api/v2/cities-municipalities')
+  if (!response.ok) {
+    throw new Error(`City catalog fetch failed: ${response.status}`)
+  }
+
+  const data = await response.json()
+  citiesMunicipalitiesCatalog.value = sanitizeLocationOptions(data)
+  return citiesMunicipalitiesCatalog.value
+}
+
+const fetchCitiesMunicipalities = async (provinceCode: string) => {
+  if (!provinceCode) {
+    citiesMunicipalities.value = []
     return
   }
 
+  citiesLoading.value = true
   try {
-    boundaryLoading.value = true
-    console.log('Starting boundary highlighting for:', lat, lng)
+    const provinceName =
+      provinces.value.find((province) => province.code === provinceCode)?.name ||
+      selectedProvinceName.value
 
-    // Clear existing boundary
-    clearCityBoundary()
-
-    // Detect city name
-    const detectedCity = await detectUserCity(lat, lng)
-    userCity.value = detectedCity
-
-    if (!detectedCity) {
-      console.warn('Could not detect city name')
-      setErrorMessage('Could not detect your city. Showing all shops.', 3000)
-      boundaryLoading.value = false
-      return
-    }
-
-    // Fetch boundary data
-    const boundaryData = await fetchCityBoundaryData(detectedCity)
-
-    if (!boundaryData) {
-      console.warn('Could not fetch boundary data')
-      setErrorMessage('Could not load city boundary. Showing all shops.', 3000)
-      boundaryLoading.value = false
-      return
-    }
-
-    // Add boundary source to map
-    const sourceId = 'city-boundary-source'
-    const fillLayerId = 'city-boundary-fill'
-    const lineLayerId = 'city-boundary-line'
-
-    if (!map.value.getSource(sourceId)) {
-      map.value.addSource(sourceId, {
-        type: 'geojson',
-        data: boundaryData,
-      })
-    } else {
-      const source = map.value.getSource(sourceId)
-      source.setData(boundaryData)
-    }
-
-    // Add fill layer if not exists
-    if (!map.value.getLayer(fillLayerId)) {
-      map.value.addLayer({
-        id: fillLayerId,
-        type: 'fill',
-        source: sourceId,
-        paint: {
-          'fill-color': '#3b82f6',
-          'fill-opacity': 0.1,
-          'fill-outline-color': '#3b82f6',
+    const [provinceLocalitiesResult, catalogLocalitiesResult] = await Promise.allSettled([
+      fetch(`https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`).then(
+        async (response) => {
+          if (!response.ok) throw new Error(`City fetch failed: ${response.status}`)
+          return sanitizeLocationOptions(await response.json())
         },
-      })
+      ),
+      fetchCitiesMunicipalitiesCatalog(),
+    ])
+
+    if (provinceLocalitiesResult.status === 'rejected') {
+      console.error(
+        'Failed to fetch province city/municipality list:',
+        provinceLocalitiesResult.reason,
+      )
     }
 
-    // Add line layer if not exists
-    if (!map.value.getLayer(lineLayerId)) {
-      map.value.addLayer({
-        id: lineLayerId,
-        type: 'line',
-        source: sourceId,
-        paint: {
-          'line-color': '#3b82f6',
-          'line-width': 3,
-          'line-opacity': 0.8,
-          'line-dasharray': [2, 2],
-        },
-      })
+    if (catalogLocalitiesResult.status === 'rejected') {
+      console.warn('Failed to fetch supplemental city catalog:', catalogLocalitiesResult.reason)
     }
 
-    // Fit map to boundary
-    try {
-      const bounds = new mapboxgl.LngLatBounds()
+    const provinceLocalities =
+      provinceLocalitiesResult.status === 'fulfilled' ? provinceLocalitiesResult.value : []
 
-      if (boundaryData.geometry.type === 'Polygon') {
-        boundaryData.geometry.coordinates[0].forEach((coord: [number, number]) => {
-          bounds.extend(coord)
-        })
-      } else if (boundaryData.geometry.type === 'MultiPolygon') {
-        boundaryData.geometry.coordinates[0][0].forEach((coord: [number, number]) => {
-          bounds.extend(coord)
-        })
-      } else if (boundaryData.geometry.type === 'Point') {
-        bounds.extend(boundaryData.geometry.coordinates as [number, number])
-      }
+    const supplementalLocalities =
+      provinceName && catalogLocalitiesResult.status === 'fulfilled'
+        ? catalogLocalitiesResult.value.filter((city) =>
+            locationNamesMatch(readHierarchyRelationName(city.province), provinceName),
+          )
+        : []
 
-      // Include user location
-      bounds.extend([lng, lat])
-
-      // Only fit bounds if we have valid bounds
-      if (bounds.getNorth() !== bounds.getSouth() && bounds.getEast() !== bounds.getWest()) {
-        map.value.fitBounds(bounds, {
-          padding: 50,
-          animate: true,
-          duration: 1000,
-          maxZoom: 15,
-        })
-      }
-    } catch (boundsError) {
-      console.warn('Could not fit bounds to boundary:', boundsError)
-      // Fallback to centering on user
-      map.value.flyTo({
-        center: [lng, lat],
-        zoom: 13,
-        animate: true,
-        duration: 1000,
-      })
-    }
-
-    setErrorMessage(`Showing shops in ${detectedCity}`, 3000)
-    console.log('Boundary highlighted successfully')
+    citiesMunicipalities.value = mergeLocationOptions(provinceLocalities, supplementalLocalities)
   } catch (error) {
-    console.error('Error highlighting city boundary:', error)
-    setErrorMessage('Error loading city boundary', 3000)
+    console.error('Failed to fetch cities/municipalities:', error)
+    citiesMunicipalities.value = []
+    setErrorMessage('Unable to load cities for that province.', 3000)
   } finally {
-    boundaryLoading.value = false
+    citiesLoading.value = false
+  }
+}
+
+const ensureLocationOptionsLoaded = async () => {
+  await fetchProvinces()
+}
+
+const createResolvedLocationResult = (
+  feature: any | null,
+  fallbackCenter: [number, number] | null,
+): ResolvedLocationResult => {
+  if (!feature) {
+    return {
+      city: null,
+      province: null,
+      cityCode: null,
+      provinceCode: null,
+      isIndependentCity: false,
+      query: null,
+      feature: null,
+      center: fallbackCenter,
+      bounds: fallbackCenter
+        ? [fallbackCenter[1], fallbackCenter[0], fallbackCenter[1], fallbackCenter[0]]
+        : null,
+    }
+  }
+
+  const attributes = getFeatureAttributes(feature)
+  const city =
+    getFeatureCityLabels(feature).find((label) => typeof label === 'string' && Boolean(label)) ||
+    null
+  const province = getFeatureProvinceLabel(feature)
+  const bounds = getGeoJsonBounds(feature)
+  const center = getBoundsCenter(bounds) || fallbackCenter
+
+  return {
+    city,
+    province,
+    cityCode: typeof attributes.GEOCODE10 === 'string' ? attributes.GEOCODE10 : null,
+    provinceCode: typeof attributes.GEOCODE_PROV === 'string' ? attributes.GEOCODE_PROV : null,
+    isIndependentCity: isIndependentCityClass(attributes.CITY_CLASS),
+    query: buildLocationQuery(city, province),
+    feature,
+    center,
+    bounds,
+  }
+}
+
+const resolveLocationFromCoordinates = async (
+  lat: number,
+  lng: number,
+): Promise<ResolvedLocationResult> => {
+  const cacheKey = `${lat.toFixed(5)},${lng.toFixed(5)}`
+  if (reverseGeocodeCache.has(cacheKey)) {
+    return reverseGeocodeCache.get(cacheKey)!
+  }
+
+  try {
+    const features = await queryArcGisBoundaryLayer({ point: [lat, lng] })
+    const feature = features[0] || null
+    const result = createResolvedLocationResult(feature, [lat, lng])
+    reverseGeocodeCache.set(cacheKey, result)
+    return result
+  } catch (error) {
+    console.warn('ArcGIS point-in-polygon lookup failed:', error)
+
+    const fallbackResult: ResolvedLocationResult = {
+      city: null,
+      province: null,
+      cityCode: null,
+      provinceCode: null,
+      isIndependentCity: false,
+      query: null,
+      feature: null,
+      center: [lat, lng],
+      bounds: [lng, lat, lng, lat],
+    }
+
+    reverseGeocodeCache.set(cacheKey, fallbackResult)
+    return fallbackResult
+  }
+}
+
+const getActiveResultShops = () => {
+  if (isSearchMode.value && !hasLocalSearchResults.value && hasOutsideSearchResults.value) {
+    return showOutsideSearchResults.value ? outsideSearchResults.value : []
+  }
+
+  return filteredShops.value
+}
+
+const fitMapToGeoJson = (geojson: any, shopsToInclude: any[] = []) => {
+  if (!map.value || !mapboxgl) return
+
+  const bounds = new mapboxgl.LngLatBounds()
+  const geoBounds = getGeoJsonBounds(geojson)
+
+  if (geoBounds) {
+    bounds.extend([geoBounds[0], geoBounds[1]])
+    bounds.extend([geoBounds[2], geoBounds[3]])
+  }
+
+  shopsToInclude.forEach((shop) => {
+    const lat = Number(shop.latitude)
+    const lng = Number(shop.longitude)
+    if (validateCoordinates(lat, lng)) {
+      bounds.extend([lng, lat])
+    }
+  })
+
+  if (bounds.isEmpty()) return
+
+  map.value.fitBounds(bounds, {
+    padding: 54,
+    animate: true,
+    duration: 900,
+    maxZoom: 15.5,
+  })
+}
+
+const renderBoundaryData = (boundaryData: any) => {
+  if (!map.value || !mapboxgl || !boundaryData) return
+
+  const sourceId = 'city-boundary-source'
+  const fillLayerId = 'city-boundary-fill'
+  const lineLayerId = 'city-boundary-line'
+
+  if (!map.value.getSource(sourceId)) {
+    map.value.addSource(sourceId, {
+      type: 'geojson',
+      data: boundaryData,
+    })
+  } else {
+    const source = map.value.getSource(sourceId)
+    source.setData(boundaryData)
+  }
+
+  if (!map.value.getLayer(fillLayerId)) {
+    map.value.addLayer({
+      id: fillLayerId,
+      type: 'fill',
+      source: sourceId,
+      paint: {
+        'fill-color': '#2563eb',
+        'fill-opacity': 0.1,
+        'fill-outline-color': '#2563eb',
+      },
+    })
+  }
+
+  if (!map.value.getLayer(lineLayerId)) {
+    map.value.addLayer({
+      id: lineLayerId,
+      type: 'line',
+      source: sourceId,
+      paint: {
+        'line-color': '#2563eb',
+        'line-width': 3,
+        'line-opacity': 0.85,
+        'line-dasharray': [2, 2],
+      },
+    })
   }
 }
 
 const clearCityBoundary = () => {
-  if (!map.value || !mapboxgl) return
-
-  // Remove layers
-  const layers = ['city-boundary-fill', 'city-boundary-line']
-  layers.forEach((layerId) => {
+  if (!map.value) return
+  ;['city-boundary-fill', 'city-boundary-line'].forEach((layerId) => {
     if (map.value.getLayer(layerId)) {
       map.value.removeLayer(layerId)
     }
   })
 
-  // Remove source
-  const sourceId = 'city-boundary-source'
-  if (map.value.getSource(sourceId)) {
-    map.value.removeSource(sourceId)
+  if (map.value.getSource('city-boundary-source')) {
+    map.value.removeSource('city-boundary-source')
+  }
+}
+
+const applyBoundaryVisibility = () => {
+  clearCityBoundary()
+
+  if (showBoundary.value && activeBoundaryFeature.value) {
+    renderBoundaryData(activeBoundaryFeature.value)
+  }
+}
+
+const fitMapToActiveArea = () => {
+  if (!map.value || !mapboxgl) return
+
+  if (activeBoundaryFeature.value) {
+    fitMapToGeoJson(activeBoundaryFeature.value, getActiveResultShops())
+    setErrorMessage(`Fitted map to ${activeLocationLabel.value || 'your active area'}`, 2000)
+    return
   }
 
-  userCity.value = null
-  console.log('City boundary cleared')
+  const knownLocation = activeLocationCenter.value || getKnownLocation()
+  if (knownLocation) {
+    flyToLocation(knownLocation[0], knownLocation[1], 14.5, 900)
+    setErrorMessage('Fitted map to your location', 2000)
+  }
+}
+
+const highlightAreaBoundary = async (
+  boundaryData: any,
+  {
+    fitMap = false,
+    showMessage = false,
+    messageLabel,
+  }: {
+    fitMap?: boolean
+    showMessage?: boolean
+    messageLabel?: string | null
+  } = {},
+) => {
+  activeBoundaryFeature.value = boundaryData
+  activeLocationBounds.value = getGeoJsonBounds(boundaryData)
+
+  if (!activeLocationCenter.value) {
+    activeLocationCenter.value = getBoundsCenter(activeLocationBounds.value)
+  }
+
+  applyBoundaryVisibility()
+
+  if (fitMap) {
+    fitMapToActiveArea()
+  }
+
+  if (showMessage && messageLabel) {
+    setErrorMessage(`Showing shops in ${messageLabel}`, 2500)
+  }
+}
+
+const refreshShopMetrics = () => {
+  const distanceOrigin =
+    (manualLocationBrowsing.value && activeLocationCenter.value) || getKnownLocation() || null
+
+  shops.value = rawShops.value
+    .map((shop) => {
+      const lat = Number(shop.latitude)
+      const lng = Number(shop.longitude)
+      const distanceKm =
+        distanceOrigin && validateCoordinates(lat, lng)
+          ? getDistanceKm(distanceOrigin[0], distanceOrigin[1], lat, lng)
+          : shop.distanceKm || 0
+
+      return {
+        ...shop,
+        distanceKm,
+        withinBoundary: isShopWithinBoundary(shop),
+      }
+    })
+    .sort((left, right) => left.distanceKm - right.distanceKm)
+}
+
+const refreshDisplayedShops = async () => {
+  refreshShopMetrics()
+
+  if (isSearchMode.value && search.value.trim()) {
+    await smartSearch()
+    return
+  }
+
+  applyShopFilters()
+}
+
+const resetLocationSelectionInputs = () => {
+  selectedProvinceCode.value = null
+  selectedProvinceName.value = null
+  selectedCityCode.value = null
+  selectedCityName.value = null
+  citiesMunicipalities.value = []
+}
+
+const activateCurrentLocationArea = async ({
+  centerMap = false,
+  syncSelectors = false,
+  showMessage = false,
+}: {
+  centerMap?: boolean
+  syncSelectors?: boolean
+  showMessage?: boolean
+} = {}) => {
+  manualLocationBrowsing.value = false
+  userCity.value = currentLocationCity.value
+  userProvince.value = currentLocationProvince.value
+  activeAreaScope.value = currentLocationCity.value
+    ? 'municipality'
+    : currentLocationProvince.value
+      ? 'province'
+      : null
+  if (!currentLocationCity.value) {
+    activeAreaIsIndependentCity.value = false
+  }
+
+  if (syncSelectors) {
+    resetLocationSelectionInputs()
+  }
+
+  await refreshDisplayedShops()
+
+  if (showBoundary.value && activeBoundaryFeature.value) {
+    applyBoundaryVisibility()
+  }
+
+  if (centerMap) {
+    fitMapToActiveArea()
+  }
+
+  if (showMessage) {
+    setErrorMessage('Showing shops near your current location', 2500)
+  }
+}
+
+const syncCurrentLocationArea = async (
+  lat: number,
+  lng: number,
+  { centerMap = false, showMessage = false }: { centerMap?: boolean; showMessage?: boolean } = {},
+) => {
+  const resolved = await resolveLocationFromCoordinates(lat, lng)
+
+  currentLocationCity.value = resolved.city
+  currentLocationProvince.value = resolved.province
+  currentLocationCityCode.value = resolved.cityCode
+  currentLocationProvinceCode.value = resolved.provinceCode
+
+  if (manualLocationBrowsing.value) {
+    return
+  }
+
+  userCity.value = resolved.city
+  userProvince.value = resolved.province
+  activeAreaScope.value = resolved.city ? 'municipality' : resolved.province ? 'province' : null
+  activeAreaIsIndependentCity.value = resolved.isIndependentCity
+  activeLocationCenter.value = resolved.center || [lat, lng]
+
+  const boundaryData =
+    resolved.feature ||
+    (await fetchBoundaryData({
+      cityName: resolved.city,
+      provinceName: resolved.province,
+      cityCode: resolved.cityCode,
+      provinceCode: resolved.provinceCode,
+      fallbackCenter: [lat, lng],
+    }))
+
+  if (boundaryData) {
+    activeBoundaryFeature.value = boundaryData
+    activeLocationBounds.value = getGeoJsonBounds(boundaryData)
+  } else {
+    activeBoundaryFeature.value = null
+    activeLocationBounds.value = null
+  }
+
+  await refreshDisplayedShops()
+
+  if (showBoundary.value && boundaryData) {
+    applyBoundaryVisibility()
+  } else if (!showBoundary.value) {
+    clearCityBoundary()
+  }
+
+  if (centerMap) {
+    fitMapToActiveArea()
+  }
+
+  if (showMessage) {
+    setErrorMessage(`Showing shops in ${activeLocationLabel.value || 'your current area'}`, 2500)
+  }
+}
+
+const navigateToSelectedArea = async () => {
+  if (!selectedProvinceName.value) {
+    await activateCurrentLocationArea({
+      centerMap: true,
+      syncSelectors: true,
+      showMessage: true,
+    })
+    return
+  }
+
+  locationNavigationLoading.value = true
+  boundaryLoading.value = true
+
+  try {
+    const areaScope: AreaScope = selectedCityName.value ? 'municipality' : 'province'
+    const boundaryData = await fetchBoundaryData({
+      cityName: selectedCityName.value,
+      provinceName: selectedProvinceName.value,
+      cityCode: selectedCityCode.value,
+      provinceCode: selectedProvinceCode.value,
+      fallbackCenter: getKnownLocation(),
+    })
+
+    if (!boundaryData) {
+      throw new Error('Boundary data unavailable')
+    }
+
+    manualLocationBrowsing.value = true
+    userCity.value = selectedCityName.value
+    userProvince.value = selectedProvinceName.value
+    activeAreaScope.value = areaScope
+    const boundaryFeatureForClass =
+      boundaryData?.type === 'FeatureCollection' ? boundaryData.features?.[0] : boundaryData
+    activeAreaIsIndependentCity.value = Boolean(
+      selectedCityName.value &&
+        isIndependentCityClass(getFeatureAttributes(boundaryFeatureForClass).CITY_CLASS),
+    )
+
+    activeBoundaryFeature.value = boundaryData
+    activeLocationBounds.value = getGeoJsonBounds(boundaryData)
+    activeLocationCenter.value =
+      getBoundsCenter(activeLocationBounds.value) ||
+      activeLocationCenter.value ||
+      getKnownLocation()
+
+    await refreshDisplayedShops()
+    await highlightAreaBoundary(boundaryData, {
+      fitMap: true,
+      showMessage: true,
+      messageLabel: activeLocationLabel.value || selectedProvinceName.value,
+    })
+  } catch (error) {
+    console.error('Manual location navigation failed:', error)
+    setErrorMessage('Unable to switch to that area right now.', 3000)
+  } finally {
+    boundaryLoading.value = false
+    locationNavigationLoading.value = false
+  }
+}
+
+const handleProvinceSelection = async (provinceCode: string | null) => {
+  selectedProvinceCode.value = provinceCode
+  selectedProvinceName.value =
+    provinces.value.find((province) => province.code === provinceCode)?.name || null
+  selectedCityCode.value = null
+  selectedCityName.value = null
+
+  if (!provinceCode) {
+    citiesMunicipalities.value = []
+    await activateCurrentLocationArea({
+      centerMap: true,
+      syncSelectors: true,
+      showMessage: true,
+    })
+    return
+  }
+
+  await fetchCitiesMunicipalities(provinceCode)
+  await navigateToSelectedArea()
+}
+
+const handleCitySelection = async (cityCode: string | null) => {
+  selectedCityCode.value = cityCode
+  selectedCityName.value =
+    citiesMunicipalities.value.find((city) => city.code === cityCode)?.name || null
+
+  if (!selectedProvinceName.value) return
+
+  await navigateToSelectedArea()
+}
+
+const openDisplayOptionsFromReminder = async () => {
+  showDisplayOptionsMenu.value = true
+  await ensureLocationOptionsLoaded()
+}
+
+const dismissPrimaryServiceAreaReminder = () => {
+  primaryServiceAreaReminderDismissed.value = true
+}
+
+const browsePrimaryServiceArea = async () => {
+  await ensureLocationOptionsLoaded()
+
+  const targetProvince = provinces.value.find((province) =>
+    locationNamesMatch(province.name, PRIMARY_SERVICE_AREA.provinceName),
+  )
+
+  if (!targetProvince) {
+    setErrorMessage(`Unable to load ${PRIMARY_SERVICE_AREA.provinceName} right now.`, 3000)
+    showDisplayOptionsMenu.value = true
+    return
+  }
+
+  selectedProvinceCode.value = targetProvince.code
+  selectedProvinceName.value = targetProvince.name
+  selectedCityCode.value = null
+  selectedCityName.value = null
+
+  await fetchCitiesMunicipalities(targetProvince.code)
+
+  const targetCity = citiesMunicipalities.value.find((city) =>
+    locationNamesMatch(city.name, PRIMARY_SERVICE_AREA.cityName),
+  )
+
+  if (!targetCity) {
+    setErrorMessage(`Unable to load ${PRIMARY_SERVICE_AREA.cityName} right now.`, 3000)
+    showDisplayOptionsMenu.value = true
+    return
+  }
+
+  selectedCityCode.value = targetCity.code
+  selectedCityName.value = targetCity.name
+
+  await navigateToSelectedArea()
+  showDisplayOptionsMenu.value = false
 }
 
 const toggleBoundaryVisibility = () => {
   showBoundary.value = !showBoundary.value
 
-  if (showBoundary.value && latitude.value && longitude.value) {
-    // Redraw boundary if turned on
-    highlightUserCityBoundary(latitude.value, longitude.value)
+  if (showBoundary.value && activeBoundaryFeature.value) {
+    applyBoundaryVisibility()
   } else {
-    // Clear boundary if turned off
     clearCityBoundary()
   }
 
-  setErrorMessage(showBoundary.value ? 'City boundary enabled' : 'City boundary disabled', 2000)
+  setErrorMessage(showBoundary.value ? 'Area boundary enabled' : 'Area boundary disabled', 2000)
 }
 
 /* -------------------- BOUNDARY CHECK -------------------- */
-const isShopWithinBoundary = (shop: any): boolean => {
-  if (!shop.latitude || !shop.longitude) {
-    return isShopInSameCity(shop)
-  }
-
-  const shopLat = Number(shop.latitude)
-  const shopLng = Number(shop.longitude)
-
-  if (!isFinite(shopLat) || !isFinite(shopLng)) {
-    return isShopInSameCity(shop)
-  }
-
-  // Fallback to city name matching
-  return isShopInSameCity(shop)
-}
-
 const isShopInSameCity = (shop: any): boolean => {
   if (!userCity.value || !shop.city) return false
 
-  const normalizeName = (name: string) => {
-    if (!name) return ''
-    return name
-      .toLowerCase()
-      .replace(/city|municipality|municipal|town|province|^\s+|\s+$/g, '')
-      .trim()
+  if (!locationNamesMatch(shop.city, userCity.value)) {
+    return false
   }
 
-  const userCityNormalized = normalizeName(userCity.value)
-  const shopCityNormalized = normalizeName(shop.city)
+  if (!userProvince.value || activeAreaIsIndependentCity.value) {
+    return true
+  }
 
-  if (!userCityNormalized || !shopCityNormalized) return false
+  return locationNamesMatch(shop.province, userProvince.value)
+}
 
-  return (
-    userCityNormalized === shopCityNormalized ||
-    shopCityNormalized.includes(userCityNormalized) ||
-    userCityNormalized.includes(shopCityNormalized)
-  )
+const isShopWithinBoundary = (shop: any): boolean => {
+  if (!userCity.value && !userProvince.value) return true
+
+  if (userCity.value) {
+    return isShopInSameCity(shop)
+  }
+
+  if (userProvince.value) {
+    return locationNamesMatch(shop.province, userProvince.value)
+  }
+
+  return true
 }
 
 /* -------------------- CACHE LOCATION -------------------- */
@@ -621,62 +1588,100 @@ function saveCachedLocation(lat: number, lng: number) {
   }
 }
 
-/* -------------------- RECENTER -------------------- */
-const recenterToUser = async () => {
+/* -------------------- LOCATION ACTIONS -------------------- */
+const zoomToMyLocation = async () => {
   if (!map.value || !mapboxgl) return
 
   locating.value = true
   errorMsg.value = null
 
-  try {
-    let targetLat: number, targetLng: number
+  const knownLocation = getKnownLocation()
 
-    if (latitude.value && longitude.value) {
-      targetLat = Number(latitude.value)
-      targetLng = Number(longitude.value)
-    } else {
-      try {
-        const position = await Geolocation.getCurrentPosition({
-          enableHighAccuracy: true,
-          timeout: 10000,
-        })
-        targetLat = position.coords.latitude
-        targetLng = position.coords.longitude
-      } catch (geolocationError) {
-        if (lastKnown.value) {
-          targetLat = lastKnown.value[0]
-          targetLng = lastKnown.value[1]
-          errorMsg.value = 'Using last known location'
-        } else {
-          errorMsg.value = 'Unable to determine your location'
-          return
-        }
-      }
+  try {
+    if (knownLocation) {
+      flyToLocation(knownLocation[0], knownLocation[1], 16.5, 850)
     }
 
-    // ALWAYS zoom to level 16 (zoom in)
-    const targetZoom = 16
+    try {
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: knownLocation ? 5000 : 0,
+      })
 
-    // Center map
-    map.value.flyTo({
-      center: [targetLng, targetLat],
-      zoom: targetZoom,
-      essential: true,
-      duration: 1000,
-    })
+      const currentLat = position.coords.latitude
+      const currentLng = position.coords.longitude
 
-    // Save and refresh boundary
-    saveCachedLocation(targetLat, targetLng)
-    await highlightUserCityBoundary(targetLat, targetLng)
+      if (!validateCoordinates(currentLat, currentLng)) {
+        throw new Error('Invalid location coordinates received')
+      }
 
-    // Show success message
-    setErrorMessage('Location updated', 2000)
+      hasValidLocation.value = true
+      saveCachedLocation(currentLat, currentLng)
+
+      const resolved = await resolveLocationFromCoordinates(currentLat, currentLng)
+      currentLocationCity.value = resolved.city
+      currentLocationProvince.value = resolved.province
+      currentLocationCityCode.value = resolved.cityCode
+      currentLocationProvinceCode.value = resolved.provinceCode
+      activeAreaIsIndependentCity.value = resolved.isIndependentCity
+      manualLocationBrowsing.value = false
+      userCity.value = resolved.city
+      userProvince.value = resolved.province
+      activeAreaScope.value = resolved.city ? 'municipality' : resolved.province ? 'province' : null
+      activeLocationCenter.value = [currentLat, currentLng]
+      resetLocationSelectionInputs()
+
+      const boundaryData =
+        resolved.feature ||
+        (await fetchBoundaryData({
+          cityName: resolved.city,
+          provinceName: resolved.province,
+          cityCode: resolved.cityCode,
+          provinceCode: resolved.provinceCode,
+          fallbackCenter: [currentLat, currentLng],
+        }))
+
+      activeBoundaryFeature.value = boundaryData
+      activeLocationBounds.value = getGeoJsonBounds(boundaryData)
+      await refreshDisplayedShops()
+
+      if (boundaryData) {
+        await highlightAreaBoundary(boundaryData, {
+          fitMap: false,
+        })
+      } else {
+        clearCityBoundary()
+      }
+
+      flyToLocation(currentLat, currentLng, 16.5, 850)
+      setErrorMessage('Centered on your current location', 2000)
+    } catch (geolocationError) {
+      console.warn('Unable to refresh current location:', geolocationError)
+
+      if (!knownLocation) {
+        setErrorMessage('Unable to determine your location', 3000)
+        return
+      }
+
+      flyToLocation(knownLocation[0], knownLocation[1], 16, 900)
+      await activateCurrentLocationArea({
+        centerMap: false,
+        syncSelectors: true,
+      })
+      setErrorMessage('Using your last known location', 2200)
+    }
   } catch (error) {
-    console.error('Error recentering:', error)
+    console.error('Error centering on current location:', error)
     setErrorMessage('Failed to update location', 3000)
   } finally {
     locating.value = false
   }
+}
+
+const recenterToUser = zoomToMyLocation
+const highlightUserCityBoundary = async (lat: number, lng: number) => {
+  await syncCurrentLocationArea(lat, lng, { centerMap: false })
 }
 
 /* -------------------- ROUTE MANAGEMENT -------------------- */
@@ -1054,7 +2059,7 @@ const getDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number) =
 const validateCoordinates = (lat: number, lng: number): boolean => {
   if (!isFinite(lat) || !isFinite(lng)) return false
   if (lat === 0 && lng === 0) return false // Avoid 0,0 coordinates
-  if (lat < -90 || lat > 90) return false  // Valid latitude range
+  if (lat < -90 || lat > 90) return false // Valid latitude range
   if (lng < -180 || lng > 180) return false // Valid longitude range
   return true
 }
@@ -1072,10 +2077,6 @@ const doFetchShops = async () => {
     loading.value = true
     errorMsg.value = null
 
-    const userLat = Number(latitude.value ?? lastKnown.value?.[0] ?? 0)
-    const userLng = Number(longitude.value ?? lastKnown.value?.[1] ?? 0)
-
-    // ✅ FIXED: Only fetch approved shops with valid coordinates
     const { data, error } = await supabase
       .from('shops')
       .select(
@@ -1100,50 +2101,32 @@ const doFetchShops = async () => {
         close_time,
         open_days,
         products:products(id, prod_name, price, main_img_urls)
-      `
+      `,
       )
-      .eq('status', 'approved')           // ✅ Only approved shops
-      .not('latitude', 'is', null)        // ✅ Only shops with latitude
-      .not('longitude', 'is', null)       // ✅ Only shops with longitude
+      .eq('status', 'approved') // ✅ Only approved shops
+      .not('latitude', 'is', null) // ✅ Only shops with latitude
+      .not('longitude', 'is', null) // ✅ Only shops with longitude
 
     if (error) throw error
-    
+
     if (!data) {
+      rawShops.value = []
       shops.value = []
       clearShopMarkers()
       return
     }
 
-    // ✅ Additional validation to ensure coordinates are valid numbers
-    const validShops = data.filter(shop => {
+    rawShops.value = data.filter((shop: any) => {
       const lat = Number(shop.latitude)
       const lng = Number(shop.longitude)
       return validateCoordinates(lat, lng)
     })
 
-    console.log(`✅ Found ${validShops.length} approved shops with valid coordinates (filtered from ${data.length} total)`)
-
-    const mapped = validShops.map((s) => {
-      const lat = Number(s.latitude)
-      const lng = Number(s.longitude)
-      const distanceKm = getDistanceKm(userLat, userLng, lat, lng)
-
-      // Check if shop is within city boundary
-      const withinBoundary = isShopWithinBoundary(s)
-
-      return {
-        ...s,
-        distanceKm,
-        withinBoundary,
-      }
-    })
-
-    shops.value = mapped.sort((a, b) => a.distanceKm - b.distanceKm)
-    applyShopFilters()
-    
+    await refreshDisplayedShops()
   } catch (e) {
     console.error('Error fetching shops:', e)
     errorMsg.value = 'Failed to fetch shops.'
+    rawShops.value = []
     shops.value = []
   } finally {
     loading.value = false
@@ -1162,26 +2145,26 @@ const fetchShops = () => {
 const applyShopFilters = () => {
   if (shopDisplayMode.value === 'within') {
     filteredShops.value = shops.value.filter(
-      (shop) => shop.withinBoundary || isShopInSameCity(shop),
+      (shop) => shop.withinBoundary || isShopWithinBoundary(shop),
     )
   } else {
     filteredShops.value = shops.value.filter(
-      (shop) => !shop.withinBoundary && !isShopInSameCity(shop),
+      (shop) => !shop.withinBoundary && !isShopWithinBoundary(shop),
     )
   }
 
-  plotShops()
+  plotShops(filteredShops.value)
 }
 
 const toggleDisplayMode = (mode: 'within' | 'outside') => {
   shopDisplayMode.value = mode
   applyShopFilters()
 
-  if (userCity.value) {
+  if (activeLocationLabel.value) {
     setErrorMessage(
       mode === 'within'
-        ? `Showing shops within ${userCity.value}`
-        : `Showing shops outside ${userCity.value}`,
+        ? `Showing shops within ${activeLocationShortLabel.value}`
+        : `Showing shops outside ${activeLocationShortLabel.value}`,
     )
   } else {
     setErrorMessage(
@@ -1194,13 +2177,14 @@ const toggleDisplayMode = (mode: 'within' | 'outside') => {
 const createShopPopup = (shop: any): string => {
   const statusDisplay = getShopStatusDisplay(shop)
   const isOpen = isShopCurrentlyOpen(shop)
-  
+  const distanceValue = (shop.searchDistance || shop.distanceKm || 0).toFixed(1)
+
   return `
     <div style="min-width: 240px; max-width: 280px; padding: 12px;" class="shop-popup-content">
       <!-- Shop Header -->
       <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 12px;">
-        <img src="${shop.logo_url || shop.physical_store || 'https://placehold.co/50x50?text=Shop'}" 
-             width="50" height="50" 
+        <img src="${shop.logo_url || shop.physical_store || 'https://placehold.co/50x50?text=Shop'}"
+             width="50" height="50"
              style="border-radius:8px;object-fit:cover;border: 2px solid ${statusDisplay.color};" />
         <div>
           <p style="margin:0;font-weight:bold;font-size:15px;color:#1f2937;">${shop.business_name}</p>
@@ -1208,12 +2192,15 @@ const createShopPopup = (shop: any): string => {
             <div style="background:${statusDisplay.color};color:white;padding:3px 10px;border-radius:12px;font-size:11px;font-weight:bold;">
               ${statusDisplay.text}
             </div>
-            ${shop.manual_status !== 'auto' ? 
-              '<span style="font-size:10px;color:#f59e0b;" title="Manual override">⚡</span>' : ''}
+            ${
+              shop.manual_status !== 'auto'
+                ? '<span style="font-size:10px;color:#f59e0b;" title="Manual override">⚡</span>'
+                : ''
+            }
           </div>
         </div>
       </div>
-      
+
       <!-- Essential Info -->
       <div style="font-size:13px;color:#4b5563;">
         <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
@@ -1222,44 +2209,49 @@ const createShopPopup = (shop: any): string => {
           </svg>
           <span>${getFullAddress(shop).split(',').slice(0, 2).join(',')}</span>
         </div>
-        
+
         <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
             <path d="M12 8v4l3 3m6-3c0 5.52-4.48 10-10 10S2 17.52 2 12 6.48 2 12 2s10 4.48 10 10z"/>
           </svg>
-          <span>
-            ${shop.distanceKm.toFixed(1)} km away
-          </span>
+          <span>${distanceValue} km ${manualLocationBrowsing.value ? 'from selected area' : 'away'}</span>
         </div>
-        
-        ${shop.open_time && shop.close_time ? `
+
+        ${
+          shop.open_time && shop.close_time
+            ? `
         <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 12px;">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="#6b7280">
             <path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/>
           </svg>
           <span>${formatTimeRange(shop.open_time, shop.close_time)}</span>
         </div>
-        ` : ''}
+        `
+            : ''
+        }
       </div>
-      
+
       <!-- Action Buttons -->
       <div style="display: flex; gap: 8px; margin-top: 16px; margin-right: 20px">
-        <button id="view-${shop.id}" 
+        <button id="view-${shop.id}"
                 class="popup-btn view-btn"
                 style="padding:8px 12px;background:#3b82f6;color:#fff;border:none;border-radius:8px;cursor:pointer;flex:1;font-size:13px;font-weight:600;">
           View Details
         </button>
-        <button id="route-${shop.id}" 
+        <button id="route-${shop.id}"
                 class="popup-btn route-btn"
                 style="padding:8px 12px;background:#10b981;color:#fff;border:none;border-radius:8px;cursor:pointer;flex:1;font-size:13px;font-weight:600;">
           Get Directions
         </button>
       </div>
-      
-      ${!isOpen ? 
-        `<p style="color: #ef4444; font-size: 12px; margin-top: 8px; padding: 4px; background: #fee; border-radius: 4px;">
+
+      ${
+        !isOpen
+          ? `<p style="color: #ef4444; font-size: 12px; margin-top: 8px; padding: 4px; background: #fee; border-radius: 4px;">
           Currently closed • Opens at ${formatTime12Hour(shop.open_time) || 'unknown'}
-        </p>` : ''}
+        </p>`
+          : ''
+      }
     </div>
   `
 }
@@ -1297,14 +2289,14 @@ const clearShopMarkers = () => {
   shopMarkers = []
 }
 
-const plotShops = () => {
+const plotShops = (source = filteredShops.value) => {
   if (!map.value || !mapboxgl) return
   clearShopMarkers()
 
   let plottedCount = 0
   let skippedCount = 0
 
-  for (const shop of filteredShops.value) {
+  for (const shop of source) {
     // Double-check: only plot approved shops
     if (shop.status !== 'approved') {
       skippedCount++
@@ -1313,7 +2305,7 @@ const plotShops = () => {
 
     const lat = Number(shop.latitude)
     const lng = Number(shop.longitude)
-    
+
     // ✅ Validate coordinates before plotting
     if (!validateCoordinates(lat, lng)) {
       console.warn(`Skipping shop ${shop.id} - invalid coordinates: ${lat}, ${lng}`)
@@ -1365,8 +2357,10 @@ const plotShops = () => {
 
     plottedCount++
   }
-  
-  console.log(`📍 Plotted ${plottedCount} shop markers (skipped ${skippedCount} shops without valid coordinates)`)
+
+  console.log(
+    `📍 Plotted ${plottedCount} shop markers (skipped ${skippedCount} shops without valid coordinates)`,
+  )
 }
 
 /* -------------------- FOCUS ON SHOP MARKER -------------------- */
@@ -1553,65 +2547,32 @@ const smartSearch = async () => {
   isSearchMode.value = true
 
   try {
-    // Get current user location for distance calculation
-    const userLat = Number(latitude.value ?? lastKnown.value?.[0])
-    const userLng = Number(longitude.value ?? lastKnown.value?.[1])
+    const localResults = getLocalSearchShops(query)
+    const outsideResults = getOutsideSearchShops(query)
 
-    const searchResults = shops.value.filter((shop) => {
-      const searchTerms = [
-        shop.business_name?.toLowerCase(),
-        shop.city?.toLowerCase(),
-        shop.barangay?.toLowerCase(),
-        shop.street?.toLowerCase(),
-        shop.province?.toLowerCase(),
-        ...(shop.products || []).map((p: any) => p.prod_name?.toLowerCase()),
-      ].filter(Boolean)
+    filteredShops.value = localResults
+    outsideSearchResults.value = outsideResults
+    showOutsideSearchResults.value = true
+    showShopMenu.value = true
 
-      return searchTerms.some((term) => term && term.includes(query))
-    })
+    if (localResults.length > 0) {
+      errorMsg.value = `Found ${localResults.length} results in ${searchLocationLabel.value}`
+      plotShops(localResults)
 
-    // Calculate distance for each result and sort
-    const sortedResults = searchResults
-      .map(shop => {
-        const lat = Number(shop.latitude)
-        const lng = Number(shop.longitude)
-        let distance = shop.distanceKm || 0
-        
-        // Recalculate distance if we have user location
-        if (isFinite(userLat) && isFinite(userLng) && isFinite(lat) && isFinite(lng)) {
-          distance = getDistanceKm(userLat, userLng, lat, lng)
-        }
-        
-        return {
-          ...shop,
-          searchDistance: distance
-        }
-      })
-      // Sort by distance (nearest first)
-      .sort((a, b) => a.searchDistance - b.searchDistance)
-
-    if (sortedResults.length === 0) {
-      errorMsg.value = `No shops or products found for "${query}"`
-      filteredShops.value = []
-      showShopMenu.value = true
-    } else {
-      const matchTypes = {
-        shops: sortedResults.filter(
-          (shop) => shop.business_name?.toLowerCase().includes(query) ||
-                  shop.city?.toLowerCase().includes(query)
-        ).length,
-        products: sortedResults.filter((shop) => getMatchingProducts(shop).length > 0).length,
+      if (localResults.length === 1) {
+        await focusOnShopMarker(localResults[0].id)
       }
-
-      errorMsg.value = `Found ${sortedResults.length} results (${matchTypes.shops} shops, ${matchTypes.products} with matching products) - Sorted by distance`
-      filteredShops.value = sortedResults
-      showShopMenu.value = true
-      plotShops()
-
-      if (sortedResults.length === 1) {
-        await focusOnShopMarker(sortedResults[0].id)
-      }
+      return
     }
+
+    if (outsideResults.length > 0) {
+      errorMsg.value = `No results found in ${searchLocationLabel.value}`
+      plotShops(outsideResults)
+      return
+    }
+
+    errorMsg.value = `No shops or products found for "${query}"`
+    plotShops([])
   } catch (error) {
     console.error('Search failed:', error)
     errorMsg.value = 'Search failed. Please try again.'
@@ -1623,16 +2584,19 @@ const smartSearch = async () => {
 const clearSearch = () => {
   search.value = ''
   isSearchMode.value = false
+  outsideSearchResults.value = []
+  showOutsideSearchResults.value = true
   applyShopFilters()
   showShopMenu.value = false
 
-  if (latitude.value && longitude.value) {
-    map.value?.flyTo({
-      center: [Number(longitude.value), Number(latitude.value)],
-      zoom: 13,
-      essential: true,
-      duration: 1000,
-    })
+  if (manualLocationBrowsing.value || activeBoundaryFeature.value) {
+    fitMapToActiveArea()
+    return
+  }
+
+  const knownLocation = getKnownLocation()
+  if (knownLocation) {
+    flyToLocation(knownLocation[0], knownLocation[1], 13.5, 900)
   }
 }
 
@@ -1642,15 +2606,44 @@ const getMatchingProducts = (shop: any): any[] => {
   return shop.products.filter((product: any) => product.prod_name?.toLowerCase().includes(query))
 }
 
+const matchesSearchQuery = (shop: any, query: string) => {
+  const searchTerms = [
+    shop.business_name?.toLowerCase(),
+    shop.city?.toLowerCase(),
+    shop.barangay?.toLowerCase(),
+    shop.street?.toLowerCase(),
+    shop.province?.toLowerCase(),
+    ...(shop.products || []).map((product: any) => product.prod_name?.toLowerCase()),
+  ].filter(Boolean)
+
+  return searchTerms.some((term) => term && term.includes(query))
+}
+
+const sortSearchResults = (items: any[]) =>
+  [...items]
+    .map((shop) => ({
+      ...shop,
+      searchDistance: shop.searchDistance ?? shop.distanceKm ?? 0,
+    }))
+    .sort((left, right) => left.searchDistance - right.searchDistance)
+
+const getLocalSearchShops = (query: string) =>
+  sortSearchResults(
+    shops.value
+      .filter((shop) => matchesSearchQuery(shop, query))
+      .filter((shop) => isShopWithinBoundary(shop)),
+  )
+
+const getOutsideSearchShops = (query: string) =>
+  sortSearchResults(
+    shops.value
+      .filter((shop) => matchesSearchQuery(shop, query))
+      .filter((shop) => !isShopWithinBoundary(shop)),
+  )
+
 const hasSearchMatch = (shop: any): boolean => {
   if (!isSearchMode.value || !search.value) return false
-  const query = search.value.toLowerCase()
-  return (
-    shop.business_name?.toLowerCase().includes(query) ||
-    shop.city?.toLowerCase().includes(query) ||
-    shop.barangay?.toLowerCase().includes(query) ||
-    getMatchingProducts(shop).length > 0
-  )
+  return matchesSearchQuery(shop, search.value.toLowerCase())
 }
 
 const onSearchKeydown = (e: KeyboardEvent) => {
@@ -1664,14 +2657,20 @@ const toggleShopMenu = () => {
   }
 }
 
+const isOutsideSearchResult = (shop: any) => outsideSearchResultIds.value.has(String(shop.id))
+
+const getShopLocationSummary = (shop: any) => {
+  const parts = [shop.city, shop.province].filter(Boolean)
+  return parts.join(', ') || 'Outside your area'
+}
+
 /* -------------------- SHOP SELECTION -------------------- */
-const handleShopClick = async (shopId: string, index: number) => {
+const handleShopClick = async (shopId: string, _index: number) => {
   selectedShopId.value = shopId
   await focusOnShopFromList(shopId)
 }
 
 const focusOnShopFromList = async (shopId: string) => {
-  console.log('Focusing on shop from list:', shopId)
   showShopMenu.value = false
   await new Promise((resolve) => setTimeout(resolve, 300))
   await focusOnShopMarker(shopId)
@@ -1731,25 +2730,27 @@ onMounted(async () => {
     console.log('Got location:', quickLat, quickLng)
 
     if (map.value) {
-      map.value.flyTo({
-        center: [quickLng, quickLat],
-        zoom: 14,
-        essential: true,
-        duration: 1000,
-      })
-
-      await highlightUserCityBoundary(quickLat, quickLng)
+      flyToLocation(quickLat, quickLng, 14, 1000)
     }
 
     saveCachedLocation(quickLat, quickLng)
-
-    setTimeout(() => {
-      doFetchShops()
-    }, 1000)
+    hasValidLocation.value = true
+    await syncCurrentLocationArea(quickLat, quickLng, {
+      centerMap: false,
+    })
+    await doFetchShops()
   } catch (err) {
     console.warn('Quick geolocation failed:', err)
     setErrorMessage('Location access failed. Using default location.', 3000)
-    doFetchShops()
+
+    const knownLocation = getKnownLocation()
+    if (knownLocation) {
+      await syncCurrentLocationArea(knownLocation[0], knownLocation[1], {
+        centerMap: false,
+      })
+    }
+
+    await doFetchShops()
   }
 })
 
@@ -1773,11 +2774,35 @@ watch(
     hasValidLocation.value = true
 
     saveCachedLocation(userLat, userLng)
-    await highlightUserCityBoundary(userLat, userLng)
-    void doFetchShops()
+    await syncCurrentLocationArea(userLat, userLng, {
+      centerMap: false,
+    })
   },
   { immediate: true },
 )
+
+watch(showDisplayOptionsMenu, (isOpen) => {
+  if (isOpen) {
+    void ensureLocationOptionsLoaded()
+  }
+})
+
+watch(primaryServiceAreaReminderLocationKey, (nextKey, previousKey) => {
+  if (!nextKey) {
+    primaryServiceAreaReminderDismissed.value = false
+    return
+  }
+
+  if (previousKey && nextKey !== previousKey) {
+    primaryServiceAreaReminderDismissed.value = false
+  }
+})
+
+watch(showOutsideSearchResults, (isVisible) => {
+  if (!isSearchMode.value || hasLocalSearchResults.value || !hasOutsideSearchResults.value) return
+
+  plotShops(isVisible ? outsideSearchResults.value : [])
+})
 
 onUnmounted(() => {
   stopWatching()
@@ -1799,489 +2824,762 @@ onUnmounted(() => {
       :threshold="150"
       :ignore-selectors="mapPullIgnoreSelectors"
     >
-    <!-- Hero Section - Fixed positioning -->
-    <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
-      <div class="hero-row">
-        <v-text-field
-          v-model="search"
-          class="search-field"
-          variant="solo"
-          rounded="pill"
-          hide-details
-          clearable
-          density="comfortable"
-          placeholder="Looking for something?"
-          append-inner-icon="mdi-magnify"
-          @keydown="onSearchKeydown"
-          @click:clear="clearSearch"
-          @click:append-inner="smartSearch"
-        />
-        <v-btn
-          class="search-btn"
-          @click="smartSearch"
-          :loading="loading"
-          :disabled="!search.trim()"
-          elevation="2"
-        >
-          <v-icon size="20">mdi-magnify</v-icon>
-        </v-btn>
-      </div>
-    </v-sheet>
+      <!-- Hero Section - Fixed positioning -->
+      <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
+        <div class="hero-row">
+          <v-text-field
+            v-model="search"
+            class="search-field"
+            variant="solo"
+            rounded="pill"
+            hide-details
+            clearable
+            density="comfortable"
+            placeholder="Looking for something?"
+            append-inner-icon="mdi-magnify"
+            @keydown="onSearchKeydown"
+            @click:clear="clearSearch"
+            @click:append-inner="smartSearch"
+          />
+          <v-btn
+            class="search-btn"
+            @click="smartSearch"
+            :loading="loading"
+            :disabled="!search.trim()"
+            elevation="2"
+          >
+            <v-icon size="20">mdi-magnify</v-icon>
+          </v-btn>
+        </div>
+      </v-sheet>
 
-    <!-- Main Content Area -->
-    <v-main class="main-content">
-      <div id="map" class="map-container" data-ptr-ignore></div>
+      <!-- Main Content Area -->
+      <v-main class="main-content">
+        <div id="map" class="map-container" data-ptr-ignore></div>
 
-      <!-- Boundary Loading Overlay -->
-      <div v-if="boundaryLoading" class="boundary-loading">
-        <v-progress-circular indeterminate color="primary" size="24"></v-progress-circular>
-        <span>Detecting city boundary...</span>
-      </div>
-
-      <!-- Route Loading Overlay -->
-      <div v-if="routeLoading" class="route-loading">
-        <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
-        <span>Calculating routes...</span>
-      </div>
-
-      <!-- Route Selection Panel -->
-      <v-card v-if="showRoutePanel" :class="['route-selection-panel', 'bottom-panel', { 'minimized': routePanelMinimized }]" elevation="4">
-        <v-card-title class="d-flex align-center justify-space-between py-2">
-          <div class="d-flex align-center">
-            <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
-            <span class="text-subtitle-1 font-weight-bold">Route Options</span>
+        <transition name="service-area-banner-fade">
+          <div v-if="showPrimaryServiceAreaReminder" class="service-area-banner-wrap">
+            <v-alert
+              class="service-area-banner"
+              color="info"
+              variant="tonal"
+              border="start"
+              icon="mdi-information-outline"
+            >
+              <div class="service-area-banner-content">
+                <div class="service-area-banner-top">
+                  <div class="service-area-banner-lead">
+                    <div class="service-area-banner-eyebrow">Primary Service Area</div>
+                    <div class="service-area-banner-title">
+                      You are currently outside Butuan City
+                    </div>
+                  </div>
+                  <v-btn
+                    icon
+                    variant="text"
+                    size="x-small"
+                    class="service-area-banner-dismiss"
+                    aria-label="Dismiss primary service area reminder"
+                    @click="dismissPrimaryServiceAreaReminder"
+                  >
+                    <v-icon size="18">mdi-close</v-icon>
+                  </v-btn>
+                </div>
+                <p class="service-area-banner-copy">
+                  Butuan City is the main service area of this app, where registered shops are
+                  currently available. Please use the Display Options below to navigate to Butuan
+                  City.
+                </p>
+                <div v-if="currentLocationLabel" class="service-area-banner-meta">
+                  Current location: {{ currentLocationLabel }}
+                </div>
+                <div class="service-area-banner-actions">
+                  <v-btn
+                    color="info"
+                    variant="flat"
+                    size="small"
+                    class="service-area-banner-btn"
+                    :loading="locationNavigationLoading"
+                    @click="browsePrimaryServiceArea"
+                  >
+                    Go to Butuan City
+                  </v-btn>
+                  <v-btn
+                    variant="text"
+                    size="small"
+                    class="service-area-banner-link"
+                    @click="openDisplayOptionsFromReminder"
+                  >
+                    Open Display Options
+                  </v-btn>
+                </div>
+              </div>
+            </v-alert>
           </div>
-          <div class="d-flex align-center gap-1">
-            <!-- Minimize Button -->
-            <v-btn 
-              icon 
-              size="small" 
-              @click="toggleRoutePanelMinimize" 
-              variant="text" 
-              :title="routePanelMinimized ? 'Expand panel' : 'Minimize panel'"
+        </transition>
+
+        <!-- Boundary Loading Overlay -->
+        <div v-if="boundaryLoading || locationNavigationLoading" class="boundary-loading">
+          <v-progress-circular indeterminate color="primary" size="24"></v-progress-circular>
+          <span>{{ locationOverlayMessage }}</span>
+        </div>
+
+        <!-- Route Loading Overlay -->
+        <div v-if="routeLoading" class="route-loading">
+          <v-progress-circular indeterminate color="primary" size="32"></v-progress-circular>
+          <span>Calculating routes...</span>
+        </div>
+
+        <!-- Route Selection Panel -->
+        <v-card
+          v-if="showRoutePanel"
+          :class="['route-selection-panel', 'bottom-panel', { minimized: routePanelMinimized }]"
+          elevation="4"
+        >
+          <v-card-title class="d-flex align-center justify-space-between py-2">
+            <div class="d-flex align-center">
+              <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
+              <span class="text-subtitle-1 font-weight-bold">Route Options</span>
+            </div>
+            <div class="d-flex align-center gap-1">
+              <!-- Minimize Button -->
+              <v-btn
+                icon
+                size="small"
+                @click="toggleRoutePanelMinimize"
+                variant="text"
+                :title="routePanelMinimized ? 'Expand panel' : 'Minimize panel'"
+              >
+                <v-icon>{{ routePanelMinimized ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              </v-btn>
+              <!-- Close Button -->
+              <v-btn
+                icon
+                size="small"
+                @click="clearAllRoutes"
+                variant="text"
+                title="Close route panel"
+              >
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </div>
+          </v-card-title>
+
+          <v-card-text v-if="!routePanelMinimized" class="py-3">
+            <div class="route-buttons-grid">
+              <v-btn
+                v-for="type in ['driving', 'walking', 'cycling'] as RouteType[]"
+                :key="type"
+                :color="
+                  selectedRouteType === type
+                    ? routeConfig[type].activeColor
+                    : routeConfig[type].color
+                "
+                variant="flat"
+                class="route-type-btn"
+                @click="selectRouteType(type)"
+                :disabled="!routeOptions.find((r) => r.type === type)"
+              >
+                <v-icon start>{{ routeConfig[type].icon }}</v-icon>
+                {{ routeConfig[type].label }}
+                <template v-if="routeOptions.find((r) => r.type === type)">
+                  <v-spacer></v-spacer>
+                  <span class="ml-2 text-caption">
+                    {{ Math.round(routeOptions.find((r) => r.type === type)!.duration / 60) }} min
+                  </span>
+                </template>
+              </v-btn>
+            </div>
+
+            <!-- Route Info -->
+            <div
+              v-if="routeOptions.find((r) => r.type === selectedRouteType)"
+              class="route-info mt-3"
             >
-              <v-icon>{{ routePanelMinimized ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
+              <v-divider class="my-2"></v-divider>
+              <div class="d-flex justify-space-between align-center">
+                <div>
+                  <div class="text-caption text-medium-emphasis">Distance</div>
+                  <div class="text-body-1 font-weight-medium">
+                    {{
+                      (
+                        routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000
+                      ).toFixed(1)
+                    }}
+                    km
+                  </div>
+                </div>
+                <div>
+                  <div class="text-caption text-medium-emphasis">Duration</div>
+                  <div class="text-body-1 font-weight-medium">
+                    {{
+                      Math.round(
+                        routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60,
+                      )
+                    }}
+                    minutes
+                  </div>
+                </div>
+              </div>
+            </div>
+          </v-card-text>
+
+          <!-- Minimized Panel Content -->
+          <v-card-text v-else class="py-2 px-3">
+            <div class="d-flex align-center justify-space-between">
+              <div class="d-flex align-center">
+                <v-icon color="primary" size="small" class="mr-2">mdi-routes</v-icon>
+                <span class="text-caption text-medium-emphasis">Route calculated</span>
+              </div>
+              <div class="d-flex align-center">
+                <span class="text-caption font-weight-medium mr-2">
+                  {{
+                    routeOptions.find((r) => r.type === selectedRouteType)
+                      ? `${(routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(1)} km • ${Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)} min`
+                      : ''
+                  }}
+                </span>
+                <v-icon size="small" :color="routeConfig[selectedRouteType].color">
+                  {{ routeConfig[selectedRouteType].icon }}
+                </v-icon>
+              </div>
+            </div>
+          </v-card-text>
+        </v-card>
+
+        <!-- Map Controls Container -->
+        <div class="map-controls-container" v-if="!showShopMenu && !showRoutePanel">
+          <!-- Display Mode Chip -->
+          <v-chip
+            v-if="activeLocationLabel"
+            :color="shopDisplayMode === 'within' ? 'green' : 'orange'"
+            size="small"
+            class="mode-chip"
+          >
+            <v-icon small class="mr-1">
+              {{ shopDisplayMode === 'within' ? 'mdi-checkbox-marked-circle' : 'mdi-arrow-expand' }}
+            </v-icon>
+            {{ shopDisplayMode === 'within' ? 'Within' : 'Outside' }} {{ activeLocationShortLabel }}
+          </v-chip>
+
+          <div class="map-controls-group">
+            <!-- Shop Menu Toggle -->
+            <v-btn
+              @click="toggleShopMenu"
+              class="control-btn"
+              variant="text"
+              rounded="xl"
+              title="Show shops list"
+              aria-label="Show shops"
+            >
+              <span class="control-btn-content">
+                <v-icon size="22" color="primary">mdi-store</v-icon>
+                <span class="control-btn-label">Show Shops</span>
+              </span>
             </v-btn>
-            <!-- Close Button -->
-            <v-btn 
-              icon 
-              size="small" 
-              @click="clearAllRoutes" 
-              variant="text" 
-              title="Close route panel"
+
+            <!-- Display Mode Menu -->
+            <v-menu
+              v-model="showDisplayOptionsMenu"
+              :close-on-content-click="false"
+              location="top center"
+              transition="scale-transition"
             >
+              <template #activator="{ props }">
+                <v-btn
+                  v-bind="props"
+                  :loading="locationNavigationLoading"
+                  title="Display Options"
+                  class="control-btn"
+                  variant="text"
+                  rounded="xl"
+                  aria-label="Display options"
+                >
+                  <span class="control-btn-content">
+                    <v-icon size="22" color="primary">mdi-filter</v-icon>
+                    <span class="control-btn-label">Display Options</span>
+                  </span>
+                </v-btn>
+              </template>
+              <v-card class="display-options-card" rounded="xl">
+                <v-card-title class="display-options-title">
+                  <div>
+                    <div class="text-subtitle-1 font-weight-bold">Display Options</div>
+                    <div class="text-caption text-medium-emphasis">
+                      Browse shops by your current municipality or switch to another province and
+                      municipality.
+                    </div>
+                  </div>
+                  <v-chip size="small" color="primary" variant="tonal">
+                    {{ activeLocationModeLabel }} {{ activeAreaScopeLabel }}
+                  </v-chip>
+                </v-card-title>
+
+                <v-card-text class="pt-0">
+                  <div class="display-options-section">
+                    <div class="display-options-section-title">Shop Coverage</div>
+                    <v-btn-group class="display-options-toggle" variant="outlined" divided>
+                      <v-btn
+                        :color="shopDisplayMode === 'within' ? 'primary' : undefined"
+                        @click="toggleDisplayMode('within')"
+                      >
+                        <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
+                        Within
+                      </v-btn>
+                      <v-btn
+                        :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
+                        @click="toggleDisplayMode('outside')"
+                      >
+                        <v-icon start size="small">mdi-arrow-expand</v-icon>
+                        Outside
+                      </v-btn>
+                    </v-btn-group>
+                    <div class="display-options-helper">
+                      Currently showing: {{ activeLocationLabel || 'All approved shops' }}
+                      <span v-if="activeLocationLabel"
+                        >({{ activeAreaScopeLabel.toLowerCase() }})</span
+                      >
+                    </div>
+                  </div>
+
+                  <div class="display-options-section">
+                    <div class="display-options-section-title">Browse Another Area</div>
+                    <div class="display-options-helper">
+                      Select a province, then optionally choose a city or municipality, including
+                      independent cities when available, to move the map and reload nearby shops
+                      there.
+                    </div>
+
+                    <v-autocomplete
+                      v-model="selectedProvinceCode"
+                      :items="provinces"
+                      item-title="name"
+                      item-value="code"
+                      label="Province"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-map-marker-radius"
+                      hide-details="auto"
+                      clearable
+                      :loading="provincesLoading"
+                      no-data-text="No provinces found"
+                      @update:modelValue="handleProvinceSelection"
+                    />
+
+                    <v-autocomplete
+                      v-model="selectedCityCode"
+                      :items="citiesMunicipalities"
+                      item-title="name"
+                      item-value="code"
+                      label="City / Municipality"
+                      variant="outlined"
+                      density="comfortable"
+                      prepend-inner-icon="mdi-city"
+                      hide-details="auto"
+                      clearable
+                      :disabled="!selectedProvinceCode"
+                      :loading="citiesLoading"
+                      no-data-text="No cities or municipalities found"
+                      @update:modelValue="handleCitySelection"
+                    />
+                  </div>
+
+                  <div class="display-options-section">
+                    <div class="display-options-section-title">Map Boundary</div>
+                    <div class="display-options-helper">
+                      Show the active province or municipality outline so you can see the area being
+                      used for shop results.
+                    </div>
+                    <v-btn
+                      block
+                      variant="outlined"
+                      :color="showBoundary ? 'primary' : undefined"
+                      @click="toggleBoundaryVisibility"
+                    >
+                      <v-icon start>{{ showBoundary ? 'mdi-eye' : 'mdi-eye-off' }}</v-icon>
+                      {{ showBoundary ? 'Hide Boundary' : 'Show Boundary' }}
+                    </v-btn>
+                  </div>
+                </v-card-text>
+              </v-card>
+            </v-menu>
+
+            <v-btn
+              :loading="locating"
+              @click="zoomToMyLocation"
+              :disabled="!hasValidLocation && !lastKnown"
+              :title="hasValidLocation ? 'Go to my current location' : 'Location not available'"
+              class="control-btn"
+              variant="text"
+              rounded="xl"
+              aria-label="My location"
+            >
+              <span class="control-btn-content">
+                <v-icon :color="hasValidLocation ? 'primary' : 'grey'" size="22">
+                  mdi-crosshairs-gps
+                </v-icon>
+                <span class="control-btn-label">My Location</span>
+              </span>
+            </v-btn>
+
+            <!-- Fit Map Button -->
+            <v-btn
+              @click="fitMapToActiveArea"
+              :disabled="!activeLocationCenter && !hasValidLocation && !lastKnown"
+              title="Fit map to active area"
+              class="control-btn"
+              variant="text"
+              rounded="xl"
+              aria-label="Fit map"
+            >
+              <span class="control-btn-content">
+                <v-icon
+                  :color="
+                    activeLocationCenter || hasValidLocation || lastKnown ? 'primary' : 'grey'
+                  "
+                  size="22"
+                >
+                  mdi-fit-to-page
+                </v-icon>
+                <span class="control-btn-label">Fit Map</span>
+              </span>
+            </v-btn>
+          </div>
+        </div>
+
+        <!-- Re-open Route Panel Button -->
+        <v-btn
+          v-if="routeOptions.length > 0 && !showRoutePanel"
+          class="reopen-route-btn"
+          @click="showRouteSelectionPanel"
+          icon
+          size="large"
+          elevation="3"
+          title="Show route options"
+        >
+          <v-badge dot color="green" offset-x="-8" offset-y="2">
+            <v-icon color="primary">mdi-routes</v-icon>
+          </v-badge>
+        </v-btn>
+
+        <!-- Error Message Alert -->
+        <v-alert
+          v-if="errorMsg"
+          type="info"
+          :class="[
+            'route-info-alert',
+            { 'route-info-alert-with-service-area': showPrimaryServiceAreaReminder },
+          ]"
+          @click="setErrorMessage(null)"
+          style="cursor: pointer"
+        >
+          <div class="d-flex justify-center align-center">
+            <span class="alert-text">{{ errorMsg }}</span>
+            <v-btn icon size="small" @click.stop="setErrorMessage(null)" class="ml-2">
               <v-icon>mdi-close</v-icon>
             </v-btn>
           </div>
-        </v-card-title>
+        </v-alert>
+      </v-main>
 
-        <v-card-text v-if="!routePanelMinimized" class="py-3">
-          <div class="route-buttons-grid">
-            <v-btn
-              v-for="type in ['driving', 'walking', 'cycling'] as RouteType[]"
-              :key="type"
-              :color="
-                selectedRouteType === type ? routeConfig[type].activeColor : routeConfig[type].color
-              "
-              variant="flat"
-              class="route-type-btn"
-              @click="selectRouteType(type)"
-              :disabled="!routeOptions.find((r) => r.type === type)"
-            >
-              <v-icon start>{{ routeConfig[type].icon }}</v-icon>
-              {{ routeConfig[type].label }}
-              <template v-if="routeOptions.find((r) => r.type === type)">
-                <v-spacer></v-spacer>
-                <span class="ml-2 text-caption">
-                  {{ Math.round(routeOptions.find((r) => r.type === type)!.duration / 60) }} min
-                </span>
-              </template>
-            </v-btn>
-          </div>
-
-          <!-- Route Info -->
-          <div
-            v-if="routeOptions.find((r) => r.type === selectedRouteType)"
-            class="route-info mt-3"
-          >
-            <v-divider class="my-2"></v-divider>
-            <div class="d-flex justify-space-between align-center">
-              <div>
-                <div class="text-caption text-medium-emphasis">Distance</div>
-                <div class="text-body-1 font-weight-medium">
-                  {{
-                    (
-                      routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000
-                    ).toFixed(1)
-                  }}
-                  km
-                </div>
+      <!-- Shop Menu Drawer -->
+      <v-navigation-drawer
+        v-model="showShopMenu"
+        location="right"
+        temporary
+        width="400"
+        class="shop-drawer"
+      >
+        <v-card class="shop-drawer-card h-100 d-flex flex-column" rounded="0">
+          <div class="shop-drawer-header">
+            <div class="shop-drawer-header-main">
+              <div class="shop-drawer-icon-wrap">
+                <v-icon color="primary" size="22">mdi-store</v-icon>
               </div>
-              <div>
-                <div class="text-caption text-medium-emphasis">Duration</div>
-                <div class="text-body-1 font-weight-medium">
-                  {{
-                    Math.round(
-                      routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60,
-                    )
-                  }}
-                  minutes
-                </div>
+
+              <div class="shop-drawer-heading">
+                <div class="shop-drawer-context">{{ shopDrawerContextLabel }}</div>
+                <div class="shop-drawer-title">{{ shopDrawerTitle }}</div>
+                <div class="shop-drawer-subtitle">{{ shopDrawerSubtitle }}</div>
               </div>
-            </div>
-          </div>
-        </v-card-text>
 
-        <!-- Minimized Panel Content -->
-        <v-card-text v-else class="py-2 px-3">
-          <div class="d-flex align-center justify-space-between">
-            <div class="d-flex align-center">
-              <v-icon color="primary" size="small" class="mr-2">mdi-routes</v-icon>
-              <span class="text-caption text-medium-emphasis">Route calculated</span>
-            </div>
-            <div class="d-flex align-center">
-              <span class="text-caption font-weight-medium mr-2">
-                {{ routeOptions.find((r) => r.type === selectedRouteType) ? 
-                  `${(routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(1)} km • ${Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)} min` 
-                  : '' }}
-              </span>
-              <v-icon size="small" :color="routeConfig[selectedRouteType].color">
-                {{ routeConfig[selectedRouteType].icon }}
-              </v-icon>
-            </div>
-          </div>
-        </v-card-text>
-      </v-card>
-
-      <!-- Map Controls Container -->
-      <div class="map-controls-container" v-if="!showShopMenu && !showRoutePanel">
-        <!-- Display Mode Chip -->
-        <v-chip
-          v-if="userCity"
-          :color="shopDisplayMode === 'within' ? 'green' : 'orange'"
-          size="small"
-          class="mode-chip"
-        >
-          <v-icon small class="mr-1">
-            {{ shopDisplayMode === 'within' ? 'mdi-checkbox-marked-circle' : 'mdi-arrow-expand' }}
-          </v-icon>
-          {{ shopDisplayMode === 'within' ? 'Within' : 'Outside' }} {{ userCity }}
-        </v-chip>
-
-        <div class="map-controls-group">
-          <!-- Shop Menu Toggle -->
-          <v-btn icon @click="toggleShopMenu" class="control-btn" title="Show shops list">
-            <v-icon>mdi-store</v-icon>
-          </v-btn>
-
-          <!-- Display Mode Menu -->
-          <v-menu location="top" transition="scale-transition" color="#ffffff">
-            <template #activator="{ props }">
-              <v-btn icon v-bind="props" title="Display Options" class="control-btn">
-                <v-icon>mdi-filter</v-icon>
+              <v-btn
+                icon
+                @click="showShopMenu = false"
+                variant="text"
+                size="small"
+                class="shop-drawer-close"
+                aria-label="Close shop menu"
+              >
+                <v-icon>mdi-close</v-icon>
               </v-btn>
-            </template>
-            <v-list>
-              <v-list-item @click="toggleDisplayMode('within')">
-                <v-list-item-title>
-                  <v-icon color="green" class="mr-2">mdi-checkbox-marked-circle</v-icon>
-                  Show Shops Within City
-                </v-list-item-title>
-                <v-list-item-subtitle
-                  >Display shops located in {{ userCity || 'your city' }}</v-list-item-subtitle
-                >
-              </v-list-item>
-              <v-list-item @click="toggleDisplayMode('outside')">
-                <v-list-item-title>
-                  <v-icon color="orange" class="mr-2">mdi-arrow-expand</v-icon>
-                  Show Shops Outside City
-                </v-list-item-title>
-                <v-list-item-subtitle
-                  >Display shops outside {{ userCity || 'your city' }}</v-list-item-subtitle
-                >
-              </v-list-item>
-              <v-divider></v-divider>
-              <v-list-item @click="toggleBoundaryVisibility">
-                <v-list-item-title>
-                  <v-icon :color="showBoundary ? 'green' : 'grey'" class="mr-2">
-                    {{ showBoundary ? 'mdi-eye' : 'mdi-eye-off' }}
-                  </v-icon>
-                  {{ showBoundary ? 'Hide' : 'Show' }} City Boundary
-                </v-list-item-title>
-              </v-list-item>
-            </v-list>
-          </v-menu>
-
-          <!-- Recenter Button -->
-          <v-btn
-            icon
-            :loading="locating"
-            @click="recenterToUser"
-            :disabled="!hasValidLocation && !lastKnown"
-            :title="hasValidLocation ? 'Recenter to my location' : 'Location not available'"
-            class="control-btn"
-          >
-            <v-icon :color="hasValidLocation ? 'primary' : 'grey'">mdi-crosshairs-gps</v-icon>
-          </v-btn>
-        </div>
-      </div>
-
-      <!-- Re-open Route Panel Button -->
-      <v-btn
-        v-if="routeOptions.length > 0 && !showRoutePanel"
-        class="reopen-route-btn"
-        @click="showRouteSelectionPanel"
-        icon
-        size="large"
-        elevation="3"
-        title="Show route options"
-      >
-        <v-badge
-          dot
-          color="green"
-          offset-x="-8"
-          offset-y="2"
-        >
-          <v-icon color="primary">mdi-routes</v-icon>
-        </v-badge>
-      </v-btn>
-
-      <!-- Error Message Alert -->
-      <v-alert
-        v-if="errorMsg"
-        type="info"
-        class="route-info-alert"
-        @click="setErrorMessage(null)"
-        style="cursor: pointer"
-      >
-        <div class="d-flex justify-center align-center">
-          <span class="alert-text">{{ errorMsg }}</span>
-          <v-btn icon size="small" @click.stop="setErrorMessage(null)" class="ml-2">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </div>
-      </v-alert>
-    </v-main>
-
-    <!-- Shop Menu Drawer -->
-    <v-navigation-drawer v-model="showShopMenu" location="right" temporary width="400">
-      <v-card class="h-100 d-flex flex-column">
-        <!-- Header -->
-        <v-card-title class="d-flex align-center bg-blue-lighten-5">
-          <v-icon color="primary" class="mr-2">mdi-store</v-icon>
-          <span class="text-h6 font-weight-bold">
-            {{ isSearchMode ? 'Search Results' : 'Shops & Products' }}
-          </span>
-          <v-spacer></v-spacer>
-          <v-btn icon @click="showShopMenu = false" variant="text" size="small">
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </v-card-title>
-
-        <!-- Search Stats -->
-        <v-card-subtitle v-if="isSearchMode && search" class="pt-3 pb-2">
-          <div class="d-flex align-center justify-space-between">
-            <span class="text-caption text-medium-emphasis">
-              Found {{ filteredShops.length }} results for "{{ search }}"
-            </span>
-            <v-btn size="x-small" variant="text" @click="clearSearch" class="text-caption">
-              Clear
-            </v-btn>
+            </div>
           </div>
-        </v-card-subtitle>
 
-        <!-- Display Mode Toggle -->
-        <v-card-text v-if="!isSearchMode && userCity" class="pt-2 pb-3">
-          <v-btn-group variant="outlined" class="w-100">
-            <v-btn
-              :color="shopDisplayMode === 'within' ? 'primary' : undefined"
-              @click="toggleDisplayMode('within')"
-              size="small"
-              class="flex-grow-1"
-            >
-              <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
-              Within {{ userCity }}
-            </v-btn>
-            <v-btn
-              :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
-              @click="toggleDisplayMode('outside')"
-              size="small"
-              class="flex-grow-1"
-            >
-              <v-icon start size="small">mdi-arrow-expand</v-icon>
-              Outside {{ userCity }}
-            </v-btn>
-          </v-btn-group>
-        </v-card-text>
+          <div class="shop-drawer-scroll">
+            <div v-if="isSearchMode && search" class="shop-drawer-search-meta">
+              <div class="shop-drawer-search-meta-row">
+                <span class="shop-drawer-search-result-text">
+                  <template v-if="hasLocalSearchResults">
+                    Found {{ filteredShops.length }} results in {{ searchLocationLabel }} for "{{
+                      search
+                    }}"
+                  </template>
+                  <template v-else-if="hasOutsideSearchResults">
+                    No local results for "{{ search }}". {{ outsideSearchResults.length }} available
+                    outside {{ searchLocationLabel }}.
+                  </template>
+                  <template v-else> No results found for "{{ search }}" </template>
+                </span>
+                <v-btn size="x-small" variant="text" @click="clearSearch" class="text-caption">
+                  Clear
+                </v-btn>
+              </div>
+            </div>
 
-        <!-- Loading State -->
-        <v-card-text v-if="loading" class="text-center py-8">
-          <v-progress-circular indeterminate color="primary"></v-progress-circular>
-          <div class="text-caption text-medium-emphasis mt-2">Loading shops...</div>
-        </v-card-text>
-
-        <!-- Empty State -->
-        <v-card-text v-else-if="filteredShops.length === 0" class="text-center py-8">
-          <v-icon size="64" color="grey-lighten-1">mdi-store-off-outline</v-icon>
-          <div class="text-h6 text-grey mt-2">No shops found</div>
-          <div class="text-caption text-medium-emphasis mt-1">
-            {{ isSearchMode ? 'Try a different search term' : 'No shops in this area' }}
-          </div>
-        </v-card-text>
-
-        <!-- Shop List -->
-        <v-card-text v-else class="pa-0 flex-grow-1" style="overflow-y: auto">
-          <v-list density="comfortable" class="pa-0">
-            <v-list-item
-              v-for="(shop, index) in filteredShops"
-              :key="shop.id"
-              @click="handleShopClick(shop.id, index)"
-              class="mb-2 shop-list-item"
-              :class="{
-                'bg-blue-lighten-5': isSearchMode && hasSearchMatch(shop),
-                'selected-shop': selectedShopId === shop.id,
-              }"
-            >
-              <template #prepend>
-                <div class="position-relative">
-                  <v-avatar size="56" rounded class="elevation-1">
-                    <v-img
-                      :src="
-                        shop.logo_url ||
-                        shop.physical_store ||
-                        'https://placehold.co/80x80?text=Shop'
-                      "
-                      :alt="shop.business_name"
-                      cover
-                    />
-                  </v-avatar>
-                  <!-- Status Badge -->
-                  <div
-                    class="status-badge"
-                    :class="isShopCurrentlyOpen(shop) ? 'bg-green' : 'bg-red'"
+            <div v-if="!isSearchMode && activeLocationLabel" class="shop-drawer-section">
+              <div class="shop-drawer-toggle-card">
+                <div class="shop-drawer-toggle-title">Shop Coverage</div>
+                <v-btn-group variant="outlined" class="shop-drawer-toggle-group">
+                  <v-btn
+                    :color="shopDisplayMode === 'within' ? 'primary' : undefined"
+                    @click="toggleDisplayMode('within')"
+                    size="small"
                   >
-                    <v-icon size="12" color="white">
-                      {{ isShopCurrentlyOpen(shop) ? 'mdi-check' : 'mdi-close' }}
-                    </v-icon>
+                    <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
+                    Within {{ activeLocationShortLabel }}
+                  </v-btn>
+                  <v-btn
+                    :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
+                    @click="toggleDisplayMode('outside')"
+                    size="small"
+                  >
+                    <v-icon start size="small">mdi-arrow-expand</v-icon>
+                    Outside {{ activeLocationShortLabel }}
+                  </v-btn>
+                </v-btn-group>
+              </div>
+            </div>
+
+            <div v-if="loading" class="shop-drawer-state">
+              <v-progress-circular indeterminate color="primary"></v-progress-circular>
+              <div class="shop-drawer-state-title">Loading shops...</div>
+              <div class="shop-drawer-state-copy">Updating available shops and products.</div>
+            </div>
+
+            <div
+              v-if="!loading && isSearchMode && !hasLocalSearchResults && hasOutsideSearchResults"
+              class="shop-drawer-search-empty"
+            >
+              <div class="shop-drawer-search-empty-title">
+                No results found in {{ searchLocationLabelTitleCase }}
+              </div>
+              <div class="shop-drawer-search-empty-copy">
+                Matching products are available in other locations. You can browse them below.
+              </div>
+              <v-switch
+                v-model="showOutsideSearchResults"
+                inset
+                hide-details
+                color="primary"
+                class="shop-drawer-outside-switch"
+                label="Show results outside my area"
+              />
+            </div>
+
+            <div
+              v-if="!loading && !isSearchMode && filteredShops.length === 0"
+              class="shop-drawer-state"
+            >
+              <v-icon size="64" color="grey-lighten-1">mdi-store-off-outline</v-icon>
+              <div class="shop-drawer-state-title">No shops found</div>
+              <div class="shop-drawer-state-copy">No shops match the current area and filter.</div>
+            </div>
+
+            <div
+              v-if="!loading && isSearchMode && !hasLocalSearchResults && !hasOutsideSearchResults"
+              class="shop-drawer-state"
+            >
+              <v-icon size="64" color="grey-lighten-1">mdi-magnify-close</v-icon>
+              <div class="shop-drawer-state-title">No search results</div>
+              <div class="shop-drawer-state-copy">
+                Try a different product, shop, or location keyword.
+              </div>
+            </div>
+
+            <div v-if="!loading && shopDrawerResultSections.length > 0">
+              <div
+                v-for="section in shopDrawerResultSections"
+                :key="section.key"
+                class="shop-drawer-section"
+              >
+                <div v-if="section.title" class="shop-drawer-results-header">
+                  <div class="shop-drawer-results-title">{{ section.title }}</div>
+                  <div v-if="section.subtitle" class="shop-drawer-results-subtitle">
+                    {{ section.subtitle }}
                   </div>
                 </div>
-              </template>
 
-              <v-list-item-title class="d-flex align-center mb-1">
-                <span class="font-weight-medium text-body-1">{{ shop.business_name }}</span>
-                <v-chip
-                  :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
-                  size="x-small"
-                  class="ml-2"
-                  density="compact"
-                >
-                  {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
-                </v-chip>
-                <v-spacer></v-spacer>
-                <v-icon
-                  v-if="isSearchMode && hasSearchMatch(shop)"
-                  size="16"
-                  color="primary"
-                  title="Search match"
-                >
-                  mdi-magnify
-                </v-icon>
-              </v-list-item-title>
+                <v-list density="comfortable" class="pa-0">
+                  <v-list-item
+                    v-for="(shop, index) in section.shops"
+                    :key="shop.id"
+                    @click="handleShopClick(shop.id, index)"
+                    class="mb-2 shop-list-item"
+                    :class="{
+                      'bg-blue-lighten-5': isSearchMode && hasSearchMatch(shop),
+                      'selected-shop': selectedShopId === shop.id,
+                    }"
+                  >
+                    <template #prepend>
+                      <div class="position-relative">
+                        <v-avatar size="56" rounded class="elevation-1">
+                          <v-img
+                            :src="
+                              shop.logo_url ||
+                              shop.physical_store ||
+                              'https://placehold.co/80x80?text=Shop'
+                            "
+                            :alt="shop.business_name"
+                            cover
+                          />
+                        </v-avatar>
+                        <div
+                          class="status-badge"
+                          :class="isShopCurrentlyOpen(shop) ? 'bg-green' : 'bg-red'"
+                        >
+                          <v-icon size="12" color="white">
+                            {{ isShopCurrentlyOpen(shop) ? 'mdi-check' : 'mdi-close' }}
+                          </v-icon>
+                        </div>
+                      </div>
+                    </template>
 
-              <v-list-item-subtitle class="text-caption">
-                <!-- Address -->
-                <div class="d-flex align-center mb-1">
-                  <v-icon size="14" class="mr-1">mdi-map-marker</v-icon>
-                  <span>{{ getFullAddress(shop) }}</span>
-                </div>
+                    <v-list-item-title class="d-flex align-center mb-1">
+                      <span class="font-weight-medium text-body-1">{{ shop.business_name }}</span>
+                      <v-chip
+                        :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
+                        size="x-small"
+                        class="ml-2"
+                        density="compact"
+                      >
+                        {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
+                      </v-chip>
+                      <v-spacer></v-spacer>
+                      <v-icon
+                        v-if="isSearchMode && hasSearchMatch(shop)"
+                        size="16"
+                        color="primary"
+                        title="Search match"
+                      >
+                        mdi-magnify
+                      </v-icon>
+                    </v-list-item-title>
 
-                <!-- In the shop list item template -->
-              <div class="d-flex align-center mb-1">
-                <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
-                <span>
-                  {{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km away
-                </span>
+                    <v-list-item-subtitle class="text-caption">
+                      <div
+                        v-if="isSearchMode && isOutsideSearchResult(shop)"
+                        class="shop-search-location-pill"
+                      >
+                        <v-icon size="13" color="orange-darken-2">mdi-earth</v-icon>
+                        <span>{{ getShopLocationSummary(shop) }}</span>
+                      </div>
+
+                      <div class="d-flex align-center mb-1">
+                        <v-icon size="14" class="mr-1">mdi-map-marker</v-icon>
+                        <span>{{ getFullAddress(shop) }}</span>
+                      </div>
+
+                      <div class="d-flex align-center mb-1">
+                        <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
+                        <span>
+                          {{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km
+                          {{ distanceDisplayLabel }}
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="isSearchMode && getMatchingProducts(shop).length > 0"
+                        class="matching-products mt-1"
+                      >
+                        <v-chip
+                          v-for="product in getMatchingProducts(shop).slice(0, 2)"
+                          :key="product.id"
+                          size="x-small"
+                          variant="outlined"
+                          color="primary"
+                          class="mr-1 mb-1"
+                          density="compact"
+                        >
+                          <v-icon start size="12">mdi-package-variant</v-icon>
+                          {{ product.prod_name }}
+                        </v-chip>
+                        <span
+                          v-if="getMatchingProducts(shop).length > 2"
+                          class="text-caption text-medium-emphasis"
+                        >
+                          +{{ getMatchingProducts(shop).length - 2 }} more
+                        </span>
+                      </div>
+
+                      <div
+                        v-if="shop.open_time && shop.close_time"
+                        class="d-flex align-center mt-1"
+                      >
+                        <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+                        <span class="text-caption">
+                          {{ formatTime12Hour(shop.open_time) }} -
+                          {{ formatTime12Hour(shop.close_time) }}
+                        </span>
+                      </div>
+                    </v-list-item-subtitle>
+
+                    <template #append>
+                      <div class="d-flex flex-column align-center gap-1">
+                        <v-btn
+                          icon
+                          variant="text"
+                          size="small"
+                          @click.stop="openShopDetails(shop.id)"
+                          title="View shop details"
+                          color="primary"
+                        >
+                          <v-icon>mdi-information</v-icon>
+                        </v-btn>
+                        <v-btn
+                          icon
+                          variant="text"
+                          size="small"
+                          @click.stop="focusOnShopFromList(shop.id)"
+                          title="Show on map"
+                          color="green"
+                        >
+                          <v-icon>mdi-map-marker</v-icon>
+                        </v-btn>
+                      </div>
+                    </template>
+                  </v-list-item>
+                </v-list>
               </div>
+            </div>
+          </div>
 
-                <!-- Matching Products (if in search mode) -->
-                <div
-                  v-if="isSearchMode && getMatchingProducts(shop).length > 0"
-                  class="matching-products mt-1"
-                >
-                  <v-chip
-                    v-for="product in getMatchingProducts(shop).slice(0, 2)"
-                    :key="product.id"
-                    size="x-small"
-                    variant="outlined"
-                    color="primary"
-                    class="mr-1 mb-1"
-                    density="compact"
-                  >
-                    <v-icon start size="12">mdi-package-variant</v-icon>
-                    {{ product.prod_name }}
-                  </v-chip>
-                  <span
-                    v-if="getMatchingProducts(shop).length > 2"
-                    class="text-caption text-medium-emphasis"
-                  >
-                    +{{ getMatchingProducts(shop).length - 2 }} more
-                  </span>
-                </div>
+          <v-card-actions v-if="shopDrawerResultSections.length > 0" class="shop-drawer-footer">
+            <v-btn
+              variant="text"
+              block
+              @click="fitMapToActiveArea"
+              :loading="locating"
+              prepend-icon="mdi-fit-to-page"
+            >
+              Fit Map
+            </v-btn>
+          </v-card-actions>
+        </v-card>
+      </v-navigation-drawer>
 
-                <!-- Shop Hours (12-hour format) -->
-                <div v-if="shop.open_time && shop.close_time" class="d-flex align-center mt-1">
-                  <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
-                  <span class="text-caption">
-                    {{ formatTime12Hour(shop.open_time) }} - {{ formatTime12Hour(shop.close_time) }}
-                  </span>
-                </div>
-              </v-list-item-subtitle>
-
-              <template #append>
-                <div class="d-flex flex-column align-center gap-1">
-                  <v-btn
-                    icon
-                    variant="text"
-                    size="small"
-                    @click.stop="openShopDetails(shop.id)"
-                    title="View shop details"
-                    color="primary"
-                  >
-                    <v-icon>mdi-information</v-icon>
-                  </v-btn>
-                  <v-btn
-                    icon
-                    variant="text"
-                    size="small"
-                    @click.stop="focusOnShopFromList(shop.id)"
-                    title="Show on map"
-                    color="green"
-                  >
-                    <v-icon>mdi-map-marker</v-icon>
-                  </v-btn>
-                </div>
-              </template>
-            </v-list-item>
-          </v-list>
-        </v-card-text>
-
-        <!-- Footer Actions -->
-        <v-card-actions v-if="filteredShops.length > 0" class="bg-grey-lighten-4">
-          <v-btn
-            variant="text"
-            block
-            @click="recenterToUser"
-            :loading="locating"
-            prepend-icon="mdi-crosshairs-gps"
-          >
-            Recenter Map
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-navigation-drawer>
-
-    <BottomNav v-model="activeTab" />
-  </PullToRefreshWrapper>
+      <BottomNav v-model="activeTab" />
+    </PullToRefreshWrapper>
   </v-app>
 </template>
 
@@ -2463,6 +3761,7 @@ onUnmounted(() => {
   gap: 8px;
   z-index: 2000;
   pointer-events: none;
+  margin-bottom: -75px !important;
 }
 
 .map-controls-group {
@@ -2476,7 +3775,6 @@ onUnmounted(() => {
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
   border: 1px solid rgba(255, 255, 255, 0.9);
   pointer-events: auto;
-  margin-bottom: -50px; /* Desktop default */
 }
 
 .mode-chip {
@@ -2696,7 +3994,9 @@ onUnmounted(() => {
   }
 
   .main-content {
-    height: calc(100vh - 150px - env(safe-area-inset-top)) !important; /* Adjusted for taller header */
+    height: calc(
+      100vh - 150px - env(safe-area-inset-top)
+    ) !important; /* Adjusted for taller header */
   }
 
   .search-field {
@@ -2750,7 +4050,6 @@ onUnmounted(() => {
 
   /* NEW: Responsive margin for tablet/small screens */
   .map-controls-group {
-    margin-bottom: -30px; /* Reduced from -50px for mobile */
     padding: 8px; /* Optional: slightly smaller padding */
   }
 
@@ -2777,7 +4076,7 @@ onUnmounted(() => {
     padding: calc(18px + env(safe-area-inset-top)) 10px 14px 10px;
     min-height: calc(85px + env(safe-area-inset-top));
   }
-  
+
   .hero-row {
     gap: 8px;
     padding-top: 4px;
@@ -2819,7 +4118,6 @@ onUnmounted(() => {
 
   /* NEW: Smaller margin for extra small devices */
   .map-controls-group {
-    margin-bottom: -20px; /* Even less margin for very small screens */
     padding: 6px; /* Smaller padding */
   }
 
@@ -2864,7 +4162,6 @@ onUnmounted(() => {
 
   /* NEW: Minimal margin for landscape mode */
   .map-controls-group {
-    margin-bottom: -15px; /* Minimal negative margin for landscape */
     padding: 5px; /* Compact padding */
     gap: 6px; /* Smaller gap between buttons */
   }
@@ -2886,10 +4183,540 @@ onUnmounted(() => {
     min-height: calc(80px + constant(safe-area-inset-top)) !important;
     min-height: calc(80px + env(safe-area-inset-top)) !important;
   }
-  
+
   .reopen-route-btn {
     bottom: calc(100px + constant(safe-area-inset-bottom)) !important;
     bottom: calc(100px + env(safe-area-inset-bottom)) !important;
+  }
+}
+
+/* Restored MapSearch overrides */
+.main-content {
+  --map-floating-offset: calc(88px + env(safe-area-inset-bottom));
+  --map-controls-height: 112px;
+  --map-controls-max-width: 390px;
+}
+
+.service-area-banner-wrap {
+  position: absolute;
+  top: 12px;
+  left: 0;
+  right: 0;
+  padding: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  z-index: 1900;
+  pointer-events: none;
+}
+
+.service-area-banner {
+  width: min(100%, 680px);
+  margin: 0;
+  margin-inline: auto;
+  border-radius: 22px !important;
+  border: 1px solid rgba(147, 197, 253, 0.82) !important;
+  background: rgba(239, 246, 255, 0.94) !important;
+  box-shadow: 0 20px 42px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(18px);
+  pointer-events: auto;
+}
+
+.service-area-banner :deep(.v-alert__content) {
+  width: 100%;
+}
+
+.service-area-banner-fade-enter-active,
+.service-area-banner-fade-leave-active {
+  transition:
+    opacity 0.22s ease,
+    transform 0.22s ease;
+}
+
+.service-area-banner-fade-enter-from,
+.service-area-banner-fade-leave-to {
+  opacity: 0;
+  transform: translateY(-10px);
+}
+
+.service-area-banner-content {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.service-area-banner-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.service-area-banner-lead {
+  min-width: 0;
+}
+
+.service-area-banner-eyebrow {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #1d4ed8;
+}
+
+.service-area-banner-title {
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1.25;
+  color: #0f172a;
+}
+
+.service-area-banner-copy {
+  margin: 0;
+  font-size: 0.88rem;
+  line-height: 1.55;
+  color: #1e3a5f;
+}
+
+.service-area-banner-meta {
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.service-area-banner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.service-area-banner-btn,
+.service-area-banner-link {
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+.service-area-banner-dismiss {
+  flex-shrink: 0;
+  margin-right: -4px;
+  margin-top: -2px;
+  color: #1d4ed8 !important;
+}
+
+.service-area-banner-btn {
+  font-weight: 700 !important;
+}
+
+.service-area-banner-link {
+  font-weight: 600 !important;
+}
+
+.reopen-route-btn {
+  left: auto;
+  right: max(16px, env(safe-area-inset-right));
+  transform: none;
+  bottom: calc(var(--map-floating-offset) + var(--map-controls-height) + 12px);
+}
+
+.reopen-route-btn:hover {
+  transform: scale(1.08);
+}
+
+.map-controls-container {
+  left: 50%;
+  right: auto;
+  bottom: var(--map-floating-offset);
+  transform: translateX(-50%);
+  align-items: center;
+  gap: 10px;
+  width: min(calc(100% - 24px), var(--map-controls-max-width));
+  margin-bottom: -75px;
+}
+
+.map-controls-group {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.95);
+  backdrop-filter: blur(18px);
+  border-radius: 15px;
+  padding: 8px;
+  box-shadow: 0 18px 40px rgba(15, 23, 42, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+
+.mode-chip {
+  font-weight: 600;
+  padding: 8px 14px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.16);
+  backdrop-filter: blur(16px);
+  border: none;
+  cursor: default;
+}
+
+.control-btn {
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%) !important;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12) !important;
+  min-width: 0 !important;
+  width: 100% !important;
+  min-height: 72px !important;
+  height: 72px !important;
+  padding: 8px 4px !important;
+  border-radius: 18px !important;
+  border: 1px solid #e2e8f0 !important;
+  text-transform: none !important;
+  letter-spacing: 0 !important;
+}
+
+:deep(.control-btn .v-btn__content) {
+  width: 100%;
+}
+
+.control-btn-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 100%;
+  line-height: 1.2;
+}
+
+.control-btn-label {
+  font-size: 0.66rem;
+  font-weight: 700;
+  color: #0f172a;
+  text-align: center;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  line-height: 1.1;
+}
+
+.display-options-card {
+  width: min(92vw, 360px);
+  border: 1px solid rgba(226, 232, 240, 0.95);
+  box-shadow: 0 20px 44px rgba(15, 23, 42, 0.2);
+  overflow: hidden;
+}
+
+.display-options-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 8px;
+}
+
+.display-options-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.display-options-section + .display-options-section {
+  margin-top: 18px;
+  padding-top: 18px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.display-options-section-title {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #0f172a;
+}
+
+.display-options-helper {
+  font-size: 0.75rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.display-options-toggle {
+  width: 100%;
+}
+
+.display-options-toggle :deep(.v-btn) {
+  flex: 1 1 0;
+  text-transform: none;
+  font-weight: 600;
+}
+
+.route-info-alert-with-service-area {
+  top: 180px;
+}
+
+.shop-drawer {
+  width: min(100vw, 420px) !important;
+}
+
+.shop-drawer-card {
+  background: linear-gradient(180deg, #f8fbff 0%, #ffffff 38%, #f8fafc 100%);
+}
+
+.shop-drawer-header {
+  padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 16px
+    calc(16px + env(safe-area-inset-left));
+  background: linear-gradient(180deg, rgba(219, 234, 254, 0.92) 0%, rgba(255, 255, 255, 0.98) 100%);
+  border-bottom: 1px solid rgba(191, 219, 254, 0.72);
+}
+
+.shop-drawer-header-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.shop-drawer-icon-wrap {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.16);
+  flex: 0 0 auto;
+}
+
+.shop-drawer-heading {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.shop-drawer-context {
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.shop-drawer-title {
+  font-size: 1.1rem;
+  font-weight: 800;
+  color: #0f172a;
+  line-height: 1.2;
+}
+
+.shop-drawer-subtitle {
+  font-size: 0.82rem;
+  line-height: 1.45;
+  color: #64748b;
+}
+
+.shop-drawer-close {
+  flex: 0 0 auto;
+}
+
+.shop-drawer-scroll {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 12px 16px 14px;
+}
+
+.shop-drawer-search-meta,
+.shop-drawer-section,
+.shop-drawer-search-empty {
+  margin-bottom: 14px;
+}
+
+.shop-drawer-search-meta-row,
+.shop-drawer-results-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.shop-drawer-search-result-text,
+.shop-drawer-results-subtitle {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: #64748b;
+}
+
+.shop-drawer-results-title,
+.shop-drawer-toggle-title,
+.shop-drawer-search-empty-title,
+.shop-drawer-state-title {
+  font-size: 0.92rem;
+  font-weight: 800;
+  color: #0f172a;
+}
+
+.shop-drawer-toggle-card,
+.shop-drawer-search-empty {
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #dbeafe;
+  border-radius: 18px;
+  padding: 12px 14px;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.06);
+}
+
+.shop-drawer-toggle-group {
+  width: 100%;
+  margin-top: 10px;
+}
+
+.shop-drawer-toggle-group :deep(.v-btn) {
+  flex: 1 1 0;
+  text-transform: none;
+}
+
+.shop-drawer-search-empty-copy,
+.shop-drawer-state-copy {
+  margin-top: 6px;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  color: #64748b;
+}
+
+.shop-drawer-outside-switch {
+  margin-top: 8px;
+}
+
+.shop-search-location-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  color: #9a3412;
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+.shop-drawer-state {
+  min-height: 220px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 8px;
+  padding: 24px 16px;
+}
+
+.shop-drawer-footer {
+  padding: 12px calc(16px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom))
+    calc(16px + env(safe-area-inset-left));
+  background: rgba(248, 250, 252, 0.94);
+  border-top: 1px solid rgba(226, 232, 240, 0.9);
+}
+
+@media (max-width: 768px) {
+  .main-content {
+    --map-controls-height: 102px;
+  }
+
+  .service-area-banner-wrap {
+    top: 10px;
+    padding: 0 max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+  }
+
+  .service-area-banner {
+    border-radius: 20px !important;
+  }
+
+  .service-area-banner-title {
+    font-size: 0.95rem;
+  }
+
+  .service-area-banner-copy {
+    font-size: 0.82rem;
+  }
+
+  .reopen-route-btn {
+    right: max(12px, env(safe-area-inset-right));
+    bottom: calc(var(--map-floating-offset) + var(--map-controls-height) + 10px);
+    width: 52px !important;
+    height: 52px !important;
+  }
+
+  .map-controls-container {
+    bottom: calc(82px + env(safe-area-inset-bottom));
+    width: min(calc(100% - 16px), 392px);
+  }
+
+  .map-controls-group {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .control-btn {
+    min-height: 62px !important;
+    height: 62px !important;
+    padding: 6px 3px !important;
+  }
+
+  .control-btn-label {
+    font-size: 0.6rem;
+  }
+
+  .display-options-card {
+    width: min(calc(100vw - 16px), 360px);
+    max-height: min(72vh, 560px);
+    overflow-y: auto;
+  }
+
+  .route-info-alert-with-service-area {
+    top: 220px;
+  }
+
+  .shop-drawer {
+    width: 100vw !important;
+    max-width: 420px !important;
+  }
+
+  .shop-drawer-header {
+    padding: calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 14px
+      calc(14px + env(safe-area-inset-left));
+  }
+}
+
+@media (max-width: 480px) {
+  .service-area-banner-wrap {
+    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+  }
+
+  .service-area-banner-title {
+    font-size: 0.88rem;
+  }
+
+  .service-area-banner-copy {
+    font-size: 0.78rem;
+  }
+}
+
+@media (max-height: 600px) and (orientation: landscape) {
+  .map-controls-container {
+    bottom: calc(72px + env(safe-area-inset-bottom));
+    width: min(calc(100% - 16px), 360px);
+  }
+
+  .map-controls-group {
+    padding: 5px;
+    gap: 4px;
+  }
+
+  .control-btn {
+    min-height: 52px !important;
+    height: 52px !important;
+    padding: 4px 2px !important;
+  }
+
+  .route-info-alert-with-service-area {
+    top: 170px;
+  }
+
+  .shop-drawer-header {
+    padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px
+      calc(12px + env(safe-area-inset-left));
   }
 }
 </style>
