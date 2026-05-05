@@ -10,7 +10,7 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath 'com.android.tools.build:gradle:8.12.3'
+        classpath 'com.android.tools.build:gradle:8.9.3'
         classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
         classpath 'com.google.gms:google-services:4.4.2'
         // NOTE: Do not place your application dependencies here; they belong
@@ -24,6 +24,43 @@ allprojects {
     repositories {
         google()
         mavenCentral()
+    }
+}
+
+subprojects {
+    configurations.configureEach {
+        resolutionStrategy.eachDependency { DependencyResolveDetails details ->
+            if (details.requested.group == 'com.google.android.gms') {
+                if (details.requested.name == 'play-services-auth') {
+                    details.useVersion rootProject.ext.playServicesAuthVersion
+                } else if (details.requested.name == 'play-services-location') {
+                    details.useVersion rootProject.ext.playServicesLocationVersion
+                }
+            }
+            if (details.requested.group == 'com.google.firebase') {
+                if (details.requested.name == 'firebase-messaging') {
+                    details.useVersion '24.1.0'
+                }
+            }
+            if (details.requested.group == 'com.google.android.libraries.identity.googleid') {
+                details.useVersion rootProject.ext.googleIdVersion
+            }
+            if (details.requested.group == 'androidx.credentials') {
+                details.useVersion rootProject.ext.androidxCredentialsVersion
+            }
+        }
+    }
+
+    // Force the BOM into every subproject to ensure transitive dependency alignment
+    plugins.withId('com.android.application') {
+        dependencies {
+            implementation platform("com.google.firebase:firebase-bom:${rootProject.ext.firebaseBomVersion}")
+        }
+    }
+    plugins.withId('com.android.library') {
+        dependencies {
+            implementation platform("com.google.firebase:firebase-bom:${rootProject.ext.firebaseBomVersion}")
+        }
     }
 }
 

@@ -1,130 +1,134 @@
 [
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xhdpi_closeshop_foreground.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xhdpi/closeshop_foreground.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-mdpi_closeshop_foreground.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-mdpi/closeshop_foreground.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-hdpi_closeshop_round.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-hdpi/closeshop_round.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xhdpi_closeshop_round.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xhdpi/closeshop_round.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-port-xxhdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-port-xxhdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xxhdpi_closeshop.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xxhdpi/closeshop.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-anydpi-v26_closeshop_round.xml.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-anydpi-v26/closeshop_round.xml"
+        "merged": "closeshop.dev.app-debug-50:/drawable_ic_launcher.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable/ic_launcher.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-mdpi_closeshop.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-mdpi/closeshop.webp"
+        "merged": "closeshop.dev.app-debug-50:/xml_config.xml.flat",
+        "source": "closeshop.dev.app-main-52:/xml/config.xml"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xxxhdpi_closeshop.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xxxhdpi/closeshop.webp"
+        "merged": "closeshop.dev.app-debug-50:/drawable-land-xhdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-land-xhdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xxhdpi_closeshop.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xxhdpi/closeshop.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-hdpi_closeshop.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-hdpi/closeshop.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xhdpi_closeshop.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xhdpi/closeshop.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xxxhdpi_closeshop_foreground.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xxxhdpi/closeshop_foreground.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xxhdpi_closeshop_foreground.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xxhdpi/closeshop_foreground.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xxhdpi_closeshop_foreground.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xxhdpi/closeshop_foreground.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-land-mdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-land-mdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xhdpi_closeshop.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xhdpi/closeshop.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xxxhdpi_closeshop_foreground.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xxxhdpi/closeshop_foreground.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-mdpi_closeshop_round.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-mdpi/closeshop_round.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-land-xxhdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-land-xxhdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-anydpi-v26_closeshop_round.xml.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-anydpi-v26/closeshop_round.xml"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-port-xxxhdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-port-xxxhdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable-land-xxxhdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-land-xxxhdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xxhdpi_closeshop_round.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xxhdpi/closeshop_round.webp"
+        "merged": "closeshop.dev.app-debug-50:/xml_file_paths.xml.flat",
+        "source": "closeshop.dev.app-main-52:/xml/file_paths.xml"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-mdpi_closeshop_foreground.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-mdpi/closeshop_foreground.webp"
+        "merged": "closeshop.dev.app-debug-50:/drawable-port-xxhdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-port-xxhdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/layout_activity_main.xml.flat",
-        "source": "closeshop.dev.app-main-50:/layout/activity_main.xml"
+        "merged": "closeshop.dev.app-debug-50:/layout_activity_main.xml.flat",
+        "source": "closeshop.dev.app-main-52:/layout/activity_main.xml"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-mdpi_closeshop_round.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-mdpi/closeshop_round.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xhdpi_closeshop_foreground.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xhdpi/closeshop_foreground.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/xml_config.xml.flat",
-        "source": "closeshop.dev.app-main-50:/xml/config.xml"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xxxhdpi_closeshop.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xxxhdpi/closeshop.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable_ic_launcher.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable/ic_launcher.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable_ic_push_notification.xml.flat",
+        "source": "closeshop.dev.app-main-52:/drawable/ic_push_notification.xml"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-land-xxxhdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-land-xxxhdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable-land-xxhdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-land-xxhdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-port-mdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-port-mdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable-port-xhdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-port-xhdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xxxhdpi_closeshop_round.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xxxhdpi/closeshop_round.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-hdpi_closeshop_foreground.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-hdpi/closeshop_foreground.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-port-hdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-port-hdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xxhdpi_closeshop_round.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xxhdpi/closeshop_round.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable-port-xxxhdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-port-xxxhdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-land-hdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-land-hdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-xxxhdpi_closeshop_round.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-xxxhdpi/closeshop_round.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-port-xhdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-port-xhdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable-land-mdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-land-mdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-hdpi_closeshop_foreground.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-hdpi/closeshop_foreground.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-anydpi-v26_closeshop.xml.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-anydpi-v26/closeshop.xml"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-xhdpi_closeshop_round.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-xhdpi/closeshop_round.webp"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-hdpi_closeshop_round.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-hdpi/closeshop_round.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-hdpi_closeshop.webp.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-hdpi/closeshop.webp"
+        "merged": "closeshop.dev.app-debug-50:/drawable-land-hdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-land-hdpi/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/xml_file_paths.xml.flat",
-        "source": "closeshop.dev.app-main-50:/xml/file_paths.xml"
+        "merged": "closeshop.dev.app-debug-50:/mipmap-mdpi_closeshop.webp.flat",
+        "source": "closeshop.dev.app-main-52:/mipmap-mdpi/closeshop.webp"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/mipmap-anydpi-v26_closeshop.xml.flat",
-        "source": "closeshop.dev.app-main-50:/mipmap-anydpi-v26/closeshop.xml"
+        "merged": "closeshop.dev.app-debug-50:/drawable_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable/splash.png"
     },
     {
-        "merged": "closeshop.dev.app-debug-48:/drawable-land-xhdpi_splash.png.flat",
-        "source": "closeshop.dev.app-main-50:/drawable-land-xhdpi/splash.png"
+        "merged": "closeshop.dev.app-debug-50:/drawable-port-mdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-port-mdpi/splash.png"
+    },
+    {
+        "merged": "closeshop.dev.app-debug-50:/drawable-port-hdpi_splash.png.flat",
+        "source": "closeshop.dev.app-main-52:/drawable-port-hdpi/splash.png"
     }
 ]

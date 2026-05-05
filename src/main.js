@@ -7,6 +7,10 @@ import '@mdi/font/css/materialdesignicons.css'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import { useNotificationStore } from '@/stores/notification'
+import {
+  deactivateCurrentPushToken,
+  initializeMobilePushNotifications,
+} from '@/utils/mobilePushNotifications'
 import 'mapbox-gl/dist/mapbox-gl.css'//for mapbox
 //import pwa elements
 import {defineCustomElements} from '@ionic/pwa-elements/loader';
@@ -40,26 +44,43 @@ app.use(vuetify)
 // ✅ Wait for router to be ready before setting up auth listeners
 router.isReady().then(() => {
   const authStore = useAuthUserStore()
+  const notificationStore = useNotificationStore()
 
   // ✅ Initial auth hydration
-  if (!authStore.userData?.id) {
-    authStore
-      .hydrateFromSession()
-      .then(() => {
-        console.log('Auth initialized')
-      })
-      .catch(console.error)
-  }
+  const initialAuthTask = authStore.userData?.id
+    ? Promise.resolve(true)
+    : authStore.hydrateFromSession()
+
+  initialAuthTask
+    .then(async () => {
+      if (authStore.userData?.id) {
+        await initializeMobilePushNotifications(authStore.userData)
+        notificationStore.fetchNotifications(authStore.userData.id)
+        notificationStore.listenForNotifications(authStore.userData.id)
+      }
+      console.log('Auth initialized')
+    })
+    .catch(console.error)
 
   // ✅ Set up auth state change listener
   supabase.auth.onAuthStateChange((event, session) => {
     window.setTimeout(async () => {
+      const previousUserId = authStore.userData?.id
+
       if (session?.user) {
         await authStore.hydrateFromSession({
           session,
           force: event === 'SIGNED_IN' || event === 'USER_UPDATED',
         })
+
+        if (authStore.userData?.id) {
+          await initializeMobilePushNotifications(authStore.userData)
+          notificationStore.fetchNotifications(authStore.userData.id)
+          notificationStore.listenForNotifications(authStore.userData.id)
+        }
       } else {
+        notificationStore.cleanupListener()
+        await deactivateCurrentPushToken(previousUserId)
         authStore.$reset()
       }
     }, 0)
@@ -72,17 +93,6 @@ router.isReady().then(() => {
   console.error('Router failed to initialize:', error)
   app.mount('#app')
 })
-
-// ✅ Notification; Start listening after user logs in
-supabase.auth.onAuthStateChange((event, session) => {
-  if (session?.user) {
-    const notificationStore = useNotificationStore()
-    notificationStore.fetchNotifications(session.user.id)
-    notificationStore.listenForNotifications(session.user.id)
-  }
-})
-
-
 
 /*
 //for nominatim

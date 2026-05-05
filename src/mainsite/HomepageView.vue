@@ -4,7 +4,6 @@ import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
 import { Geolocation } from '@capacitor/geolocation'
-//import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
 import { Capacitor } from '@capacitor/core'
 import {
@@ -202,58 +201,6 @@ function saveLastKnownLocation(coords) {
   }
 }
 
-/* 🔔 Push Notifications — Native Only (Capacitor) */
-async function setupPushNotifications() {
-  try {
-    // Step 1: Check permission
-    let permStatus = await PushNotifications.checkPermissions()
-    if (permStatus.receive !== 'granted') {
-      const req = await PushNotifications.requestPermissions()
-      if (req.receive !== 'granted') {
-        console.warn('❌ Notifications permission denied.')
-        return
-      }
-    }
-
-    // Step 2: Register with APNS/FCM (handled internally by Capacitor)
-    // await PushNotifications.register()
-
-    // Step 3: Handle successful registration (token received)
-    PushNotifications.addListener('registration', async (token) => {
-      console.log('✅ Push token (Capacitor):', token.value)
-
-      // Optional: Save token to Supabase for your backend
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (user) {
-        const { error } = await supabase
-          .from('user_fcm_tokens')
-          .upsert({ user_id: user.id, token: token.value }, { onConflict: 'user_id' })
-        if (error) console.error('Error saving push token:', error)
-        else console.log('✅ Token saved to Supabase')
-      }
-    })
-
-    // Step 4: Handle registration errors
-    PushNotifications.addListener('registrationError', (error) => {
-      console.error('❌ Push registration error:', error)
-    })
-
-    // Step 5: Handle foreground notifications
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('📩 Push received:', notification)
-    })
-
-    // Step 6: Handle user tapping a notification
-    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      console.log('🖱️ Notification action:', action.notification)
-    })
-  } catch (err) {
-    console.error('⚠️ setupPushNotifications error:', err)
-  }
-}
-
 /* 🌐 Network Status */
 async function checkNetworkStatus() {
   try {
@@ -442,14 +389,6 @@ async function setupNotificationListener() {
         }
 
         unreadNotifications.value++
-
-        // Show native notification if enabled
-        if (Notification.permission === 'granted') {
-          new Notification('CloseShop', {
-            body: visibleNotification.message,
-            icon: '/icon.png',
-          })
-        }
       },
     )
     .on(
@@ -507,8 +446,6 @@ onMounted(async () => {
           console.warn('📍 Location setup completed with warnings:', err)
           return false
         })
-
-      await setupPushNotifications()
 
       // Wait a bit for location if possible, but don't block
       await Promise.race([locationPromise, new Promise((resolve) => setTimeout(resolve, 2000))])

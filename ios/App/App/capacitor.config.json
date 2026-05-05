@@ -20,7 +20,9 @@
 		"GeolocationPlugin",
 		"HapticsPlugin",
 		"KeyboardPlugin",
+		"LocalNotificationsPlugin",
 		"CAPNetworkPlugin",
+		"PushNotificationsPlugin",
 		"StatusBarPlugin",
 		"GoogleSignInPlugin"
 	]

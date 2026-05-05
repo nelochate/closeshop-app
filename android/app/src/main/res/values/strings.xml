@@ -2,6 +2,7 @@
 <resources>
     <string name="app_name">closeshop-dev</string>
     <string name="title_activity_main">closeshop-dev</string>
+    <string name="default_notification_channel_id">closeshop-high-priority</string>
     <string name="google_server_client_id">618681645336-0fqba348n7kfcc65qkvh90lsioo7l3ti.apps.googleusercontent.com</string>
     <string name="google_android_client_id">618681645336-d1s591p0okdttm6m1pb2vjb2nukdsknl.apps.googleusercontent.com</string>
 </resources>

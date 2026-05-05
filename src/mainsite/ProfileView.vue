@@ -816,14 +816,6 @@ const setupNotificationListener = async () => {
         }
 
         unreadNotifications.value++
-
-        // Show native notification if enabled
-        if (Notification.permission === 'granted') {
-          new Notification('CloseShop', {
-            body: visibleNotification.message,
-            icon: '/icon.png',
-          })
-        }
       },
     )
     .on(

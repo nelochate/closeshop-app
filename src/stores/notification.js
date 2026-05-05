@@ -9,6 +9,8 @@ export const useNotificationStore = defineStore('notification', {
   state: () => ({
     notifications: [],
     loading: false,
+    channel: null,
+    currentUserId: null,
   }),
 
   actions: {
@@ -28,8 +30,26 @@ export const useNotificationStore = defineStore('notification', {
       this.loading = false
     },
 
+    cleanupListener() {
+      if (this.channel) {
+        supabase.removeChannel(this.channel)
+        this.channel = null
+      }
+
+      this.currentUserId = null
+    },
+
     listenForNotifications(userId) {
-      const channel = supabase
+      if (!userId) return
+
+      if (this.channel && this.currentUserId === userId) {
+        return
+      }
+
+      this.cleanupListener()
+      this.currentUserId = userId
+
+      this.channel = supabase
         .channel(`notifications:user:${userId}`)
         .on(
           'postgres_changes',

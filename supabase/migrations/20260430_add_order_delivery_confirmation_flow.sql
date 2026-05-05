@@ -4,6 +4,9 @@ add column if not exists delivery_proof_url text;
 alter table public.orders
 add column if not exists completed_at timestamptz;
 
+alter table public.orders
+disable trigger trg_enforce_rider_order_status_permissions;
+
 update public.orders
 set completed_at = coalesce(completed_at, delivered_at, updated_at, created_at)
 where status = 'completed'
@@ -17,6 +20,9 @@ where status in ('delivered', 'completed')
 update public.orders
 set status = 'picked_up'
 where status in ('delivered', 'completed');
+
+alter table public.orders
+enable trigger trg_enforce_rider_order_status_permissions;
 
 insert into storage.buckets (id, name, public)
 values ('order-proofs', 'order-proofs', true)

@@ -37,5 +37,8 @@ ios/App/GoogleService-Info.plist
 # Environment variables
 .env
 
+# Local secret files
+secrets/
+
 #vercel
 .vercel

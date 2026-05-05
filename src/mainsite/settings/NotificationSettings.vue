@@ -103,8 +103,15 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthUserStore } from '@/stores/authUser'
+import {
+  loadNotificationSettings,
+  saveNotificationSettings,
+} from '@/utils/notificationPreferences'
+import { syncPushNotificationPreferences } from '@/utils/mobilePushNotifications'
 
 const router = useRouter()
+const authStore = useAuthUserStore()
 const saving = ref(false)
 
 const notifications = ref({
@@ -121,14 +128,9 @@ const snackbar = ref({
 })
 
 onMounted(() => {
-  const saved = localStorage.getItem('closeshop_notification_settings')
-  if (saved) {
-    try {
-      const parsed = JSON.parse(saved)
-      notifications.value = { ...notifications.value, ...parsed }
-    } catch (e) {
-      console.error('Failed to load notification settings', e)
-    }
+  notifications.value = {
+    ...notifications.value,
+    ...loadNotificationSettings(),
   }
 })
 
@@ -138,10 +140,14 @@ const goBack = () => {
 
 const saveSettings = async () => {
   saving.value = true
-  
-  setTimeout(() => {
-    localStorage.setItem('closeshop_notification_settings', JSON.stringify(notifications.value))
-    
+
+  setTimeout(async () => {
+    notifications.value = saveNotificationSettings(notifications.value)
+
+    if (authStore.userData?.id) {
+      await syncPushNotificationPreferences(authStore.userData.id)
+    }
+
     saving.value = false
     snackbar.value = {
       show: true,

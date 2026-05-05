@@ -145,8 +145,12 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import { useAuthUserStore } from '@/stores/authUser'
+import { loadChatSettings, saveChatSettings } from '@/utils/notificationPreferences'
+import { syncPushNotificationPreferences } from '@/utils/mobilePushNotifications'
 
 const router = useRouter()
+const authStore = useAuthUserStore()
 const saving = ref(false)
 
 // Simplified chat settings
@@ -173,14 +177,9 @@ const snackbar = ref({
 
 // Load saved settings
 onMounted(() => {
-  const savedSettings = localStorage.getItem('closeshop_chat_settings')
-  if (savedSettings) {
-    try {
-      const parsed = JSON.parse(savedSettings)
-      chatSettings.value = { ...chatSettings.value, ...parsed }
-    } catch (e) {
-      console.error('Failed to load chat settings', e)
-    }
+  chatSettings.value = {
+    ...chatSettings.value,
+    ...loadChatSettings(),
   }
   
   // Load blocked users
@@ -202,8 +201,12 @@ const saveSettings = async () => {
   saving.value = true
   
   // Simulate save delay
-  setTimeout(() => {
-    localStorage.setItem('closeshop_chat_settings', JSON.stringify(chatSettings.value))
+  setTimeout(async () => {
+    chatSettings.value = saveChatSettings(chatSettings.value)
+
+    if (authStore.userData?.id) {
+      await syncPushNotificationPreferences(authStore.userData.id)
+    }
     
     saving.value = false
     snackbar.value = {
