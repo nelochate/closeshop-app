@@ -18,6 +18,8 @@ import ProductListing from '@/mainsite/ProductListing.vue'
 import ChatView from '@/mainsite/ChatView.vue'
 import AuthCallback from '../auth/AuthCallback.vue'
 
+const keepAliveScrollPositions = new Map()
+
 
 
 // ✅ Define routes
@@ -30,14 +32,29 @@ const routes = [
 
   { path: '/', name: 'login', component: LoginView },
   { path: '/register', name: 'register', component: RegisterView },
-  { path: '/homepage', name: 'homepage', component: HomepageView, meta: { requiresAuth: true } },
-  { path: '/mapsearch', name: 'mapsearch', component: MapSearch, meta: { requiresAuth: true } },
-  { path: '/cartview', name: 'cartview', component: CartView, meta: { requiresAuth: true } },
+  {
+    path: '/homepage',
+    name: 'homepage',
+    component: HomepageView,
+    meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
+  },
+  {
+    path: '/mapsearch',
+    name: 'mapsearch',
+    component: MapSearch,
+    meta: { requiresAuth: true, localPullToRefresh: true },
+  },
+  {
+    path: '/cartview',
+    name: 'cartview',
+    component: CartView,
+    meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
+  },
   {
     path: '/messageview',
     name: 'messageview',
     component: MessageView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
   },
   {
     path: '/chatview/:id',
@@ -50,13 +67,13 @@ const routes = [
     path: '/profileview',
     name: 'profileview',
     component: ProfileView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, localPullToRefresh: true },
   },
   {
     path: '/notificationview',
     name: 'notificationview',
     component: NotificationView,
-    meta: { requiresAuth: true },
+    meta: { requiresAuth: true, localPullToRefresh: true },
   },
   { path: '/register-success', name: 'confirm-email', component: ConfirmEmail },
   {
@@ -279,6 +296,14 @@ const router = createRouter({
     if (savedPosition) {
       return savedPosition
     }
+
+    if (to.meta.keepAlive && keepAliveScrollPositions.has(to.fullPath)) {
+      return {
+        left: 0,
+        top: keepAliveScrollPositions.get(to.fullPath),
+      }
+    }
+
     return { top: 0 }
   },
 })
@@ -288,6 +313,10 @@ let authInitialized = false
 
 router.beforeEach(async (to, from, next) => {
   try {
+    if (from.meta?.keepAlive && typeof window !== 'undefined') {
+      keepAliveScrollPositions.set(from.fullPath, window.scrollY || 0)
+    }
+
     const authStore = useAuthUserStore()
 
     // ✅ Initialize auth if not done yet

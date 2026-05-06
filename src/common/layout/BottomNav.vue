@@ -2,7 +2,7 @@
 import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useCartStore } from '@/stores/cart'
-import { supabase } from '@/utils/supabase'
+import { useMessageBadgeStore } from '@/stores/messageBadge'
 
 const props = defineProps({
   /** v-model for the active tab */
@@ -24,225 +24,32 @@ const emit = defineEmits(['update:modelValue'])
 const router = useRouter()
 const route = useRoute()
 const cart = useCartStore()
-cart.fetchCart()
+const messageBadgeStore = useMessageBadgeStore()
 
 // Screen size detection
 const isMobile = ref(false)
 const windowWidth = ref(window.innerWidth)
-
-// Message notification state
-const hasUnreadMessages = ref(false)
-const unreadCount = ref(0)
-let messagesSubscription = null
 
 const checkScreenSize = () => {
   windowWidth.value = window.innerWidth
   isMobile.value = windowWidth.value <= 768
 }
 
-// ✅ Mark all messages as read when user views chat
-const markAllMessagesAsRead = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data: conversations, error: convError } = await supabase
-      .from('conversations')
-      .select('id')
-      .or(`user1.eq.${user.id},user2.eq.${user.id}`)
-
-    if (convError || !conversations || conversations.length === 0) return
-
-    const conversationIds = conversations.map(c => c.id)
-    
-    // Mark all unread messages as read
-    const { error: updateError } = await supabase
-      .from('messages')
-      .update({ is_read: true })
-      .in('conversation_id', conversationIds)
-      .eq('receiver_id', user.id)
-      .eq('is_read', false)
-
-    if (updateError) {
-      console.error('Error marking messages as read:', updateError)
-      return
-    }
-
-    // Update local state
-    unreadCount.value = 0
-    hasUnreadMessages.value = false
-    
-  } catch (error) {
-    console.error('Error in markAllMessagesAsRead:', error)
-  }
-}
-
-// ✅ Fetch unread messages count
-const fetchUnreadMessages = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data: conversations, error: convError } = await supabase
-      .from('conversations')
-      .select('id')
-      .or(`user1.eq.${user.id},user2.eq.${user.id}`)
-
-    if (convError) {
-      console.error('Error fetching conversations:', convError)
-      return
-    }
-
-    if (!conversations || conversations.length === 0) {
-      hasUnreadMessages.value = false
-      unreadCount.value = 0
-      return
-    }
-
-    const conversationIds = conversations.map(c => c.id)
-    
-    const { data: messages, error: msgError } = await supabase
-      .from('messages')
-      .select('id, is_read')
-      .in('conversation_id', conversationIds)
-      .eq('receiver_id', user.id)
-      .eq('is_read', false)
-
-    if (msgError) {
-      console.error('Error fetching unread messages:', msgError)
-      return
-    }
-
-    unreadCount.value = messages?.length || 0
-    hasUnreadMessages.value = unreadCount.value > 0
-    
-  } catch (error) {
-    console.error('Error in fetchUnreadMessages:', error)
-  }
-}
-
-// ✅ Subscribe to real-time message updates
-const subscribeToMessages = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    // Unsubscribe from previous subscription if exists
-    if (messagesSubscription) {
-      supabase.removeChannel(messagesSubscription)
-    }
-
-    // Get user's conversations
-    const { data: conversations, error: convError } = await supabase
-      .from('conversations')
-      .select('id')
-      .or(`user1.eq.${user.id},user2.eq.${user.id}`)
-
-    if (convError || !conversations) return
-
-    const conversationIds = conversations.map(c => c.id)
-    
-    if (conversationIds.length === 0) return
-
-    // Subscribe to new messages in all conversations
-    messagesSubscription = supabase
-      .channel('unread-messages-channel')
-      .on(
-        'postgres_changes',
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=in.(${conversationIds.join(',')})`,
-        },
-        (payload) => {
-          // Check if the new message is for the current user
-          if (payload.new.receiver_id === user.id && !payload.new.is_read) {
-            unreadCount.value += 1
-            hasUnreadMessages.value = true
-            
-            // Optional: Show a small notification
-            if (props.modelValue !== 'chat') {
-              console.log('New message received!')
-            }
-          }
-        }
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'messages',
-          filter: `conversation_id=in.(${conversationIds.join(',')})`,
-        },
-        (payload) => {
-          // If a message was marked as read
-          if (payload.new.is_read && payload.old.is_read === false) {
-            unreadCount.value = Math.max(0, unreadCount.value - 1)
-            hasUnreadMessages.value = unreadCount.value > 0
-          }
-        }
-      )
-      .subscribe()
-
-  } catch (error) {
-    console.error('Error subscribing to messages:', error)
-  }
-}
-
-// ✅ Check auth status and set up subscriptions
-const setupMessageNotifications = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (user) {
-      await fetchUnreadMessages()
-      await subscribeToMessages()
-      
-      // Also set up auth state change listener
-      supabase.auth.onAuthStateChange((event, session) => {
-        if (event === 'SIGNED_IN') {
-          fetchUnreadMessages()
-          subscribeToMessages()
-        }
-        if (event === 'SIGNED_OUT') {
-          hasUnreadMessages.value = false
-          unreadCount.value = 0
-          if (messagesSubscription) {
-            supabase.removeChannel(messagesSubscription)
-            messagesSubscription = null
-          }
-        }
-      })
-    }
-  } catch (error) {
-    console.error('Error setting up message notifications:', error)
-  }
-}
-
 onMounted(() => {
   checkScreenSize()
   window.addEventListener('resize', checkScreenSize)
-  
-  // Set up message notifications
-  setupMessageNotifications()
+  messageBadgeStore.initialize()
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', checkScreenSize)
-  
-  // Clean up subscription
-  if (messagesSubscription) {
-    supabase.removeChannel(messagesSubscription)
-    messagesSubscription = null
-  }
 })
 
 // Watch for route changes to mark messages as read when viewing chat
 watch(() => route.path, (newPath) => {
   // Check if we're on a chat-related page
   if (newPath.includes('/messageview') || newPath.includes('/chatview/')) {
-    markAllMessagesAsRead()
+    messageBadgeStore.markAllMessagesAsRead()
   }
 })
 
@@ -259,9 +66,12 @@ function go(key) {
   
   // If going to chat view, mark all messages as read
   if (key === 'chat') {
-    markAllMessagesAsRead()
+    messageBadgeStore.markAllMessagesAsRead()
   }
 }
+
+const hasUnreadMessages = computed(() => messageBadgeStore.hasUnreadMessages)
+const unreadCount = computed(() => messageBadgeStore.unreadCount)
 </script>
 
 <template>

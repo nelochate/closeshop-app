@@ -10,11 +10,13 @@ import {
   getVisibleUnreadNotificationCount,
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
+import { useCartStore } from '@/stores/cart'
 
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue' 
 
 const router = useRouter()
 const activeTab = ref('home')
+const cart = useCartStore()
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
@@ -39,6 +41,9 @@ const handleRefresh = async () => {
     
     // Refresh products
     await fetchProducts()
+
+    // Refresh cart badge state
+    await cart.ensureFresh({ force: true, silent: true })
     
     // Refresh notification count
     await fetchUnreadNotificationCount()
@@ -365,6 +370,10 @@ async function setupNotificationListener() {
   } = await supabase.auth.getUser()
   if (!user) return
 
+  if (notificationSubscription.value) {
+    return
+  }
+
   // Fetch initial unread count
   await fetchUnreadNotificationCount()
 
@@ -416,6 +425,85 @@ async function fetchUnreadNotificationCount() {
   if (!user) return
 
   unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
+}
+
+const cleanupHomepageRuntime = () => {
+  window.removeEventListener('resize', updateSafeAreaInsets)
+  window.removeEventListener('orientationchange', updateSafeAreaInsets)
+
+  if (notificationSubscription.value) {
+    notificationSubscription.value.unsubscribe()
+    notificationSubscription.value = null
+  }
+
+  if (surveyBubbleTimeout) {
+    clearTimeout(surveyBubbleTimeout)
+    surveyBubbleTimeout = null
+  }
+
+  if (surveyBubbleHideTimeout) {
+    clearTimeout(surveyBubbleHideTimeout)
+    surveyBubbleHideTimeout = null
+  }
+}
+
+const startHomepageRuntime = async ({ refresh = false } = {}) => {
+  updateSafeAreaInsets()
+  window.addEventListener('resize', updateSafeAreaInsets)
+  window.addEventListener('orientationchange', updateSafeAreaInsets)
+
+  try {
+    if (!homepageInitialized || refresh) {
+      loading.value = true
+      errorMsg.value = ''
+
+      if (Capacitor.isNativePlatform()) {
+        await checkNetworkStatus()
+
+        const locationPromise = requestLocationPermission()
+          .then((hasPermission) => {
+            if (hasPermission) {
+              console.log('ðŸ“ Location permission granted, will use for sorting')
+            }
+            return hasPermission
+          })
+          .catch((err) => {
+            console.warn('ðŸ“ Location setup completed with warnings:', err)
+            return false
+          })
+
+        await Promise.race([locationPromise, new Promise((resolve) => setTimeout(resolve, 2000))])
+      }
+
+      await Promise.all([fetchShops(), fetchProducts()])
+      homepageInitialized = true
+    }
+
+    await setupNotificationListener()
+
+    if (refresh) {
+      await fetchUnreadNotificationCount()
+    }
+
+    if (surveyBubbleTimeout) {
+      clearTimeout(surveyBubbleTimeout)
+    }
+    surveyBubbleTimeout = setTimeout(() => {
+      showSurveyBubble.value = true
+    }, 3000)
+
+    if (surveyBubbleHideTimeout) {
+      clearTimeout(surveyBubbleHideTimeout)
+    }
+    surveyBubbleHideTimeout = setTimeout(() => {
+      showSurveyBubble.value = false
+    }, 15000)
+  } catch (err) {
+    console.error('âŒ Error in homepage runtime:', err)
+    errorMsg.value = 'Failed to load app data'
+  } finally {
+    loading.value = false
+  }
 }
 
 /* 🚀 Main Lifecycle */

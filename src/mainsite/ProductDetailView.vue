@@ -3,16 +3,18 @@
 import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { useCartStore } from '@/stores/cart'
 
 const route = useRoute()
 const router = useRouter()
 const productId = route.params.id
+const cart = useCartStore()
 
 // State management
 const product = ref(null)
 const loading = ref(true)
 const error = ref(null)
-const cartCount = ref(0)
+const cartCount = computed(() => cart.count)
 const isAnimating = ref(false)
 const addingToCart = ref(false)
 
@@ -59,27 +61,6 @@ const fetchUser = async () => {
     user.value = data?.user
   } catch (err) {
     console.error('Error fetching user:', err)
-  }
-}
-
-// Fetch cart count
-const fetchCartCount = async () => {
-  if (!user.value) {
-    cartCount.value = 0
-    return
-  }
-
-  try {
-    const { count, error } = await supabase
-      .from('cart_items')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.value.id)
-
-    if (error) throw error
-    cartCount.value = count || 0
-  } catch (err) {
-    console.error('Error fetching cart count:', err)
-    cartCount.value = 0
   }
 }
 
@@ -376,28 +357,21 @@ const confirmAddToCart = async () => {
         }
       : null
 
-    // Add to cart in Supabase
-    const { data, error } = await supabase
-      .from('cart_items')
-      .insert({
-        user_id: user.value.id,
-        product_id: product.value.id,
-        quantity: finalQuantity,
-        selected_size: finalSize,
-        selected_variety: finalVariety ? finalVariety.name : null,
-        variety_data: varietyData
-      })
-      .select()
-      .single()
+    const result = await cart.addToCart(
+      product.value.id,
+      finalQuantity,
+      finalSize,
+      finalVariety ? finalVariety.name : null,
+      varietyData,
+    )
 
-    if (error) throw error
+    if (!result.success) {
+      throw new Error(result.error || 'Failed to add item to cart')
+    }
 
     showSnackbar('Product added to cart successfully!', 'success')
     animateToCart()
     closeAddToCartDialog()
-    
-    // Refresh cart count
-    await fetchCartCount()
 
   } catch (err) {
     console.error('❌ Error adding to cart:', err)
@@ -549,9 +523,9 @@ const shareProduct = async () => {
 
 // Initialize on mount
 onMounted(async () => {
+  await cart.initialize()
   await fetchUser()
   await fetchProduct()
-  await fetchCartCount()
 })
 </script>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { ref, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
@@ -22,6 +22,7 @@ const currentTime = ref(Date.now())
 let conversationsSubscription: any = null
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 let timeUpdateInterval: ReturnType<typeof setInterval> | null = null
+let hasLoadedConversations = false
 
 const formatConversationTime = (timestamp?: string | null) =>
   formatLiveTimestamp(timestamp, currentTime.value)
@@ -324,6 +325,8 @@ const fetchConversationsWithRPC = async () => {
 
 // Real-time subscription for new messages
 const subscribeToMessages = () => {
+  conversationsSubscription?.unsubscribe()
+
   const subscription = supabase
     .channel('conversations-changes')
     .on(
@@ -367,6 +370,44 @@ const subscribeToMessages = () => {
   return subscription
 }
 
+const startMessageViewRuntime = async ({ refresh = false } = {}) => {
+  currentTime.value = Date.now()
+
+  if (!timeUpdateInterval) {
+    timeUpdateInterval = setInterval(() => {
+      currentTime.value = Date.now()
+    }, 30000)
+  }
+
+  if (!hasLoadedConversations || refresh) {
+    await fetchConversations()
+    hasLoadedConversations = true
+  }
+
+  if (!conversationsSubscription) {
+    conversationsSubscription = subscribeToMessages()
+  }
+
+  if (!refreshInterval) {
+    refreshInterval = setInterval(fetchConversations, 30000)
+  }
+}
+
+const cleanupMessageViewRuntime = () => {
+  conversationsSubscription?.unsubscribe()
+  conversationsSubscription = null
+
+  if (refreshInterval) {
+    clearInterval(refreshInterval)
+    refreshInterval = null
+  }
+
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
+  }
+}
+
 // Navigate to chat
 const openChat = (conversation: any) => {
   console.log('💬 Opening chat with:', conversation)
@@ -384,29 +425,16 @@ const startNewConversation = () => {
   // router.push({ name: 'new-conversation' })
 }
 
-// Initialize
-onMounted(async () => {
-  currentTime.value = Date.now()
-  timeUpdateInterval = setInterval(() => {
-    currentTime.value = Date.now()
-  }, 30000)
-  await fetchConversations()
-  conversationsSubscription = subscribeToMessages()
-  refreshInterval = setInterval(fetchConversations, 30000)
+onActivated(() => {
+  void startMessageViewRuntime({ refresh: true })
+})
+
+onDeactivated(() => {
+  cleanupMessageViewRuntime()
 })
 
 onUnmounted(() => {
-  conversationsSubscription?.unsubscribe()
-
-  if (refreshInterval) {
-    clearInterval(refreshInterval)
-    refreshInterval = null
-  }
-
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-    timeUpdateInterval = null
-  }
+  cleanupMessageViewRuntime()
 })
 </script>
 

@@ -1,32 +1,40 @@
 <script setup>
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, onActivated, computed, watch } from 'vue'
 import { useCartStore } from '@/stores/cart'
 import BottomNav from '@/common/layout/BottomNav.vue'
-import { supabase } from '@/utils/supabase'
 import { useRouter } from 'vue-router'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const activeTab = ref('cart')
 const cart = useCartStore()
 
-const loading = ref(true)
 const selectedItems = ref([])
-const shopGroups = ref({}) // Track items grouped by shop
+const isInitialLoading = computed(() => cart.loading && !cart.initialized)
 
 // ✅ Fetch cart on mount
+const syncCartView = async ({ force = false, silent = true } = {}) => {
+  await cart.initialize()
+  await cart.ensureFresh({ force, silent })
+}
+
+const handleRefresh = async () => {
+  await syncCartView({ force: true, silent: true })
+}
+
 onMounted(async () => {
-  loading.value = true
-  await cart.fetchCart()
-  // Group items by shop after fetching
-  groupItemsByShop()
-  loading.value = false
+  await syncCartView({ silent: false })
+})
+
+onActivated(() => {
+  void syncCartView()
 })
 
 // ✅ Group items by shop
-const groupItemsByShop = () => {
+const shopGroups = computed(() => {
   const groups = {}
 
-  cart.items.forEach(item => {
+  cart.items.forEach((item) => {
     const shopId = item.product?.shop?.id || 'unknown'
 
     if (!groups[shopId]) {
@@ -34,26 +42,27 @@ const groupItemsByShop = () => {
         shop: item.product?.shop || {
           id: shopId,
           business_name: 'Unknown Shop',
-          logo_url: null
+          logo_url: null,
         },
-        items: []
+        items: [],
       }
     }
 
     groups[shopId].items.push(item)
   })
 
-  shopGroups.value = groups
-}
+  return groups
+})
 
-// Watch for cart changes to update grouping
 watch(() => cart.items, () => {
-  groupItemsByShop()
+  const validIds = new Set(cart.items.map((item) => item.id))
+  selectedItems.value = selectedItems.value.filter((id) => validIds.has(id))
 }, { deep: true })
 
 // ✅ Delete item
 const deleteItem = async (id) => {
-  await cart.deleteFromCart(id)
+  const result = await cart.deleteFromCart(id)
+  if (!result?.success) return
   selectedItems.value = selectedItems.value.filter(i => i !== id)
 }
 
@@ -65,21 +74,9 @@ const updateQuantity = async (itemId, newQty) => {
     return
   }
 
-  const item = cart.items.find(i => i.id === itemId)
-  if (!item) return
-
-  try {
-    const { error } = await supabase
-      .from('cart_items')
-      .update({ quantity: newQty })
-      .eq('id', itemId)
-
-    if (error) throw error
-
-    // Update store after success
-    await cart.fetchCart()
-  } catch (err) {
-    console.error('updateQuantity error:', err)
+  const result = await cart.updateQuantity(itemId, newQty)
+  if (!result?.success) {
+    console.error('updateQuantity error:', result?.error)
   }
 }
 
@@ -217,6 +214,7 @@ const debugCart = () => {
 
 <template>
   <v-app>
+    <PullToRefreshWrapper :on-refresh="handleRefresh">
       <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
         <v-btn variant="text" icon @click="goBack" class="back-btn">
           <v-icon>mdi-arrow-left</v-icon>
@@ -230,7 +228,7 @@ const debugCart = () => {
     <v-main>
       <v-container fluid class="container pb-12">
         <!-- Loader -->
-        <div v-if="loading" class="d-flex justify-center align-center pa-12">
+        <div v-if="isInitialLoading" class="d-flex justify-center align-center pa-12">
           <v-progress-circular indeterminate color="primary" />
         </div>
 
@@ -279,9 +277,9 @@ const debugCart = () => {
                   <!-- Shop Actions -->
                   <div class="d-flex align-center gap-2">
                     <v-checkbox
-                      v-model="selectedItems"
-                      :value="shopId"
-                      @click.stop="toggleShopSelection(shopId)"
+                      :model-value="group.items.every(item => selectedItems.includes(item.id))"
+                      @click.stop
+                      @update:model-value="toggleShopSelection(shopId)"
                       density="compact"
                       color="primary"
                       hide-details
@@ -294,7 +292,7 @@ const debugCart = () => {
                             <v-icon
                               v-bind="props"
                               size="18"
-                              :color="selectedItems.includes(shopId) ? 'primary' : 'grey'"
+                              :color="group.items.every(item => selectedItems.includes(item.id)) || isShopPartialSelected(shopId) ? 'primary' : 'grey'"
                             >
                               mdi-checkbox-multiple-marked
                             </v-icon>
@@ -468,6 +466,7 @@ const debugCart = () => {
 
     <!-- Bottom Navigation -->
     <BottomNav v-model="activeTab" />
+    </PullToRefreshWrapper>
   </v-app>
 </template>
 
