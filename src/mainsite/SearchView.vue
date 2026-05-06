@@ -7,8 +7,15 @@ const route = useRoute()
 const router = useRouter()
 
 const normalizeQueryValue = (value) => (typeof value === 'string' ? value : '')
+const getTrimmedQuery = (value = query.value) => normalizeQueryValue(value).trim()
 
 const query = ref(normalizeQueryValue(route.query.q))
+const queryModel = computed({
+  get: () => query.value,
+  set: (value) => {
+    query.value = normalizeQueryValue(value)
+  },
+})
 const productResults = ref([])
 const shopResults = ref([])
 const loading = ref(false)
@@ -46,7 +53,7 @@ function debounceRouteSync(nextQuery) {
 
 // 🔍 Fetch products and shops
 async function fetchSearchResults() {
-  const searchText = query.value.trim()
+  const searchText = getTrimmedQuery()
 
   if (!searchText) {
     productResults.value = []
@@ -106,8 +113,17 @@ async function fetchSearchResults() {
   }
 }
 
-// 🔙 Navigation helpers
-const goBack = () => router.back()
+// Prefer app history when we have one, otherwise fall back to the homepage.
+const goBack = async () => {
+  const previousRoute = typeof window !== 'undefined' ? window.history.state?.back : null
+
+  if (typeof previousRoute === 'string' && previousRoute !== route.fullPath) {
+    await router.back()
+    return
+  }
+
+  await router.replace({ name: 'homepage' })
+}
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
 const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
@@ -128,7 +144,7 @@ watch(
 
 watch(query, (val) => {
   debounceFetch()
-  debounceRouteSync(val.trim())
+  debounceRouteSync(getTrimmedQuery(val))
 })
 
 onUnmounted(() => {
@@ -141,13 +157,9 @@ const hasResults = computed(() =>
   productResults.value.length > 0 || shopResults.value.length > 0
 )
 
-const currentResults = computed(() => {
-  return activeTab.value === 'products' ? productResults.value : shopResults.value
-})
-
 const showEmptyState = computed(() => 
   !loading.value && 
-  query.value.length >= 2 && 
+  getTrimmedQuery().length >= 2 && 
   !hasResults.value
 )
 </script>
@@ -163,7 +175,7 @@ const showEmptyState = computed(() =>
           </v-btn>
 
           <v-text-field
-            v-model="query"
+            v-model="queryModel"
             variant="solo"
             rounded="pill"
             hide-details

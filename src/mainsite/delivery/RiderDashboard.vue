@@ -53,7 +53,9 @@ const usingOrdersEarningsFallback = ref(false)
 const currentRider = ref(null)
 const currentRiderNumericId = ref(null)
 
-const isAwaitingCustomerConfirmation = (order) => !!order?.delivered_at && !order?.completed_at
+const isAwaitingCustomerConfirmation = (order) =>
+  !!order?.delivered_at &&
+  !order?.completed_at
 
 const hasDeliveryIssue = (order) =>
   order?.status === 'picked_up' &&
@@ -61,7 +63,8 @@ const hasDeliveryIssue = (order) =>
   !order?.delivered_at &&
   !order?.completed_at
 
-const isOrderCompleted = (order) => !!order?.completed_at || order?.status === 'completed'
+const isOrderCompleted = (order) =>
+  !!order?.completed_at || order?.status === 'completed'
 
 const isActivePickedUpOrder = (order) =>
   order?.status === 'picked_up' &&
@@ -95,8 +98,7 @@ const getOrderActivityTimestamp = (order) => {
   return order.created_at || order.updated_at || null
 }
 
-const getOrderActivityTimestampValue = (order) =>
-  getAppTimestampValue(getOrderActivityTimestamp(order))
+const getOrderActivityTimestampValue = (order) => getAppTimestampValue(getOrderActivityTimestamp(order))
 
 const sortOrdersByActivityTime = (left, right, direction = 'asc') => {
   const leftValue = getOrderActivityTimestampValue(left)
@@ -126,9 +128,9 @@ const loadingProfile = ref(true)
 // Computed orders by status
 const acceptedOrders = computed(() => {
   return orders.value
-    .filter(
-      (order) =>
-        order.status === 'accepted_by_rider' && order.rider_id === currentRiderNumericId.value,
+    .filter((order) =>
+      order.status === 'accepted_by_rider' &&
+      order.rider_id === currentRiderNumericId.value
     )
     .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
@@ -146,28 +148,30 @@ const availableOrders = computed(() => {
 
 const pickedUpOrders = computed(() => {
   return orders.value
-    .filter(
-      (order) =>
-        order.status === 'picked_up' &&
-        !isAwaitingCustomerConfirmation(order) &&
-        !isOrderCompleted(order) &&
-        order.rider_id === currentRiderNumericId.value,
+    .filter((order) =>
+      order.status === 'picked_up' &&
+      !isAwaitingCustomerConfirmation(order) &&
+      !isOrderCompleted(order) &&
+      order.rider_id === currentRiderNumericId.value
     )
     .sort((a, b) => sortOrdersByActivityTime(a, b))
 })
 
 const deliveredOrders = computed(() => {
   return orders.value
-    .filter(
-      (order) =>
-        isAwaitingCustomerConfirmation(order) && order.rider_id === currentRiderNumericId.value,
+    .filter((order) =>
+      isAwaitingCustomerConfirmation(order) &&
+      order.rider_id === currentRiderNumericId.value
     )
     .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
 
 const completedOrders = computed(() => {
   return orders.value
-    .filter((order) => isOrderCompleted(order) && order.rider_id === currentRiderNumericId.value)
+    .filter((order) =>
+      isOrderCompleted(order) &&
+      order.rider_id === currentRiderNumericId.value
+    )
     .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
 
@@ -366,9 +370,7 @@ const fetchFallbackEarningsRecords = async () => {
 // Check rider approval status
 const checkRiderApproval = async () => {
   try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
+    const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       router.push('/login')
       return
@@ -391,7 +393,7 @@ const checkRiderApproval = async () => {
       name: `${data.first_name} ${data.last_name}`,
       email: data.email,
       rider_id: data.rider_id,
-      status: data.status,
+      status: data.status
     })
 
     if (!isApproved.value) {
@@ -480,9 +482,9 @@ const calculateDistance = (lat1, lon1, lat2, lon2) => {
   const a =
     Math.sin(dLat / 2) * Math.sin(dLat / 2) +
     Math.cos((lat1 * Math.PI) / 180) *
-      Math.cos((lat2 * Math.PI) / 180) *
-      Math.sin(dLon / 2) *
-      Math.sin(dLon / 2)
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLon / 2) *
+    Math.sin(dLon / 2)
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
   return R * c
 }
@@ -696,8 +698,7 @@ const fetchOrders = async () => {
 
     const { data, error } = await supabase
       .from('orders')
-      .select(
-        `
+      .select(`
         *,
         order_items (
           id,
@@ -740,11 +741,8 @@ const fetchOrders = async () => {
           latitude,
           longitude
         )
-      `,
-      )
-      .or(
-        `and(status.eq.waiting_for_rider,rider_id.is.null),rider_id.eq.${currentRiderNumericId.value}`,
-      )
+      `)
+      .or(`and(status.eq.waiting_for_rider,rider_id.is.null),rider_id.eq.${currentRiderNumericId.value}`)
       .order('created_at', { ascending: false })
 
     if (error) throw error
@@ -1101,7 +1099,7 @@ onUnmounted(() => {
           @keydown.space.prevent="goToRiderEarnings"
         >
           <div class="stat-content">
-            <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
+            <v-icon size="32" color="#4caf50">mdi-history</v-icon>
             <div class="stat-info">
               <div class="stat-value">{{ formatPhpAmount(stats.totalEarnings) }}</div>
               <div class="stat-label">Total Earnings</div>
@@ -1109,20 +1107,30 @@ onUnmounted(() => {
             </div>
           </div>
         </v-card>
+
+
+      <!-- Earnings Card -->
+      <v-card class="stat-card" elevation="0">
+        <div class="stat-content">
+          <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
+          <div class="stat-info">
+            <div class="stat-value">{{ stats.totalEarnings.toLocaleString() }}</div>
+            <div class="stat-label">Total Earnings</div>
+          </div>
+        </div>
+      </v-card>
       </div>
+
 
       <!-- Active Filter Status Badge -->
       <div class="active-filter-badge mb-4 mx-4">
-        <div
-          class="status-badge-large"
-          :class="{
-            'status-accepted': activeFilter === 'accepted',
-            'status-available': activeFilter === 'available',
-            'status-picked': activeFilter === 'pickedup',
-            'status-delivered': activeFilter === 'delivered',
-            'status-completed': activeFilter === 'completed',
-          }"
-        >
+        <div class="status-badge-large" :class="{
+          'status-accepted': activeFilter === 'accepted',
+          'status-available': activeFilter === 'available',
+          'status-picked': activeFilter === 'pickedup',
+          'status-delivered': activeFilter === 'delivered',
+          'status-completed': activeFilter === 'completed'
+        }">
           <v-icon left size="24" class="mr-2">
             <template v-if="activeFilter === 'accepted'">mdi-check-circle</template>
             <template v-else-if="activeFilter === 'available'">mdi-bike-fast</template>
@@ -1176,7 +1184,9 @@ onUnmounted(() => {
           </p>
         </div>
 
+
         <div v-else class="orders-list">
+
           <!-- Click Instruction Banner -->
           <div class="instruction-banner mx-4 mb-3">
             <div class="instruction-content">
@@ -1222,10 +1232,7 @@ onUnmounted(() => {
                 <v-icon size="14">mdi-alert-circle</v-icon>
                 Re-delivery Required
               </div>
-              <span
-                >Customer reported this order was not received. Coordinate with the seller or
-                support, then reattempt delivery.</span
-              >
+              <span>Customer reported this order was not received. Coordinate with the seller or support, then reattempt delivery.</span>
             </div>
 
             <div class="order-products">
@@ -1454,9 +1461,7 @@ onUnmounted(() => {
   border-radius: 16px;
   overflow: hidden;
   cursor: pointer;
-  transition:
-    transform 0.2s,
-    box-shadow 0.2s;
+  transition: transform 0.2s, box-shadow 0.2s;
   position: relative;
 }
 
@@ -1825,10 +1830,7 @@ onUnmounted(() => {
   background: linear-gradient(135deg, #388e3c 0%, #66bb6a 100%);
 }
 
-.order-card:not(.accepted-card):not(.picked-card):not(.delivered-card):not(.completed-card):not(
-    .issue-card
-  )
-  .order-number-badge {
+.order-card:not(.accepted-card):not(.picked-card):not(.delivered-card):not(.completed-card):not(.issue-card) .order-number-badge {
   background: linear-gradient(135deg, #055e1d 0%, #229b42 100%);
 }
 

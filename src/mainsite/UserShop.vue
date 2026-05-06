@@ -1219,7 +1219,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
           </div>
         </v-alert>
 
-        <!-- Orders List - FIXED: Removed max-height to prevent cutting off content -->
+        <!-- Orders List - Keep all this content -->
         <div v-else class="orders-list">
           <!-- Pending Approval Section Orders -->
           <template v-if="activeOrderTab === 'pending_approval'">
@@ -1228,51 +1228,43 @@ const getOrderDeliveryDisplay = (order: any): string => {
               :key="order.id"
               class="mb-3 order-card elevation-1"
               :rounded="isMobile ? 'lg' : 'xl'"
+              :style="{ borderLeft: '4px solid #ff9800' }"
             >
               <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
-                <div class="d-flex justify-space-between align-start mb-3">
+                <!-- Order Header -->
+                <div class="d-flex justify-space-between align-start mb-2">
                   <div>
-                    <div class="d-flex align-center mb-1">
-                      <h4 class="text-subtitle-2 font-weight-bold text-primary mr-2">
-                        #{{ getTransactionNumber(order) }}
-                      </h4>
-                      <v-chip color="warning" size="x-small">
-                        <v-icon start size="10">mdi-clock-outline</v-icon>
-                        Pending Approval
-                      </v-chip>
-                    </div>
-                    <div class="d-flex align-center flex-wrap gap-1">
-                      <p class="text-caption text-medium-emphasis">
-                        <v-icon :size="isMobile ? 12 : 14" class="mr-1">mdi-calendar</v-icon>
-                        {{ formatDate(order.created_at) }}
-                      </p>
+                    <span class="text-subtitle-2 font-weight-bold text-primary">
+                      #{{ getTransactionNumber(order) }}
+                    </span>
+                    <div class="text-caption text-medium-emphasis">
+                      {{ formatDate(order.created_at) }}
                     </div>
                   </div>
+                  <v-chip color="warning" size="x-small">
+                    <v-icon start size="10">mdi-clock-outline</v-icon>
+                    Pending Approval
+                  </v-chip>
                 </div>
 
-                <div class="d-flex align-center mb-3">
-                  <v-avatar size="36" color="primary" class="mr-2">
-                    <v-img
-                      v-if="order.user?.avatar_url"
-                      :src="order.user.avatar_url"
-                      alt="Customer"
-                    />
-                    <span v-else class="text-white text-caption">
-                      {{ order.user?.first_name?.[0] }}{{ order.user?.last_name?.[0] }}
+                <!-- Customer Info -->
+                <div class="d-flex align-center mb-2">
+                  <v-avatar size="28" color="primary" class="mr-2">
+                    <span class="text-white text-caption">
+                      {{ order.customer_name?.charAt(0) || 'C' }}
                     </span>
                   </v-avatar>
                   <div>
-                    <div class="text-caption font-weight-medium">
-                      {{ order.user?.first_name }} {{ order.user?.last_name }}
-                    </div>
+                    <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
                     <div class="text-caption text-medium-emphasis">
                       {{ order.contact_number || order.address?.phone || order.user?.phone || 'N/A' }}
                     </div>
                   </div>
                 </div>
 
-                <div class="mb-3">
-                  <div class="text-caption font-weight-bold mb-1">Items:</div>
+                <!-- Items Summary -->
+                <div class="mb-2">
+                  <div class="text-caption font-weight-bold">Items:</div>
                   <div
                     v-for="item in order.items.slice(0, 2)"
                     :key="item.id"
@@ -1280,23 +1272,27 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   >
                     <v-img
                       :src="item.image || '/placeholder-product.png'"
-                      width="36"
-                      height="36"
+                      width="28"
+                      height="28"
                       cover
                       class="rounded mr-2"
                     />
                     <div class="flex-grow-1">
-                      <div class="text-caption line-clamp-1">{{ item.name }}</div>
+                      <div class="text-caption">{{ item.name }}</div>
                       <div class="text-caption text-medium-emphasis">
                         {{ item.quantity }} × ₱{{ Number(item.price).toLocaleString() }}
                       </div>
                     </div>
                   </div>
-                  <div v-if="order.items.length > 2" class="text-caption text-medium-emphasis mt-1">
+                  <div
+                    v-if="order.items.length > 2"
+                    class="text-caption text-medium-emphasis mt-1"
+                  >
                     +{{ order.items.length - 2 }} more items
                   </div>
                 </div>
 
+                <!-- Total -->
                 <div class="d-flex justify-space-between align-center mb-3 pt-2 border-top">
                   <span class="text-caption font-weight-bold">Total Amount:</span>
                   <span class="text-subtitle-2 font-weight-bold text-primary">
@@ -1304,6 +1300,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </span>
                 </div>
 
+                <!-- Action Buttons -->
                 <div class="action-buttons-wrapper">
                   <v-btn
                     color="success"
@@ -1436,6 +1433,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   </v-chip>
                 </div>
 
+                <!-- Rider Info -->
                 <div
                   v-if="order.rider_details"
                   class="mb-2 pa-2 rounded-lg"
@@ -1593,7 +1591,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
     </v-main>
   </v-app>
 </template>
-
 <style scoped>
 /* Base Styles */
 .background-gradient {
@@ -1840,7 +1837,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
   }
 }
 </style>
-
 
 
 

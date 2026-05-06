@@ -2336,7 +2336,7 @@ watch(
   <v-app>
       <!-- Top App Bar -->
       <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
-        <v-btn variant="text" icon @click="goBack" class="back-btn">
+        <v-btn variant="text" icon @click="$router.back()" class="back-btn">
           <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
         <v-toolbar-title class="font-bold">

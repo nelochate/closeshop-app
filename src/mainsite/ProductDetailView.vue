@@ -1,6 +1,5 @@
-
 <script setup>
-import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
@@ -28,9 +27,6 @@ const showAddToCartDialog = ref(false)
 const showBuyNowDialog = ref(false)
 const selectedSize = ref(null)
 const selectedVariety = ref(null)
-const openImageDialog = ref(false)
-const previewIndex = ref(0)
-const openReviewImageDialog = ref(false)
 
 // DOM refs
 const productImgRef = ref(null)
@@ -46,11 +42,7 @@ const buyNowSelectedSize = ref(null)
 const buyNowSelectedVariety = ref(null)
 const buyNowQuantity = ref(1)
 
-// Image states
-const currentImage = ref('')
-const openVarietyDialog = ref(false)
-const varietyPreviewIndex = ref(0)
-const varietyImages = ref([])
+// Review states
 const reviews = ref([])
 const reviewsLoading = ref(false)
 const reviewError = ref('')
@@ -65,6 +57,9 @@ const snackbarColor = ref('success')
 const user = ref(null)
 let reviewsSubscription = null
 let reviewsRefreshTimeoutId = null
+
+// Real-time subscription
+let productSubscription = null
 
 // Fetch user
 const fetchUser = async () => {
@@ -89,11 +84,128 @@ const mainImage = (imgs) => {
   return imgs
 }
 
+const normalizeImageList = (imgs) => {
+  if (Array.isArray(imgs)) {
+    return imgs.filter(Boolean)
+  }
+
+  if (typeof imgs === 'string') {
+    try {
+      const parsed = JSON.parse(imgs)
+      if (Array.isArray(parsed)) {
+        return parsed.filter(Boolean)
+      }
+    } catch {
+      return imgs ? [imgs] : []
+    }
+  }
+
+  return []
+}
+
+const normalizeVarietiesList = (varieties) => {
+  if (Array.isArray(varieties)) {
+    return varieties
+  }
+
+  if (typeof varieties === 'string') {
+    try {
+      const parsed = JSON.parse(varieties)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return []
+    }
+  }
+
+  return []
+}
+
+const formatCurrency = (value = 0) =>
+  `PHP ${Number(value || 0).toLocaleString('en-PH', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+
+const getAvailabilityLabel = (stock = 0) => {
+  const stockCount = Number(stock || 0)
+
+  if (stockCount <= 0) return 'Out of stock'
+  if (stockCount < 5) return `Only ${stockCount} left`
+  return `${stockCount} available`
+}
+
+const productImageList = computed(() => {
+  const images = normalizeImageList(product.value?.main_img_urls)
+  return images.length ? images : ['/placeholder.png']
+})
+
 // Show snackbar notification
 const showSnackbar = (message, color = 'success') => {
   snackbarMessage.value = message
   snackbarColor.value = color
   snackbar.value = true
+}
+
+// Setup real-time product updates
+const cleanupProductRealtimeSubscription = () => {
+  if (!productSubscription) {
+    return
+  }
+
+  supabase.removeChannel(productSubscription)
+  productSubscription = null
+}
+
+const setupProductRealtimeSubscription = () => {
+  if (!productId.value) {
+    cleanupProductRealtimeSubscription()
+    return
+  }
+
+  cleanupProductRealtimeSubscription()
+
+  productSubscription = supabase
+    .channel(`product-${productId.value}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'products',
+        filter: `id=eq.${productId.value}`,
+      },
+      (payload) => {
+        console.log('🔄 Product updated in real-time:', payload)
+        const updatedProduct = payload.new
+        const updatedVarieties = normalizeVarietiesList(updatedProduct?.varieties)
+
+        if (product.value) {
+          const prevStock = Number(product.value.stock || 0)
+          const prevSold = Number(product.value.sold || 0)
+
+          product.value = {
+            ...product.value,
+            stock: Number(updatedProduct?.stock || 0),
+            sold: Number(updatedProduct?.sold || 0),
+            varieties: updatedVarieties.length ? updatedVarieties : product.value.varieties,
+          }
+
+          if (Number(updatedProduct?.stock || 0) === 0 && prevStock > 0) {
+            showSnackbar('This product is now out of stock!', 'warning')
+          } else if (Number(updatedProduct?.stock || 0) > 0 && prevStock === 0) {
+            showSnackbar('This product is back in stock!', 'success')
+          }
+
+          if (Number(updatedProduct?.sold || 0) > prevSold) {
+            const soldIncrease = Number(updatedProduct.sold || 0) - prevSold
+            showSnackbar(`🔥 ${soldIncrease} item${soldIncrease > 1 ? 's' : ''} just sold!`, 'info')
+          }
+        }
+      },
+    )
+    .subscribe()
+
+  console.log('📡 Subscribed to real-time product updates for product:', productId)
 }
 
 const normalizeReviewPhotos = (photos) => {
@@ -236,7 +348,8 @@ const fetchProduct = async () => {
   try {
     const { data, error: err } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         prod_description,
@@ -254,37 +367,25 @@ const fetchProduct = async () => {
           logo_url,
           owner_id
         )
-      `)
+      `,
+      )
       .eq('id', productId.value)
       .single()
 
     if (err) throw err
     product.value = data
 
-    // Parse JSON safely
-    if (product.value.sizes && typeof product.value.sizes === 'string') {
-      try {
-        product.value.sizes = JSON.parse(product.value.sizes)
-      } catch {
-        product.value.sizes = []
-      }
-    }
+    product.value.main_img_urls = productImageList.value
+    product.value.sizes = Array.isArray(product.value.sizes) ? product.value.sizes : []
+    product.value.varieties = normalizeVarietiesList(product.value.varieties)
 
-    if (product.value.varieties && typeof product.value.varieties === 'string') {
-      try {
-        product.value.varieties = JSON.parse(product.value.varieties)
-      } catch {
-        product.value.varieties = []
-      }
-    }
-
-    // Auto-select if only one option
     if (product.value?.sizes?.length === 1) {
       selectedSize.value = product.value.sizes[0]
       dialogSelectedSize.value = product.value.sizes[0]
       buyNowSelectedSize.value = product.value.sizes[0]
     }
 
+    setupProductRealtimeSubscription()
   } catch (e) {
     error.value = e.message || 'Failed to load product'
     console.error('Error loading product:', e)
@@ -309,6 +410,36 @@ const displayStock = computed(() => {
   }
   return product.value.stock || 0
 })
+
+const soldCountLabel = computed(() => `${Number(product.value?.sold || 0)} sold`)
+
+const stockBadgeLabel = computed(() => {
+  if (displayStock.value <= 0) return 'Out of stock'
+  if (displayStock.value < 5) return 'Low stock'
+  return 'Ready to ship'
+})
+
+const stockBadgeClass = computed(() => {
+  if (displayStock.value <= 0) return 'stock-badge--empty'
+  if (displayStock.value < 5) return 'stock-badge--low'
+  return 'stock-badge--ready'
+})
+
+const selectionSummaryText = computed(() => {
+  const parts = [selectedVariety.value?.name || 'Standard Product']
+
+  if (selectedSize.value) {
+    parts.push(selectedSize.value)
+  }
+
+  return parts.join(' • ')
+})
+
+const selectionSummaryLabel = computed(() => {
+  return selectionSummaryText.value.replace(/ [^A-Za-z0-9/]+ /, ' / ')
+})
+
+const stockSummaryText = computed(() => getAvailabilityLabel(displayStock.value))
 
 const dialogDisplayStock = computed(() => {
   if (!product.value) return 0
@@ -362,16 +493,6 @@ const reviewSummaryLabel = computed(() => {
 
   return `${reviewCount.value} reviews`
 })
-
-const openReviewImagePreview = (imageUrl) => {
-  currentImage.value = imageUrl
-  openReviewImageDialog.value = true
-}
-
-const closeReviewImagePreview = () => {
-  openReviewImageDialog.value = false
-  currentImage.value = ''
-}
 
 const isCurrentUsersReview = (review) =>
   !!review?.user_id && !!user.value?.id && review.user_id === user.value.id
@@ -456,12 +577,10 @@ const formatReviewDate = (dateString) => {
   })
 }
 
-// Check if variety is selected
 const isVarietySelected = (variety) => {
   return selectedVariety.value && selectedVariety.value.name === variety.name
 }
 
-// Get variety image
 const getVarietyImage = (variety) => {
   if (variety.images && variety.images.length) {
     return variety.images[0]
@@ -472,7 +591,6 @@ const getVarietyImage = (variety) => {
   return mainImage(product.value?.main_img_urls)
 }
 
-// Navigation functions
 const goToCart = () => {
   router.push('/cartview')
 }
@@ -481,25 +599,57 @@ const goToShop = (shopId) => {
   router.push(`/shop/${shopId}`)
 }
 
-const goToChat = () => {
-  if (product.value?.shop?.owner_id) {
-    router.push(`/chatview/${product.value.shop.owner_id}`)
+const goToChat = async () => {
+  if (!user.value) {
+    showSnackbar('Please login to chat with the seller', 'warning')
+    return
   }
+
+  if (!product.value?.shop?.owner_id) {
+    showSnackbar('Unable to start chat', 'error')
+    return
+  }
+
+  // Prepare product information
+  const productInfo = {
+    id: product.value.id,
+    name: product.value.prod_name,
+    price: product.value.price,
+    image: mainImage(product.value.main_img_urls),
+    description: product.value.prod_description,
+    selectedVariety: selectedVariety.value,
+    selectedSize: selectedSize.value,
+    shop_id: product.value.shop.id,
+    shop_name: product.value.shop.business_name
+  }
+
+  // Create a natural question about the product
+  let questionText = `Hi! I have a question about ${product.value.prod_name}`
+
+  if (selectedVariety.value) {
+    questionText += ` (${selectedVariety.value.name} variety)`
+  }
+
+  if (selectedSize.value) {
+    questionText += ` - Size: ${selectedSize.value}`
+  }
+
+  questionText += `. Can you tell me more about it?`
+
+  // Store in sessionStorage
+  sessionStorage.setItem('sharedProduct', JSON.stringify(productInfo))
+  sessionStorage.setItem('chatAutoMessage', questionText)
+
+  // Navigate to chat with the shop owner
+  router.push(`/chatview/${product.value.shop.owner_id}`)
+
+  showSnackbar('Opening chat with your product question...', 'info')
 }
 
-// Selection functions
 const selectMainProduct = () => {
   selectedVariety.value = null
 }
 
-const previewVarietyImages = (images, index = 0) => {
-  if (!images || !images.length) return
-  varietyImages.value = images
-  varietyPreviewIndex.value = index
-  openVarietyDialog.value = true
-}
-
-// Quantity functions
 const incrementQuantity = () => {
   if (dialogQuantity.value < dialogDisplayStock.value) {
     dialogQuantity.value++
@@ -524,7 +674,6 @@ const decrementBuyNowQuantity = () => {
   }
 }
 
-// Dialog functions
 const openAddToCartDialog = () => {
   if (!product.value) {
     showSnackbar('Product not loaded', 'error')
@@ -574,7 +723,6 @@ const closeBuyNowDialog = () => {
   buyNowQuantity.value = 1
 }
 
-// Add to cart function
 const confirmAddToCart = async () => {
   console.log('🛒 Adding to cart...')
 
@@ -592,7 +740,6 @@ const confirmAddToCart = async () => {
   const finalVariety = dialogSelectedVariety.value
   const finalQuantity = dialogQuantity.value
 
-  // Validate selections
   if (product.value.has_sizes && !finalSize) {
     showSnackbar('Please select a size', 'warning')
     return
@@ -607,7 +754,6 @@ const confirmAddToCart = async () => {
   addingToCart.value = true
 
   try {
-    // Prepare variety data
     const varietyData = finalVariety
       ? {
           name: finalVariety.name,
@@ -641,7 +787,6 @@ const confirmAddToCart = async () => {
   }
 }
 
-// Buy now function
 const proceedToCheckout = () => {
   if (!product.value) {
     showSnackbar('Product not loaded', 'error')
@@ -652,7 +797,6 @@ const proceedToCheckout = () => {
   const finalVariety = buyNowSelectedVariety.value
   const finalQuantity = buyNowQuantity.value
 
-  // Validate selections
   if (product.value.has_sizes && !finalSize) {
     showSnackbar('Please select a size', 'warning')
     return
@@ -682,7 +826,6 @@ const proceedToCheckout = () => {
     shop_id: product.value.shop?.id,
   }
 
-  // Navigate to checkout
   router.push({
     name: 'purchaseview',
     query: {
@@ -701,7 +844,6 @@ const proceedToCheckout = () => {
   })
 }
 
-// Animation function
 const animateToCart = () => {
   if (isAnimating.value) return
   isAnimating.value = true
@@ -763,7 +905,6 @@ const animateToCart = () => {
   }, 800)
 }
 
-// Share product
 const shareProduct = async () => {
   if (navigator.share) {
     try {
@@ -786,7 +927,13 @@ const loadProductPage = async () => {
   subscribeToProductReviews()
 }
 
-// Initialize on mount
+const cleanup = () => {
+  if (productSubscription) {
+    productSubscription.unsubscribe()
+    console.log('📡 Unsubscribed from product updates')
+  }
+}
+
 onMounted(async () => {
   await cart.initialize()
   await Promise.all([fetchUser(), loadProductPage()])
@@ -799,6 +946,8 @@ watch(
       return
     }
 
+    cleanupProductRealtimeSubscription()
+    cleanupReviewsSubscription()
     selectedSize.value = null
     selectedVariety.value = null
     dialogSelectedSize.value = null
@@ -807,9 +956,6 @@ watch(
     buyNowSelectedVariety.value = null
     dialogQuantity.value = 1
     buyNowQuantity.value = 1
-    currentImage.value = ''
-    openImageDialog.value = false
-    openReviewImageDialog.value = false
     reviewError.value = ''
 
     await loadProductPage()
@@ -818,6 +964,7 @@ watch(
 
 onUnmounted(() => {
   cleanupReviewsSubscription()
+  cleanupProductRealtimeSubscription()
 })
 </script>
 
@@ -948,7 +1095,6 @@ onUnmounted(() => {
             </v-card-title>
 
             <v-card-text>
-              <!-- Product Info -->
               <div class="mb-4 d-flex align-center">
                 <v-avatar size="80" class="mr-3">
                   <v-img :src="mainImage(product.main_img_urls)" />
@@ -956,7 +1102,7 @@ onUnmounted(() => {
                 <div>
                   <h4 class="mb-1">{{ product.prod_name }}</h4>
                   <div class="text-primary font-weight-bold">
-                    ₱{{ dialogSelectedVariety?.price || product.price }}
+                    {{ formatCurrency(dialogSelectedVariety?.price || product.price) }}
                   </div>
                   <div class="text-caption text-grey">
                     Stock: {{ dialogDisplayStock }} available
@@ -964,7 +1110,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Size Selection -->
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Size:</p>
                 <v-btn-toggle
@@ -987,11 +1132,9 @@ onUnmounted(() => {
                 </v-btn-toggle>
               </div>
 
-              <!-- Variety Selection -->
               <div v-if="product.varieties && product.varieties.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Variety:</p>
                 <div class="varieties-list">
-                  <!-- Main Product Option -->
                   <v-card
                     class="mb-2"
                     :class="{ 'option-selected': !dialogSelectedVariety }"
@@ -1004,7 +1147,7 @@ onUnmounted(() => {
                       </v-avatar>
                       <div class="flex-grow-1">
                         <div class="font-weight-medium">Standard Product</div>
-                        <div class="text-caption text-grey">₱{{ product.price }}</div>
+                        <div class="text-caption text-grey">{{ formatCurrency(product.price) }}</div>
                       </div>
                       <v-icon v-if="!dialogSelectedVariety" color="primary">
                         mdi-check-circle
@@ -1012,7 +1155,6 @@ onUnmounted(() => {
                     </v-card-text>
                   </v-card>
 
-                  <!-- Varieties -->
                   <v-card
                     v-for="variety in product.varieties"
                     :key="variety.name"
@@ -1029,15 +1171,7 @@ onUnmounted(() => {
                       <div class="flex-grow-1">
                         <div class="font-weight-medium">{{ variety.name }}</div>
                         <div class="text-caption text-grey">
-                          ₱{{ variety.price || product.price }}
-                        </div>
-                        <div class="text-caption">
-                          <v-chip v-if="variety.stock === 0" size="x-small" color="red">
-                            Out of stock
-                          </v-chip>
-                          <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
-                            {{ variety.stock }} left
-                          </v-chip>
+                          {{ formatCurrency(variety.price || product.price) }}
                         </div>
                       </div>
                       <v-icon v-if="dialogSelectedVariety?.name === variety.name" color="primary">
@@ -1048,7 +1182,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Quantity Selector -->
               <div class="mb-4">
                 <p class="font-weight-medium mb-2">Quantity:</p>
                 <div class="d-flex align-center">
@@ -1069,13 +1202,12 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Total Price -->
               <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa">
                 <div class="d-flex justify-space-between">
                   <span>Total:</span>
                   <span class="font-weight-bold text-primary">
-                    ₱{{
-                      ((dialogSelectedVariety?.price || product.price) * dialogQuantity).toFixed(2)
+                    {{
+                      formatCurrency((dialogSelectedVariety?.price || product.price) * dialogQuantity)
                     }}
                   </span>
                 </div>
@@ -1108,15 +1240,14 @@ onUnmounted(() => {
             </v-card-title>
 
             <v-card-text>
-              <!-- Product Info -->
               <div class="mb-4 d-flex align-center">
-                <v-avatar size="10" class="mr-3">
+                <v-avatar size="80" class="mr-3">
                   <v-img :src="mainImage(product.main_img_urls)" />
                 </v-avatar>
                 <div>
                   <h4 class="mb-1">{{ product.prod_name }}</h4>
                   <div class="text-primary font-weight-bold">
-                    ₱{{ buyNowSelectedVariety?.price || product.price }}
+                    {{ formatCurrency(buyNowSelectedVariety?.price || product.price) }}
                   </div>
                   <div class="text-caption text-grey">
                     Stock: {{ buyNowDisplayStock }} available
@@ -1124,7 +1255,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Size Selection -->
               <div v-if="product.sizes && product.sizes.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Size:</p>
                 <v-btn-toggle
@@ -1147,11 +1277,9 @@ onUnmounted(() => {
                 </v-btn-toggle>
               </div>
 
-              <!-- Variety Selection -->
               <div v-if="product.varieties && product.varieties.length" class="mb-4">
                 <p class="font-weight-medium mb-2">Select Variety:</p>
                 <div class="varieties-list">
-                  <!-- Main Product Option -->
                   <v-card
                     class="mb-2"
                     :class="{ 'option-selected': !buyNowSelectedVariety }"
@@ -1164,7 +1292,7 @@ onUnmounted(() => {
                       </v-avatar>
                       <div class="flex-grow-1">
                         <div class="font-weight-medium">Standard Product</div>
-                        <div class="text-caption text-grey">₱{{ product.price }}</div>
+                        <div class="text-caption text-grey">{{ formatCurrency(product.price) }}</div>
                       </div>
                       <v-icon v-if="!buyNowSelectedVariety" color="primary">
                         mdi-check-circle
@@ -1172,7 +1300,6 @@ onUnmounted(() => {
                     </v-card-text>
                   </v-card>
 
-                  <!-- Varieties -->
                   <v-card
                     v-for="variety in product.varieties"
                     :key="variety.name"
@@ -1189,15 +1316,7 @@ onUnmounted(() => {
                       <div class="flex-grow-1">
                         <div class="font-weight-medium">{{ variety.name }}</div>
                         <div class="text-caption text-grey">
-                          ₱{{ variety.price || product.price }}
-                        </div>
-                        <div class="text-caption">
-                          <v-chip v-if="variety.stock === 0" size="x-small" color="red">
-                            Out of stock
-                          </v-chip>
-                          <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
-                            {{ variety.stock }} left
-                          </v-chip>
+                          {{ formatCurrency(variety.price || product.price) }}
                         </div>
                       </div>
                       <v-icon v-if="buyNowSelectedVariety?.name === variety.name" color="primary">
@@ -1208,7 +1327,6 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Quantity Selector -->
               <div class="mb-4">
                 <p class="font-weight-medium mb-2">Quantity:</p>
                 <div class="d-flex align-center">
@@ -1229,13 +1347,12 @@ onUnmounted(() => {
                 </div>
               </div>
 
-              <!-- Total Price -->
               <div class="total-price mb-4 pa-3 rounded-lg" style="background: #f8f9fa">
                 <div class="d-flex justify-space-between">
                   <span>Total:</span>
                   <span class="font-weight-bold text-primary">
-                    ₱{{
-                      ((buyNowSelectedVariety?.price || product.price) * buyNowQuantity).toFixed(2)
+                    {{
+                      formatCurrency((buyNowSelectedVariety?.price || product.price) * buyNowQuantity)
                     }}
                   </span>
                 </div>
@@ -1258,31 +1375,45 @@ onUnmounted(() => {
 
         <!-- Product Info -->
         <div class="product-info mb-4">
-          <h2 class="product-title mb-2">{{ product.prod_name }}</h2>
-          <div class="product-review-summary mb-2">
-            <v-rating
-              :model-value="averageRating"
-              readonly
-              half-increments
-              density="compact"
-              color="amber"
-              active-color="amber"
-              size="small"
-            />
-            <span class="product-review-summary__score">
-              {{ reviewCount ? averageRating.toFixed(1) : 'New' }}
+          <div class="product-badges">
+            <span class="stock-badge" :class="stockBadgeClass">{{ stockBadgeLabel }}</span>
+            <span class="info-badge">{{ soldCountLabel }}</span>
+            <span v-if="product.varieties && product.varieties.length" class="info-badge">
+              {{ product.varieties.length }} variant{{ product.varieties.length === 1 ? '' : 's' }}
             </span>
-            <span class="product-review-summary__meta">{{ reviewSummaryLabel }}</span>
           </div>
-          <p class="product-price mb-2">₱{{ displayPrice }}</p>
+
+          <div class="product-info__top">
+            <div class="product-headline">
+              <h2 class="product-title mb-2">{{ product.prod_name }}</h2>
+              <div class="product-review-summary mb-2">
+                <v-rating
+                  :model-value="averageRating"
+                  readonly
+                  half-increments
+                  density="compact"
+                  color="amber"
+                  active-color="amber"
+                  size="small"
+                />
+                <span class="product-review-summary__score">
+                  {{ reviewCount ? averageRating.toFixed(1) : 'New' }}
+                </span>
+                <span class="product-review-summary__meta">{{ reviewSummaryLabel }}</span>
+              </div>
+            </div>
+
+            <div class="price-panel">
+              <p class="product-price mb-1">{{ formatCurrency(displayPrice) }}</p>
+              <p class="price-caption">Current selling price</p>
+            </div>
+          </div>
 
           <!-- Selection Options -->
           <div class="selection-options mb-4">
-            <!-- Main Product Option -->
             <div class="option-section mb-4">
-              <p class="font-weight-medium mb-2">Choose your option:</p>
+              <p class="selection-label">Choose your option:</p>
 
-              <!-- Main Product Card -->
               <v-card
                 class="option-card mb-2"
                 :class="{ 'option-card--selected': isMainProductSelected }"
@@ -1295,37 +1426,25 @@ onUnmounted(() => {
                     <v-img :src="mainImage(product.main_img_urls)" />
                   </v-avatar>
                   <div class="flex-grow-1">
-                    <div class="d-flex justify-space-between align-center">
-                      <span class="font-weight-medium">Standard Product</span>
-                      <v-chip v-if="product.stock === 0" size="small" color="red">
-                        Out of stock
-                      </v-chip>
-                      <v-chip v-else-if="product.stock < 10" size="small" color="orange">
-                        {{ product.stock }} left
-                      </v-chip>
-                    </div>
-                    <div class="d-flex justify-space-between align-center mt-1">
-                      <span class="text-caption text-grey">Base option</span>
-                      <span class="font-weight-medium text-primary">₱{{ product.price }}</span>
-                    </div>
+                    <div class="option-title">Standard Product</div>
+                    <div class="option-subtitle">{{ getAvailabilityLabel(product.stock) }}</div>
                   </div>
-                  <v-icon v-if="isMainProductSelected" color="primary" class="ml-2">
+                  <div class="option-price">{{ formatCurrency(product.price) }}</div>
+                  <v-icon v-if="isMainProductSelected" color="primary" class="ml-3">
                     mdi-check-circle
                   </v-icon>
                 </v-card-text>
               </v-card>
 
-              <!-- OR Separator - Only show if there are varieties -->
-              <div v-if="product.varieties && product.varieties.length" class="text-center my-3">
+              <div v-if="product.varieties && product.varieties.length" class="or-divider">
                 <v-divider />
-                <span class="text-caption text-grey bg-white px-3">OR</span>
+                <span class="or-text">OR</span>
                 <v-divider />
               </div>
             </div>
 
-            <!-- Varieties Section -->
             <div v-if="product.varieties && product.varieties.length" class="varieties-section">
-              <p class="font-weight-medium mb-2">Available Varieties:</p>
+              <p class="selection-label">Available Varieties:</p>
 
               <div class="varieties-grid">
                 <v-card
@@ -1338,39 +1457,18 @@ onUnmounted(() => {
                   :disabled="variety.stock === 0"
                 >
                   <v-card-text class="pa-3">
-                    <div class="d-flex align-center mb-2">
+                    <div class="variety-content">
                       <v-avatar size="48" class="mr-3">
-                        <v-img
-                          :src="getVarietyImage(variety)"
-                          @click.stop="previewVarietyImages(variety.images)"
-                          style="cursor: zoom-in"
-                        />
+                        <v-img :src="getVarietyImage(variety)" />
                       </v-avatar>
-                      <div class="flex-grow-1">
-                        <div class="d-flex justify-space-between align-center">
-                          <span class="font-weight-medium">{{ variety.name }}</span>
-                          <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">
-                            mdi-check-circle
-                          </v-icon>
-                        </div>
-                        <div class="d-flex justify-space-between align-center mt-1">
-                          <span class="text-caption text-grey">Special variant</span>
-                          <span class="font-weight-medium text-primary">
-                            ₱{{ variety.price || product.price }}
-                          </span>
-                        </div>
+                      <div class="variety-info">
+                        <div class="variety-name">{{ variety.name }}</div>
+                        <div class="variety-type">{{ getAvailabilityLabel(variety.stock) }}</div>
                       </div>
-                    </div>
-
-                    <!-- Stock indicator -->
-                    <div class="d-flex justify-end">
-                      <v-chip v-if="variety.stock === 0" size="x-small" color="red">
-                        Out of stock
-                      </v-chip>
-                      <v-chip v-else-if="variety.stock < 10" size="x-small" color="orange">
-                        {{ variety.stock }} left
-                      </v-chip>
-                      <v-chip v-else size="x-small" color="green"> In stock </v-chip>
+                      <div class="variety-price">{{ formatCurrency(variety.price || product.price) }}</div>
+                      <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">
+                        mdi-check-circle
+                      </v-icon>
                     </div>
                   </v-card-text>
                 </v-card>
@@ -1379,39 +1477,67 @@ onUnmounted(() => {
           </div>
 
           <!-- Sizes -->
-          <div v-if="product.sizes && product.sizes.length" class="mb-3">
-            <p class="font-weight-medium mb-1">Size:</p>
-            <v-btn-toggle v-model="selectedSize" mandatory class="flex-wrap" style="gap: 6px">
-              <v-btn
+          <div v-if="product.sizes && product.sizes.length" class="size-section mb-4">
+            <p class="selection-label">Select Size:</p>
+            <div class="size-buttons">
+              <button
                 v-for="size in product.sizes"
                 :key="size"
-                :value="size"
-                variant="outlined"
-                class="ma-1 rounded-pill text-capitalize"
-                color="primary"
-                size="small"
+                class="size-btn"
+                :class="{ 'size-btn--active': selectedSize === size }"
+                @click="selectedSize = size"
               >
                 {{ size }}
-              </v-btn>
-            </v-btn-toggle>
+              </button>
+            </div>
           </div>
 
           <!-- Selection Summary -->
-          <div class="selection-summary mb-3 pa-3 rounded-lg" style="background: #f8f9fa">
-            <p class="text-caption text-grey mb-1">Your selection:</p>
-            <p class="font-weight-medium mb-1">
-              {{ selectedVariety ? selectedVariety.name : 'Standard Product' }}
-              <span v-if="selectedSize"> • {{ selectedSize }}</span>
-            </p>
-            <p class="text-caption text-grey">
-              Price: <span class="font-weight-medium text-primary">₱{{ displayPrice }}</span> •
-              Stock: <span class="font-weight-medium">{{ displayStock }} available</span>
-            </p>
+          <div class="selection-summary">
+            <p class="summary-label">Your selection:</p>
+            <p class="summary-value">{{ selectionSummaryLabel }}</p>
+            <div class="summary-details">
+              <span>Price: <strong>{{ formatCurrency(displayPrice) }}</strong></span>
+              <span>
+                Stock:
+                <strong
+                  :class="{
+                    'low-stock': displayStock < 5 && displayStock > 0,
+                    'out-stock-text': displayStock === 0,
+                  }"
+                >
+                  {{ stockSummaryText }}
+                </strong>
+              </span>
+            </div>
           </div>
 
-          <p class="product-description mb-2">{{ product.prod_description }}</p>
-          <p class="product-meta">Total Sold: {{ product.sold }}</p>
+          <div class="description-block">
+            <div class="description-label">About this item</div>
+            <p class="product-description">
+              {{ product.prod_description || 'No product description available yet.' }}
+            </p>
+          </div>
         </div>
+
+      <!-- Shop Info -->
+        <v-card
+          v-if="product.shop"
+          flat
+          class="shop-card"
+          @click="goToShop(product.shop.id)"
+        >
+          <div class="shop-card__content">
+            <v-avatar size="52" class="mr-3">
+              <v-img :src="product.shop.logo_url || '/placeholder.png'" />
+            </v-avatar>
+            <div class="shop-info">
+              <p class="shop-eyebrow">Shop</p>
+              <p class="shop-name">{{ product.shop.business_name }}</p>
+            </div>
+            <v-spacer />
+          </div>
+        </v-card>
 
         <section class="reviews-section mb-4" aria-label="Customer reviews">
           <div class="reviews-section__header">
@@ -1512,39 +1638,22 @@ onUnmounted(() => {
               </p>
 
               <div v-if="review.photos?.length" class="review-photo-grid">
-                <button
+                <div
                   v-for="(photo, index) in review.photos"
                   :key="`${review.id}-${index}`"
-                  type="button"
                   class="review-photo-grid__item"
-                  @click="openReviewImagePreview(photo)"
                 >
                   <img :src="photo" alt="Review photo" />
-                </button>
+                </div>
               </div>
             </article>
           </div>
         </section>
 
-        <!-- Shop Info -->
-        <v-card
-          v-if="product.shop"
-          flat
-          class="shop-card pa-2 d-flex align-center mb-4"
-          @click="goToShop(product.shop.id)"
-          style="cursor: pointer"
-        >
-          <v-avatar size="48">
-            <v-img :src="product.shop.logo_url || '/placeholder.png'" />
-          </v-avatar>
-          <div class="shop-info ml-3">
-            <p class="shop-name">{{ product.shop.business_name }}</p>
-          </div>
-        </v-card>
       </v-sheet>
     </v-main>
 
-    <!-- Bottom Nav -->
+        <!-- Bottom Nav -->
     <v-bottom-navigation class="bottom-nav" fixed>
       <v-row class="w-full pa-0 ma-0" no-gutters>
         <template v-if="isOwner">
@@ -1687,6 +1796,54 @@ v-main,
 .product-images :deep(img) {
   object-fit: contain !important;
   padding: 18px;
+}
+
+
+.shop-card {
+  border-radius: 16px;
+  padding: 12px 16px;
+  margin: 12px 0;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #fff;
+}
+
+.shop-card:active {
+  transform: scale(0.98);
+}
+
+.shop-card__content {
+  display: flex;
+  align-items: center; /* vertically align avatar + text */
+  width: 100%;
+}
+
+.shop-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  margin-left: 12px; /* spacing beside avatar */
+  overflow: hidden;
+}
+
+.shop-eyebrow {
+  font-size: 12px;
+  color: #888;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.shop-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: #111;
+  margin: 2px 0 0;
+  line-height: 1.3;
+
+  /* Prevent overflow */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* ===============================
@@ -1957,11 +2114,39 @@ v-main,
   background: white;
   box-shadow: 0 5px 14px rgba(0,0,0,0.05);
   margin-bottom: 50px !important;
+  cursor: pointer;
+}
+
+.shop-card__content {
+  display: flex;
+  align-items: center;
+  padding: 16px 18px;
+}
+
+.shop-info {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 0;
+}
+
+.shop-eyebrow,
+.shop-name {
+  margin: 0;
+}
+
+.shop-eyebrow {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #64748b;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .shop-name {
   font-weight: 700;
   font-size: 1rem;
+  color: #1e293b;
 }
 
 /* ===============================
