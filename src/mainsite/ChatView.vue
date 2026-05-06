@@ -14,7 +14,7 @@ import {
   resolveCounterpartyIdentity,
   type CounterpartyViewerRole,
 } from '@/utils/chatIdentity'
-
+const imageCache = new Map()
 const router = useRouter()
 const route = useRoute()
 
@@ -1418,22 +1418,25 @@ const getOrderMessageOrderId = (msg: any): string | null =>
   extractOrderIdFromContent(msg.content || '')
 
 // ✅ Get product image
-const getProductImage = (product: any) => {
+// REPLACE your existing getProductImage function with this one
+const getProductImage = (product) => {
   if (!product?.main_img_urls) return '/placeholder.png'
+  
+  let imageUrl = '/placeholder.png'
   try {
     if (typeof product.main_img_urls === 'string') {
       const parsed = JSON.parse(product.main_img_urls)
-      return Array.isArray(parsed) ? parsed[0] : parsed
+      imageUrl = Array.isArray(parsed) ? parsed[0] : parsed
+    } else if (Array.isArray(product.main_img_urls)) {
+      imageUrl = product.main_img_urls[0]
     }
-    if (Array.isArray(product.main_img_urls)) {
-      return product.main_img_urls[0]
-    }
-    return '/placeholder.png'
   } catch {
-    return '/placeholder.png'
+    imageUrl = '/placeholder.png'
   }
+  
+  // Return optimized thumbnail (200x200 for chat)
+  return getOptimizedImageUrl(imageUrl, 200, 200)
 }
-
 // ✅ Check if message is an order notification
 const isOrderNotification = (content: string) => {
   return content.includes('New Order Received!') || content.includes('Order ID:') || content.includes('Transaction #:')
@@ -1456,6 +1459,7 @@ onMounted(async () => {
     await loadMessages()
     if (conversationId.value) await subscribeMessages()
     startTimeUpdates()
+    receiveSharedProduct()
   } catch (err) {
     console.error('❌ Error during initialization:', err)
   } finally {
@@ -1470,6 +1474,67 @@ onUnmounted(() => {
   if (timeUpdateInterval) clearInterval(timeUpdateInterval)
   viewportCleanup?.()
 })
+
+
+
+
+// Add this function inside your <script setup> section
+const receiveSharedProduct = () => {
+  const sharedProduct = sessionStorage.getItem('sharedProduct')
+  const autoMessage = sessionStorage.getItem('chatAutoMessage')
+  
+  if (sharedProduct && autoMessage) {
+    try {
+      const product = JSON.parse(sharedProduct)
+      
+      setTimeout(async () => {
+        if (conversationId.value && userId.value && otherUserId.value) {
+          // Send as a product message (using your existing sendProductMessage function)
+          // You already have sendProductMessage defined - use it!
+          await sendProductMessage(product)
+          
+          // Then send the follow-up question
+          newMessage.value = autoMessage
+          await sendMessage()
+          
+          // Clear storage
+          sessionStorage.removeItem('sharedProduct')
+          sessionStorage.removeItem('chatAutoMessage')
+        }
+      }, 1000)
+    } catch (error) {
+      console.error('Error processing shared product:', error)
+    }
+  }
+}
+
+
+// Add this function to optimize image URLs
+const getOptimizedImageUrl = (url, width = 200, height = 200) => {
+  if (!url) return '/placeholder.png'
+  if (url.startsWith('/') || url.startsWith('data:')) return url
+  
+  // For Supabase Storage images - add transformation parameters
+  if (url.includes('supabase.co')) {
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}width=${width}&height=${height}&quality=80&resize=contain`
+  }
+  
+  // For other image hosts (Cloudinary, etc.)
+  if (url.includes('cloudinary.com')) {
+    return url.replace('/upload/', `/upload/w_${width},h_${height},c_fill,q_auto/`)
+  }
+  
+  return url
+}
+
+
+// Add this function if not already there
+const getCachedImage = (url) => {
+  if (imageCache.has(url)) return imageCache.get(url)
+  imageCache.set(url, url)
+  return url
+}
 </script>
 
 <template>
@@ -1538,13 +1603,23 @@ onUnmounted(() => {
               </div>
 
               <div v-else-if="msg.product_id && msg.product" class="product-message">
+                <!-- UPDATED: Product card with optimized image loading -->
                 <div class="product-card" @click="viewProduct(msg.product.id)">
-                  <v-img
-                    :src="getProductImage(msg.product)"
-                    :alt="msg.product.prod_name"
-                    class="product-image"
-                    cover
-                  />
+                  <div class="product-image-wrapper">
+                    <v-img
+                      :src="getCachedImage(getProductImage(msg.product))"
+                      :alt="msg.product.prod_name"
+                      class="product-image"
+                      cover
+                      :lazy-src="getOptimizedImageUrl(getProductImage(msg.product), 40, 40)"
+                    >
+                      <template v-slot:placeholder>
+                        <div class="image-placeholder">
+                          <v-progress-circular indeterminate size="24" color="primary" />
+                        </div>
+                      </template>
+                    </v-img>
+                  </div>
 
                   <div class="product-info">
                     <div class="product-name">{{ msg.product.prod_name }}</div>
@@ -1710,7 +1785,6 @@ onUnmounted(() => {
     </v-main>
   </v-app>
 </template>
-
 <style scoped>
 .chat-page {
   min-height: var(--chat-viewport-height, 100dvh);
@@ -1881,11 +1955,30 @@ onUnmounted(() => {
   cursor: pointer;
 }
 
-.product-image {
+/* NEW: Product image wrapper with loading state */
+.product-image-wrapper {
   width: 84px;
   height: 84px;
   border-radius: 14px;
   flex-shrink: 0;
+  overflow: hidden;
+  background: #f1f5f9;
+}
+
+.product-image {
+  width: 100%;
+  height: 100%;
+  transition: opacity 0.2s ease;
+}
+
+/* NEW: Image placeholder while loading */
+.image-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f8fafc;
 }
 
 .product-info {
@@ -2187,7 +2280,7 @@ onUnmounted(() => {
     padding: 10px;
   }
 
-  .product-image {
+  .product-image-wrapper {
     width: 72px;
     height: 72px;
   }

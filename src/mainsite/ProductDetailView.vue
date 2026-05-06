@@ -294,10 +294,51 @@ const goToShop = (shopId) => {
   router.push(`/shop/${shopId}`)
 }
 
-const goToChat = () => {
-  if (product.value?.shop?.owner_id) {
-    router.push(`/chatview/${product.value.shop.owner_id}`)
+const goToChat = async () => {
+  if (!user.value) {
+    showSnackbar('Please login to chat with the seller', 'warning')
+    return
   }
+
+  if (!product.value?.shop?.owner_id) {
+    showSnackbar('Unable to start chat', 'error')
+    return
+  }
+
+  // Prepare product information
+  const productInfo = {
+    id: product.value.id,
+    name: product.value.prod_name,
+    price: product.value.price,
+    image: mainImage(product.value.main_img_urls),
+    description: product.value.prod_description,
+    selectedVariety: selectedVariety.value,
+    selectedSize: selectedSize.value,
+    shop_id: product.value.shop.id,
+    shop_name: product.value.shop.business_name
+  }
+
+  // Create a natural question about the product
+  let questionText = `Hi! I have a question about ${product.value.prod_name}`
+  
+  if (selectedVariety.value) {
+    questionText += ` (${selectedVariety.value.name} variety)`
+  }
+  
+  if (selectedSize.value) {
+    questionText += ` - Size: ${selectedSize.value}`
+  }
+  
+  questionText += `. Can you tell me more about it?`
+
+  // Store in sessionStorage
+  sessionStorage.setItem('sharedProduct', JSON.stringify(productInfo))
+  sessionStorage.setItem('chatAutoMessage', questionText)
+
+  // Navigate to chat with the shop owner
+  router.push(`/chatview/${product.value.shop.owner_id}`)
+  
+  showSnackbar('Opening chat with your product question...', 'info')
 }
 
 const selectMainProduct = () => {
