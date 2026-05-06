@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue' // Added computed
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
@@ -11,13 +11,13 @@ import {
   getVisibleUnreadNotificationCount,
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
-
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const activeTab = ref('home')
 const products = ref([])
-const nearby = ref([])
+const allShops = ref([]) // Store all shops before filtering
+const nearby = ref([]) // Filtered shops (within city)
 const loading = ref(true)
 const errorMsg = ref('')
 
@@ -33,20 +33,20 @@ const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
 // Safe area insets for notches and camera cutouts
 const heroPaddingTop = ref('env(safe-area-inset-top)')
 
+//location based
+const userCity = ref('')
+const showLocationBasedStores = ref(true)
+const isDetectingCity = ref(false)
+const locationAccuracy = ref('none')
+
 // Refresh handler function
 const handleRefresh = async () => {
   console.log('🔄 Pull-to-refresh triggered - Refreshing home page...')
 
   try {
-    // Refresh shops
     await fetchShops()
-
-    // Refresh products
     await fetchProducts()
-
-    // Refresh notification count
     await fetchUnreadNotificationCount()
-
     console.log('✅ Home page refresh complete!')
   } catch (error) {
     console.error('❌ Refresh failed:', error)
@@ -61,18 +61,16 @@ const updateSafeAreaInsets = () => {
 
   console.log('Safe area top inset:', topInset)
 
-  // Set padding values based on safe area
   if (topInset && topInset !== '0px') {
     heroPaddingTop.value = `calc(12px + ${topInset})`
   } else {
-    // Fallback for devices without notch detection
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
     const isAndroid = /Android/.test(navigator.userAgent)
 
     if (isIOS) {
-      heroPaddingTop.value = 'calc(12px + 44px)' // iOS status bar height
+      heroPaddingTop.value = 'calc(12px + 44px)'
     } else if (isAndroid) {
-      heroPaddingTop.value = 'calc(12px + 24px)' // Android status bar height
+      heroPaddingTop.value = 'calc(12px + 24px)'
     } else {
       heroPaddingTop.value = '12px'
     }
@@ -88,23 +86,82 @@ function goToSearch() {
 }
 
 function updateSearch() {
-  // instantly sync search input with SearchView via query param
   router.replace({ name: 'search', query: { q: searchQuery.value } })
+}
+
+// Apply filter - always show shops within the same city
+const applyShopFilter = () => {
+  nearby.value = allShops.value.filter(shop => isShopInSameCity(shop))
+}
+
+// Check if shop is in the same city as user
+const isShopInSameCity = (shop) => {
+  if (!userCity.value) return true // If no city detected, show all
+
+  // Get shop city from various possible fields
+  const shopCity = shop.city || shop.barangay || ''
+
+  if (!shopCity) return false
+
+  const normalizeName = (name) => {
+    if (!name) return ''
+    return name
+      .toLowerCase()
+      .replace(/city|municipality|municipal|town|province|^\s+|\s+$/g, '')
+      .replace(/^city of /i, '')
+      .replace(/^municipality of /i, '')
+      .replace(/ city$/i, '')
+      .replace(/ municipality$/i, '')
+      .trim()
+  }
+
+  const userCityNormalized = normalizeName(userCity.value)
+  const shopCityNormalized = normalizeName(shopCity)
+
+  if (!userCityNormalized || !shopCityNormalized) return false
+
+  // Check if shop is in the same city
+  return (
+    userCityNormalized === shopCityNormalized ||
+    shopCityNormalized.includes(userCityNormalized) ||
+    userCityNormalized.includes(shopCityNormalized)
+  )
+}
+
+// Helper function for error messages
+let errorTimeout = null
+
+const setErrorMessage = (message, duration = 4000) => {
+  if (errorTimeout) {
+    clearTimeout(errorTimeout)
+    errorTimeout = null
+  }
+
+  errorMsg.value = null
+
+  if (message) {
+    setTimeout(() => {
+      errorMsg.value = message
+
+      if (duration > 0) {
+        errorTimeout = window.setTimeout(() => {
+          errorMsg.value = null
+        }, duration)
+      }
+    }, 50)
+  }
 }
 
 /* 🧭 Location Permission */
 async function requestLocationPermission() {
   try {
     console.log('📍 Requesting location permission...')
-
-    // Check current permission status first
     const currentPerm = await Geolocation.checkPermissions()
     if (currentPerm.location === 'granted') {
       console.log('📍 Location already granted')
       return true
     }
 
-    // Request permission
     const perm = await Geolocation.requestPermissions()
     if (perm.location === 'granted') {
       console.log('📍 Location permission granted')
@@ -126,12 +183,10 @@ async function getUserLocation() {
 
   try {
     console.log('📍 Attempting high accuracy location...')
-
-    // Strategy 1: High accuracy (GPS) - 10 second timeout
     coords = await Geolocation.getCurrentPosition({
       enableHighAccuracy: true,
-      timeout: 10000, // 10 seconds for GPS
-      maximumAge: 0, // Don't use cached position
+      timeout: 10000,
+      maximumAge: 0,
     })
     accuracy = 'high'
     console.log('📍 High accuracy location acquired:', coords.coords)
@@ -139,18 +194,16 @@ async function getUserLocation() {
     console.warn('📍 High accuracy failed, trying standard accuracy...', highAccuracyError)
 
     try {
-      // Strategy 2: Standard accuracy (WiFi/cell) - 5 second timeout
       coords = await Geolocation.getCurrentPosition({
-        enableHighAccuracy: false, // Faster but less accurate
-        timeout: 5000, // 5 seconds
-        maximumAge: 300000, // Accept position up to 5 minutes old
+        enableHighAccuracy: false,
+        timeout: 5000,
+        maximumAge: 300000,
       })
       accuracy = 'medium'
       console.log('📍 Standard accuracy location acquired:', coords.coords)
     } catch (standardError) {
       console.warn('📍 Standard accuracy failed, using last known position...', standardError)
 
-      // Strategy 3: Last known position from localStorage
       const lastKnown = getLastKnownLocation()
       if (lastKnown) {
         coords = { coords: lastKnown }
@@ -162,7 +215,6 @@ async function getUserLocation() {
     }
   }
 
-  // Save successful location for future fallback
   if (coords && coords.coords && accuracy !== 'cached') {
     saveLastKnownLocation(coords.coords)
   }
@@ -180,7 +232,6 @@ function getLastKnownLocation() {
     const cached = localStorage.getItem('lastKnownLocation')
     if (cached) {
       const { latitude, longitude, timestamp } = JSON.parse(cached)
-      // Only use if less than 1 hour old
       if (Date.now() - timestamp < 3600000) {
         return { latitude, longitude }
       }
@@ -208,7 +259,6 @@ function saveLastKnownLocation(coords) {
 /* 🔔 Push Notifications — Native Only (Capacitor) */
 async function setupPushNotifications() {
   try {
-    // Step 1: Check permission
     let permStatus = await PushNotifications.checkPermissions()
     if (permStatus.receive !== 'granted') {
       const req = await PushNotifications.requestPermissions()
@@ -218,14 +268,8 @@ async function setupPushNotifications() {
       }
     }
 
-    // Step 2: Register with APNS/FCM (handled internally by Capacitor)
-    // await PushNotifications.register()
-
-    // Step 3: Handle successful registration (token received)
     PushNotifications.addListener('registration', async (token) => {
       console.log('✅ Push token (Capacitor):', token.value)
-
-      // Optional: Save token to Supabase for your backend
       const {
         data: { user },
       } = await supabase.auth.getUser()
@@ -238,17 +282,14 @@ async function setupPushNotifications() {
       }
     })
 
-    // Step 4: Handle registration errors
     PushNotifications.addListener('registrationError', (error) => {
       console.error('❌ Push registration error:', error)
     })
 
-    // Step 5: Handle foreground notifications
     PushNotifications.addListener('pushNotificationReceived', (notification) => {
       console.log('📩 Push received:', notification)
     })
 
-    // Step 6: Handle user tapping a notification
     PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
       console.log('🖱️ Notification action:', action.notification)
     })
@@ -279,32 +320,146 @@ async function checkNetworkStatus() {
   }
 }
 
-/* 🏪 Fetch Shops with Smart Location Handling */
+// City caching functions
+const CACHE_DURATION = 30 * 60 * 1000
+
+function getCachedCity() {
+  try {
+    const cached = localStorage.getItem('userCity')
+    if (cached) {
+      const { city, timestamp } = JSON.parse(cached)
+      if (Date.now() - timestamp < CACHE_DURATION) {
+        console.log(`📍 Using cached city: ${city}`)
+        return city
+      }
+    }
+  } catch (e) {
+    console.warn('Could not read cached city', e)
+  }
+  return null
+}
+
+function saveCachedCity(city) {
+  try {
+    const cityData = {
+      city: city,
+      timestamp: Date.now()
+    }
+    localStorage.setItem('userCity', JSON.stringify(cityData))
+  } catch (e) {
+    console.warn('Could not save city cache', e)
+  }
+}
+
+// Detect city from coordinates using Mapbox
+async function detectCityFromCoordinates(lat, lng) {
+  try {
+    const accessToken = import.meta.env.VITE_MAPBOX_ACCESS_TOKEN
+
+    if (!accessToken) {
+      console.warn('Mapbox access token not found')
+      return null
+    }
+
+    const response = await fetch(
+      `https://api.mapbox.com/geocoding/v5/mapbox.places/${lng},${lat}.json?` +
+        `access_token=${accessToken}&types=place,locality,district&limit=1`,
+    )
+
+    if (!response.ok) throw new Error('Geocoding failed')
+
+    const data = await response.json()
+
+    if (data.features && data.features.length > 0) {
+      const feature = data.features[0]
+      let city = null
+
+      if (feature.context) {
+        const locality = feature.context.find((ctx) => ctx.id.includes('locality'))
+        if (locality) city = locality.text
+
+        if (!city) {
+          const place = feature.context.find((ctx) => ctx.id.includes('place'))
+          if (place) city = place.text
+        }
+
+        if (!city) {
+          const district = feature.context.find((ctx) => ctx.id.includes('district'))
+          if (district) city = district.text
+        }
+      }
+
+      if (!city && feature.place_type.includes('place')) {
+        city = feature.text
+      }
+
+      city = city || feature.text
+      console.log(`📍 City detected: ${city}`)
+      return city
+    }
+
+    return null
+  } catch (error) {
+    console.error('City detection error:', error)
+    return null
+  }
+}
+
+/* 🏪 Fetch Shops */
 async function fetchShops() {
   let userLat = null
   let userLon = null
-  let locationAccuracy = 'none'
+  let locationAccuracyValue = 'none'
+  let detectedCity = null
 
   try {
-    // Get user location with fallbacks
     const locationResult = await getUserLocation()
     if (locationResult.coords) {
       userLat = locationResult.coords.latitude
       userLon = locationResult.coords.longitude
-      locationAccuracy = locationResult.accuracy
-    }
+      locationAccuracyValue = locationResult.accuracy
+      locationAccuracy.value = locationAccuracyValue
 
-    console.log(`📍 Using location with accuracy: ${locationAccuracy}`)
+      isDetectingCity.value = true
+
+      // Try to get cached city first
+      const cachedCity = getCachedCity()
+
+      if (cachedCity) {
+        detectedCity = cachedCity
+        userCity.value = detectedCity
+        console.log(`📍 Using cached city: ${detectedCity}`)
+      } else {
+        // Detect city from coordinates
+        detectedCity = await detectCityFromCoordinates(userLat, userLon)
+
+        if (detectedCity) {
+          userCity.value = detectedCity
+          saveCachedCity(detectedCity)
+          console.log(`📍 User detected in: ${detectedCity}`)
+        } else {
+          userCity.value = 'Detecting...'
+          console.warn('Could not detect specific city')
+        }
+      }
+
+      isDetectingCity.value = false
+    } else {
+      userCity.value = 'Location unavailable'
+      console.warn('No location coordinates available')
+    }
   } catch (locationError) {
-    console.warn('📍 Could not get user location, showing all shops:', locationError)
-    // Continue without location - we'll show all shops
+    console.error('📍 Could not get user location:', locationError)
+    userCity.value = 'Location unavailable'
+    isDetectingCity.value = false
   }
 
   try {
+    // Fetch all approved shops with valid coordinates
     const { data, error } = await supabase
       .from('shops')
       .select(
-        'id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region, latitude, longitude, status',
+        'id, business_name, description, logo_url, physical_store, building, street, barangay, city, province, region, latitude, longitude, status, detected_address, address_source',
       )
       .eq('status', 'approved')
       .not('latitude', 'is', null)
@@ -312,27 +467,15 @@ async function fetchShops() {
 
     if (error) throw error
 
-    // Compute distance only if we have user location
-    function calculateDistance(lat1, lon1, lat2, lon2) {
-      const R = 6371 // Earth radius in km
-      const dLat = ((lat2 - lat1) * Math.PI) / 180
-      const dLon = ((lon2 - lon1) * Math.PI) / 180
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((lat1 * Math.PI) / 180) *
-          Math.cos((lat2 * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2)
-      return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
-    }
+    console.log(`📍 Found ${data?.length || 0} total approved shops`)
 
-    let mapped = data.map((s) => {
-      let distance = null
-      let distanceAccuracy = 'unknown'
-
-      if (userLat && userLon && s.latitude && s.longitude) {
-        distance = calculateDistance(userLat, userLon, s.latitude, s.longitude)
-        distanceAccuracy = locationAccuracy
+    // Prepare shop data without distance calculation
+    let mapped = (data || []).map((s) => {
+      let displayAddress = ''
+      if (s.address_source === 'detected' && s.detected_address) {
+        displayAddress = s.detected_address
+      } else {
+        displayAddress = [s.building, s.street, s.barangay, s.city, s.province].filter(Boolean).join(', ')
       }
 
       return {
@@ -340,27 +483,32 @@ async function fetchShops() {
         title: s.business_name,
         img: s.physical_store || PLACEHOLDER_IMG,
         logo: s.logo_url,
-        address: [s.building, s.street, s.barangay, s.city, s.province].filter(Boolean).join(', '),
-        distance,
-        distanceAccuracy,
-        hasExactLocation: !!(s.latitude && s.longitude),
+        address: displayAddress,
+        city: s.city || s.barangay || '',
+        addressSource: s.address_source,
       }
     })
 
-    // Sort by distance if available, otherwise keep original order
-    if (userLat && userLon) {
-      mapped.sort((a, b) => {
-        // Put shops with unknown distance at the end
-        if (a.distance === null) return 1
-        if (b.distance === null) return -1
-        return a.distance - b.distance
-      })
+    // Store all shops (no sorting by distance)
+    allShops.value = mapped
+
+    // Apply filter - always show within city
+    applyShopFilter()
+
+    // Show appropriate message
+    if (nearby.value.length === 0 && detectedCity && detectedCity !== 'Detecting...' && detectedCity !== 'Location unavailable') {
+      errorMsg.value = `No shops found in ${detectedCity} yet.\nCheck back soon or explore nearby areas!`
+    } else if (nearby.value.length > 0 && detectedCity && detectedCity !== 'Detecting...') {
+      if (errorMsg.value && errorMsg.value.includes(detectedCity)) {
+        errorMsg.value = ''
+      }
+      console.log(`✅ Showing ${nearby.value.length} shop(s) within ${detectedCity}`)
     }
 
-    nearby.value = mapped
   } catch (err) {
     console.error('fetchShops error:', err)
     errorMsg.value = 'Failed to load shops'
+    allShops.value = []
     nearby.value = []
   }
 }
@@ -382,7 +530,7 @@ async function fetchProducts() {
         shops!inner (status)
       `,
       )
-      .eq('shops.status', 'approved') // ✅ Only shops approved
+      .eq('shops.status', 'approved')
 
     if (error) throw error
 
@@ -423,10 +571,8 @@ async function setupNotificationListener() {
   } = await supabase.auth.getUser()
   if (!user) return
 
-  // Fetch initial unread count
   await fetchUnreadNotificationCount()
 
-  // Subscribe to real-time notifications
   notificationSubscription.value = supabase
     .channel('user-notifications')
     .on(
@@ -439,16 +585,9 @@ async function setupNotificationListener() {
       },
       async (payload) => {
         console.log('New notification received:', payload)
-
         const visibleNotification = await resolveVisibleNotification(payload.new)
-
-        if (!visibleNotification) {
-          return
-        }
-
+        if (!visibleNotification) return
         unreadNotifications.value++
-
-        // Show native notification if enabled
         if (Notification.permission === 'granted') {
           new Notification('CloseShop', {
             body: visibleNotification.message,
@@ -466,7 +605,6 @@ async function setupNotificationListener() {
         filter: `user_id=eq.${user.id}`,
       },
       (payload) => {
-        // If notification is marked as read, decrease count
         if (payload.new.is_read && !payload.old.is_read) {
           unreadNotifications.value = Math.max(0, unreadNotifications.value - 1)
         }
@@ -480,17 +618,15 @@ async function fetchUnreadNotificationCount() {
     data: { user },
   } = await supabase.auth.getUser()
   if (!user) return
-
   unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
 }
 
-// NEW: Setup real-time product updates subscription
+// Setup real-time product updates subscription
 async function setupProductsSubscription() {
   if (productsSubscription.value) {
     productsSubscription.value.unsubscribe()
   }
 
-  // Subscribe to real-time updates on products table
   productsSubscription.value = supabase
     .channel('products-changes')
     .on(
@@ -502,8 +638,6 @@ async function setupProductsSubscription() {
       },
       (payload) => {
         console.log('🔄 Product updated in real-time:', payload)
-
-        // Update the sold count for the specific product
         const updatedProduct = payload.new
         const productIndex = products.value.findIndex((p) => p.id === updatedProduct.id)
 
@@ -511,22 +645,17 @@ async function setupProductsSubscription() {
           const oldSold = products.value[productIndex].sold
           const newSold = updatedProduct.sold || 0
 
-          // Update product with sold and stock
           products.value[productIndex] = {
             ...products.value[productIndex],
             sold: newSold,
             stock: updatedProduct.stock || 0,
           }
 
-          // Log the update
           if (newSold > oldSold) {
             console.log(`🔥 Product ${updatedProduct.id} sales increased: ${oldSold} → ${newSold}`)
           } else if (newSold < oldSold) {
             console.log(`📉 Product ${updatedProduct.id} sales adjusted: ${oldSold} → ${newSold}`)
           }
-          console.log(
-            `✅ Updated product ${updatedProduct.id}: sold=${newSold}, stock=${updatedProduct.stock}`,
-          )
         }
       },
     )
@@ -535,18 +664,9 @@ async function setupProductsSubscription() {
   console.log('📡 Subscribed to real-time product updates')
 }
 
-// NEW: Function to refresh all products data
-async function refreshProductsData() {
-  console.log('🔄 Refreshing products data...')
-  await fetchProducts()
-  console.log('✅ Products data refreshed')
-}
-
 /* 🚀 Main Lifecycle */
 onMounted(async () => {
   updateSafeAreaInsets()
-
-  // Listen for orientation changes
   window.addEventListener('resize', updateSafeAreaInsets)
   window.addEventListener('orientationchange', updateSafeAreaInsets)
 
@@ -554,11 +674,8 @@ onMounted(async () => {
     loading.value = true
     errorMsg.value = ''
 
-    // Only run these on mobile builds
     if (Capacitor.isNativePlatform()) {
       await checkNetworkStatus()
-
-      // Request location in background - don't block UI
       const locationPromise = requestLocationPermission()
         .then((hasPermission) => {
           if (hasPermission) {
@@ -572,21 +689,13 @@ onMounted(async () => {
         })
 
       await setupPushNotifications()
-
-      // Wait a bit for location if possible, but don't block
       await Promise.race([locationPromise, new Promise((resolve) => setTimeout(resolve, 2000))])
     }
 
-    // Setup notification listener
     await setupNotificationListener()
-
-    // Setup real-time products subscription
     await setupProductsSubscription()
-
-    // Load shops and products in parallel
     await Promise.all([fetchShops(), fetchProducts()])
 
-    // Show survey bubble after a delay (3 seconds)
     setTimeout(() => {
       showSurveyBubble.value = true
     }, 3000)
@@ -596,9 +705,13 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+
+  setTimeout(() => {
+    showSurveyBubble.value = false
+  }, 15000)
 })
 
-// Cleanup subscriptions - ✅ FIXED: Now properly imported
+// Cleanup subscriptions
 onUnmounted(() => {
   window.removeEventListener('resize', updateSafeAreaInsets)
   window.removeEventListener('orientationchange', updateSafeAreaInsets)
@@ -607,7 +720,6 @@ onUnmounted(() => {
     notificationSubscription.value.unsubscribe()
   }
 
-  // Clean up products subscription
   if (productsSubscription.value) {
     productsSubscription.value.unsubscribe()
     console.log('📡 Unsubscribed from product updates')
@@ -627,7 +739,7 @@ const showSurveyBubble = ref(false)
 
 function openSurvey() {
   showSurvey.value = true
-  showSurveyBubble.value = false // Hide bubble when user opens the survey
+  showSurveyBubble.value = false
 }
 
 function markSurveyAnswered() {
@@ -636,9 +748,6 @@ function markSurveyAnswered() {
   showSurvey.value = false
   showSurveyBubble.value = false
 }
-
-// Add these helper functions
-const locationAccuracy = ref('none')
 
 const getLocationStatusColor = (accuracy) => {
   switch (accuracy) {
@@ -666,14 +775,6 @@ const getLocationStatusText = (accuracy) => {
   }
 }
 
-// Auto-hide bubble after 15 seconds
-onMounted(() => {
-  setTimeout(() => {
-    showSurveyBubble.value = false
-  }, 15000)
-})
-
-// Optional: Add a computed property for formatted product data
 const formattedProducts = computed(() => {
   return products.value.map((product) => ({
     ...product,
@@ -682,29 +783,15 @@ const formattedProducts = computed(() => {
   }))
 })
 
-// Replace the existing hotPicks computed property with this:
 const hotPicks = computed(() => {
-  // Filter products that have the "hot" badge criteria:
-  // 1. Stock > 0 (in stock)
-  // 2. Sold >= 50 (meets hot threshold)
-  const hotProducts = products.value.filter(product => 
-    product.stock > 0 && product.sold >= 50
-  )
-  
-  // Sort by sold count (highest first) and add rank numbers
-  const sorted = [...hotProducts]
-    .sort((a, b) => (b.sold || 0) - (a.sold || 0))
-    .slice(0, 10) // Show top 10 hot products
-  
-  // Add rank numbers
+  const hotProducts = products.value.filter((product) => product.stock > 0 && product.sold >= 50)
+  const sorted = [...hotProducts].sort((a, b) => (b.sold || 0) - (a.sold || 0)).slice(0, 10)
   return sorted.map((product, index) => ({
     ...product,
-    rank: index + 1
+    rank: index + 1,
   }))
 })
-
 </script>
-
 <template>
   <v-app>
     <PullToRefreshWrapper :on-refresh="handleRefresh">
@@ -745,13 +832,34 @@ const hotPicks = computed(() => {
         </v-sheet>
 
         <v-container class="py-4" style="max-width: 720px">
-          
-          <!-- ========== SECTION 1: STORES WITHIN BUTUAN ========== -->
+          <!-- ========== SECTION 1: STORES NEAR USER LOCATION ========== -->
           <div class="section-header mt-6">
-            <h3 class="section-title">Stores Within Butuan</h3>
+            <div class="section-title-wrapper">
+              <h3 class="section-title">
+                Stores Near
+                <span class="dynamic-city">
+                  {{
+                    !isDetectingCity &&
+                    userCity &&
+                    userCity !== 'Detecting...' &&
+                    userCity !== 'Location unavailable'
+                      ? userCity.charAt(0).toUpperCase() + userCity.slice(1)
+                      : 'Your Location'
+                  }}
+                </span>
+              </h3>
+              <v-progress-circular
+                v-if="isDetectingCity"
+                indeterminate
+                size="16"
+                width="2"
+                color="#3f83c7"
+                class="ml-2"
+              />
+            </div>
             <div class="location-status">
               <v-chip
-                v-if="locationAccuracy !== 'none'"
+                v-if="locationAccuracy !== 'none' && !isDetectingCity"
                 :color="getLocationStatusColor(locationAccuracy)"
                 size="small"
               >
@@ -773,8 +881,37 @@ const hotPicks = computed(() => {
             </template>
             <template v-else-if="nearby.length === 0">
               <div class="empty-card">
-                <div class="empty-title">Nothing nearby yet</div>
-                <div class="empty-sub">Location-based results coming soon.</div>
+                <div class="empty-icon">
+                  <v-icon size="32" color="#cbd5e1">mdi-store-off</v-icon>
+                </div>
+                <div class="empty-title">
+                  <template v-if="isDetectingCity"> Detecting your location... </template>
+                  <template
+                    v-else-if="
+                      userCity && userCity !== 'Detecting...' && userCity !== 'Location unavailable'
+                    "
+                  >
+                    No shops in {{ userCity }}
+                  </template>
+                  <template v-else> No shops nearby </template>
+                </div>
+                <div class="empty-sub">
+                  <template v-if="isDetectingCity">
+                    Please wait while we find shops near you
+                  </template>
+                  <template
+                    v-else-if="
+                      userCity && userCity !== 'Detecting...' && userCity !== 'Location unavailable'
+                    "
+                  >
+                    No shops found in {{ userCity }} yet.<br />
+                    Check back soon or explore nearby areas!
+                  </template>
+                  <template v-else>
+                    Unable to detect your location.<br />
+                    Please enable location services to find shops near you.
+                  </template>
+                </div>
               </div>
             </template>
             <template v-else>
@@ -790,6 +927,9 @@ const hotPicks = computed(() => {
                     <v-img :src="item.logo || PLACEHOLDER_IMG" />
                   </v-avatar>
                   <div class="item-title">{{ item.title }}</div>
+                </div>
+                <div v-if="item.distance" class="distance-badge">
+                  {{ item.distance.toFixed(1) }} km
                 </div>
               </div>
             </template>
@@ -815,8 +955,13 @@ const hotPicks = computed(() => {
             </template>
             <template v-else-if="hotPicks.length === 0">
               <div class="empty-card">
+                <div class="empty-icon">
+                  <v-icon size="32" color="#cbd5e1">mdi-fire-off</v-icon>
+                </div>
                 <div class="empty-title">No hot picks yet</div>
-                <div class="empty-sub">Popular products will appear here.</div>
+                <div class="empty-sub">
+                  Popular products will appear here once they get enough sales.
+                </div>
               </div>
             </template>
             <template v-else>
@@ -859,9 +1004,12 @@ const hotPicks = computed(() => {
             </div>
           </template>
           <template v-else-if="products.length === 0">
-            <div class="empty-card">
+            <div class="empty-card large">
+              <div class="empty-icon">
+                <v-icon size="48" color="#cbd5e1">mdi-package-variant-closed</v-icon>
+              </div>
               <div class="empty-title">No products yet</div>
-              <div class="empty-sub">Products will appear here.</div>
+              <div class="empty-sub">Products from approved shops will appear here.</div>
             </div>
           </template>
           <template v-else>
@@ -870,9 +1018,9 @@ const hotPicks = computed(() => {
                 v-for="item in products"
                 :key="item.id"
                 class="product-card"
-                :class="{ 
+                :class="{
                   'product-card--hot': item.sold >= 50 && item.stock > 0,
-                  'product-card--out-of-stock': item.stock === 0
+                  'product-card--out-of-stock': item.stock === 0,
                 }"
                 @click="goToProduct(item.id)"
               >
@@ -903,18 +1051,22 @@ const hotPicks = computed(() => {
                   <div class="product-price">₱{{ Number(item.price).toFixed(2) }}</div>
                   <div class="product-sold">
                     <v-icon size="14" class="mr-1">mdi-fire</v-icon>
-                    {{ item.sold }} sold
+                    {{ item.sold.toLocaleString() }} sold
                   </div>
                 </div>
               </div>
             </div>
           </template>
 
-          <v-alert v-if="errorMsg" class="mt-6" type="error" variant="tonal">
+          <v-alert
+            v-if="errorMsg && !errorMsg.includes('No shops found')"
+            class="mt-6"
+            type="error"
+            variant="tonal"
+          >
             {{ errorMsg }}
           </v-alert>
         </v-container>
-
       </v-main>
 
       <!-- Survey Bubble Message -->
@@ -998,7 +1150,7 @@ const hotPicks = computed(() => {
   }
 }
 
-/* Hero Section with Safe Area Support - COMPLETELY REWRITTEN */
+/* Hero Section with Safe Area Support */
 .hero {
   background: #3f83c7;
   border-radius: 0;
@@ -1008,22 +1160,17 @@ const hotPicks = computed(() => {
   top: 0;
   z-index: 100;
   box-sizing: border-box;
-  /* Dynamic padding - will be overridden by inline style */
   padding: 12px 16px 16px 16px;
-  /* Fallback padding */
   padding-top: 12px;
-  /* Add a subtle shadow for depth */
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
 }
 
-/* For devices with notches/cutouts - CSS only fallback */
 @supports (padding-top: env(safe-area-inset-top)) {
   .hero {
     padding-top: calc(12px + env(safe-area-inset-top));
   }
 }
 
-/* For iOS devices with dynamic island */
 @supports (padding-top: constant(safe-area-inset-top)) {
   .hero {
     padding-top: calc(12px + constant(safe-area-inset-top));
@@ -1042,7 +1189,7 @@ const hotPicks = computed(() => {
 /* Search Field - Responsive */
 .search-field {
   flex: 1;
-  min-width: 0; /* Prevents overflow */
+  min-width: 0;
   transition: all 0.3s ease;
 }
 
@@ -1147,32 +1294,26 @@ const hotPicks = computed(() => {
   .hero {
     padding: 12px 12px 14px 12px;
   }
-
   @supports (padding-top: env(safe-area-inset-top)) {
     .hero {
       padding-top: calc(12px + env(safe-area-inset-top));
     }
   }
-
   .hero-row {
     gap: 10px;
   }
-
   .search-field :deep(input) {
     font-size: 13px;
     padding: 10px 0;
   }
-
   .notif-btn {
     width: 44px;
     height: 44px;
     min-width: 44px;
   }
-
   .notif-btn :deep(.v-icon) {
     font-size: 20px;
   }
-
   .notification-badge {
     min-width: 18px;
     height: 18px;
@@ -1180,7 +1321,6 @@ const hotPicks = computed(() => {
     top: -3px;
     right: -3px;
   }
-
   .badge-large {
     min-width: 22px;
     height: 22px;
@@ -1190,45 +1330,36 @@ const hotPicks = computed(() => {
   }
 }
 
-/* Extra Small Devices (phones, 480px and down) */
 @media (max-width: 480px) {
   .hero {
     padding: 10px 10px 12px 10px;
   }
-
   @supports (padding-top: env(safe-area-inset-top)) {
     .hero {
       padding-top: calc(10px + env(safe-area-inset-top));
     }
   }
-
   .hero-row {
     gap: 8px;
   }
-
   .search-field :deep(input) {
     font-size: 12px;
     padding: 8px 0;
   }
-
   .search-field :deep(.v-field__prepend-inner) {
     padding-left: 8px;
   }
-
   .search-field :deep(.v-field__append-inner) {
     padding-right: 8px;
   }
-
   .notif-btn {
     width: 40px;
     height: 40px;
     min-width: 40px;
   }
-
   .notif-btn :deep(.v-icon) {
     font-size: 18px;
   }
-
   .notification-badge {
     min-width: 16px;
     height: 16px;
@@ -1236,7 +1367,6 @@ const hotPicks = computed(() => {
     top: -2px;
     right: -2px;
   }
-
   .badge-large {
     min-width: 20px;
     height: 20px;
@@ -1251,104 +1381,88 @@ const hotPicks = computed(() => {
   .hero {
     padding: 8px 12px 10px 12px;
   }
-
   @supports (padding-top: env(safe-area-inset-top)) {
     .hero {
       padding-top: calc(8px + env(safe-area-inset-top));
     }
   }
-
   .hero-row {
     gap: 10px;
   }
-
   .search-field :deep(input) {
     padding: 8px 0;
   }
-
   .notif-btn {
     width: 38px;
     height: 38px;
     min-width: 38px;
   }
-
   .notif-btn :deep(.v-icon) {
     font-size: 18px;
   }
 }
 
-/* Tablet Devices (768px to 1024px) */
+/* Tablet Devices */
 @media (min-width: 769px) and (max-width: 1024px) {
   .hero {
     padding: 14px 20px 18px 20px;
   }
-
   @supports (padding-top: env(safe-area-inset-top)) {
     .hero {
       padding-top: calc(14px + env(safe-area-inset-top));
     }
   }
-
   .hero-row {
     max-width: 800px;
     gap: 14px;
   }
-
   .search-field :deep(input) {
     font-size: 15px;
   }
-
   .notif-btn {
     width: 52px;
     height: 52px;
     min-width: 52px;
   }
-
   .notif-btn :deep(.v-icon) {
     font-size: 24px;
   }
 }
 
-/* Desktop Devices (1024px and up) */
+/* Desktop Devices */
 @media (min-width: 1025px) {
   .hero {
     padding: 16px 24px 20px 24px;
   }
-
   @supports (padding-top: env(safe-area-inset-top)) {
     .hero {
       padding-top: calc(16px + env(safe-area-inset-top));
     }
   }
-
   .hero-row {
     max-width: 1200px;
     gap: 16px;
   }
-
   .search-field :deep(input) {
     font-size: 16px;
     padding: 14px 0;
   }
-
   .notif-btn {
     width: 56px;
     height: 56px;
     min-width: 56px;
   }
-
   .notif-btn :deep(.v-icon) {
     font-size: 26px;
   }
 }
 
-/* iOS-specific adjustments for notch */
+/* iOS-specific adjustments */
 @supports (-webkit-touch-callout: none) {
   .hero {
     padding-top: calc(12px + constant(safe-area-inset-top)) !important;
     padding-top: calc(12px + env(safe-area-inset-top)) !important;
   }
-
   @media (max-width: 480px) {
     .hero {
       padding-top: calc(10px + constant(safe-area-inset-top)) !important;
@@ -1362,7 +1476,6 @@ const hotPicks = computed(() => {
   .hero {
     padding-top: calc(12px + 24px);
   }
-
   @media (max-width: 480px) {
     .hero {
       padding-top: calc(10px + 24px);
@@ -1370,16 +1483,14 @@ const hotPicks = computed(() => {
   }
 }
 
-/* Ensure the search field doesn't overflow on very small screens */
+/* Small screen adjustments */
 @media (max-width: 360px) {
   .hero-row {
     gap: 6px;
   }
-
   .search-field :deep(.v-field__prepend-inner) {
     padding-left: 6px;
   }
-
   .search-field :deep(.v-field__append-inner) {
     padding-right: 6px;
   }
@@ -1437,13 +1548,8 @@ const hotPicks = computed(() => {
 }
 
 @keyframes floatBubble {
-  0%,
-  100% {
-    transform: translateY(0) translateX(0);
-  }
-  50% {
-    transform: translateY(-5px) translateX(2px);
-  }
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-5px) translateX(2px); }
 }
 
 @keyframes bubbleAppear {
@@ -1475,6 +1581,12 @@ const hotPicks = computed(() => {
   color: #6b7280;
   font-weight: 600;
   cursor: pointer;
+}
+
+.location-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
 }
 
 .scroll-row {
@@ -1544,10 +1656,30 @@ const hotPicks = computed(() => {
   flex: 1;
 }
 
+/* Distance Badge */
+.distance-badge {
+  position: absolute;
+  bottom: 8px;
+  right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  color: white;
+  padding: 2px 6px;
+  border-radius: 12px;
+  font-size: 10px;
+  font-weight: 600;
+  z-index: 10;
+  letter-spacing: 0.3px;
+  font-family: monospace;
+}
+
+/* Empty Card Styles */
 .empty-card {
   width: 240px;
-  height: 124px;
-  border-radius: 12px;
+  min-width: 200px;
+  padding: 24px 16px;
+  border-radius: 16px;
   background: #fff;
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
   display: flex;
@@ -1555,17 +1687,32 @@ const hotPicks = computed(() => {
   align-items: center;
   justify-content: center;
   text-align: center;
-  padding: 12px;
+}
+
+.empty-card.large {
+  width: 100%;
+  min-width: auto;
+  padding: 48px 24px;
+}
+
+.empty-icon {
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .empty-title {
   font-weight: 700;
+  font-size: 16px;
   color: #1f2937;
+  margin-bottom: 8px;
 }
 
 .empty-sub {
   font-size: 12px;
   color: #6b7280;
+  line-height: 1.4;
 }
 
 .mt-6 {
@@ -1573,7 +1720,7 @@ const hotPicks = computed(() => {
 }
 
 /* =========================================== */
-/* ENHANCED PRODUCT GRID AND OUT OF STOCK UI */
+/* PRODUCT GRID AND OUT OF STOCK UI */
 /* =========================================== */
 
 .product-grid {
@@ -1583,7 +1730,6 @@ const hotPicks = computed(() => {
   margin-top: 12px;
 }
 
-/* Base Product Card */
 .product-card {
   position: relative;
   background: #fff;
@@ -1611,7 +1757,6 @@ const hotPicks = computed(() => {
   box-shadow: 0 6px 20px rgba(255, 107, 107, 0.25);
 }
 
-/* Out of Stock Card Styling */
 .product-card--out-of-stock {
   opacity: 0.85;
   filter: grayscale(0.15);
@@ -1638,7 +1783,6 @@ const hotPicks = computed(() => {
   color: #adb5bd;
 }
 
-/* Hot Badge */
 .product-badge-hot {
   position: absolute;
   top: 8px;
@@ -1657,21 +1801,13 @@ const hotPicks = computed(() => {
   animation: hotPulse 2s infinite;
 }
 
-.badge-fire {
-  font-size: 12px;
-}
+.badge-fire { font-size: 12px; }
+.badge-text { letter-spacing: 0.5px; }
 
-.badge-text {
-  letter-spacing: 0.5px;
-}
-
-/* Out of Stock Badge - Enhanced */
 .product-badge-oos {
   position: absolute;
   top: 8px;
   left: 8px;
-  right: auto;
-  bottom: auto;
   background: linear-gradient(135deg, #6c757d, #495057);
   color: white;
   padding: 6px 12px;
@@ -1689,13 +1825,10 @@ const hotPicks = computed(() => {
   gap: 4px;
 }
 
-/* Low Stock Badge - Enhanced */
 .product-badge-low {
   position: absolute;
   top: 8px;
   left: 8px;
-  right: auto;
-  bottom: auto;
   background: linear-gradient(135deg, #ff9800, #f57c00);
   color: white;
   padding: 6px 12px;
@@ -1712,11 +1845,6 @@ const hotPicks = computed(() => {
   gap: 4px;
 }
 
-/* Overlay for Out of Stock Products */
-.product-card--out-of-stock .product-img {
-  position: relative;
-}
-
 .product-card--out-of-stock .product-img::after {
   content: '';
   position: absolute;
@@ -1728,7 +1856,6 @@ const hotPicks = computed(() => {
   pointer-events: none;
 }
 
-/* Sold Out Stamp Effect */
 .product-card--out-of-stock .product-info {
   position: relative;
 }
@@ -1751,35 +1878,18 @@ const hotPicks = computed(() => {
 }
 
 @keyframes hotPulse {
-  0%,
-  100% {
-    transform: scale(1);
-  }
-  50% {
-    transform: scale(1.05);
-  }
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
 }
 
 @keyframes pulseLowStock {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
-  }
-  50% {
-    transform: scale(1.05);
-    box-shadow: 0 4px 12px rgba(255, 152, 0, 0.5);
-  }
+  0%, 100% { transform: scale(1); box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3); }
+  50% { transform: scale(1.05); box-shadow: 0 4px 12px rgba(255, 152, 0, 0.5); }
 }
 
 @keyframes fadeInOut {
-  from {
-    opacity: 0;
-    transform: translateY(-10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .product-img {
@@ -1841,9 +1951,7 @@ const hotPicks = computed(() => {
   background: linear-gradient(135deg, #4285f4, #34a853) !important;
   color: white !important;
   box-shadow: 0 6px 20px rgba(66, 133, 244, 0.4);
-  transition:
-    transform 0.3s ease,
-    box-shadow 0.3s ease;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
   animation: pulseGoogle 2s infinite;
 }
 
@@ -1853,13 +1961,8 @@ const hotPicks = computed(() => {
 }
 
 @keyframes pulseGoogle {
-  0%,
-  100% {
-    box-shadow: 0 6px 20px rgba(66, 133, 244, 0.4);
-  }
-  50% {
-    box-shadow: 0 6px 25px rgba(66, 133, 244, 0.7);
-  }
+  0%, 100% { box-shadow: 0 6px 20px rgba(66, 133, 244, 0.4); }
+  50% { box-shadow: 0 6px 25px rgba(66, 133, 244, 0.7); }
 }
 
 .survey-fullscreen-card {
@@ -1895,48 +1998,22 @@ const hotPicks = computed(() => {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
-
-  .product-img {
-    height: 140px;
-  }
-
-  .product-title {
-    font-size: 12px;
-  }
-
-  .product-price {
-    font-size: 13px;
-  }
-
-  .product-sold {
-    font-size: 11px;
-  }
-
-  .survey-bubble-wrapper {
-    bottom: 150px;
-    right: 60px;
-  }
-
-  .survey-bubble {
-    max-width: 200px;
-  }
-  
-  .product-badge-oos,
-  .product-badge-low,
-  .product-badge-hot {
-    padding: 4px 8px;
-    font-size: 9px;
-  }
-  
-  .product-card--out-of-stock .product-info::before {
-    font-size: 10px;
-  }
+  .product-img { height: 140px; }
+  .product-title { font-size: 12px; }
+  .product-price { font-size: 13px; }
+  .product-sold { font-size: 11px; }
+  .survey-bubble-wrapper { bottom: 150px; right: 60px; }
+  .survey-bubble { max-width: 200px; }
+  .product-badge-oos, .product-badge-low, .product-badge-hot { padding: 4px 8px; font-size: 9px; }
+  .product-card--out-of-stock .product-info::before { font-size: 10px; }
+  .distance-badge { font-size: 9px; padding: 2px 5px; }
+  .empty-card { padding: 16px 12px; }
+  .empty-card.large { padding: 32px 16px; }
+  .empty-title { font-size: 14px; }
 }
 
 @media (max-width: 600px) {
-  .survey-toolbar .v-toolbar-title {
-    font-size: 16px;
-  }
+  .survey-toolbar .v-toolbar-title { font-size: 16px; }
 }
 
 /* Hot Picks Styles */
@@ -2041,38 +2118,50 @@ const hotPicks = computed(() => {
   gap: 4px;
 }
 
-/* Responsive adjustments for hot picks */
 @media (max-width: 480px) {
-  .hot-pick-card {
-    flex: 0 0 calc(50% - 8px);
-  }
-  
-  .hot-pick-img {
-    height: 100px;
-  }
-  
-  .hot-pick-title {
-    font-size: 11px;
-    height: 26px;
-  }
-  
-  .hot-pick-price {
-    font-size: 12px;
-  }
-  
-  .hot-pick-rank {
-    padding: 3px 6px;
-    font-size: 9px;
-  }
-  
-  .rank-number {
-    font-size: 8px;
-  }
+  .hot-pick-card { flex: 0 0 calc(50% - 8px); }
+  .hot-pick-img { height: 100px; }
+  .hot-pick-title { font-size: 11px; height: 26px; }
+  .hot-pick-price { font-size: 12px; }
+  .hot-pick-rank { padding: 3px 6px; font-size: 9px; }
+  .rank-number { font-size: 8px; }
 }
 
 @media (max-width: 360px) {
-  .hot-pick-card {
-    flex: 0 0 calc(100% - 12px);
-  }
+  .hot-pick-card { flex: 0 0 calc(100% - 12px); }
+}
+
+/* Section Title Wrapper and Dynamic City */
+.section-title-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dynamic-city {
+  background: linear-gradient(135deg, #3f83c7, #2c5f8a);
+  background-clip: text;
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+  position: relative;
+  display: inline-block;
+}
+
+.dynamic-city::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #3f83c7, transparent);
+  border-radius: 2px;
+}
+
+@media (max-width: 480px) {
+  .dynamic-city { font-size: 14px; }
+  .section-title-wrapper { gap: 4px; }
 }
 </style>
