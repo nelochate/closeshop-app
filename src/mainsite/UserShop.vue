@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime } from '@/utils/dateTime'
 import { isOrderCancellationRequestedStatus, normalizeOrderStatus } from '@/utils/orderStatus'
@@ -194,19 +195,19 @@ const ensureSellerCancellationNotifications = async (ordersToCheck: any[] = []) 
       const orderLabel = order.transaction_number ? `order ${order.transaction_number}` : 'the order'
       const customerLabel = order.customer_name ? ` for ${order.customer_name}` : ''
 
-      const { error: insertError } = await supabase.from('notifications').insert({
-        user_id: shopOwnerUserId.value,
+      const notificationResult = await createNotificationRecordIfEnabled({
+        userId: shopOwnerUserId.value,
         type: 'shipping_update',
         title: 'Cancellation Requested',
         message: `Customer requested cancellation approval for ${orderLabel}${customerLabel}.`,
-        related_id: order.id,
-        related_type: 'order',
-        is_read: false,
-        created_at: order.updated_at || new Date().toISOString(),
+        relatedId: order.id,
+        relatedType: 'order',
+        isRead: false,
+        createdAt: order.updated_at || new Date().toISOString(),
       })
 
-      if (insertError) {
-        console.warn('Could not backfill seller cancellation notification:', insertError)
+      if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
+        console.warn('Could not backfill seller cancellation notification:', notificationResult)
       }
     }),
   )

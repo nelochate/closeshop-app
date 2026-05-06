@@ -4,6 +4,7 @@ import {
   ORDER_CANCEL_REQUESTED_STATUS,
   isOrderCancellationRequestedStatus,
 } from '@/utils/orderStatus'
+import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 
 const getShopName = (orderData = {}) => {
   if (orderData.shop_name) return orderData.shop_name
@@ -265,20 +266,18 @@ export const notifyCustomerOrderStatus = async ({
     return { created: false, reason: 'duplicate' }
   }
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: context.customerUserId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: context.customerUserId,
     type: notification.type,
     title: notification.title,
     message: notification.message,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt || new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: createdAt || new Date().toISOString(),
   })
 
-  if (error) throw error
-
-  return { created: true }
+  return notificationResult
 }
 
 export const notifySellerOrderStatus = async ({
@@ -330,20 +329,18 @@ export const notifySellerOrderStatus = async ({
     return { created: false, reason: 'duplicate' }
   }
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: context.sellerUserId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: context.sellerUserId,
     type: notification.type,
     title: notification.title,
     message: notification.message,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt || new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: createdAt || new Date().toISOString(),
   })
 
-  if (error) throw error
-
-  return { created: true }
+  return notificationResult
 }
 
 export const notifyAssignedRiderOrderStatus = async ({
@@ -396,18 +393,16 @@ export const notifyAssignedRiderOrderStatus = async ({
     return { created: false, reason: 'duplicate' }
   }
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: riderProfileId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: riderProfileId,
     type: notification.type,
     title: notification.title,
     message: notification.message,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt || new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: createdAt || new Date().toISOString(),
   })
 
-  if (error) throw error
-
-  return { created: true }
+  return notificationResult
 }

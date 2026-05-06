@@ -2,6 +2,7 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import {
   notifyAssignedRiderOrderStatus,
   notifyCustomerOrderStatus,
@@ -837,18 +838,20 @@ const createSellerCancellationRequestFallbackNotification = async (createdAt: st
     : 'the order'
   const customerLabel = buyerDisplayName.value ? ` for ${buyerDisplayName.value}` : ''
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: sellerUserId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: sellerUserId,
     type: 'shipping_update',
     title: 'Cancellation Requested',
     message: `Customer requested cancellation approval for ${orderLabel}${customerLabel}.`,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt,
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt,
   })
 
-  if (error) throw error
+  if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
+    throw notificationResult
+  }
 
   return { created: true, reason: 'fallback-created' }
 }

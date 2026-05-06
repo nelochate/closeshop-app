@@ -5,7 +5,8 @@ import { LocalNotifications } from '@capacitor/local-notifications'
 import router from '@/router'
 import { supabase } from '@/utils/supabase'
 import {
-  loadUnifiedPushPreferences,
+  fetchNotificationPreferences,
+  getNotificationPreferencesSnapshot,
   notificationTypeMatchesPreferences,
 } from '@/utils/notificationPreferences'
 
@@ -24,12 +25,15 @@ const normalizeText = (value) => (typeof value === 'string' ? value.trim() : '')
 
 const isNativePushSupported = () => Capacitor.isNativePlatform()
 
-const buildPushPreferencePayload = () => {
-  const preferences = loadUnifiedPushPreferences()
+const buildPushPreferencePayload = async ({ userId, preferences = null } = {}) => {
+  const resolvedPreferences =
+    preferences ||
+    (userId ? await fetchNotificationPreferences(userId) : getNotificationPreferencesSnapshot())
+
   return {
-    notifications_enabled: !!preferences.enabled,
-    chat_enabled: !!preferences.chatMessages,
-    order_enabled: !!preferences.orderUpdates,
+    notifications_enabled: !!resolvedPreferences.enabled,
+    chat_enabled: !!resolvedPreferences.chatMessages,
+    order_enabled: !!resolvedPreferences.orderUpdates,
   }
 }
 
@@ -97,7 +101,7 @@ const persistPushToken = async ({ userId, token }) => {
       token,
       platform: Capacitor.getPlatform(),
       is_active: true,
-      ...buildPushPreferencePayload(),
+      ...(await buildPushPreferencePayload({ userId })),
       last_seen_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     },
@@ -302,15 +306,20 @@ export const initializeMobilePushNotifications = async (user) => {
   return true
 }
 
-export const syncPushNotificationPreferences = async (userId) => {
+export const syncPushNotificationPreferences = async (userId, preferences = null) => {
   if (!isNativePushSupported() || !userId) {
     return
   }
 
+  const pushPreferencePayload = await buildPushPreferencePayload({
+    userId,
+    preferences,
+  })
+
   const { error } = await supabase
     .from(PUSH_TOKEN_TABLE)
     .update({
-      ...buildPushPreferencePayload(),
+      ...pushPreferencePayload,
       updated_at: new Date().toISOString(),
       last_seen_at: new Date().toISOString(),
     })

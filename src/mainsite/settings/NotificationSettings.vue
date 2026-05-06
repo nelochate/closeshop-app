@@ -1,6 +1,5 @@
 <template>
   <v-app>
-    <!-- Top App Bar -->
     <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn icon @click="goBack">
         <v-icon>mdi-arrow-left</v-icon>
@@ -10,71 +9,58 @@
 
     <v-main>
       <v-list density="comfortable" class="settings-list">
-        <!-- Push Notifications -->
+        <div class="settings-header">
+          <p class="category">Push Alerts</p>
+          <p class="helper-copy">
+            Only working notification features appear here. These toggles control native push alerts
+            for your device and order-related updates already sent through CloseShop.
+          </p>
+        </div>
+
+        <v-progress-linear v-if="loading" indeterminate color="#3f83c7" class="mb-2" />
+
         <div class="settings-container">
-          <br>
-          <p class="category">Notifications</p>
           <v-divider />
 
           <v-list-item>
-            <template v-slot:prepend>
+            <template #prepend>
               <v-icon>mdi-bell-ring</v-icon>
             </template>
-            <v-list-item-title>Enable Notifications</v-list-item-title>
-            <v-list-item-subtitle>Receive notifications on your device</v-list-item-subtitle>
-            <template v-slot:append>
-              <v-switch v-model="notifications.enabled" color="#3f83c7" hide-details></v-switch>
+            <v-list-item-title>Enable Push Notifications</v-list-item-title>
+            <v-list-item-subtitle>
+              Allow CloseShop to send native push notifications to this device.
+            </v-list-item-subtitle>
+            <template #append>
+              <v-switch
+                v-model="settings.enabled"
+                color="#3f83c7"
+                hide-details
+                :disabled="loading || saving"
+              />
+            </template>
+          </v-list-item>
+
+          <v-divider />
+
+          <v-list-item>
+            <template #prepend>
+              <v-icon>mdi-truck-delivery-outline</v-icon>
+            </template>
+            <v-list-item-title>Enable Order Notifications</v-list-item-title>
+            <v-list-item-subtitle>
+              Receive push alerts for order placement, shipping updates, and delivery events.
+            </v-list-item-subtitle>
+            <template #append>
+              <v-switch
+                v-model="settings.orderUpdates"
+                color="#3f83c7"
+                hide-details
+                :disabled="loading || saving"
+              />
             </template>
           </v-list-item>
         </div>
 
-        <!-- Order Notifications -->
-        <div class="settings-container">
-          <p class="category">Order Updates</p>
-          <v-divider />
-
-          <v-list-item>
-            <template v-slot:prepend>
-              <v-icon>mdi-cart</v-icon>
-            </template>
-            <v-list-item-title>Order Status</v-list-item-title>
-            <v-list-item-subtitle>Get notified when your order status changes</v-list-item-subtitle>
-            <template v-slot:append>
-              <v-switch v-model="notifications.orderStatus" color="#3f83c7" hide-details></v-switch>
-            </template>
-          </v-list-item>
-          <v-divider />
-
-          <v-list-item>
-            <template v-slot:prepend>
-              <v-icon>mdi-truck-fast</v-icon>
-            </template>
-            <v-list-item-title>Delivery Updates</v-list-item-title>
-            <v-list-item-subtitle>Get notified when your order is out for delivery</v-list-item-subtitle>
-            <template v-slot:append>
-              <v-switch v-model="notifications.delivery" color="#3f83c7" hide-details></v-switch>
-            </template>
-          </v-list-item>
-        </div>
-
-        <!-- Promotional Notifications -->
-        <div class="settings-container">
-          <p class="category">Promotions</p>
-          <v-divider />
-
-          <v-list-item>
-            <template v-slot:prepend>
-              <v-icon>mdi-sale</v-icon>
-            </template>
-            <v-list-item-title>Offers & Deals</v-list-item-title>
-            <v-list-item-subtitle>Receive notifications about discounts and promotions</v-list-item-subtitle>
-            <template v-slot:append>
-              <v-switch v-model="notifications.promotions" color="#3f83c7" hide-details></v-switch>
-            </template>
-          </v-list-item>
-        </div>
-
-        <!-- Save Button -->
         <div class="save-button-container">
           <v-btn
             class="save-btn"
@@ -82,6 +68,7 @@
             block
             size="large"
             :loading="saving"
+            :disabled="loading"
             @click="saveSettings"
           >
             Save Changes
@@ -90,10 +77,9 @@
       </v-list>
     </v-main>
 
-    <!-- Snackbar -->
-    <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3000">
+    <v-snackbar v-model="snackbar.show" :color="snackbar.color" timeout="3200">
       {{ snackbar.text }}
-      <template v-slot:actions>
+      <template #actions>
         <v-btn variant="text" @click="snackbar.show = false">Close</v-btn>
       </template>
     </v-snackbar>
@@ -101,65 +87,116 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAuthUserStore } from '@/stores/authUser'
 import {
-  loadNotificationSettings,
-  saveNotificationSettings,
+  fetchNotificationPreferences,
+  saveNotificationPreferences,
 } from '@/utils/notificationPreferences'
 import { syncPushNotificationPreferences } from '@/utils/mobilePushNotifications'
 
 const router = useRouter()
 const authStore = useAuthUserStore()
-const saving = ref(false)
 
-const notifications = ref({
+const loading = ref(true)
+const saving = ref(false)
+const settings = ref({
   enabled: true,
-  orderStatus: true,
-  delivery: true,
-  promotions: false
+  orderUpdates: true,
 })
 
 const snackbar = ref({
   show: false,
   text: '',
-  color: 'success'
+  color: 'success',
 })
 
-onMounted(() => {
-  notifications.value = {
-    ...notifications.value,
-    ...loadNotificationSettings(),
-  }
-})
+const getCurrentUserId = () => authStore.userData?.id || authStore.userId
 
 const goBack = () => {
   router.back()
 }
 
-const saveSettings = async () => {
-  saving.value = true
+const loadSettings = async () => {
+  const userId = getCurrentUserId()
+  if (!userId) {
+    loading.value = false
+    return
+  }
 
-  setTimeout(async () => {
-    notifications.value = saveNotificationSettings(notifications.value)
+  loading.value = true
 
-    if (authStore.userData?.id) {
-      await syncPushNotificationPreferences(authStore.userData.id)
+  try {
+    const preferences = await fetchNotificationPreferences(userId)
+    settings.value = {
+      enabled: preferences.enabled,
+      orderUpdates: preferences.orderUpdates,
     }
-
-    saving.value = false
+  } catch (error) {
+    console.error('Failed to load notification settings:', error)
     snackbar.value = {
       show: true,
-      text: 'Notification settings saved!',
-      color: 'success'
+      text: 'Could not load notification settings.',
+      color: 'error',
     }
-  }, 500)
+  } finally {
+    loading.value = false
+  }
 }
+
+const saveSettings = async () => {
+  const userId = getCurrentUserId()
+  if (!userId) {
+    snackbar.value = {
+      show: true,
+      text: 'Please sign in again to update notification settings.',
+      color: 'error',
+    }
+    return
+  }
+
+  saving.value = true
+
+  try {
+    const updatedPreferences = await saveNotificationPreferences({
+      userId,
+      preferences: {
+        enabled: settings.value.enabled,
+        orderUpdates: settings.value.orderUpdates,
+      },
+    })
+
+    settings.value = {
+      enabled: updatedPreferences.enabled,
+      orderUpdates: updatedPreferences.orderUpdates,
+    }
+
+    await syncPushNotificationPreferences(userId, updatedPreferences)
+
+    snackbar.value = {
+      show: true,
+      text: 'Notification settings saved.',
+      color: 'success',
+    }
+  } catch (error) {
+    console.error('Failed to save notification settings:', error)
+    snackbar.value = {
+      show: true,
+      text: 'Could not save notification settings.',
+      color: 'error',
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(() => {
+  loadSettings()
+})
 </script>
 
 <style scoped>
-/* Same styles as Chat Settings */
 :root {
   font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
@@ -204,12 +241,16 @@ v-main,
   padding-bottom: 10px;
 }
 
+.settings-header {
+  padding: 18px 18px 12px;
+}
+
 .settings-container {
-  padding: 10px 0;
+  padding: 4px 0 10px;
 }
 
 .category {
-  margin: 14px 18px 10px;
+  margin: 0 0 10px;
   font-size: 0.8rem;
   font-weight: 700;
   color: #6b7280;
@@ -217,12 +258,18 @@ v-main,
   letter-spacing: 0.8px;
 }
 
+.helper-copy {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.84rem;
+  line-height: 1.5;
+}
+
 .settings-list :deep(.v-list-item) {
-  min-height: 65px;
+  min-height: 68px;
   padding-left: 18px;
   padding-right: 18px;
   transition: all 0.25s ease;
-  border-radius: 0;
 }
 
 .settings-list :deep(.v-list-item:hover) {
@@ -274,18 +321,21 @@ v-main,
     margin: 12px 10px 20px;
     border-radius: 16px;
   }
-  
+
+  .settings-header {
+    padding: 16px 16px 12px;
+  }
+
   .category {
-    margin: 12px 16px 8px;
     font-size: 0.75rem;
   }
-  
+
   .settings-list :deep(.v-list-item) {
-    min-height: 60px;
+    min-height: 62px;
     padding-left: 14px;
     padding-right: 14px;
   }
-  
+
   .save-button-container {
     padding: 16px 14px;
   }

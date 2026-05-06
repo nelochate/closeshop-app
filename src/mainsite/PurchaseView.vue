@@ -3,6 +3,7 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { removeRecentMessageNotification } from '@/utils/chatNotifications'
+import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import { syncProfileFromAuthUser } from '@/utils/profileSync'
 import { useCheckoutStore } from '@/stores/checkout'
 import {
@@ -1995,7 +1996,7 @@ const updateConversationActivity = async (targetConversationId: string) => {
     .update({ updated_at: new Date().toISOString() })
     .eq('id', targetConversationId)
 
-  if (error) {
+  if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
     console.warn('⚠️ Could not update conversation timestamp:', error)
   }
 }
@@ -2011,18 +2012,19 @@ const createSellerOrderNotification = async ({
   shopName: string
   orderId: string
 }) => {
-  const { error } = await supabase.from('notifications').insert({
-    user_id: sellerUserId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: sellerUserId,
     type: 'order_placed',
     title: `New order from ${customerName}`,
     message: `${customerName} placed a new order at ${shopName}.`,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: new Date().toISOString(),
   })
+  const error = notificationResult
 
-  if (error) {
+  if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
     console.warn('⚠️ Could not create seller notification:', error)
   }
 }

@@ -5,6 +5,7 @@ import {
   type CounterpartyViewerRole,
 } from '@/utils/chatIdentity'
 import { parseAppTimestamp } from '@/utils/dateTime'
+import { notificationRecordMatchesPreferences } from '@/utils/notificationPreferences'
 
 const ORDER_MESSAGE_MARKERS = ['New Order Received!', 'Order ID:', 'Transaction #:']
 const UNSENT_MESSAGE_TEXT = 'Message unsent'
@@ -28,6 +29,7 @@ type NotificationRecord = {
   title?: string | null
   message?: string | null
   related_id?: string | null
+  related_type?: string | null
   created_at?: string | null
 }
 
@@ -794,6 +796,15 @@ export const resolveVisibleNotification = async <T extends NotificationRecord>(
     return null
   }
 
+  if (
+    !notificationRecordMatchesPreferences({
+      type: notification.type || '',
+      relatedType: notification.related_type || '',
+    })
+  ) {
+    return null
+  }
+
   const insight = await inspectMessageNotification(notification)
 
   if (insight.shouldSuppress) {
@@ -836,40 +847,22 @@ export const filterVisibleNotifications = async <T extends NotificationRecord>(n
 }
 
 export const getVisibleUnreadNotificationCount = async (userId: string) => {
-  const { count, error } = await supabase
+  const { data, error } = await supabase
     .from('notifications')
-    .select('id', { count: 'exact', head: true })
+    .select('id, user_id, type, title, message, related_id, related_type, created_at')
     .eq('user_id', userId)
     .eq('is_read', false)
+    .order('created_at', { ascending: false })
 
   if (error) {
     console.warn('Could not fetch unread notification count:', error)
     return 0
   }
 
-  if (!count) {
+  if (!data || data.length === 0) {
     return 0
   }
 
-  const { data: unreadMessageNotifications, error: unreadMessagesError } = await supabase
-    .from('notifications')
-    .select('id, user_id, type, title, message, related_id, created_at')
-    .eq('user_id', userId)
-    .eq('is_read', false)
-    .eq('type', 'new_message')
-    .order('created_at', { ascending: false })
-
-  if (unreadMessagesError) {
-    console.warn('Could not inspect unread message notifications:', unreadMessagesError)
-    return count
-  }
-
-  if (!unreadMessageNotifications || unreadMessageNotifications.length === 0) {
-    return count
-  }
-
-  const visibleUnreadMessageNotifications = await filterVisibleNotifications(unreadMessageNotifications)
-  const suppressedCount = unreadMessageNotifications.length - visibleUnreadMessageNotifications.length
-
-  return Math.max(0, count - suppressedCount)
+  const visibleUnreadNotifications = await filterVisibleNotifications(data)
+  return visibleUnreadNotifications.length
 }
