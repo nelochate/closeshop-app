@@ -3291,6 +3291,7 @@ onUnmounted(() => {
         class="shop-drawer"
       >
         <v-card class="shop-drawer-card h-100 d-flex flex-column" rounded="0">
+          <div class="shop-drawer-statusbar-spacer" aria-hidden="true"></div>
           <div class="shop-drawer-header">
             <div class="shop-drawer-header-main">
               <div class="shop-drawer-icon-wrap">
@@ -4446,17 +4447,33 @@ onUnmounted(() => {
 
 .shop-drawer {
   width: min(100vw, 420px) !important;
+  background: transparent !important;
+}
+
+.shop-drawer :deep(.v-navigation-drawer__content) {
+  background: transparent !important;
 }
 
 .shop-drawer-card {
   background: linear-gradient(180deg, #f8fbff 0%, #ffffff 38%, #f8fafc 100%);
+  position: relative;
+  overflow: hidden;
+}
+
+.shop-drawer-statusbar-spacer {
+  flex: 0 0 auto;
+  height: var(--sat, 0px);
+  min-height: 18px;
+  background: linear-gradient(180deg, rgba(29, 78, 216, 0.96) 0%, rgba(59, 130, 246, 0.86) 100%);
 }
 
 .shop-drawer-header {
-  padding: calc(14px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right)) 16px
+  padding: 14px calc(16px + env(safe-area-inset-right)) 16px
     calc(16px + env(safe-area-inset-left));
-  background: linear-gradient(180deg, rgba(219, 234, 254, 0.92) 0%, rgba(255, 255, 255, 0.98) 100%);
+  background: linear-gradient(180deg, rgba(214, 231, 255, 0.98) 0%, rgba(255, 255, 255, 0.99) 100%);
   border-bottom: 1px solid rgba(191, 219, 254, 0.72);
+  position: relative;
+  z-index: 1;
 }
 
 .shop-drawer-header-main {
@@ -4674,7 +4691,7 @@ onUnmounted(() => {
   }
 
   .shop-drawer-header {
-    padding: calc(12px + env(safe-area-inset-top)) calc(14px + env(safe-area-inset-right)) 14px
+    padding: 12px calc(14px + env(safe-area-inset-right)) 14px
       calc(14px + env(safe-area-inset-left));
   }
 }
@@ -4715,7 +4732,7 @@ onUnmounted(() => {
   }
 
   .shop-drawer-header {
-    padding: calc(8px + env(safe-area-inset-top)) calc(12px + env(safe-area-inset-right)) 10px
+    padding: 8px calc(12px + env(safe-area-inset-right)) 10px
       calc(12px + env(safe-area-inset-left));
   }
 }
