@@ -4,10 +4,12 @@ import mapboxgl from 'mapbox-gl'
 import { supabase } from '@/utils/supabase'
 import {
   MAPBOX_ACCESS_TOKEN,
+  buildRiderTrackingLocation,
   formatTrackingDistance,
   formatTrackingDuration,
   formatTrackingTimestamp,
   getTrackingChannelName,
+  persistOrderTrackingLocation,
   type TrackingLocation,
   type TrackingViewerMode,
 } from '@/utils/orderTracking'
@@ -28,6 +30,7 @@ const props = withDefaults(
     riderLocation?: TrackingLocation | null
     viewerMode?: TrackingViewerMode
     trackOwnLocation?: boolean
+    persistRiderLocationEnabled?: boolean
     subscribeToLiveLocation?: boolean
     fullscreen?: boolean
     panelCollapsed?: boolean
@@ -40,6 +43,7 @@ const props = withDefaults(
     riderLocation: null,
     viewerMode: 'customer',
     trackOwnLocation: false,
+    persistRiderLocationEnabled: false,
     subscribeToLiveLocation: true,
     fullscreen: false,
     panelCollapsed: false,
@@ -74,6 +78,8 @@ let routeRefreshTimeout: number | null = null
 let heartbeatInterval: number | null = null
 let hasFramedBounds = false
 let lastRenderedPointCount = 0
+let lastPersistedLocationSignature = ''
+let lastPersistedLocationAt = 0
 
 const sourceId = `order-tracking-source-${props.orderId}`.replace(/[^a-zA-Z0-9_-]/g, '-')
 const outlineLayerId = `${sourceId}-outline`
@@ -591,7 +597,7 @@ const syncMapScene = ({
     fit ||
     !hasFramedBounds ||
     (fitIfPointCountIncreases && currentPointCount > lastRenderedPointCount) ||
-    (props.fullscreen && !mapContainsAllPoints())
+    !mapContainsAllPoints()
 
   renderMarkers()
   scheduleRouteRefresh()
@@ -619,21 +625,54 @@ const publishRiderLocation = async (location: TrackingLocation) => {
   }
 }
 
+const persistRiderLocationSnapshot = async (
+  location: TrackingLocation,
+  { force = false }: { force?: boolean } = {},
+) => {
+  if (!props.trackOwnLocation || !props.orderId) return
+  if (!props.persistRiderLocationEnabled) return
+
+  const locationSignature = `${location.lat.toFixed(5)}:${location.lng.toFixed(5)}`
+  const now = Date.now()
+
+  if (
+    !force &&
+    locationSignature === lastPersistedLocationSignature &&
+    now - lastPersistedLocationAt < 10000
+  ) {
+    return
+  }
+
+  const persistenceResult = await persistOrderTrackingLocation({
+    orderId: props.orderId,
+    location,
+  })
+
+  if (persistenceResult.error) {
+    console.warn('Unable to persist rider tracking location on the order:', persistenceResult.error)
+  }
+
+  lastPersistedLocationSignature = locationSignature
+  lastPersistedLocationAt = now
+}
+
 const handleTrackedPosition = async (position: GeolocationPosition) => {
-  const location: TrackingLocation = {
+  const location = buildRiderTrackingLocation({
     lat: position.coords.latitude,
     lng: position.coords.longitude,
-    name: 'Assigned rider',
+    name: props.viewerMode === 'rider' ? 'My current location' : 'Assigned rider',
     address: `${position.coords.latitude.toFixed(5)}, ${position.coords.longitude.toFixed(5)}`,
     updatedAt: new Date().toISOString(),
-  }
+  })
+
+  if (!location) return
 
   liveRiderLocation.value = location
   if (!mapInitError.value) {
     mapError.value = null
   }
   syncMapScene({ fitIfPointCountIncreases: true })
-  await publishRiderLocation(location)
+  await Promise.all([publishRiderLocation(location), persistRiderLocationSnapshot(location)])
 }
 
 const startOwnLocationTracking = async () => {
@@ -707,6 +746,7 @@ const subscribeToTracking = async () => {
   trackingChannel.subscribe((status: string) => {
     if (status === 'SUBSCRIBED' && props.trackOwnLocation && liveRiderLocation.value) {
       publishRiderLocation(liveRiderLocation.value)
+      persistRiderLocationSnapshot(liveRiderLocation.value, { force: true })
     }
   })
 }
@@ -860,7 +900,10 @@ watch(
       await startOwnLocationTracking()
 
       if (trackingChannel && liveRiderLocation.value) {
-        await publishRiderLocation(liveRiderLocation.value)
+        await Promise.all([
+          publishRiderLocation(liveRiderLocation.value),
+          persistRiderLocationSnapshot(liveRiderLocation.value, { force: true }),
+        ])
       }
 
       return

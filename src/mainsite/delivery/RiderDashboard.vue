@@ -5,6 +5,12 @@ import { supabase } from '@/utils/supabase'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime, getAppTimestampValue, parseAppTimestamp } from '@/utils/dateTime'
 import {
+  buildRiderTrackingLocation,
+  getTrackingChannelName,
+  persistOrderTrackingLocation,
+  supportsOrderTrackingPersistence,
+} from '@/utils/orderTracking'
+import {
   buildRiderEarningsRecordsFromOrders,
   clearRiderEarningsLedgerMissingMark,
   formatPhpAmount,
@@ -29,6 +35,12 @@ let currentTimeInterval = null
 const currentLocation = ref(null)
 const locationLoading = ref(false)
 const locationWatchId = ref(null)
+const trackingBroadcastChannels = new Map()
+let trackingHeartbeatInterval = null
+let lastTrackingPublishSignature = ''
+let lastTrackingPublishAt = 0
+let lastTrackingPersistSignature = ''
+let lastTrackingPersistAt = 0
 
 // Orders data
 const orders = ref([])
@@ -158,6 +170,27 @@ const completedOrders = computed(() => {
     .filter((order) => isOrderCompleted(order) && order.rider_id === currentRiderNumericId.value)
     .sort((a, b) => sortOrdersByActivityTime(a, b, 'desc'))
 })
+
+const shouldShareRiderLocationForOrder = (order) => {
+  if (!order || !currentRiderNumericId.value) return false
+  if (order.rider_id !== currentRiderNumericId.value) return false
+  if (order.status === 'cancelled' || isOrderCompleted(order)) return false
+
+  return (
+    order.status === 'accepted_by_rider' ||
+    isActivePickedUpOrder(order) ||
+    isAwaitingCustomerConfirmation(order) ||
+    hasDeliveryIssue(order)
+  )
+}
+
+const activeTrackingOrders = computed(() =>
+  orders.value.filter((order) => shouldShareRiderLocationForOrder(order)),
+)
+
+const trackingPersistenceEnabled = computed(() =>
+  activeTrackingOrders.value.some((order) => supportsOrderTrackingPersistence(order)),
+)
 
 // Stats
 const stats = computed(() => ({
@@ -391,9 +424,10 @@ const getCurrentLocation = () => {
     async (position) => {
       const { latitude, longitude } = position.coords
       currentLocation.value = { latitude, longitude }
+      filterOrdersByDistance(latitude, longitude)
+      await publishRiderLocationToActiveOrders({ force: true })
       await getAddressFromCoords(latitude, longitude)
       locationLoading.value = false
-      filterOrdersByDistance(latitude, longitude)
     },
     (error) => {
       console.error('Location error:', error)
@@ -430,10 +464,12 @@ const getAddressFromCoords = async (lat, lng) => {
       const addressParts = data.display_name.split(',')
       currentLocation.value.address = addressParts.slice(0, 3).join(', ')
       currentLocation.value.fullAddress = data.display_name
+      await publishRiderLocationToActiveOrders({ force: true })
     }
   } catch (error) {
     console.error('Error getting address:', error)
     currentLocation.value.address = `${lat.toFixed(4)}, ${lng.toFixed(4)}`
+    await publishRiderLocationToActiveOrders({ force: true })
   }
 }
 
@@ -461,15 +497,182 @@ const filterOrdersByDistance = (lat, lng) => {
   })
 }
 
+const getActiveTrackingOrderIds = () =>
+  activeTrackingOrders.value
+    .map((order) => order?.id)
+    .filter((orderId) => typeof orderId === 'string' && orderId.trim())
+
+const buildCurrentRiderTrackingLocation = () => {
+  const riderName =
+    `${currentRider.value?.first_name || ''} ${currentRider.value?.last_name || ''}`.trim() ||
+    'Assigned rider'
+
+  return buildRiderTrackingLocation({
+    lat: currentLocation.value?.latitude,
+    lng: currentLocation.value?.longitude,
+    name: riderName,
+    address:
+      currentLocation.value?.fullAddress ||
+      currentLocation.value?.address ||
+      (Number.isFinite(Number(currentLocation.value?.latitude)) &&
+      Number.isFinite(Number(currentLocation.value?.longitude))
+        ? `${Number(currentLocation.value.latitude).toFixed(5)}, ${Number(currentLocation.value.longitude).toFixed(5)}`
+        : ''),
+    updatedAt: new Date().toISOString(),
+  })
+}
+
+const ensureTrackingBroadcastChannel = async (orderId) => {
+  const existingChannel = trackingBroadcastChannels.get(orderId)
+  if (existingChannel) return existingChannel
+
+  const channel = supabase.channel(getTrackingChannelName(orderId), {
+    config: {
+      broadcast: {
+        self: true,
+      },
+    },
+  })
+
+  trackingBroadcastChannels.set(orderId, channel)
+
+  await new Promise((resolve) => {
+    let settled = false
+
+    const finish = () => {
+      if (settled) return
+      settled = true
+      resolve()
+    }
+
+    channel.subscribe((status) => {
+      if (['SUBSCRIBED', 'TIMED_OUT', 'CHANNEL_ERROR', 'CLOSED'].includes(status)) {
+        finish()
+      }
+    })
+
+    window.setTimeout(finish, 2000)
+  })
+
+  return channel
+}
+
+const removeTrackingBroadcastChannel = (orderId) => {
+  const channel = trackingBroadcastChannels.get(orderId)
+  if (!channel) return
+
+  supabase.removeChannel(channel)
+  trackingBroadcastChannels.delete(orderId)
+}
+
+const syncTrackingBroadcastChannels = async () => {
+  const activeOrderIds = new Set(getActiveTrackingOrderIds())
+
+  Array.from(trackingBroadcastChannels.keys()).forEach((orderId) => {
+    if (!activeOrderIds.has(orderId)) {
+      removeTrackingBroadcastChannel(orderId)
+    }
+  })
+
+  await Promise.all(
+    Array.from(activeOrderIds).map((orderId) => ensureTrackingBroadcastChannel(orderId)),
+  )
+}
+
+const persistRiderLocationToActiveOrders = async (
+  trackingLocation,
+  { force = false } = {},
+) => {
+  if (!trackingPersistenceEnabled.value) return
+
+  const activeOrderIds = getActiveTrackingOrderIds()
+  if (!activeOrderIds.length || !trackingLocation) return
+
+  const locationSignature = `${trackingLocation.lat.toFixed(5)}:${trackingLocation.lng.toFixed(5)}`
+  const orderSignature = [...activeOrderIds].sort().join(',')
+  const persistSignature = `${orderSignature}|${locationSignature}`
+  const now = Date.now()
+
+  if (
+    !force &&
+    persistSignature === lastTrackingPersistSignature &&
+    now - lastTrackingPersistAt < 15000
+  ) {
+    return
+  }
+
+  await Promise.all(
+    activeOrderIds.map(async (orderId) => {
+      const persistenceResult = await persistOrderTrackingLocation({
+        orderId,
+        location: trackingLocation,
+      })
+
+      if (persistenceResult.error) {
+        console.warn(`Unable to persist rider tracking snapshot for order ${orderId}:`, persistenceResult.error)
+      }
+    }),
+  )
+
+  lastTrackingPersistSignature = persistSignature
+  lastTrackingPersistAt = now
+}
+
+const publishRiderLocationToActiveOrders = async ({ force = false } = {}) => {
+  const activeOrderIds = getActiveTrackingOrderIds()
+  if (!activeOrderIds.length) {
+    lastTrackingPublishSignature = ''
+    lastTrackingPersistSignature = ''
+    return
+  }
+
+  const trackingLocation = buildCurrentRiderTrackingLocation()
+  if (!trackingLocation) return
+
+  const orderSignature = [...activeOrderIds].sort().join(',')
+  const locationSignature = `${trackingLocation.lat.toFixed(5)}:${trackingLocation.lng.toFixed(5)}`
+  const publishSignature = `${orderSignature}|${locationSignature}`
+  const now = Date.now()
+
+  if (!force && publishSignature === lastTrackingPublishSignature && now - lastTrackingPublishAt < 10000) {
+    return
+  }
+
+  await syncTrackingBroadcastChannels()
+
+  await Promise.all(
+    activeOrderIds.map(async (orderId) => {
+      const channel = trackingBroadcastChannels.get(orderId)
+      if (!channel) return
+
+      try {
+        await channel.send({
+          type: 'broadcast',
+          event: 'rider-location',
+          payload: trackingLocation,
+        })
+      } catch (error) {
+        console.error(`Unable to publish rider tracking for order ${orderId}:`, error)
+      }
+    }),
+  )
+
+  await persistRiderLocationToActiveOrders(trackingLocation, { force })
+
+  lastTrackingPublishSignature = publishSignature
+  lastTrackingPublishAt = now
+}
+
 const startWatchingLocation = () => {
   if (navigator.geolocation) {
     locationWatchId.value = navigator.geolocation.watchPosition(
-      (position) => {
+      async (position) => {
         const { latitude, longitude } = position.coords
-        currentLocation.value = { ...currentLocation.value, latitude, longitude }
-        if (currentLocation.value.latitude) {
+        currentLocation.value = { ...(currentLocation.value || {}), latitude, longitude }
+        if (Number.isFinite(currentLocation.value.latitude)) {
           filterOrdersByDistance(latitude, longitude)
         }
+        await publishRiderLocationToActiveOrders()
       },
       (error) => console.error('Watch location error:', error),
       { enableHighAccuracy: true, maximumAge: 30000, timeout: 10000 },
@@ -621,12 +824,16 @@ const fetchOrders = async () => {
       })
 
       orders.value = await reconcileAutoCompletedOrders(hydratedOrders)
+      await syncTrackingBroadcastChannels()
+      await publishRiderLocationToActiveOrders({ force: true })
     } else {
       orders.value = []
+      await syncTrackingBroadcastChannels()
     }
   } catch (error) {
     console.error('Error fetching orders:', error)
     orders.value = []
+    await syncTrackingBroadcastChannels()
   } finally {
     loading.value = false
   }
@@ -717,6 +924,9 @@ onMounted(async () => {
   currentTimeInterval = setInterval(() => {
     currentTime.value = Date.now()
   }, 30000)
+  trackingHeartbeatInterval = setInterval(() => {
+    publishRiderLocationToActiveOrders({ force: true })
+  }, 15000)
 
   await checkRiderApproval()
   if (isApproved.value && currentRiderNumericId.value) {
@@ -739,7 +949,14 @@ onUnmounted(() => {
     clearInterval(currentTimeInterval)
     currentTimeInterval = null
   }
+  if (trackingHeartbeatInterval) {
+    clearInterval(trackingHeartbeatInterval)
+    trackingHeartbeatInterval = null
+  }
   stopWatchingLocation()
+  Array.from(trackingBroadcastChannels.keys()).forEach((orderId) => {
+    removeTrackingBroadcastChannel(orderId)
+  })
 })
 </script>
 

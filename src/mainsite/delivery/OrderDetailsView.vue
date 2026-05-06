@@ -52,6 +52,7 @@
                 :rider-location="persistedRiderTrackingLocation"
                 viewer-mode="rider"
                 :track-own-location="shouldTrackOwnLocation"
+                :persist-rider-location-enabled="trackingPersistenceEnabled"
                 :title="trackingMapTitle"
                 subtitle="Use the map below to compare your current position, the pickup point, and the customer address."
                 :show-fullscreen-button="true"
@@ -438,6 +439,7 @@ import {
   buildDeliveryAddress,
   extractPersistedRiderCoordinates,
   resolveTrackingLocation,
+  supportsOrderTrackingPersistence,
 } from '@/utils/orderTracking'
 import {
   formatPhpAmount,
@@ -1197,6 +1199,8 @@ const shouldTrackOwnLocation = computed(() => {
   )
 })
 
+const trackingPersistenceEnabled = computed(() => supportsOrderTrackingPersistence(order.value))
+
 const persistedRiderTrackingLocation = computed(() => {
   const persisted = extractPersistedRiderCoordinates(order.value)
 
@@ -1209,7 +1213,9 @@ const persistedRiderTrackingLocation = computed(() => {
         'Assigned rider'
       : 'Assigned rider',
     address:
-      currentRider.value?.phone || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+      persisted.address ||
+      currentRider.value?.phone ||
+      `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
   }
 })
 

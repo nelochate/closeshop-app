@@ -207,10 +207,13 @@ const createPaymentRecordWithSchemaFallback = async ({
 }) => {
   const createdAt = new Date().toISOString()
   const payloadVariants = [
+    { order_id: orderId, amount, status: 'pending', method, payment_date: createdAt },
     { order_id: orderId, amount, status: 'pending', method, created_at: createdAt },
     { order_id: orderId, amount, status: 'pending', method },
+    { order_id: orderId, amount, status: 'pending', payment_method: method, payment_date: createdAt },
     { order_id: orderId, amount, status: 'pending', payment_method: method, created_at: createdAt },
     { order_id: orderId, amount, status: 'pending', payment_method: method },
+    { order_id: orderId, amount, status: 'pending', payment_date: createdAt },
     { order_id: orderId, amount, status: 'pending', created_at: createdAt },
     { order_id: orderId, amount, status: 'pending' },
   ]
@@ -1996,7 +1999,7 @@ const updateConversationActivity = async (targetConversationId: string) => {
     .update({ updated_at: new Date().toISOString() })
     .eq('id', targetConversationId)
 
-  if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
+  if (error) {
     console.warn('⚠️ Could not update conversation timestamp:', error)
   }
 }
@@ -2012,19 +2015,25 @@ const createSellerOrderNotification = async ({
   shopName: string
   orderId: string
 }) => {
-  const notificationResult = await createNotificationRecordIfEnabled({
-    userId: sellerUserId,
-    type: 'order_placed',
-    title: `New order from ${customerName}`,
-    message: `${customerName} placed a new order at ${shopName}.`,
-    relatedId: orderId,
-    relatedType: 'order',
-    isRead: false,
-    createdAt: new Date().toISOString(),
-  })
-  const error = notificationResult
+  try {
+    const notificationResult = await createNotificationRecordIfEnabled({
+      userId: sellerUserId,
+      type: 'order_placed',
+      title: `New order from ${customerName}`,
+      message: `${customerName} placed a new order at ${shopName}.`,
+      relatedId: orderId,
+      relatedType: 'order',
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    })
 
-  if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
+    if (
+      !notificationResult.created &&
+      notificationResult.reason !== 'disabled-by-user-preference'
+    ) {
+      console.warn('⚠️ Could not create seller notification:', notificationResult)
+    }
+  } catch (error) {
     console.warn('⚠️ Could not create seller notification:', error)
   }
 }
@@ -2177,22 +2186,36 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       throw msgError
     }
 
-    await updateConversationActivity(conversationId)
-    await createSellerOrderNotification({
-      sellerUserId,
-      customerName,
-      shopName,
-      orderId,
-    })
-    await removeRecentMessageNotification({
-      receiverUserId: sellerUserId,
-      conversationId,
-      senderUserId: buyerUserId,
-      messageCreatedAt,
-      lookbackMs: 60000,
-      maxAttempts: 12,
-      retryDelayMs: 500,
-    })
+    try {
+      await updateConversationActivity(conversationId)
+    } catch (activityError) {
+      console.warn('⚠️ Could not update conversation activity:', activityError)
+    }
+
+    try {
+      await createSellerOrderNotification({
+        sellerUserId,
+        customerName,
+        shopName,
+        orderId,
+      })
+    } catch (notificationError) {
+      console.warn('⚠️ Could not notify seller about the new order:', notificationError)
+    }
+
+    try {
+      await removeRecentMessageNotification({
+        receiverUserId: sellerUserId,
+        conversationId,
+        senderUserId: buyerUserId,
+        messageCreatedAt,
+        lookbackMs: 60000,
+        maxAttempts: 12,
+        retryDelayMs: 500,
+      })
+    } catch (cleanupError) {
+      console.warn('⚠️ Could not clean up recent message notification duplicate:', cleanupError)
+    }
 
     console.log(`✅ Order message sent to ${shopName} successfully!`)
   } catch (err) {

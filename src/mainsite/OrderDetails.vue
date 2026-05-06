@@ -567,7 +567,9 @@ const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
     ...persisted,
     name: riderDisplayName.value,
     address:
-      riderDetails.value?.phone || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+      persisted.address ||
+      riderDetails.value?.phone ||
+      `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
   }
 })
 const trackingMapTitle = computed(() => {
@@ -608,6 +610,12 @@ const trackingMapSubtitle = computed(() => {
   }
   if (!order.value?.rider_id) {
     return 'Pickup and delivery addresses are available now. Live rider sharing starts once the order is assigned.'
+  }
+  if (order.value?.status === 'accepted_by_rider') {
+    return 'The assigned rider can already be tracked on the map before pickup, and the route will keep updating automatically.'
+  }
+  if (order.value?.status === 'picked_up') {
+    return 'The rider location updates live while the order is on the way to the customer.'
   }
   return ''
 })
