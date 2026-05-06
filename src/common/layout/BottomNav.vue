@@ -1,6 +1,6 @@
 <script setup lang="js">
-import { computed, ref, onMounted, onUnmounted, watch } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { useRouter } from 'vue-router'
 import { useCartStore } from '@/stores/cart'
 import { useMessageBadgeStore } from '@/stores/messageBadge'
 
@@ -22,7 +22,6 @@ const props = defineProps({
 
 const emit = defineEmits(['update:modelValue'])
 const router = useRouter()
-const route = useRoute()
 const cart = useCartStore()
 const messageBadgeStore = useMessageBadgeStore()
 
@@ -45,14 +44,6 @@ onUnmounted(() => {
   window.removeEventListener('resize', checkScreenSize)
 })
 
-// Watch for route changes to mark messages as read when viewing chat
-watch(() => route.path, (newPath) => {
-  // Check if we're on a chat-related page
-  if (newPath.includes('/messageview') || newPath.includes('/chatview/')) {
-    messageBadgeStore.markAllMessagesAsRead()
-  }
-})
-
 // v-model binding
 const value = computed({
   get: () => props.modelValue,
@@ -63,11 +54,6 @@ function go(key) {
   emit('update:modelValue', key)
   const path = props.routeMap[key]
   if (path) router.push(path)
-  
-  // If going to chat view, mark all messages as read
-  if (key === 'chat') {
-    messageBadgeStore.markAllMessagesAsRead()
-  }
 }
 
 const hasUnreadMessages = computed(() => messageBadgeStore.hasUnreadMessages)

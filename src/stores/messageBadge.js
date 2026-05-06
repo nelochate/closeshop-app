@@ -12,6 +12,18 @@ export const useMessageBadgeStore = defineStore('messageBadge', () => {
 
   const hasUnreadMessages = computed(() => unreadCount.value > 0)
 
+  const resolveUserId = async (preferredUserId = activeUserId.value) => {
+    if (preferredUserId) {
+      return preferredUserId
+    }
+
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
+
+    return user?.id || null
+  }
+
   const clearState = () => {
     unreadCount.value = 0
     activeUserId.value = null
@@ -152,33 +164,26 @@ export const useMessageBadgeStore = defineStore('messageBadge', () => {
     }
   }
 
-  const markAllMessagesAsRead = async () => {
-    let userId = activeUserId.value
+  const markConversationAsRead = async (conversationId, preferredUserId = activeUserId.value) => {
+    const userId = await resolveUserId(preferredUserId)
 
-    if (!userId) {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-
-      userId = user?.id || null
-    }
-
-    if (!userId) {
+    if (!conversationId || !userId) {
       return
     }
 
     const { error } = await supabase
       .from('messages')
       .update({ is_read: true })
+      .eq('conversation_id', conversationId)
       .eq('receiver_id', userId)
       .eq('is_read', false)
 
     if (error) {
-      console.error('Error marking messages as read:', error)
+      console.error('Error marking conversation messages as read:', error)
       return
     }
 
-    unreadCount.value = 0
+    await fetchUnreadMessages(userId)
   }
 
   return {
@@ -188,7 +193,7 @@ export const useMessageBadgeStore = defineStore('messageBadge', () => {
     activeUserId,
     initialize,
     fetchUnreadMessages,
-    markAllMessagesAsRead,
+    markConversationAsRead,
     clearState,
   }
 })

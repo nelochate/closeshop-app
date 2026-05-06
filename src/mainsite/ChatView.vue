@@ -2,6 +2,7 @@
 import { ref, onMounted, onUnmounted, nextTick, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { useMessageBadgeStore } from '@/stores/messageBadge'
 import {
   isOrderChatMessage,
   removeRecentMessageNotification,
@@ -17,6 +18,7 @@ import {
 
 const router = useRouter()
 const route = useRoute()
+const messageBadgeStore = useMessageBadgeStore()
 
 const userId = ref<string | null>(null)
 const routeTargetId = computed(() => (typeof route.params.id === 'string' ? route.params.id : ''))
@@ -433,16 +435,8 @@ const markConversationMessagesAsRead = async () => {
   if (!conversationId.value || !userId.value) return
 
   try {
-    const { error } = await supabase
-      .from('messages')
-      .update({ is_read: true })
-      .eq('conversation_id', conversationId.value)
-      .eq('receiver_id', userId.value)
-      .eq('is_read', false)
-
-    if (error) {
-      console.error('Error marking conversation messages as read:', error)
-    }
+    await messageBadgeStore.initialize(userId.value)
+    await messageBadgeStore.markConversationAsRead(conversationId.value, userId.value)
   } catch (error) {
     console.error('Unexpected error marking conversation messages as read:', error)
   }
@@ -1188,7 +1182,7 @@ const subscribeMessages = async () => {
         void scrollToBottom('smooth')
 
         if (payload.new.receiver_id === userId.value) {
-          await markMessageAsRead(payload.new.id)
+          await markConversationMessagesAsRead()
         }
       },
     )
