@@ -3,6 +3,7 @@ import { onMounted, onUnmounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
+import { StatusBar, Style } from '@capacitor/status-bar'
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { useCartStore } from '@/stores/cart'
 import { useMessageBadgeStore } from '@/stores/messageBadge'
@@ -24,6 +25,7 @@ const lastBackPressAt = ref(0)
 
 const ANDROID_BACK_EXIT_WINDOW_MS = 2000
 const EXIT_ROUTE_PATHS = new Set(['/homepage', '/'])
+const ANDROID_STATUS_BAR_COLOR = '#295f8d'
 
 const resetBackExitPrompt = () => {
   if (exitToastTimerId) {
@@ -88,6 +90,24 @@ const handleGlobalPullToRefresh = async () => {
   dispatchGlobalPullToRefresh()
 }
 
+const syncNativeStatusBar = async () => {
+  if (!Capacitor.isNativePlatform()) {
+    return
+  }
+
+  if (Capacitor.getPlatform() !== 'android') {
+    return
+  }
+
+  try {
+    await StatusBar.setOverlaysWebView({ overlay: false })
+    await StatusBar.setBackgroundColor({ color: ANDROID_STATUS_BAR_COLOR })
+    await StatusBar.setStyle({ style: Style.Light })
+  } catch (error) {
+    console.warn('Failed to sync Android status bar appearance:', error)
+  }
+}
+
 const navigateToAppRoot = async () => {
   const fallbackPath = authStore.isLoggedIn ? '/homepage' : '/'
 
@@ -136,11 +156,13 @@ watch(
   () => route.fullPath,
   () => {
     resetBackExitPrompt()
+    void syncNativeStatusBar()
   },
 )
 
 onMounted(() => {
   cart.init()
+  void syncNativeStatusBar()
 
   window.addEventListener('focus', handleWindowFocus)
   window.addEventListener('pageshow', handlePageShow)

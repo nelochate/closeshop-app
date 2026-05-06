@@ -733,23 +733,22 @@ onMounted(() => {
 </script>
 
 <template>
-  <v-container fluid class="pa-0 ma-0" style="max-width: 100vw; overflow-x: hidden">
+  <v-container fluid class="admin-dashboard-container pa-0 ma-0">
     <!-- Header Section -->
-    <v-card flat class="mb-4 admin-header" rounded="0">
-      <v-card-text class="pa-4">
-        <div class="d-flex align-center flex-wrap">
-          <div class="d-flex align-center mr-4 mb-2">
-            <v-icon color="white" size="32" class="mr-3">mdi-shield-account</v-icon>
-            <div>
-              <h1 class="text-h5 text-md-h4 font-weight-bold text-white">Admin Dashboard</h1>
-              <div v-if="adminUser" class="text-caption text-white text-opacity-90">
+    <v-card flat class="mb-4 admin-header" rounded="xl">
+      <v-card-text class="admin-header-content">
+        <div class="admin-header-row">
+          <div class="admin-header-main">
+            <v-icon color="white" size="32" class="admin-header-icon">mdi-shield-account</v-icon>
+            <div class="admin-header-copy">
+              <h1 class="admin-title text-h5 text-md-h4 font-weight-bold text-white">Admin Dashboard</h1>
+              <div v-if="adminUser" class="admin-subtitle text-caption text-white text-opacity-90">
                 Welcome, {{ adminUser.first_name || adminUser.email }}
               </div>
             </div>
           </div>
-          <v-spacer></v-spacer>
-          <div class="d-flex align-center gap-2 mb-2">
-            <v-chip v-if="isAdmin" color="white" size="large" class="text-primary d-none d-sm-flex">
+          <div class="admin-header-actions">
+            <v-chip v-if="isAdmin" color="white" size="large" class="text-primary admin-role-chip d-none d-sm-flex">
               <v-icon start size="20">mdi-shield-account</v-icon>
               Administrator
             </v-chip>
@@ -757,7 +756,7 @@ onMounted(() => {
               color="white"
               variant="outlined"
               @click="openLogoutDialog"
-              class="logout-btn"
+              class="logout-btn touch-target"
               size="small"
             >
               <v-icon start size="20">mdi-logout</v-icon>
@@ -769,7 +768,7 @@ onMounted(() => {
     </v-card>
 
     <!-- Debug Info Card -->
-    <v-card v-if="showDebug && debugInfo" class="mx-2 mb-4" color="info" variant="tonal">
+    <v-card v-if="showDebug && debugInfo" class="mx-2 mb-4 admin-status-card" color="info" variant="tonal">
       <v-card-text class="pa-3">
         <div class="d-flex align-center justify-space-between">
           <div>
@@ -788,7 +787,7 @@ onMounted(() => {
     <v-alert
       v-if="errorMessage"
       type="error"
-      class="mb-4 mx-2"
+      class="mb-4 mx-2 admin-error-alert"
       variant="tonal"
       dismissible
       @click:close="errorMessage = ''"
@@ -797,7 +796,7 @@ onMounted(() => {
     </v-alert>
 
     <!-- Access Denied State -->
-    <div v-if="!isAdmin && adminUser" class="text-center py-16 px-3">
+    <div v-if="!isAdmin && adminUser" class="admin-empty-state text-center py-16 px-3">
       <v-icon color="warning" size="72" class="mb-4">mdi-shield-account-outline</v-icon>
       <h2 class="text-h5 font-weight-bold mb-4">Access Denied</h2>
       <p class="text-body-1 text-medium-emphasis mb-6">
@@ -810,9 +809,9 @@ onMounted(() => {
     </div>
 
     <!-- Admin Content -->
-    <div v-else-if="isAdmin">
+    <div v-else-if="isAdmin" class="admin-dashboard-body">
       <!-- Main Tabs for Shops and Riders -->
-      <v-tabs v-model="activeTab" color="primary" grow show-arrows class="mx-2">
+      <v-tabs v-model="activeTab" color="primary" grow show-arrows class="mx-2 admin-main-tabs">
         <v-tab value="pending-shops">
           <v-icon start>mdi-store</v-icon>
           Shops
@@ -837,13 +836,13 @@ onMounted(() => {
         </v-tab>
       </v-tabs>
 
-      <v-window v-model="activeTab" class="mt-4">
+      <v-window v-model="activeTab" class="mt-4 admin-window">
         <!-- SHOPS MANAGEMENT SECTION -->
         <v-window-item value="pending-shops">
-          <v-card class="mx-2" rounded="lg" elevation="1">
+          <v-card class="mx-2 admin-section-card" rounded="xl" elevation="1">
             <v-card-text class="pa-0">
               <!-- Shop Status Tabs -->
-              <v-tabs v-model="shopActiveTab" color="primary" grow show-arrows>
+              <v-tabs v-model="shopActiveTab" color="primary" grow show-arrows class="admin-sub-tabs">
                 <v-tab value="pending">
                   Pending
                   <v-badge
@@ -1208,10 +1207,10 @@ onMounted(() => {
 
         <!-- RIDERS MANAGEMENT SECTION -->
         <v-window-item value="pending-riders">
-          <v-card class="mx-2" rounded="lg" elevation="1">
+          <v-card class="mx-2 admin-section-card" rounded="xl" elevation="1">
             <v-card-text class="pa-0">
               <!-- Rider Status Tabs -->
-              <v-tabs v-model="riderActiveTab" color="primary" grow show-arrows>
+              <v-tabs v-model="riderActiveTab" color="primary" grow show-arrows class="admin-sub-tabs">
                 <v-tab value="pending">
                   Pending Applications
                   <v-badge
@@ -1683,9 +1682,181 @@ onMounted(() => {
 </template>
 
 <style scoped>
+.admin-dashboard-container {
+  max-width: 100vw;
+  overflow-x: hidden;
+  min-height: 100vh;
+  position: relative;
+  padding:
+    0
+    max(12px, env(safe-area-inset-right, 0px))
+    calc(28px + env(safe-area-inset-bottom, 0px))
+    max(12px, env(safe-area-inset-left, 0px)) !important;
+  background:
+    radial-gradient(circle at top, rgba(102, 126, 234, 0.14), transparent 32%),
+    linear-gradient(180deg, #f4f7fb 0%, #edf3f9 100%);
+}
+
+.admin-dashboard-container::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: calc(env(safe-area-inset-top, 0px) + 28px);
+  background: linear-gradient(135deg, #2c5f8c 0%, #5c6fd6 100%);
+  z-index: 0;
+}
+
 .admin-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   color: white;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 20px 44px rgba(82, 99, 174, 0.22);
+  position: relative;
+  z-index: 1;
+}
+
+.admin-header-content {
+  padding:
+    calc(clamp(18px, 3vw, 28px) + env(safe-area-inset-top, 0px))
+    clamp(18px, 3vw, 28px)
+    clamp(18px, 3vw, 28px)
+    clamp(18px, 3vw, 28px) !important;
+}
+
+.admin-header-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.admin-header-main {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 320px;
+}
+
+.admin-header-icon {
+  flex-shrink: 0;
+  filter: drop-shadow(0 8px 18px rgba(26, 35, 126, 0.24));
+}
+
+.admin-header-copy {
+  min-width: 0;
+}
+
+.admin-title {
+  margin: 0;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+
+.admin-subtitle {
+  margin-top: 6px;
+}
+
+.admin-header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.admin-role-chip {
+  font-weight: 700;
+}
+
+.logout-btn {
+  min-height: 42px !important;
+  border-color: rgba(255, 255, 255, 0.45) !important;
+  backdrop-filter: blur(6px);
+}
+
+.admin-dashboard-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  position: relative;
+  z-index: 1;
+}
+
+.admin-status-card,
+.admin-error-alert,
+.admin-main-tabs,
+.admin-section-card,
+.admin-empty-state {
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.08);
+}
+
+.admin-status-card,
+.admin-error-alert,
+.admin-main-tabs,
+.admin-section-card {
+  border: 1px solid rgba(148, 163, 184, 0.14);
+}
+
+.admin-status-card,
+.admin-error-alert,
+.admin-section-card {
+  border-radius: 24px !important;
+  overflow: hidden;
+}
+
+.admin-empty-state {
+  max-width: 560px;
+  margin: 0 auto;
+  border-radius: 28px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 1px solid rgba(148, 163, 184, 0.12);
+}
+
+.admin-main-tabs,
+.admin-sub-tabs {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.admin-main-tabs {
+  border-radius: 22px !important;
+  overflow: hidden;
+}
+
+.admin-window {
+  overflow: visible;
+}
+
+.admin-section-card {
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.admin-main-tabs :deep(.v-slide-group__content),
+.admin-sub-tabs :deep(.v-slide-group__content) {
+  gap: 6px;
+  padding: 8px;
+}
+
+.admin-main-tabs :deep(.v-tab),
+.admin-sub-tabs :deep(.v-tab) {
+  min-height: 48px;
+  border-radius: 16px;
+  text-transform: none;
+  font-weight: 700;
+}
+
+.admin-main-tabs :deep(.v-tab__slider),
+.admin-sub-tabs :deep(.v-tab__slider) {
+  display: none;
+}
+
+.admin-main-tabs :deep(.v-tab--selected),
+.admin-sub-tabs :deep(.v-tab--selected) {
+  background: rgba(102, 126, 234, 0.12);
 }
 
 .touch-target {
@@ -1699,20 +1870,27 @@ onMounted(() => {
 
 .expandable-card {
   transition: all 0.3s ease;
-  border: 1px solid #e0e0e0;
+  border: 1px solid rgba(224, 224, 224, 0.92);
+  border-radius: 22px !important;
+  background: rgba(255, 255, 255, 0.98);
 }
 
 .expandable-card:hover {
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 12px 26px rgba(15, 23, 42, 0.1);
+  transform: translateY(-1px);
 }
 
 .expandable-card.expanded {
   border-color: #667eea;
-  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.2);
+  box-shadow: 0 12px 26px rgba(102, 126, 234, 0.16);
 }
 
 .detail-section {
   margin-bottom: 20px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  border: 1px solid rgba(148, 163, 184, 0.14);
 }
 
 .detail-title {
@@ -1726,12 +1904,15 @@ onMounted(() => {
 
 .detail-row {
   display: flex;
+  align-items: flex-start;
   margin-bottom: 8px;
   font-size: 0.9rem;
+  gap: 12px;
 }
 
 .detail-label {
   width: 140px;
+  flex-shrink: 0;
   font-weight: 500;
   color: #666;
 }
@@ -1739,6 +1920,8 @@ onMounted(() => {
 .detail-value {
   flex: 1;
   color: #333;
+  min-width: 0;
+  word-break: break-word;
 }
 
 .gap-2 {
@@ -1756,12 +1939,58 @@ onMounted(() => {
 }
 
 @media (max-width: 600px) {
+  .admin-dashboard-container {
+    padding:
+      0
+      max(10px, env(safe-area-inset-right, 0px))
+      calc(22px + env(safe-area-inset-bottom, 0px))
+      max(10px, env(safe-area-inset-left, 0px)) !important;
+  }
+
+  .admin-header-content {
+    padding:
+      calc(16px + env(safe-area-inset-top, 0px))
+      16px
+      16px
+      16px !important;
+  }
+
+  .admin-header-main {
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .admin-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .admin-main-tabs,
+  .admin-section-card,
+  .admin-status-card,
+  .admin-error-alert {
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+  }
+
+  .admin-main-tabs :deep(.v-tab),
+  .admin-sub-tabs :deep(.v-tab) {
+    min-height: 46px;
+    font-size: 0.82rem;
+    padding-inline: 10px;
+  }
+
+  .logout-btn {
+    flex: 1 1 auto;
+  }
+
   .touch-target {
     min-height: 48px !important;
   }
 
   .detail-row {
     flex-direction: column;
+    gap: 4px;
   }
 
   .detail-label {
@@ -1771,6 +2000,20 @@ onMounted(() => {
 
   .detail-value {
     margin-bottom: 8px;
+  }
+}
+
+@media (max-width: 420px) {
+  .admin-title {
+    font-size: 1.45rem !important;
+  }
+
+  .admin-header-icon {
+    font-size: 28px !important;
+  }
+
+  .admin-header-actions {
+    gap: 8px;
   }
 }
 </style>
