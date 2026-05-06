@@ -1321,8 +1321,6 @@ onBeforeRouteUpdate((to, from, next) => {
           ></v-btn>
         </div>
       </v-snackbar>
-
-      <!-- Reusable BottomNav -->
       <BottomNav v-model="activeTab" />
     </PullToRefreshWrapper>
   </v-app>

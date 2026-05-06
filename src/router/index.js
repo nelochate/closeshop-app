@@ -37,7 +37,12 @@ const routes = [
     path: '/homepage',
     name: 'homepage',
     component: HomepageView,
-    meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
+    meta: {
+      requiresAuth: true,
+      keepAlive: true,
+      localPullToRefresh: true,
+      preserveScroll: false,
+    },
   },
   {
     path: '/email-confirmed',
@@ -305,7 +310,7 @@ const router = createRouter({
       return savedPosition
     }
 
-    if (to.meta.keepAlive && keepAliveScrollPositions.has(to.fullPath)) {
+    if (to.meta.keepAlive && to.meta.preserveScroll !== false && keepAliveScrollPositions.has(to.fullPath)) {
       return {
         left: 0,
         top: keepAliveScrollPositions.get(to.fullPath),
@@ -322,7 +327,11 @@ let authInitialized = false
 router.beforeEach(async (to, from, next) => {
   try {
     if (from.meta?.keepAlive && typeof window !== 'undefined') {
-      keepAliveScrollPositions.set(from.fullPath, window.scrollY || 0)
+      if (from.meta?.preserveScroll === false) {
+        keepAliveScrollPositions.delete(from.fullPath)
+      } else {
+        keepAliveScrollPositions.set(from.fullPath, window.scrollY || 0)
+      }
     }
 
     const authStore = useAuthUserStore()

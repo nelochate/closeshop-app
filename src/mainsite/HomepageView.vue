@@ -809,7 +809,6 @@ onMounted(() => {
         </div>
       </v-card>
     </v-dialog>
-
     <BottomNav v-model="activeTab" />
   </PullToRefreshWrapper>
   </v-app>

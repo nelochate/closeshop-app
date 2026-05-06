@@ -3578,7 +3578,6 @@ onUnmounted(() => {
           </v-card-actions>
         </v-card>
       </v-navigation-drawer>
-
       <BottomNav v-model="activeTab" />
     </PullToRefreshWrapper>
   </v-app>
@@ -4463,7 +4462,7 @@ onUnmounted(() => {
 .shop-drawer-statusbar-spacer {
   flex: 0 0 auto;
   height: var(--sat, 0px);
-  min-height: 18px;
+  min-height: 40px;
   background: linear-gradient(180deg, rgba(29, 78, 216, 0.96) 0%, rgba(59, 130, 246, 0.86) 100%);
 }
 

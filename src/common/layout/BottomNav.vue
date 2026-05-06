@@ -27,8 +27,9 @@ const cart = useCartStore()
 const messageBadgeStore = useMessageBadgeStore()
 
 // Screen size detection
-const isMobile = ref(false)
-const windowWidth = ref(window.innerWidth)
+const initialWindowWidth = typeof window !== 'undefined' ? window.innerWidth : 390
+const windowWidth = ref(initialWindowWidth)
+const isMobile = ref(initialWindowWidth <= 768)
 
 const checkScreenSize = () => {
   windowWidth.value = window.innerWidth
@@ -93,6 +94,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
         value="home"
         aria-label="Home"
         variant="text"
+        :ripple="false"
         class="nav-btn"
         :min-width="isMobile ? '56' : '64'"
       >
@@ -108,6 +110,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
         value="cart"
         aria-label="Cart"
         variant="text"
+        :ripple="false"
         class="nav-btn"
         :min-width="isMobile ? '56' : '64'"
       >
@@ -136,6 +139,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
         value="map"
         aria-label="Map/Search"
         variant="text"
+        :ripple="false"
         class="nav-btn"
         :min-width="isMobile ? '56' : '64'"
       >
@@ -151,6 +155,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
         value="chat"
         aria-label="Chat"
         variant="text"
+        :ripple="false"
         class="nav-btn"
         :min-width="isMobile ? '56' : '64'"
       >
@@ -191,6 +196,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
         value="account"
         aria-label="Account"
         variant="text"
+        :ripple="false"
         class="nav-btn"
         :min-width="isMobile ? '56' : '64'"
       >
@@ -233,7 +239,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
     0 4px 24px rgba(63, 131, 199, 0.15),
     inset 0 1px 0 rgba(255, 255, 255, 0.2) !important;
   background: linear-gradient(135deg, #3f83c7 0%, #2a6ab0 100%) !important;
-  backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1);
   overflow: hidden;
 }
@@ -254,7 +259,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   background: #ff4757;
   border: 2px solid #3f83c7;
   border-radius: 50%;
-  animation: pulse 2s infinite;
   z-index: 10;
 }
 
@@ -274,7 +278,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   color: white !important;
   background: #ff4757 !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-  animation: pulse 2s infinite;
 }
 
 .message-badge.small-badge :deep(.v-badge__badge) {
@@ -323,7 +326,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 .nav-btn {
   color: rgba(255, 255, 255, 0.85) !important;
   opacity: 0.9;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   min-height: 52px !important;
   margin: 0 2px;
 }
@@ -341,7 +343,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 .nav-btn.is-active .v-icon {
   color: white !important;
   font-variation-settings: 'wght' 500 !important;
-  transform: scale(1.05);
 }
 
 .nav-btn.is-active .btn-label {
@@ -356,15 +357,13 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   align-items: center;
   justify-content: center;
   gap: 4px;
-  transition: transform 0.3s ease;
 }
 
 /* Icon styling */
 .bot-nav :deep(.v-icon) {
   font-variation-settings: 'wght' 300;
   color: rgba(255, 255, 255, 0.9);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.1));
+  filter: none;
 }
 
 /* Button label styling */
@@ -372,17 +371,9 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   font-size: 11px;
   font-weight: 500;
   color: rgba(255, 255, 255, 0.85);
-  transition: all 0.3s ease;
   letter-spacing: 0.3px;
   line-height: 1;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
-}
-
-@media (hover: hover) and (pointer: fine) {
-  .nav-btn:hover {
-    opacity: 1;
-    transform: translateY(-2px);
-  }
 }
 
 /* Cart badge styling */
@@ -398,7 +389,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   color: #fcfdff !important;
   background: rgb(251, 12, 12) !important;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
-  animation: pulse 2s infinite;
 }
 
 .cart-badge.small-badge :deep(.v-badge__badge) {
@@ -430,27 +420,27 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   }
 }
 
-/* Animation for badges */
-@keyframes pulse {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(255, 71, 87, 0.7);
-  }
-  50% {
-    transform: scale(1.1);
-  }
-  70% {
-    box-shadow: 0 0 0 6px rgba(255, 71, 87, 0);
-  }
-}
-
-/* Active state ripple effect */
-.nav-btn.is-active :deep(.v-btn__overlay) {
-  background: rgba(255, 255, 255, 0.1);
+.nav-btn :deep(.v-btn__overlay) {
+  display: none !important;
 }
 
 /* Improve touch targets for mobile */
 @media (hover: none) and (pointer: coarse) {
+  .nav-btn,
+  .btn-content,
+  .bot-nav :deep(.v-icon),
+  .btn-label,
+  .cart-badge :deep(.v-badge__badge),
+  .message-badge :deep(.v-badge__badge),
+  .unread-dot,
+  .nav-btn.is-active .v-icon,
+  .nav-btn.is-active .btn-label,
+  .nav-btn.is-active .btn-content {
+    transition: none !important;
+    transform: none !important;
+    animation: none !important;
+  }
+
   .nav-btn {
     min-height: 56px !important;
     min-width: 60px !important;
@@ -482,7 +472,9 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 
 /* Reduce motion for accessibility */
 @media (prefers-reduced-motion: reduce) {
+  .bot-nav,
   .nav-btn,
+  .btn-content,
   .bot-nav :deep(.v-icon),
   .btn-label,
   .cart-badge :deep(.v-badge__badge),

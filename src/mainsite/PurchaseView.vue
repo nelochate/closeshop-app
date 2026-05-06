@@ -3108,17 +3108,6 @@ watch(
   }
 }
 
-
-/* Cards */
-.summary-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-}
-
-.summary-card .text-primary {
-  color: white !important;
-}
-
 .delivery-card,
 .items-card,
 .option-card,
@@ -3650,19 +3639,7 @@ watch(
   color: white;
   position: relative;
   overflow: hidden;
-}
-
-.summary-card::before {
-  content: '';
-  position: absolute;
-  top: -50%;
-  right: -50%;
-  width: 200%;
-  height: 200%;
-  background: radial-gradient(circle, rgba(255,255,255,0.1) 1px, transparent 1px);
-  background-size: 20px 20px;
-  opacity: 0.3;
-  pointer-events: none;
+  margin-top: -65px !important;
 }
 
 .summary-card .text-primary {
