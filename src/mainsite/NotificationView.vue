@@ -636,6 +636,10 @@ function getResolvedMessageNotificationTitle(notification) {
 
 // Helper to get human-readable notification title
 function getNotificationTitle(notification) {
+  if (notification.type === 'new_message' && notification.title && notification.title !== 'New Message') {
+    return notification.title
+  }
+
   const resolvedMessageTitle = getResolvedMessageNotificationTitle(notification)
 
   if (resolvedMessageTitle) return resolvedMessageTitle

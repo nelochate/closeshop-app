@@ -1,39 +1,58 @@
 <script setup>
-import { ref, watch, onMounted, computed } from 'vue'
+import { ref, watch, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
 const route = useRoute()
 const router = useRouter()
 
-const query = ref(route.query.q || '')
+const normalizeQueryValue = (value) => (typeof value === 'string' ? value : '')
+
+const query = ref(normalizeQueryValue(route.query.q))
 const productResults = ref([])
 const shopResults = ref([])
 const loading = ref(false)
 const errorMsg = ref('')
 const activeTab = ref('products') // 'products' or 'shops'
-let debounceTimer
-
-// 🔄 Watch URL query param and refetch on change
-watch(
-  () => route.query.q,
-  (newQ) => {
-    query.value = newQ || ''
-    debounceFetch()
-  }
-)
+let fetchDebounceTimer
+let routeDebounceTimer
 
 // 🕓 Debounce search to avoid overloading Supabase
 function debounceFetch() {
-  clearTimeout(debounceTimer)
-  debounceTimer = setTimeout(fetchSearchResults, 400)
+  clearTimeout(fetchDebounceTimer)
+  fetchDebounceTimer = setTimeout(fetchSearchResults, 250)
+}
+
+function debounceRouteSync(nextQuery) {
+  clearTimeout(routeDebounceTimer)
+  routeDebounceTimer = setTimeout(() => {
+    const currentRouteQuery = normalizeQueryValue(route.query.q)
+
+    if (nextQuery === currentRouteQuery) {
+      return
+    }
+
+    const nextRouteQuery = nextQuery ? { ...route.query, q: nextQuery } : { ...route.query }
+    if (!nextQuery) {
+      delete nextRouteQuery.q
+    }
+
+    router.replace({
+      name: 'search',
+      query: nextRouteQuery,
+    })
+  }, 350)
 }
 
 // 🔍 Fetch products and shops
 async function fetchSearchResults() {
-  if (!query.value || query.value.trim().length < 1) {
+  const searchText = query.value.trim()
+
+  if (!searchText) {
     productResults.value = []
     shopResults.value = []
+    loading.value = false
+    errorMsg.value = ''
     return
   }
 
@@ -45,7 +64,7 @@ async function fetchSearchResults() {
     const { data: products, error: productsError } = await supabase
       .from('products')
       .select('id, prod_name, price, main_img_urls, sold, shop_id')
-      .ilike('prod_name', `%${query.value}%`)
+      .ilike('prod_name', `%${searchText}%`)
 
     if (productsError) throw productsError
 
@@ -53,7 +72,7 @@ async function fetchSearchResults() {
     const { data: shops, error: shopsError } = await supabase
       .from('shops')
       .select('id, business_name, logo_url, status, description')
-      .ilike('business_name', `%${query.value}%`)
+      .ilike('business_name', `%${searchText}%`)
       .eq('status', 'approved') // Only show approved shops
 
     if (shopsError) throw shopsError
@@ -87,16 +106,34 @@ async function fetchSearchResults() {
   }
 }
 
-onMounted(fetchSearchResults)
-
 // 🔙 Navigation helpers
 const goBack = () => router.back()
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
 const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
-// 🔁 Update search as user types
+watch(
+  () => route.query.q,
+  (newQ) => {
+    const normalizedQuery = normalizeQueryValue(newQ)
+
+    if (normalizedQuery !== query.value) {
+      query.value = normalizedQuery
+      return
+    }
+
+    debounceFetch()
+  },
+  { immediate: true },
+)
+
 watch(query, (val) => {
-  router.replace({ name: 'search', query: { q: val } })
+  debounceFetch()
+  debounceRouteSync(val.trim())
+})
+
+onUnmounted(() => {
+  clearTimeout(fetchDebounceTimer)
+  clearTimeout(routeDebounceTimer)
 })
 
 // Computed properties

@@ -10,7 +10,7 @@ import {
   notificationTypeMatchesPreferences,
 } from '@/utils/notificationPreferences'
 
-const PUSH_CHANNEL_ID = 'closeshop-high-priority'
+const PUSH_CHANNEL_ID = 'closeshop-high-priority-v2'
 const PUSH_CHANNEL_NAME = 'CloseShop Alerts'
 const PUSH_TOKEN_TABLE = 'user_push_tokens'
 
@@ -22,6 +22,17 @@ let isAppActive = true
 let lastForegroundNotificationKey = ''
 
 const normalizeText = (value) => (typeof value === 'string' ? value.trim() : '')
+
+const normalizeNotificationData = (data = {}) => ({
+  ...data,
+  type: normalizeText(data.type),
+  related_id: normalizeText(data.related_id || data.relatedId),
+  related_type: normalizeText(data.related_type || data.relatedType),
+  action_url: normalizeText(data.action_url || data.actionUrl),
+  conversation_id: normalizeText(data.conversation_id || data.conversationId),
+  other_user_id: normalizeText(data.other_user_id || data.otherUserId),
+  order_id: normalizeText(data.order_id || data.orderId),
+})
 
 const isNativePushSupported = () => Capacitor.isNativePlatform()
 
@@ -38,7 +49,8 @@ const buildPushPreferencePayload = async ({ userId, preferences = null } = {}) =
 }
 
 const buildNotificationPayload = (notification = {}) => {
-  const data = notification?.data && typeof notification.data === 'object' ? notification.data : {}
+  const rawData = notification?.data && typeof notification.data === 'object' ? notification.data : {}
+  const data = normalizeNotificationData(rawData)
 
   return {
     id: normalizeText(data.notification_id || notification?.id),
@@ -146,7 +158,7 @@ const showAndroidForegroundNotification = async (notification) => {
         title: notification.title || 'CloseShop',
         body: notification.body || 'You have a new update.',
         channelId: PUSH_CHANNEL_ID,
-        extra: notification.data,
+        extra: normalizeNotificationData(notification.data),
       },
     ],
   })
@@ -200,24 +212,92 @@ const resolveOrderRoute = async (orderId) => {
   return { name: 'order-details', params: { id: orderId } }
 }
 
+const resolveChatRoute = async ({ conversationId = '', otherUserId = '', relatedId = '' } = {}) => {
+  const directConversationId = normalizeText(conversationId)
+  const directOtherUserId = normalizeText(otherUserId)
+  const fallbackRelatedId = normalizeText(relatedId)
+
+  if (directConversationId && directOtherUserId) {
+    return {
+      name: 'chatview',
+      params: { id: directOtherUserId },
+      query: { conversationId: directConversationId },
+    }
+  }
+
+  const candidateConversationId = directConversationId || fallbackRelatedId
+
+  if (candidateConversationId) {
+    try {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser()
+
+      const { data: conversation, error } = await supabase
+        .from('conversations')
+        .select('id, user1, user2')
+        .eq('id', candidateConversationId)
+        .maybeSingle()
+
+      if (error) {
+        throw error
+      }
+
+      if (conversation?.id) {
+        const resolvedOtherUserId =
+          conversation.user1 === user?.id ? conversation.user2 : conversation.user1
+
+        if (resolvedOtherUserId) {
+          return {
+            name: 'chatview',
+            params: { id: resolvedOtherUserId },
+            query: { conversationId: conversation.id },
+          }
+        }
+      }
+    } catch (error) {
+      console.warn('Could not resolve chat route from push notification:', error)
+    }
+  }
+
+  if (directOtherUserId) {
+    return { name: 'chatview', params: { id: directOtherUserId } }
+  }
+
+  if (fallbackRelatedId) {
+    return { name: 'chatview', params: { id: fallbackRelatedId } }
+  }
+
+  return { name: 'messageview' }
+}
+
 const routeFromPushPayload = async (data = {}) => {
-  const actionUrl = normalizeText(data.action_url)
-  const type = normalizeText(data.type)
-  const relatedId = normalizeText(data.related_id)
-  const relatedType = normalizeText(data.related_type)
+  const normalizedData = normalizeNotificationData(data)
+  const actionUrl = normalizedData.action_url
+  const type = normalizedData.type
+  const relatedId = normalizedData.related_id
+  const relatedType = normalizedData.related_type
 
   if (actionUrl) {
     await router.push(actionUrl)
     return
   }
 
-  if (type === 'new_message' && relatedId) {
-    await router.push({ name: 'chatview', params: { id: relatedId } })
+  if (type === 'new_message') {
+    await router.push(
+      await resolveChatRoute({
+        conversationId: normalizedData.conversation_id,
+        otherUserId: normalizedData.other_user_id,
+        relatedId,
+      }),
+    )
     return
   }
 
-  if (relatedType === 'order' && relatedId) {
-    await router.push(await resolveOrderRoute(relatedId))
+  const orderId = normalizedData.order_id || relatedId
+
+  if (relatedType === 'order' && orderId) {
+    await router.push(await resolveOrderRoute(orderId))
     return
   }
 
@@ -275,10 +355,12 @@ export const initializeMobilePushNotifications = async (user) => {
     await PushNotifications.createChannel({
       id: PUSH_CHANNEL_ID,
       name: PUSH_CHANNEL_NAME,
-      description: 'Chat messages and order updates',
+      description: 'High-priority chat, order, and rider updates',
       importance: 5,
       visibility: 1,
-      sound: 'default',
+      sound: 'notification.wav',
+      vibration: true,
+      lights: true,
     })
   }
 

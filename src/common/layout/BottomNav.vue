@@ -1,6 +1,6 @@
 <script setup lang="js">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useCartStore } from '@/stores/cart'
 import { useMessageBadgeStore } from '@/stores/messageBadge'
 
@@ -21,6 +21,7 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['update:modelValue'])
+const route = useRoute()
 const router = useRouter()
 const cart = useCartStore()
 const messageBadgeStore = useMessageBadgeStore()
@@ -46,14 +47,29 @@ onUnmounted(() => {
 
 // v-model binding
 const value = computed({
-  get: () => props.modelValue,
+  get: () => {
+    const routeEntry = Object.entries(props.routeMap).find(([, path]) => path === route.path)
+    return routeEntry?.[0] || props.modelValue
+  },
   set: (v) => emit('update:modelValue', v),
 })
 
-function go(key) {
+async function go(key) {
+  if (!key) {
+    return
+  }
+
   emit('update:modelValue', key)
   const path = props.routeMap[key]
-  if (path) router.push(path)
+  if (!path || path === route.path) {
+    return
+  }
+
+  try {
+    await router.push(path)
+  } catch (error) {
+    console.warn('Bottom navigation failed:', error)
+  }
 }
 
 const hasUnreadMessages = computed(() => messageBadgeStore.hasUnreadMessages)
@@ -66,15 +82,15 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
     <v-bottom-navigation
       class="bot-nav"
       :height="isMobile ? '68' : '72'"
-      v-model="value"
-      mode="shift"
+      :model-value="value"
+      @update:modelValue="go"
+      mode="horizontal"
       :grow="isMobile"
     >
       <!-- Home -->
       <v-btn
         :class="{ 'is-active': value === 'home' }"
         value="home"
-        @click="go('home')"
         aria-label="Home"
         variant="text"
         class="nav-btn"
@@ -90,7 +106,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
       <v-btn
         :class="{ 'is-active': value === 'cart' }"
         value="cart"
-        @click="go('cart')"
         aria-label="Cart"
         variant="text"
         class="nav-btn"
@@ -119,7 +134,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
       <v-btn
         :class="{ 'is-active': value === 'map' }"
         value="map"
-        @click="go('map')"
         aria-label="Map/Search"
         variant="text"
         class="nav-btn"
@@ -135,7 +149,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
       <v-btn
         :class="{ 'is-active': value === 'chat' }"
         value="chat"
-        @click="go('chat')"
         aria-label="Chat"
         variant="text"
         class="nav-btn"
@@ -176,7 +189,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
       <v-btn
         :class="{ 'is-active': value === 'account' }"
         value="account"
-        @click="go('account')"
         aria-label="Account"
         variant="text"
         class="nav-btn"
@@ -316,11 +328,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   margin: 0 2px;
 }
 
-.nav-btn:hover {
-  opacity: 1;
-  transform: translateY(-2px);
-}
-
 .nav-btn.is-active {
   color: white !important;
   opacity: 1;
@@ -328,7 +335,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 }
 
 .nav-btn.is-active .btn-content {
-  transform: translateY(-1px);
+  transform: none;
 }
 
 .nav-btn.is-active .v-icon {
@@ -369,6 +376,13 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   letter-spacing: 0.3px;
   line-height: 1;
   text-shadow: 0 1px 1px rgba(0, 0, 0, 0.1);
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .nav-btn:hover {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
 }
 
 /* Cart badge styling */

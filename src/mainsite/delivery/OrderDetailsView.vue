@@ -853,6 +853,17 @@ const confirmAcceptOrder = async () => {
 
     showAcceptDialog.value = false
     try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: 'accepted_by_rider',
+        createdAt: acceptedAt,
+        orderData: order.value,
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about rider assignment:', notificationError)
+    }
+
+    try {
       await notifySellerOrderStatus({
         orderId,
         status: 'accepted_by_rider',

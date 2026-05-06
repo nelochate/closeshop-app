@@ -57,6 +57,9 @@ const mergeOrderContext = (primaryContext = {}, fallbackContext = {}) => {
   }
 }
 
+const normalizeNotificationTitle = (value) =>
+  typeof value === 'string' ? value.trim() : ''
+
 const fetchOrderContext = async (orderId) => {
   const { data, error } = await supabase
     .from('orders')
@@ -107,6 +110,12 @@ const buildCustomerOrderStatusNotification = ({ status, shopName, transactionNum
   const shopLabel = shopName ? ` from ${shopName}` : ''
 
   switch (status) {
+    case 'accepted_by_rider':
+      return {
+        type: 'shipping_update',
+        title: 'Rider Assigned',
+        message: 'Rider is on the way to pick up your order',
+      }
     case 'cancelled':
       return {
         type: 'shipping_update',
@@ -157,8 +166,8 @@ const buildSellerOrderStatusNotification = ({ status, transactionNumber, custome
     case 'accepted_by_rider':
       return {
         type: 'shipping_update',
-        title: 'Rider Accepted Order',
-        message: `A rider has accepted ${orderLabel}${customerLabel}.`,
+        title: 'Rider Assigned',
+        message: 'Rider assigned to your order',
       }
     case 'picked_up':
       return {
@@ -175,8 +184,8 @@ const buildSellerOrderStatusNotification = ({ status, transactionNumber, custome
     case 'not_received':
       return {
         type: 'shipping_update',
-        title: 'Delivery Issue Reported',
-        message: `Customer reported ${orderLabel}${customerLabel} was not received.`,
+        title: 'Order Not Received',
+        message: 'Customer reported order not received',
       }
     case 'auto_completed':
       return {
@@ -197,8 +206,8 @@ const buildAssignedRiderOrderStatusNotification = ({ status, transactionNumber, 
     case 'not_received':
       return {
         type: 'shipping_update',
-        title: 'Delivery Issue Reported',
-        message: `Customer reported ${orderLabel}${customerLabel} was not received. Please reattempt delivery.`,
+        title: 'Order Not Received',
+        message: 'Customer reported order not received',
       }
     case 'auto_completed':
       return {
@@ -210,6 +219,12 @@ const buildAssignedRiderOrderStatusNotification = ({ status, transactionNumber, 
       return null
   }
 }
+
+const buildAvailableRiderOrderNotification = () => ({
+  type: 'shipping_update',
+  title: 'New Delivery Request',
+  message: 'New delivery request available',
+})
 
 const notificationAlreadyExists = async ({ userId, orderId, type, title }) => {
   const { data, error } = await supabase
@@ -228,6 +243,22 @@ const notificationAlreadyExists = async ({ userId, orderId, type, title }) => {
   }
 
   return Array.isArray(data) && data.length > 0
+}
+
+const fetchAvailableRiderProfileIds = async ({ excludeUserId = null } = {}) => {
+  const { data, error } = await supabase
+    .from('Rider_Registration')
+    .select('profile_id')
+    .eq('status', 'approved')
+    .eq('is_available', true)
+
+  if (error) {
+    throw error
+  }
+
+  return (data || [])
+    .map((row) => row?.profile_id)
+    .filter((profileId) => typeof profileId === 'string' && profileId !== excludeUserId)
 }
 
 export const notifyCustomerOrderStatus = async ({
@@ -405,4 +436,60 @@ export const notifyAssignedRiderOrderStatus = async ({
   })
 
   return notificationResult
+}
+
+export const notifyAvailableRidersNewDeliveryRequest = async ({
+  orderId,
+  createdAt = null,
+  actorUserId = null,
+}) => {
+  if (!orderId) return { created: false, reason: 'missing-order-id', recipients: 0 }
+
+  const notification = buildAvailableRiderOrderNotification()
+  const riderProfileIds = await fetchAvailableRiderProfileIds({
+    excludeUserId: actorUserId || null,
+  })
+
+  if (riderProfileIds.length === 0) {
+    return { created: false, reason: 'no-available-riders', recipients: 0 }
+  }
+
+  const uniqueRiderProfileIds = [...new Set(riderProfileIds)]
+  let createdCount = 0
+
+  await Promise.all(
+    uniqueRiderProfileIds.map(async (riderProfileId) => {
+      const exists = await notificationAlreadyExists({
+        userId: riderProfileId,
+        orderId,
+        type: notification.type,
+        title: normalizeNotificationTitle(notification.title),
+      })
+
+      if (exists) {
+        return
+      }
+
+      const notificationResult = await createNotificationRecordIfEnabled({
+        userId: riderProfileId,
+        type: notification.type,
+        title: notification.title,
+        message: notification.message,
+        relatedId: orderId,
+        relatedType: 'order',
+        isRead: false,
+        createdAt: createdAt || new Date().toISOString(),
+      })
+
+      if (notificationResult?.created) {
+        createdCount += 1
+      }
+    }),
+  )
+
+  return {
+    created: createdCount > 0,
+    recipients: uniqueRiderProfileIds.length,
+    createdCount,
+  }
 }

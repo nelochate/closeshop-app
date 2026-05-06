@@ -1,7 +1,7 @@
 import { serve } from "https://deno.land/std@0.177.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-const PUSH_CHANNEL_ID = "closeshop-high-priority";
+const PUSH_CHANNEL_ID = "closeshop-high-priority-v2";
 const FIREBASE_SCOPE = "https://www.googleapis.com/auth/firebase.messaging";
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 
@@ -24,6 +24,13 @@ type PushTokenRow = {
   notifications_enabled?: boolean | null;
   chat_enabled?: boolean | null;
   order_enabled?: boolean | null;
+};
+
+type NotificationRoutingPayload = {
+  actionUrl: string;
+  conversationId: string;
+  otherUserId: string;
+  orderId: string;
 };
 
 let cachedAccessToken = "";
@@ -83,18 +90,6 @@ const extractNotificationRecord = (payload: Record<string, unknown>): Notificati
     action_url: normalizeText(record.action_url || payload.action_url),
     direct_token: normalizeText(payload.token),
   };
-};
-
-const buildActionUrl = (notification: NotificationRecord) => {
-  if (notification.action_url) {
-    return notification.action_url;
-  }
-
-  if (notification.type === "new_message" && notification.related_id) {
-    return `/chatview/${notification.related_id}`;
-  }
-
-  return "/notificationview";
 };
 
 const toBase64Url = (value: string | Uint8Array) => {
@@ -272,6 +267,64 @@ const getSupabaseAdminClient = () => {
   });
 };
 
+const resolveChatRoutingPayload = async (
+  supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>,
+  notification: NotificationRecord,
+): Promise<NotificationRoutingPayload> => {
+  if (notification.action_url) {
+    return {
+      actionUrl: notification.action_url,
+      conversationId: "",
+      otherUserId: "",
+      orderId: "",
+    };
+  }
+
+  if (notification.type !== "new_message" || !notification.related_id || !notification.user_id) {
+    return {
+      actionUrl: "",
+      conversationId: "",
+      otherUserId: "",
+      orderId: notification.related_type === "order" ? notification.related_id : "",
+    };
+  }
+
+  try {
+    const { data: conversation, error } = await supabaseAdmin
+      .from("conversations")
+      .select("id, user1, user2")
+      .eq("id", notification.related_id)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (conversation?.id) {
+      const otherUserId =
+        conversation.user1 === notification.user_id ? conversation.user2 : conversation.user1;
+
+      if (otherUserId) {
+        return {
+          actionUrl: `/chatview/${otherUserId}?conversationId=${conversation.id}`,
+          conversationId: conversation.id,
+          otherUserId,
+          orderId: "",
+        };
+      }
+    }
+  } catch (error) {
+    console.warn("Could not resolve chat conversation route for push payload:", error);
+  }
+
+  return {
+    actionUrl: "",
+    conversationId: "",
+    otherUserId: "",
+    orderId: "",
+  };
+};
+
 const fetchRecipientTokens = async (
   supabaseAdmin: ReturnType<typeof getSupabaseAdminClient>,
   notification: NotificationRecord,
@@ -307,6 +360,7 @@ const sendPushMessage = async (
   firebaseProjectId: string,
   notification: NotificationRecord,
   tokenRow: PushTokenRow,
+  routingPayload: NotificationRoutingPayload,
 ) => {
   const requestBody = {
     message: {
@@ -320,7 +374,10 @@ const sendPushMessage = async (
         type: notification.type || "",
         related_id: notification.related_id || "",
         related_type: notification.related_type || "",
-        action_url: buildActionUrl(notification),
+        action_url: routingPayload.actionUrl || "",
+        conversation_id: routingPayload.conversationId || "",
+        other_user_id: routingPayload.otherUserId || "",
+        order_id: routingPayload.orderId || "",
         title: notification.title || "CloseShop",
         message: notification.message || "",
       },
@@ -328,6 +385,7 @@ const sendPushMessage = async (
         priority: "high",
         notification: {
           channel_id: PUSH_CHANNEL_ID,
+          sound: "notification",
         },
       },
       apns: {
@@ -377,6 +435,7 @@ const sendPushMessage = async (
 const sendApnsMessage = async (
   notification: NotificationRecord,
   tokenRow: PushTokenRow,
+  routingPayload: NotificationRoutingPayload,
 ) => {
   const apnsBundleId = Deno.env.get("APNS_BUNDLE_ID");
   const apnsHost = Deno.env.get("APNS_HOST") ||
@@ -401,7 +460,10 @@ const sendApnsMessage = async (
     type: notification.type || "",
     related_id: notification.related_id || "",
     related_type: notification.related_type || "",
-    action_url: buildActionUrl(notification),
+    action_url: routingPayload.actionUrl || "",
+    conversation_id: routingPayload.conversationId || "",
+    other_user_id: routingPayload.otherUserId || "",
+    order_id: routingPayload.orderId || "",
     title: notification.title || "CloseShop",
     message: notification.message || "",
   };
@@ -460,6 +522,7 @@ serve(async (req) => {
 
     const supabaseAdmin = getSupabaseAdminClient();
     const recipientTokens = await fetchRecipientTokens(supabaseAdmin, notification);
+    const routingPayload = await resolveChatRoutingPayload(supabaseAdmin, notification);
 
     if (recipientTokens.length === 0) {
       return jsonResponse(200, {
@@ -480,10 +543,16 @@ serve(async (req) => {
     const results = await Promise.all(
       recipientTokens.map((tokenRow) => {
         if (tokenRow.platform === "ios") {
-          return sendApnsMessage(notification, tokenRow);
+          return sendApnsMessage(notification, tokenRow, routingPayload);
         }
 
-        return sendPushMessage(firebaseAccessToken, firebaseProjectId, notification, tokenRow);
+        return sendPushMessage(
+          firebaseAccessToken,
+          firebaseProjectId,
+          notification,
+          tokenRow,
+          routingPayload,
+        );
       }),
     );
 

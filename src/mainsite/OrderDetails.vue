@@ -5,6 +5,7 @@ import { supabase } from '@/utils/supabase'
 import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import {
   notifyAssignedRiderOrderStatus,
+  notifyAvailableRidersNewDeliveryRequest,
   notifyCustomerOrderStatus,
   notifySellerOrderStatus,
 } from '@/utils/orderNotifications'
@@ -1005,15 +1006,28 @@ const approveOrder = async () => {
   if (!confirm('Approve this order? It will be made available for riders.')) return
 
   try {
+    const approvedAt = new Date().toISOString()
     const { error } = await supabase
       .from('orders')
       .update({
         status: 'waiting_for_rider',
-        approved_at: new Date().toISOString(),
+        approved_at: approvedAt,
       })
       .eq('id', orderId)
 
     if (error) throw error
+
+    try {
+      await notifyAvailableRidersNewDeliveryRequest({
+        orderId,
+        createdAt: approvedAt,
+        actorUserId: currentUser.value?.id || null,
+        orderData: getOrderNotificationData(),
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify available riders after order approval:', notificationError)
+    }
+
     alert('Order approved! Riders can now accept it.')
     await fetchOrderDetails()
   } catch (err) {
@@ -1112,6 +1126,17 @@ const declineCancellationRequest = async () => {
       console.warn('Could not notify customer about the declined cancellation request:', notificationError)
     }
 
+    try {
+      await notifyAvailableRidersNewDeliveryRequest({
+        orderId,
+        createdAt: respondedAt,
+        actorUserId: currentUser.value?.id || null,
+        orderData: getOrderNotificationData(),
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify available riders after returning the order to waiting for rider:', notificationError)
+    }
+
     alert('Cancellation request declined. Order returned to waiting for rider.')
     await fetchOrderDetails()
   } catch (err) {
@@ -1174,6 +1199,24 @@ const acceptOrderAsRider = async () => {
       alert('This order is no longer available for rider acceptance.')
       await fetchOrderDetails()
       return
+    }
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId,
+        status: 'accepted_by_rider',
+        createdAt: acceptedAt,
+        actorUserId: currentUser.value?.id,
+        orderData: {
+          ...order.value,
+          address: shippingAddress.value,
+          buyer: buyer.value,
+          shop: shop.value,
+          shop_name: shop.value?.business_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about rider assignment:', notificationError)
     }
 
     try {

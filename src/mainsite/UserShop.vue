@@ -3,6 +3,7 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
+import { notifyAvailableRidersNewDeliveryRequest } from '@/utils/orderNotifications'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime } from '@/utils/dateTime'
 import { isOrderCancellationRequestedStatus, normalizeOrderStatus } from '@/utils/orderStatus'
@@ -229,17 +230,33 @@ const approveOrder = async (order: any) => {
     const {
       data: { user },
     } = await supabase.auth.getUser()
+    const approvedAt = new Date().toISOString()
 
     const { error } = await supabase
       .from('orders')
       .update({
         status: 'waiting_for_rider',
-        approved_at: new Date().toISOString(),
+        approved_at: approvedAt,
         approved_by: user?.id,
       })
       .eq('id', order.id)
 
     if (error) throw error
+
+    try {
+      await notifyAvailableRidersNewDeliveryRequest({
+        orderId: order.id,
+        createdAt: approvedAt,
+        actorUserId: user?.id || null,
+        orderData: {
+          ...order,
+          shop_name: businessName.value || order.shop_name,
+          customer_name: order.customer_name,
+        },
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify available riders about the new delivery request:', notificationError)
+    }
 
     alert('✅ Order approved! Riders can now accept this order.')
     await fetchOrders()

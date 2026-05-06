@@ -88,6 +88,11 @@ const conversationCache = new Map<string, ConversationRecord | null>()
 // instead of probing optional conversation columns that may not exist yet.
 let supportsConversationNotificationState = false
 
+const buildReplyPreview = (content?: string | null) =>
+  (content || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+
 const getNotificationRelatedIds = ({
   conversationId,
   senderUserId,
@@ -698,10 +703,12 @@ const inspectSourceMessageNotification = async ({
   }
 
   const fallbackName = evaluation.event === 'conversation_start' ? 'Customer' : 'Shop'
+  const displayName = counterpartyDisplayName || fallbackName
+  const replyPreview = buildReplyPreview(sourceMessage.content)
   const notificationTitle =
     evaluation.event === 'conversation_start'
-      ? `${counterpartyDisplayName || fallbackName} sent you a message`
-      : `${counterpartyDisplayName || fallbackName} replied to your message`
+      ? `${displayName} sent you a message`
+      : `${displayName} replied: '${replyPreview}'`
 
   return {
     shouldSuppress: false,

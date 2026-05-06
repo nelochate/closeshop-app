@@ -9,6 +9,7 @@ layout activity_main
 mipmap closeshop
 mipmap closeshop_foreground
 mipmap closeshop_round
+raw notification
 string app_name
 string default_notification_channel_id
 string gcm_defaultSenderId

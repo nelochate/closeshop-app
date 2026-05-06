@@ -206,6 +206,7 @@ const routes = [
     path: '/search',
     name: 'search',
     component: () => import('@/mainsite/SearchView.vue'),
+    meta: { requiresAuth: true, stableComponentKey: true },
   },
 
   {

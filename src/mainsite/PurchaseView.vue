@@ -2334,15 +2334,16 @@ watch(
 
 <template>
   <v-app>
-    <v-app-bar class="app-bar" color="#438fda" flat>
-      <v-btn icon @click="router.back()" variant="text" color="white">
-        <v-icon>mdi-arrow-left</v-icon>
-      </v-btn>
-      <v-toolbar-title class="app-bar-title text-white">
-        <strong>Checkout</strong>
-      </v-toolbar-title>
-      <v-spacer></v-spacer>
-    </v-app-bar>
+      <!-- Top App Bar -->
+      <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+        <v-btn variant="text" icon @click="goBack" class="back-btn">
+          <v-icon>mdi-arrow-left</v-icon>
+        </v-btn>
+        <v-toolbar-title class="font-bold">
+          <strong>Checkout</strong>
+        </v-toolbar-title>
+        <v-spacer />
+      </v-app-bar>
 
     <v-main class="main-app">
       <v-container fluid class="px-3 py-4 main-container">
@@ -2808,7 +2809,7 @@ watch(
         <v-container class="px-3">
           <div class="d-flex align-center justify-space-between bottom-action-content">
             <div class="order-summary">
-              <div class="text-caption text-grey">Total Amount</div>
+              <div class="text-caption">Total Amount</div>
               <div class="text-h5 font-weight-bold text-white">
                 {{ formatCurrency(totalPrice) }}
               </div>
@@ -3009,12 +3010,70 @@ watch(
   --purchase-safe-right: env(safe-area-inset-right, 0px);
   --purchase-safe-bottom: env(safe-area-inset-bottom, 0px);
   --purchase-safe-left: env(safe-area-inset-left, 0px);
+  --purchase-header-height: 56px;
+  --purchase-header-offset: calc(var(--purchase-header-height) + var(--purchase-safe-top));
+}
+
+/* Top Navigation Bar - Fixed for notches */
+.top-nav {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+  z-index: 20 !important;
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+/* For older iOS devices */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+/* Ensure toolbar content is properly aligned */
+.top-nav :deep(.v-toolbar__content) {
+  height: 56px !important;
+  padding-top: 0 !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn) {
+  color: white !important;
+}
+
+/* iOS support for margin-top */
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: env(safe-area-inset-top);
+  }
+}
+
+/* Landscape mode adjustment */
+@media (orientation: landscape) and (max-height: 500px) {
+  .top-nav {
+    height: 56px !important;
+    padding-top: 0 !important;
+  }
 }
 
 /* Main Layout */
 .main-app {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
-  min-height: 100dvh;
+  min-height: calc(100dvh - var(--purchase-header-offset));
+  margin-top: var(--purchase-header-offset);
   padding-left: var(--purchase-safe-left);
   padding-right: var(--purchase-safe-right);
 }
@@ -3022,42 +3081,33 @@ watch(
 .main-container {
   max-width: 800px;
   margin: 0 auto;
-  padding-top: calc(68px + var(--purchase-safe-top)) !important;
+  padding-top: 16px !important;
   padding-bottom: calc(132px + var(--purchase-safe-bottom)) !important;
   padding-left: max(12px, var(--purchase-safe-left)) !important;
   padding-right: max(12px, var(--purchase-safe-right)) !important;
 }
 
-/* App Bar */
-.app-bar {
-  background: linear-gradient(135deg, #438fda 0%, #2f6ca9 100%) !important;
-  box-shadow: 0 2px 12px rgba(67, 143, 218, 0.15);
-  padding-top: var(--purchase-safe-top);
-}
-
-.app-bar :deep(.v-toolbar__content) {
-  min-height: 56px !important;
-  height: 56px !important;
-  padding: 0 max(8px, var(--purchase-safe-right)) 0 max(8px, var(--purchase-safe-left)) !important;
-}
-
 @supports (padding-top: env(safe-area-inset-top)) {
-  .app-bar {
-    height: calc(56px + env(safe-area-inset-top)) !important;
+  .main-app {
+    margin-top: calc(56px + env(safe-area-inset-top));
+    min-height: calc(100dvh - 56px - env(safe-area-inset-top));
   }
 }
 
 @supports (padding-top: constant(safe-area-inset-top)) {
-  .app-bar {
-    padding-top: constant(safe-area-inset-top);
-    height: calc(56px + constant(safe-area-inset-top)) !important;
+  .main-app {
+    margin-top: calc(56px + constant(safe-area-inset-top));
+    min-height: calc(100dvh - 56px - constant(safe-area-inset-top));
   }
 }
 
-.app-bar-title {
-  font-size: 1.1rem;
-  letter-spacing: 0.5px;
+@media (orientation: landscape) and (max-height: 500px) {
+  .main-app {
+    margin-top: 56px;
+    min-height: calc(100dvh - 56px);
+  }
 }
+
 
 /* Cards */
 .summary-card {
@@ -3470,7 +3520,7 @@ watch(
 /* Responsive Design */
 @media (max-width: 600px) {
   .main-container {
-    padding-top: calc(64px + var(--purchase-safe-top)) !important;
+    padding-top: 12px !important;
     padding-bottom: calc(148px + var(--purchase-safe-bottom)) !important;
   }
 
@@ -3499,8 +3549,8 @@ watch(
     flex-direction: column;
     align-items: stretch !important;
     gap: 12px;
-    padding-right:15px;
-    padding-left:15px;
+    padding-right:20px;
+    padding-left:20px;
 
   }
 

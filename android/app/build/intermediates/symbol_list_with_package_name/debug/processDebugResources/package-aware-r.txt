@@ -4459,6 +4459,7 @@ mipmap closeshop_foreground
 mipmap closeshop_round
 plurals mtrl_badge_content_description
 raw firebase_common_keep
+raw notification
 string abc_action_bar_home_description
 string abc_action_bar_up_description
 string abc_action_menu_overflow_description
