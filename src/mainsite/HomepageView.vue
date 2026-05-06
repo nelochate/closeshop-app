@@ -681,6 +681,28 @@ const formattedProducts = computed(() => {
     formattedPrice: `₱${Number(product.price).toFixed(2)}`,
   }))
 })
+
+// Replace the existing hotPicks computed property with this:
+const hotPicks = computed(() => {
+  // Filter products that have the "hot" badge criteria:
+  // 1. Stock > 0 (in stock)
+  // 2. Sold >= 50 (meets hot threshold)
+  const hotProducts = products.value.filter(product => 
+    product.stock > 0 && product.sold >= 50
+  )
+  
+  // Sort by sold count (highest first) and add rank numbers
+  const sorted = [...hotProducts]
+    .sort((a, b) => (b.sold || 0) - (a.sold || 0))
+    .slice(0, 10) // Show top 10 hot products
+  
+  // Add rank numbers
+  return sorted.map((product, index) => ({
+    ...product,
+    rank: index + 1
+  }))
+})
+
 </script>
 
 <template>
@@ -723,7 +745,8 @@ const formattedProducts = computed(() => {
         </v-sheet>
 
         <v-container class="py-4" style="max-width: 720px">
-          <!-- 🏬 Nearby Stores -->
+          
+          <!-- ========== SECTION 1: STORES WITHIN BUTUAN ========== -->
           <div class="section-header mt-6">
             <h3 class="section-title">Stores Within Butuan</h3>
             <div class="location-status">
@@ -772,7 +795,55 @@ const formattedProducts = computed(() => {
             </template>
           </div>
 
-          <!-- 🛒 Products -->
+          <!-- ========== SECTION 2: HOT PICKS ========== -->
+          <div class="section-header mt-6">
+            <h3 class="section-title">🔥 Hot Picks</h3>
+            <div class="hot-picks-badge">
+              <v-icon size="16" color="#ff4757">mdi-fire</v-icon>
+              <span class="hot-picks-text">Trending Now</span>
+            </div>
+          </div>
+
+          <div class="scroll-row hot-picks-row">
+            <template v-if="loading">
+              <v-skeleton-loader
+                v-for="i in 4"
+                :key="'hot-skel-' + i"
+                type="image"
+                class="hot-pick-card"
+              />
+            </template>
+            <template v-else-if="hotPicks.length === 0">
+              <div class="empty-card">
+                <div class="empty-title">No hot picks yet</div>
+                <div class="empty-sub">Popular products will appear here.</div>
+              </div>
+            </template>
+            <template v-else>
+              <div
+                v-for="item in hotPicks"
+                :key="item.id"
+                class="hot-pick-card"
+                @click="goToProduct(item.id)"
+              >
+                <div class="hot-pick-rank">
+                  <span class="rank-number">#{{ item.rank }}</span>
+                  <v-icon class="rank-fire" size="14" color="#ff4757">mdi-fire</v-icon>
+                </div>
+                <v-img :src="item.img" cover class="hot-pick-img" />
+                <div class="hot-pick-info">
+                  <div class="hot-pick-title">{{ item.title }}</div>
+                  <div class="hot-pick-price">₱{{ Number(item.price).toFixed(2) }}</div>
+                  <div class="hot-pick-stats">
+                    <v-icon size="12">mdi-fire</v-icon>
+                    <span>{{ item.sold }} sold</span>
+                  </div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <!-- ========== SECTION 3: BROWSE PRODUCTS ========== -->
           <div class="section-header mt-6">
             <h3 class="section-title">Browse Products</h3>
           </div>
@@ -843,6 +914,7 @@ const formattedProducts = computed(() => {
             {{ errorMsg }}
           </v-alert>
         </v-container>
+
       </v-main>
 
       <!-- Survey Bubble Message -->
@@ -903,7 +975,6 @@ const formattedProducts = computed(() => {
     </PullToRefreshWrapper>
   </v-app>
 </template>
-
 <style scoped>
 .page {
   background: #f5f7fa;
@@ -1865,6 +1936,143 @@ const formattedProducts = computed(() => {
 @media (max-width: 600px) {
   .survey-toolbar .v-toolbar-title {
     font-size: 16px;
+  }
+}
+
+/* Hot Picks Styles */
+.hot-picks-row {
+  margin-bottom: 8px;
+}
+
+.hot-picks-badge {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #fff5f5, #ffe0e0);
+  padding: 4px 12px;
+  border-radius: 20px;
+}
+
+.hot-picks-text {
+  font-size: 12px;
+  font-weight: 600;
+  color: #ff4757;
+  letter-spacing: 0.5px;
+}
+
+.hot-pick-card {
+  position: relative;
+  flex: 0 0 calc(33.333% - 12px);
+  background: linear-gradient(135deg, #fff, #fff9f9);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+  transition: all 0.3s ease;
+  cursor: pointer;
+  border: 1px solid rgba(255, 71, 87, 0.2);
+}
+
+.hot-pick-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 20px rgba(255, 71, 87, 0.2);
+  border-color: rgba(255, 71, 87, 0.4);
+}
+
+.hot-pick-rank {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  background: linear-gradient(135deg, #ff4757, #ff6b6b);
+  color: white;
+  padding: 4px 8px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(255, 71, 87, 0.3);
+}
+
+.rank-number {
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.hot-pick-img {
+  width: 100%;
+  height: 120px;
+  object-fit: cover;
+}
+
+.hot-pick-info {
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.hot-pick-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #111827;
+  line-height: 1.3;
+  height: 30px;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.hot-pick-price {
+  font-size: 13px;
+  font-weight: 700;
+  color: #e53935;
+}
+
+.hot-pick-stats {
+  font-size: 11px;
+  color: #ff6b6b;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+/* Responsive adjustments for hot picks */
+@media (max-width: 480px) {
+  .hot-pick-card {
+    flex: 0 0 calc(50% - 8px);
+  }
+  
+  .hot-pick-img {
+    height: 100px;
+  }
+  
+  .hot-pick-title {
+    font-size: 11px;
+    height: 26px;
+  }
+  
+  .hot-pick-price {
+    font-size: 12px;
+  }
+  
+  .hot-pick-rank {
+    padding: 3px 6px;
+    font-size: 9px;
+  }
+  
+  .rank-number {
+    font-size: 8px;
+  }
+}
+
+@media (max-width: 360px) {
+  .hot-pick-card {
+    flex: 0 0 calc(100% - 12px);
   }
 }
 </style>
