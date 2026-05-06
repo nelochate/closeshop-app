@@ -9,6 +9,7 @@ import MessageView from '@/mainsite/MessageView.vue'
 import ProfileView from '@/mainsite/ProfileView.vue'
 import NotificationView from '@/mainsite/NotificationView.vue'
 import ConfirmEmail from '@/common/ConfirmEmail.vue'
+import EmailConfirmed from '@/common/EmailConfirmed.vue'
 import AdminDashboard from '@/mainsite/AdminDashboard.vue'
 import ForgotPasswordView from '@/mainsite/resetpass/ForgotPasswordView.vue'
 import UpdatePasswordView from '@/mainsite/resetpass/UpdatePasswordView.vue'
@@ -37,6 +38,12 @@ const routes = [
     name: 'homepage',
     component: HomepageView,
     meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
+  },
+  {
+    path: '/email-confirmed',
+    name: 'email-confirmed',
+    component: EmailConfirmed,
+    meta: { requiresAuth: false },
   },
   {
     path: '/mapsearch',

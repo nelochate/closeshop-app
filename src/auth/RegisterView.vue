@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
 import {
   requiredValidator,
   emailValidator,
@@ -24,10 +25,26 @@ const formDataDefault = {
 const formData = ref({ ...formDataDefault })
 const formAction = ref({ ...formActionDefault })
 const refVform = ref()
+const isMobile = Capacitor.isNativePlatform()
+const isDevelopment = import.meta.env.DEV
 
 // Password visibility states
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+
+const getEmailConfirmationRedirectUrl = () => {
+  const callbackPath = '/auth/callback?redirectTo=/email-confirmed&flow=signup-confirmation'
+
+  if (isMobile) {
+    return `https://closeshop.vercel.app${callbackPath}`
+  }
+
+  if (isDevelopment) {
+    return `${window.location.origin}${callbackPath}`
+  }
+
+  return `https://closeshop.vercel.app${callbackPath}`
+}
 
 // Register function
 const onSubmit = async () => {
@@ -38,7 +55,7 @@ const onSubmit = async () => {
     email: formData.value.email,
     password: formData.value.password,
     options: {
-      emailRedirectTo: `${window.location.origin}/`,
+      emailRedirectTo: getEmailConfirmationRedirectUrl(),
       data: {
         first_name: formData.value.firstName,
         last_name: formData.value.lastName,
