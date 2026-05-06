@@ -15,7 +15,8 @@ import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const activeTab = ref('home')
-const products = ref([])
+const allProducts = ref([]) // Store all products before filtering
+const products = ref([]) // Filtered products (from shops within city)
 const allShops = ref([]) // Store all shops before filtering
 const nearby = ref([]) // Filtered shops (within city)
 const loading = ref(true)
@@ -92,6 +93,20 @@ function updateSearch() {
 // Apply filter - always show shops within the same city
 const applyShopFilter = () => {
   nearby.value = allShops.value.filter(shop => isShopInSameCity(shop))
+  
+  // Also filter products based on the filtered shops
+  applyProductFilter()
+}
+
+// Apply filter to products - only show products from shops within the city
+const applyProductFilter = () => {
+  // Get shop IDs that are within the city
+  const filteredShopIds = nearby.value.map(shop => shop.id)
+  
+  // Filter products to only those from filtered shops
+  products.value = allProducts.value.filter(product => 
+    filteredShopIds.includes(product.shop_id)
+  )
 }
 
 // Check if shop is in the same city as user
@@ -489,10 +504,10 @@ async function fetchShops() {
       }
     })
 
-    // Store all shops (no sorting by distance)
+    // Store all shops
     allShops.value = mapped
 
-    // Apply filter - always show within city
+    // Apply filter - always show within city (this will also trigger product filter)
     applyShopFilter()
 
     // Show appropriate message
@@ -534,17 +549,24 @@ async function fetchProducts() {
 
     if (error) throw error
 
-    products.value = (data || []).map((p) => ({
+    // Store all products
+    allProducts.value = (data || []).map((p) => ({
       id: p.id,
       title: p.prod_name,
       price: p.price,
       img: extractImage(p.main_img_urls),
       sold: p.sold || 0,
       stock: p.stock || 0,
+      shop_id: p.shop_id, // Important: Keep shop_id for filtering
     }))
+    
+    // Apply product filter based on current shops
+    applyProductFilter()
+    
   } catch (err) {
     console.error('fetchProducts error:', err)
     errorMsg.value = err.message
+    allProducts.value = []
     products.value = []
   }
 }
@@ -639,17 +661,20 @@ async function setupProductsSubscription() {
       (payload) => {
         console.log('🔄 Product updated in real-time:', payload)
         const updatedProduct = payload.new
-        const productIndex = products.value.findIndex((p) => p.id === updatedProduct.id)
+        const productIndex = allProducts.value.findIndex((p) => p.id === updatedProduct.id)
 
         if (productIndex !== -1) {
-          const oldSold = products.value[productIndex].sold
+          const oldSold = allProducts.value[productIndex].sold
           const newSold = updatedProduct.sold || 0
 
-          products.value[productIndex] = {
-            ...products.value[productIndex],
+          allProducts.value[productIndex] = {
+            ...allProducts.value[productIndex],
             sold: newSold,
             stock: updatedProduct.stock || 0,
           }
+          
+          // Re-apply filter to update displayed products
+          applyProductFilter()
 
           if (newSold > oldSold) {
             console.log(`🔥 Product ${updatedProduct.id} sales increased: ${oldSold} → ${newSold}`)
@@ -784,6 +809,7 @@ const formattedProducts = computed(() => {
 })
 
 const hotPicks = computed(() => {
+  // Hot picks should also be filtered to only show products from shops within city
   const hotProducts = products.value.filter((product) => product.stock > 0 && product.sold >= 50)
   const sorted = [...hotProducts].sort((a, b) => (b.sold || 0) - (a.sold || 0)).slice(0, 10)
   return sorted.map((product, index) => ({
