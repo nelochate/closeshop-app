@@ -469,6 +469,7 @@ const statusDisplayText = computed(() => {
 const isBuyer = computed(() => userRole.value === 'buyer')
 const isSeller = computed(() => userRole.value === 'seller')
 const isRider = computed(() => userRole.value === 'rider')
+const showReviewOrderButton = computed(() => isBuyer.value && isOrderCompleted.value)
 const canBuyerCancelDirectly = computed(
   () => isBuyer.value && order.value?.status === 'pending_approval',
 )
@@ -1460,7 +1461,6 @@ const confirmOrderReceived = async () => {
     const { data, error } = await supabase
       .from('orders')
       .update({
-        status: 'delivered',
         completed_at: completedAt,
         updated_at: completedAt,
       })
@@ -1596,6 +1596,7 @@ const buildFullAddress = computed(() => {
 
 const goBack = () => router.back()
 const goToFullscreenMap = () => router.push({ name: 'LocationToDeliver', params: { orderId } })
+const goToRateOrder = () => router.push({ name: 'rateview', params: { orderId } })
 const viewProduct = (productId: string) =>
   router.push({ name: 'product-detail', params: { id: productId } })
 const contactSeller = () =>
@@ -1660,7 +1661,8 @@ onMounted(async () => {
               <h2>{{ trackingMapTitle }}</h2>
               <p>
                 <span v-if="isOrderCompleted"
-                  >The customer confirmed receipt and the order is fully completed.</span
+                  >The customer confirmed receipt and the order is completed. If the items still
+                  need a review, you can submit it anytime from here.</span
                 >
                 <span v-else-if="hasDeliveryIssue">{{ deliveryIssueRoleMessage }}</span>
                 <span v-else-if="isAwaitingCustomerConfirmation"
@@ -1686,6 +1688,16 @@ onMounted(async () => {
                   >This order was cancelled before completion.</span
                 >
               </p>
+              <v-btn
+                v-if="showReviewOrderButton"
+                color="secondary"
+                variant="tonal"
+                class="hero-review-cta"
+                @click="goToRateOrder"
+              >
+                <v-icon start>mdi-star-outline</v-icon>
+                Review items
+              </v-btn>
             </div>
           </div>
 
@@ -2378,6 +2390,10 @@ onMounted(async () => {
   max-width: 640px;
   line-height: 1.5;
   color: #52667d;
+}
+
+.hero-review-cta {
+  margin-top: 14px;
 }
 
 .hero-card__meta {

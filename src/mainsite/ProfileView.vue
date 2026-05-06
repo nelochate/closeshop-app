@@ -33,6 +33,8 @@ const shopCreationStatus = ref(null)
 
 const unreadNotifications = ref(0)
 const notificationSubscription = ref(null)
+const orderSubscription = ref(null)
+const reviewSubscription = ref(null)
 
 // Notification state
 const showApprovalToast = ref(false)
@@ -106,8 +108,7 @@ const handleRefresh = async () => {
   console.log('🔄 Refreshing profile...')
 
   await loadUser()
-  await loadOrderCounts()
-  await loadSectionItems(selectedSection.value)
+  await refreshOrderViews()
   await checkUserShop()
   await checkRiderStatus()
 
@@ -377,6 +378,58 @@ const displayedEmail = computed(
   () => normalizeIdentityText(authStore.profile?.email) || normalizeIdentityText(user.value?.email) || '...',
 )
 
+const getUniqueOrderProductIds = (orders = []) => {
+  const productIds = orders.flatMap((order) =>
+    (order.order_items || []).map((item) => item.product_id).filter(Boolean),
+  )
+
+  return [...new Set(productIds)]
+}
+
+const fetchReviewedProductIds = async (productIds = []) => {
+  if (!user.value?.id || productIds.length === 0) {
+    return new Set()
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('product_id')
+      .eq('user_id', user.value.id)
+      .in('product_id', productIds)
+
+    if (error) throw error
+
+    return new Set((data || []).map((review) => review.product_id).filter(Boolean))
+  } catch (error) {
+    console.error('Error loading reviewed products:', error)
+    return new Set()
+  }
+}
+
+const annotateOrdersWithReviewState = async (orders = []) => {
+  const reviewedProductIds = await fetchReviewedProductIds(getUniqueOrderProductIds(orders))
+
+  return orders.map((order) => {
+    const uniqueProductIds = [
+      ...new Set((order.order_items || []).map((item) => item.product_id).filter(Boolean)),
+    ]
+    const pendingReviewProductIds = uniqueProductIds.filter(
+      (productId) => !reviewedProductIds.has(productId),
+    )
+
+    return {
+      ...order,
+      order_items: order.order_items || [],
+      has_pending_review:
+        isOrderDeliveredState(order) &&
+        order.status !== 'cancelled' &&
+        pendingReviewProductIds.length > 0,
+      pending_review_count: pendingReviewProductIds.length,
+    }
+  })
+}
+
 // Check if user is a rider
 const checkRiderStatus = async () => {
   if (!user.value?.id) return
@@ -471,7 +524,18 @@ const loadOrderCounts = async () => {
   try {
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('status, payment_status, delivered_at, completed_at, id')
+      .select(
+        `
+        status,
+        payment_status,
+        delivered_at,
+        completed_at,
+        id,
+        order_items (
+          product_id
+        )
+      `,
+      )
       .eq('user_id', user.value.id)
 
     if (error) {
@@ -480,36 +544,35 @@ const loadOrderCounts = async () => {
     }
 
     const currentOrders = await reconcileAutoCompletedOrders(orders || [])
+    const reviewAwareOrders = await annotateOrdersWithReviewState(currentOrders)
 
-    console.log('📊 All orders for counts:', currentOrders)
+    console.log('📊 All orders for counts:', reviewAwareOrders)
 
     navItems.value = navItems.value.map((item) => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
           // Show ALL orders regardless of status
-          count = currentOrders.filter((o) => o.status !== 'cancelled').length
+          count = reviewAwareOrders.filter((o) => o.status !== 'cancelled').length
           break
         case 'to-receive':
-          count = currentOrders.filter(
+          count = reviewAwareOrders.filter(
             (o) => isOrderPendingDelivery(o) || isOrderAwaitingCustomerConfirmation(o),
           ).length
           break
         case 'reviews':
-          count = currentOrders.filter(
-            (o) => isOrderDeliveredState(o) && o.status !== 'cancelled',
-          ).length
+          count = reviewAwareOrders.filter((o) => o.has_pending_review).length
           break
         case 'completed':
-          count = currentOrders.filter((o) => isOrderCompleted(o)).length
+          count = reviewAwareOrders.filter((o) => isOrderCompleted(o)).length
           break
         case 'cancelled':
-          count = currentOrders.filter(
+          count = reviewAwareOrders.filter(
             (o) => o.status === 'cancelled' || o.payment_status === 'cancelled',
           ).length
           break
         case 'failed':
-          count = currentOrders.filter(
+          count = reviewAwareOrders.filter(
             (o) =>
               o.payment_status === 'failed' ||
               o.status === 'failed' ||
@@ -553,6 +616,15 @@ const isOrderPendingDelivery = (order) => {
   if (order.status === 'waiting_for_rider' || order.status === 'accepted_by_rider') return true
 
   return order.status === 'picked_up' && !order.delivered_at && !order.completed_at
+}
+
+const isCompletedPendingReview = (order) => isOrderCompleted(order) && !!order?.has_pending_review
+
+const getPendingReviewText = (order) => {
+  const pendingCount = Number(order?.pending_review_count || 0)
+  if (pendingCount <= 0) return 'Review pending'
+  if (pendingCount === 1) return '1 item left to review'
+  return `${pendingCount} items left to review`
 }
 
 // FIXED: Load items for the selected section with correct filtering
@@ -629,15 +701,16 @@ const loadSectionItems = async (sectionId) => {
       sectionItems.value = []
     } else {
       const currentOrders = await reconcileAutoCompletedOrders(data || [])
+      const reviewAwareOrders = await annotateOrdersWithReviewState(currentOrders)
 
-      console.log(`📦 ${sectionId} items:`, currentOrders)
+      console.log(`📦 ${sectionId} items:`, reviewAwareOrders)
 
-      const filteredData = currentOrders.filter((order) => {
+      const filteredData = reviewAwareOrders.filter((order) => {
         switch (sectionId) {
           case 'to-receive':
             return isOrderPendingDelivery(order) || isOrderAwaitingCustomerConfirmation(order)
           case 'reviews':
-            return isOrderDeliveredState(order) && order.status !== 'cancelled'
+            return order.has_pending_review
           case 'completed':
             return isOrderCompleted(order) && order.status !== 'cancelled'
           case 'cancelled':
@@ -665,6 +738,8 @@ const loadSectionItems = async (sectionId) => {
         completed_at: order.completed_at,
         total_amount: order.total_amount,
         created_at: order.created_at,
+        has_pending_review: order.has_pending_review,
+        pending_review_count: order.pending_review_count,
         items: order.order_items.map((item) => ({
           id: item.id,
           product_id: item.product_id,
@@ -687,11 +762,17 @@ const loadSectionItems = async (sectionId) => {
   }
 }
 
+const refreshOrderViews = async () => {
+  await loadOrderCounts()
+  await loadSectionItems(selectedSection.value)
+}
+
 // Helper function to get status color
 const getStatusColor = (order) => {
   const status = normalizeOrderStatus(order.status)
 
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
+  if (isCompletedPendingReview(order)) return 'secondary'
   if (isOrderDeliveredState(order)) return 'success'
   if (status === 'cancel_requested') return 'warning'
   if (status === 'waiting_for_rider') return 'warning' // Orange/Yellow
@@ -709,6 +790,7 @@ const getStatusText = (order) => {
   const status = normalizeOrderStatus(order.status)
 
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
+  if (isCompletedPendingReview(order)) return 'Completed - Review Pending'
   if (isOrderCompleted(order)) return 'Completed'
   if (isOrderDeliveredState(order)) return 'Delivered'
   if (status === 'cancel_requested') return 'Cancellation Requested'
@@ -726,7 +808,11 @@ const getStatusText = (order) => {
 const setupOrderSubscription = () => {
   if (!user.value?.id) return
 
-  const orderChannel = supabase
+  if (orderSubscription.value) {
+    orderSubscription.value.unsubscribe()
+  }
+
+  orderSubscription.value = supabase
     .channel('customer-orders')
     .on(
       'postgres_changes',
@@ -739,13 +825,35 @@ const setupOrderSubscription = () => {
       async (payload) => {
         console.log('Order status changed:', payload)
         // Refresh counts and current section
-        await loadOrderCounts()
-        await loadSectionItems(selectedSection.value)
+        await refreshOrderViews()
       },
     )
     .subscribe()
+}
 
-  return orderChannel
+const setupReviewSubscription = () => {
+  if (!user.value?.id) return
+
+  if (reviewSubscription.value) {
+    reviewSubscription.value.unsubscribe()
+  }
+
+  reviewSubscription.value = supabase
+    .channel(`profile-review-updates-${user.value.id}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'reviews',
+        filter: `user_id=eq.${user.value.id}`,
+      },
+      async (payload) => {
+        console.log('Review state changed:', payload)
+        await refreshOrderViews()
+      },
+    )
+    .subscribe()
 }
 
 // Format date
@@ -850,23 +958,41 @@ const goNotifications = () => {
   router.push('/notificationview')
 }
 
+const handleReviewSubmitted = async (event) => {
+  const submittedUserId = event?.detail?.userId
+
+  if (submittedUserId && user.value?.id && submittedUserId !== user.value.id) {
+    return
+  }
+
+  await refreshOrderViews()
+}
+
 // Run when component mounts
 onMounted(async () => {
   await loadUser()
-  await loadOrderCounts()
   await debugCurrentUser()
-  await loadSectionItems(selectedSection.value)
+  await refreshOrderViews()
   setupShopRealtimeSubscription()
   await setupNotificationListener()
   setupOrderSubscription()
+  setupReviewSubscription()
+  window.addEventListener('profile:review-submitted', handleReviewSubmitted)
 })
 
 onUnmounted(() => {
   cleanupShopSubscription()
   cleanupRiderOrdersSubscription()
+  if (orderSubscription.value) {
+    orderSubscription.value.unsubscribe()
+  }
+  if (reviewSubscription.value) {
+    reviewSubscription.value.unsubscribe()
+  }
   if (notificationSubscription.value) {
     notificationSubscription.value.unsubscribe()
   }
+  window.removeEventListener('profile:review-submitted', handleReviewSubmitted)
 })
 
 // Watch for user changes
@@ -875,8 +1001,9 @@ watch(
   async (newId) => {
     if (newId) {
       await checkRiderStatus()
-      await loadOrderCounts()
-      await loadSectionItems(selectedSection.value)
+      await refreshOrderViews()
+      setupOrderSubscription()
+      setupReviewSubscription()
     }
   },
 )
@@ -1096,6 +1223,10 @@ onBeforeRouteUpdate((to, from, next) => {
                   <v-card-actions class="order-actions">
                     <div class="order-total">
                       <strong>Total: ₱{{ order.total_amount?.toLocaleString() }}</strong>
+                      <div v-if="order.has_pending_review" class="review-pending-note">
+                        <v-icon size="16" color="secondary">mdi-star-outline</v-icon>
+                        <span>{{ getPendingReviewText(order) }}</span>
+                      </div>
                     </div>
                     <div class="action-buttons">
                       <v-btn
@@ -1108,7 +1239,7 @@ onBeforeRouteUpdate((to, from, next) => {
                         View Order
                       </v-btn>
                       <v-btn
-                        v-if="isOrderDeliveredState(order)"
+                        v-if="order.has_pending_review"
                         color="secondary"
                         variant="flat"
                         size="small"
@@ -1727,6 +1858,16 @@ onBeforeRouteUpdate((to, from, next) => {
 .order-total {
   font-size: 1.1rem;
   color: #354d7c;
+}
+
+.review-pending-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.86rem;
+  color: #6a1b9a;
+  font-weight: 600;
 }
 
 .action-buttons {

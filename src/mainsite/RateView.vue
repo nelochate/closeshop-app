@@ -1,7 +1,15 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, watch, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import {
+  buildAvatarFallback,
+  getAuthUserAvatarUrl,
+  getAuthUserDisplayName,
+  getProfileDisplayName,
+  normalizeIdentityText,
+} from '@/utils/accountIdentity'
+import { syncProfileFromAuthUser } from '@/utils/profileSync'
 
 const router = useRouter()
 const route = useRoute()
@@ -19,11 +27,39 @@ const showImageDialog = ref(false)
 const currentImage = ref('')
 const selectedProduct = ref<any>(null)
 const currentUserId = ref<string | null>(null)
+const draftRatings = ref<Record<string, number>>({})
+const editingReviewId = ref<string | null>(null)
+const existingPhotoUrls = ref<string[]>([])
 
 // Image upload state
 const uploadingImages = ref(false)
 const imagePreviews = ref<{ id: string; file: File; url: string }[]>([])
+const selectedUploadFiles = ref<File[]>([])
 const uploadProgress = ref(0)
+
+const ratingFilterOptions = [
+  { title: 'All Ratings', value: 'all' },
+  { title: '5 Stars', value: '5' },
+  { title: '4 Stars', value: '4' },
+  { title: '3 Stars', value: '3' },
+  { title: '2 Stars', value: '2' },
+  { title: '1 Star', value: '1' },
+]
+
+const sortOptions = [
+  { title: 'Latest', value: 'latest' },
+  { title: 'Highest', value: 'highest' },
+  { title: 'Lowest', value: 'lowest' },
+  { title: 'Most Liked', value: 'most_liked' },
+]
+
+const ratingLabels: Record<number, string> = {
+  1: 'Poor',
+  2: 'Fair',
+  3: 'Good',
+  4: 'Very Good',
+  5: 'Excellent',
+}
 
 // New review form
 const newReview = ref({
@@ -32,6 +68,30 @@ const newReview = ref({
   comment: '',
   photos: [] as string[],
 })
+
+const isEditingReview = computed(() => !!editingReviewId.value)
+const totalAttachedPhotoCount = computed(
+  () => existingPhotoUrls.value.length + imagePreviews.value.length,
+)
+
+const normalizeReviewPhotos = (photos: unknown) => {
+  if (Array.isArray(photos)) {
+    return photos.filter((photo): photo is string => typeof photo === 'string' && photo.trim())
+  }
+
+  if (typeof photos === 'string') {
+    try {
+      const parsed = JSON.parse(photos)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((photo): photo is string => typeof photo === 'string' && photo.trim())
+      }
+    } catch {
+      return photos.trim() ? [photos] : []
+    }
+  }
+
+  return []
+}
 
 // Load order items
 const loadOrderItems = async () => {
@@ -90,7 +150,44 @@ const loadReviews = async () => {
       .order('created_at', { ascending: false })
 
     if (error) throw error
-    reviews.value = data || []
+
+    const reviewRows = data || []
+    const reviewerIds = [...new Set(reviewRows.map((review) => review.user_id).filter(Boolean))]
+    let profilesById = new Map<string, any>()
+
+    if (reviewerIds.length > 0) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, first_name, last_name, full_name, avatar_url')
+        .in('id', reviewerIds)
+
+      if (profileError) {
+        console.warn('Could not load reviewer profiles:', profileError)
+      } else {
+        profilesById = new Map((profileRows || []).map((profile) => [profile.id, profile]))
+      }
+    }
+
+    reviews.value = reviewRows.map((review) => {
+      const reviewerProfile = review.user_id ? profilesById.get(review.user_id) : null
+      const reviewerName =
+        getProfileDisplayName(reviewerProfile) ||
+        normalizeIdentityText(review.user_name) ||
+        'Customer'
+      const reviewerAvatar =
+        normalizeIdentityText(reviewerProfile?.avatar_url) ||
+        normalizeIdentityText(review.user_avatar) ||
+        buildAvatarFallback(reviewerName)
+
+      return {
+        ...review,
+        rating: Number(review.rating || 0),
+        likes: Number(review.likes || 0),
+        photos: normalizeReviewPhotos(review.photos),
+        reviewer_name: reviewerName,
+        reviewer_avatar: reviewerAvatar,
+      }
+    })
   } catch (error) {
     console.error('Error loading reviews:', error)
   } finally {
@@ -160,40 +257,124 @@ const getProductRating = (productId: string) => {
 }
 
 // Open review dialog for a product
-const openReviewDialog = (product: any) => {
-  if (hasUserReviewed(product.id)) {
-    alert('You have already reviewed this product.')
+const getRatingLabel = (rating: number) => ratingLabels[rating] || 'Select rating'
+
+const clearDraftRating = (productId?: string | null) => {
+  if (!productId) return
+
+  const nextDraftRatings = { ...draftRatings.value }
+  delete nextDraftRatings[productId]
+  draftRatings.value = nextDraftRatings
+}
+
+const resetReviewForm = () => {
+  clearDraftRating(selectedProduct.value?.id)
+  cleanupImagePreviews()
+  editingReviewId.value = null
+  existingPhotoUrls.value = []
+  showReviewDialog.value = false
+  selectedProduct.value = null
+  newReview.value = {
+    product_id: '',
+    rating: 0,
+    comment: '',
+    photos: [],
+  }
+}
+
+const getUserReview = (productId: string) => {
+  return (
+    reviews.value.find(
+      (review) => review.product_id === productId && review.user_id === currentUserId.value,
+    ) || null
+  )
+}
+
+const openReviewDialog = (product: any, initialRating = 0) => {
+  const existingReview = getUserReview(product.id)
+  if (existingReview) {
+    openEditReviewDialog(product, existingReview)
     return
   }
+
+  if (initialRating > 0) {
+    draftRatings.value = {
+      ...draftRatings.value,
+      [product.id]: initialRating,
+    }
+  }
+
+  cleanupImagePreviews()
   selectedProduct.value = product
+  editingReviewId.value = null
+  existingPhotoUrls.value = []
   newReview.value = {
     product_id: product.id,
-    rating: 0,
+    rating: initialRating,
     comment: '',
     photos: [],
   }
   showReviewDialog.value = true
 }
 
+const openEditReviewDialog = (product: any, review: any) => {
+  const reviewPhotos = normalizeReviewPhotos(review?.photos)
+
+  cleanupImagePreviews()
+  selectedProduct.value = product
+  editingReviewId.value = review?.id || null
+  existingPhotoUrls.value = [...reviewPhotos]
+  newReview.value = {
+    product_id: product.id,
+    rating: Number(review?.rating || 0),
+    comment: review?.comment || '',
+    photos: [...reviewPhotos],
+  }
+  showReviewDialog.value = true
+}
+
+const handleInlineRating = (product: any, value: number) => {
+  const rating = Number(value || 0)
+
+  if (!product?.id || !rating) {
+    return
+  }
+
+  openReviewDialog(product, rating)
+}
+
 // Check if user has already reviewed a product
 const hasUserReviewed = (productId: string) => {
-  return reviews.value.some(
-    (review) => review.product_id === productId && review.user_id === currentUserId.value,
+  return !!getUserReview(productId)
+}
+
+const getProductForReview = (review: any) => {
+  const matchingOrderItem = orderItems.value.find((item) => item.product_id === review.product_id)
+
+  return (
+    matchingOrderItem?.product || {
+      id: review.product_id,
+      prod_name: review.product_name || 'Product',
+      main_img_urls: review.product_img || '/placeholder-product.png',
+      description: '',
+    }
   )
 }
 
 // Handle photo upload
-const handlePhotoUpload = (event: Event) => {
-  const input = event.target as HTMLInputElement
-  if (!input.files || input.files.length === 0) return
+const handlePhotoUpload = (value: File[] | File | null) => {
+  const files = Array.isArray(value) ? value : value ? [value] : []
 
-  const files = Array.from(input.files)
+  if (files.length === 0) {
+    selectedUploadFiles.value = []
+    return
+  }
 
   // Validate file count
-  const totalFiles = imagePreviews.value.length + files.length
+  const totalFiles = totalAttachedPhotoCount.value + files.length
   if (totalFiles > 5) {
     alert('Maximum 5 images allowed')
-    input.value = '' // Reset input
+    selectedUploadFiles.value = []
     return
   }
 
@@ -202,13 +383,13 @@ const handlePhotoUpload = (event: Event) => {
     if (file.size > 5 * 1024 * 1024) {
       // 5MB limit
       alert(`File ${file.name} is too large. Maximum size is 5MB.`)
-      input.value = '' // Reset input
+      selectedUploadFiles.value = []
       return
     }
 
     if (!file.type.startsWith('image/')) {
       alert(`File ${file.name} is not an image.`)
-      input.value = '' // Reset input
+      selectedUploadFiles.value = []
       return
     }
   }
@@ -224,13 +405,18 @@ const handlePhotoUpload = (event: Event) => {
   })
 
   // Clear the input for future selections
-  input.value = ''
+  selectedUploadFiles.value = []
 }
 
 // Remove image from preview
 const removeImage = (index: number) => {
   URL.revokeObjectURL(imagePreviews.value[index].url)
   imagePreviews.value.splice(index, 1)
+}
+
+const removeExistingPhoto = (index: number) => {
+  existingPhotoUrls.value.splice(index, 1)
+  newReview.value.photos = [...existingPhotoUrls.value]
 }
 
 // Upload images to Supabase Storage
@@ -291,16 +477,17 @@ const cleanupImagePreviews = () => {
     URL.revokeObjectURL(preview.url)
   })
   imagePreviews.value = []
+  selectedUploadFiles.value = []
 }
 
 // Submit a new review
 const submitReview = async () => {
-  if (!newReview.value.rating || !newReview.value.comment.trim()) {
-    alert('Please provide both rating and comment')
+  if (!newReview.value.rating) {
+    alert('Please select a star rating')
     return
   }
 
-  if (hasUserReviewed(newReview.value.product_id)) {
+  if (!isEditingReview.value && hasUserReviewed(newReview.value.product_id)) {
     alert('You have already reviewed this product.')
     return
   }
@@ -309,46 +496,87 @@ const submitReview = async () => {
   try {
     const { data: userData } = await supabase.auth.getUser()
     if (!userData.user) throw new Error('User not authenticated')
+    const syncedProfile = await syncProfileFromAuthUser({ user: userData.user })
+    const trimmedComment = newReview.value.comment.trim()
+    const reviewerName =
+      getProfileDisplayName(syncedProfile) ||
+      getAuthUserDisplayName(userData.user) ||
+      'Anonymous'
+    const reviewerAvatar =
+      normalizeIdentityText(syncedProfile?.avatar_url) ||
+      getAuthUserAvatarUrl(userData.user) ||
+      buildAvatarFallback(reviewerName)
 
     // Upload images first if any
-    let photoUrls: string[] = []
+    let uploadedPhotoUrls: string[] = []
     if (imagePreviews.value.length > 0) {
-      photoUrls = await uploadImagesToStorage()
+      uploadedPhotoUrls = await uploadImagesToStorage()
     }
 
-    // Insert review with image URLs
+    const finalPhotoUrls = [...existingPhotoUrls.value, ...uploadedPhotoUrls]
+
     const reviewData = {
-      product_id: newReview.value.product_id,
       rating: newReview.value.rating,
-      comment: newReview.value.comment.trim(),
-      photos: photoUrls.length > 0 ? photoUrls : null,
-      user_id: userData.user.id,
-      user_name:
-        userData.user.user_metadata?.full_name ||
-        `${userData.user.user_metadata?.first_name || ''} ${userData.user.user_metadata?.last_name || ''}`.trim() ||
-        'Anonymous',
-      user_avatar: userData.user.user_metadata?.avatar_url || null,
+      comment: trimmedComment || '',
+      photos: finalPhotoUrls.length > 0 ? finalPhotoUrls : null,
+      user_name: reviewerName,
+      user_avatar: reviewerAvatar,
       is_verified: true,
     }
+    const wasEditingReview = isEditingReview.value
 
-    const { data, error } = await supabase.from('reviews').insert(reviewData).select().single()
+    let data: any = null
+    let error: any = null
+
+    if (wasEditingReview && editingReviewId.value) {
+      const response = await supabase
+        .from('reviews')
+        .update(reviewData)
+        .eq('id', editingReviewId.value)
+        .eq('user_id', userData.user.id)
+        .select()
+        .single()
+
+      data = response.data
+      error = response.error
+    } else {
+      const response = await supabase
+        .from('reviews')
+        .insert({
+          ...reviewData,
+          product_id: newReview.value.product_id,
+          user_id: userData.user.id,
+        })
+        .select()
+        .single()
+
+      data = response.data
+      error = response.error
+    }
 
     if (error) throw error
 
-    // Reset form and close dialog
-    cleanupImagePreviews()
-    showReviewDialog.value = false
-    newReview.value = {
-      product_id: '',
-      rating: 0,
-      comment: '',
-      photos: [],
-    }
+    resetReviewForm()
 
     // Reload reviews
     await loadReviews()
 
-    console.log('Review submitted successfully with images:', photoUrls)
+    window.dispatchEvent(
+      new CustomEvent('profile:review-submitted', {
+        detail: {
+          userId: userData.user.id,
+          orderId: orderId.value,
+          productId: data.product_id,
+          reviewId: data.id,
+          action: wasEditingReview ? 'updated' : 'created',
+        },
+      }),
+    )
+
+    console.log(
+      wasEditingReview ? 'Review updated successfully:' : 'Review submitted successfully:',
+      finalPhotoUrls,
+    )
   } catch (error) {
     console.error('Error submitting review:', error)
     alert('Failed to submit review: ' + (error as Error).message)
@@ -384,15 +612,7 @@ const viewImage = (imageUrl: string) => {
 
 // Close dialogs
 const closeReviewDialog = () => {
-  cleanupImagePreviews()
-  showReviewDialog.value = false
-  selectedProduct.value = null
-  newReview.value = {
-    product_id: '',
-    rating: 0,
-    comment: '',
-    photos: [],
-  }
+  resetReviewForm()
 }
 
 const closeImageDialog = () => {
@@ -413,6 +633,9 @@ const formatDate = (dateString: string) => {
 onMounted(async () => {
   const { data: userData } = await supabase.auth.getUser()
   currentUserId.value = userData.user?.id || null
+  if (userData.user) {
+    await syncProfileFromAuthUser({ user: userData.user })
+  }
   await loadOrderItems()
   await loadReviews()
 })
@@ -421,41 +644,48 @@ onMounted(async () => {
 onUnmounted(() => {
   cleanupImagePreviews()
 })
-
-// Watch for order items changes
-watch(orderItems, () => {
-  loadReviews()
-})
 </script>
 
 <template>
   <v-app>
-    <v-main class="bg-grey-lighten-4">
-      <v-container max-width="1200" class="pa-4">
-        <!-- Header -->
-        <v-card class="mb-6" elevation="2">
-          <v-card-title class="d-flex justify-space-between align-center bg-primary">
-            <span class="text-white">Rate Your Order</span>
-            <v-btn @click="router.back()" variant="text" icon color="white">
-              <v-icon>mdi-close</v-icon>
-            </v-btn>
-          </v-card-title>
-          <v-card-text class="pa-4">
-            <div class="text-body-1 text-grey-darken-2">
-              Share your experience with the products from order #{{ orderId }}
+    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+      <v-btn variant="text" icon @click="router.back()">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title class="font-weight-bold">Rate Your Order</v-toolbar-title>
+      <v-spacer />
+    </v-app-bar>
+
+    <v-main class="rate-page">
+      <v-container max-width="1200" class="rate-container">
+        <v-card class="mb-6 intro-card" elevation="0" rounded="xl">
+          <v-card-text class="pa-5 pa-sm-6">
+            <div class="d-flex align-start justify-space-between flex-wrap ga-3">
+              <div>
+                <div class="text-overline text-primary font-weight-bold">Order feedback</div>
+                <div class="text-h5 font-weight-bold text-grey-darken-4 mb-2">
+                  Share your experience
+                </div>
+                <div class="text-body-1 text-grey-darken-2">
+                  Help other customers by reviewing the products from order #{{ orderId }}.
+                </div>
+              </div>
+              <v-chip color="primary" variant="tonal" size="small" class="font-weight-bold">
+                Order #{{ orderId }}
+              </v-chip>
             </div>
           </v-card-text>
         </v-card>
 
         <!-- Order Items to Review -->
-        <v-card class="mb-6" elevation="2">
+        <v-card class="mb-6 section-card" elevation="2">
           <v-card-title class="bg-blue-lighten-5">
             <v-icon left>mdi-package-variant</v-icon>
             Products to Review
           </v-card-title>
           <v-card-text class="pa-0">
             <v-list>
-              <v-list-item v-for="item in orderItems" :key="item.id" class="border-b">
+              <v-list-item v-for="item in orderItems" :key="item.id" class="border-b product-review-item">
                 <template v-slot:prepend>
                   <v-avatar rounded="lg" size="64" class="ma-2">
                     <v-img
@@ -496,17 +726,45 @@ watch(orderItems, () => {
                       {{ item.selected_variety }}
                     </v-chip>
                   </div>
+                  <div v-if="hasUserReviewed(item.product_id)" class="mt-2">
+                    <v-chip color="success" variant="tonal" size="small">
+                      <v-icon start size="14">mdi-check-circle</v-icon>
+                      You already reviewed this product
+                    </v-chip>
+                  </div>
+                  <div v-else class="mt-2 quick-rate-row">
+                    <v-rating
+                      :model-value="draftRatings[item.product_id] || 0"
+                      hover
+                      density="compact"
+                      color="amber"
+                      active-color="amber"
+                      size="small"
+                      @update:model-value="handleInlineRating(item.product, $event)"
+                    />
+                    <span class="text-caption text-grey">
+                      {{
+                        draftRatings[item.product_id]
+                          ? `${getRatingLabel(draftRatings[item.product_id])} selected. Add details if you want.`
+                          : 'Tap the stars to rate this product.'
+                      }}
+                    </span>
+                  </div>
                 </v-list-item-subtitle>
 
                 <template v-slot:append>
                   <v-btn
-                    color="primary"
+                    :color="hasUserReviewed(item.product_id) ? 'secondary' : 'primary'"
                     variant="outlined"
-                    :disabled="hasUserReviewed(item.product.id)"
-                    @click="openReviewDialog(item.product)"
+                    @click="
+                      hasUserReviewed(item.product_id)
+                        ? openEditReviewDialog(item.product, getUserReview(item.product_id))
+                        : openReviewDialog(item.product, draftRatings[item.product_id] || 0)
+                    "
+                    class="review-action-btn"
                   >
                     <v-icon left small>mdi-pencil</v-icon>
-                    {{ hasUserReviewed(item.product.id) ? 'Reviewed' : 'Review' }}
+                    {{ hasUserReviewed(item.product_id) ? 'Edit Review' : 'Add Details' }}
                   </v-btn>
                 </template>
               </v-list-item>
@@ -517,7 +775,7 @@ watch(orderItems, () => {
         <!-- Review Statistics -->
         <v-row v-if="reviews.length > 0" class="mb-6">
           <v-col cols="12" md="4">
-            <v-card elevation="2" class="text-center pa-4">
+            <v-card elevation="2" class="text-center pa-4 section-card">
               <div class="text-h3 text-primary font-weight-bold">
                 {{ reviewStats.average_rating.toFixed(1) }}
               </div>
@@ -533,7 +791,7 @@ watch(orderItems, () => {
           </v-col>
 
           <v-col cols="12" md="8">
-            <v-card elevation="2" class="pa-4">
+            <v-card elevation="2" class="pa-4 section-card">
               <v-card-title class="text-h6">Rating Distribution</v-card-title>
               <div v-for="rating in [5, 4, 3, 2, 1]" :key="rating" class="d-flex align-center mb-2">
                 <span class="text-caption mr-2" style="min-width: 20px">{{ rating }}</span>
@@ -564,37 +822,29 @@ watch(orderItems, () => {
         </v-row>
 
         <!-- Reviews Section -->
-        <v-card elevation="2">
-          <v-card-title class="d-flex flex-wrap align-center gap-2">
+        <v-card elevation="2" class="section-card">
+          <v-card-title class="d-flex flex-wrap align-center gap-2 review-section-header">
             <span>Customer Reviews</span>
             <v-spacer></v-spacer>
             <v-select
               v-model="filter"
-              :items="[
-                { text: 'All Ratings', value: 'all' },
-                { text: '5 Stars', value: '5' },
-                { text: '4 Stars', value: '4' },
-                { text: '3 Stars', value: '3' },
-                { text: '2 Stars', value: '2' },
-                { text: '1 Star', value: '1' },
-              ]"
+              :items="ratingFilterOptions"
+              item-title="title"
+              item-value="value"
               density="compact"
               variant="outlined"
               hide-details
-              style="max-width: 140px"
+              class="review-filter-select"
             />
             <v-select
               v-model="sortBy"
-              :items="[
-                { text: 'Latest', value: 'latest' },
-                { text: 'Highest', value: 'highest' },
-                { text: 'Lowest', value: 'lowest' },
-                { text: 'Most Liked', value: 'most_liked' },
-              ]"
+              :items="sortOptions"
+              item-title="title"
+              item-value="value"
               density="compact"
               variant="outlined"
               hide-details
-              style="max-width: 140px"
+              class="review-filter-select"
             />
           </v-card-title>
 
@@ -617,20 +867,20 @@ watch(orderItems, () => {
               <v-card
                 v-for="review in filteredReviews"
                 :key="review.id"
-                class="mb-4"
+                class="mb-4 review-entry-card"
                 variant="outlined"
               >
                 <v-card-text class="pa-4">
                   <div class="d-flex align-start">
                     <!-- User Avatar -->
                     <v-avatar size="48" class="mr-4">
-                      <v-img :src="review.user_avatar || '/default-avatar.png'" alt="User avatar" />
+                      <v-img :src="review.reviewer_avatar" alt="User avatar" />
                     </v-avatar>
 
                     <!-- Review Content -->
                     <div class="flex-grow-1">
                       <div class="d-flex align-center flex-wrap mb-2">
-                        <div class="font-weight-medium mr-2">{{ review.user_name }}</div>
+                        <div class="font-weight-medium mr-2">{{ review.reviewer_name }}</div>
                         <v-chip v-if="review.is_verified" size="x-small" color="green" class="ml-1">
                           <v-icon left small>mdi-check</v-icon>
                           Verified
@@ -652,7 +902,12 @@ watch(orderItems, () => {
                       />
 
                       <!-- Comment -->
-                      <div class="text-body-1 mb-3">{{ review.comment }}</div>
+                      <div v-if="review.comment?.trim()" class="text-body-1 mb-3">
+                        {{ review.comment }}
+                      </div>
+                      <div v-else class="text-body-2 text-medium-emphasis mb-3">
+                        Rated this product without a written review.
+                      </div>
 
                       <!-- Photos -->
                       <div v-if="review.photos && review.photos.length > 0" class="mb-3">
@@ -686,6 +941,16 @@ watch(orderItems, () => {
                           <v-icon left small>mdi-thumb-up</v-icon>
                           Helpful ({{ review.likes || 0 }})
                         </v-btn>
+                        <v-btn
+                          v-if="review.user_id === currentUserId"
+                          variant="text"
+                          size="small"
+                          color="secondary"
+                          @click="openEditReviewDialog(getProductForReview(review), review)"
+                        >
+                          <v-icon left small>mdi-pencil</v-icon>
+                          Edit review
+                        </v-btn>
                       </div>
                     </div>
                   </div>
@@ -700,7 +965,7 @@ watch(orderItems, () => {
       <v-dialog v-model="showReviewDialog" max-width="600px" persistent>
         <v-card>
           <v-card-title class="d-flex justify-space-between align-center">
-            <span>Write a Review</span>
+            <span>{{ isEditingReview ? 'Edit Your Review' : 'Write a Review' }}</span>
             <v-btn icon @click="closeReviewDialog">
               <v-icon>mdi-close</v-icon>
             </v-btn>
@@ -730,31 +995,32 @@ watch(orderItems, () => {
 
             <!-- Rating -->
             <div class="text-center mb-4">
-              <div class="text-h6 mb-2">How would you rate this product?</div>
-              <v-rating v-model="newReview.rating" size="large" color="amber" class="mb-2" />
+              <div class="text-h6 mb-2">
+                {{ isEditingReview ? 'Update your rating' : 'How would you rate this product?' }}
+              </div>
+              <div class="text-body-2 text-medium-emphasis mb-3">
+                Tap a star to rate. Writing a review and uploading photos are optional.
+              </div>
+              <v-rating
+                v-model="newReview.rating"
+                size="large"
+                color="amber"
+                active-color="amber"
+                hover
+                class="mb-2"
+              />
               <div class="text-caption text-grey">
-                {{
-                  newReview.rating === 0
-                    ? 'Select rating'
-                    : newReview.rating === 1
-                      ? 'Poor'
-                      : newReview.rating === 2
-                        ? 'Fair'
-                        : newReview.rating === 3
-                          ? 'Good'
-                          : newReview.rating === 4
-                            ? 'Very Good'
-                            : 'Excellent'
-                }}
+                {{ getRatingLabel(newReview.rating) }}
               </div>
             </div>
 
             <!-- Comment -->
             <v-textarea
               v-model="newReview.comment"
-              label="Share your experience"
+              label="Write a review (optional)"
               variant="outlined"
-              rows="4"
+              rows="3"
+              auto-grow
               placeholder="What did you like or dislike about this product?"
               class="mb-4"
             />
@@ -763,18 +1029,47 @@ watch(orderItems, () => {
             <div class="mb-4">
               <div class="text-body-2 mb-2">Add Photos (Optional)</div>
 
+              <div v-if="existingPhotoUrls.length > 0" class="mt-3">
+                <div class="text-caption text-grey mb-2">Current photos</div>
+                <v-row dense>
+                  <v-col
+                    v-for="(photo, index) in existingPhotoUrls"
+                    :key="`existing-${index}`"
+                    cols="4"
+                    sm="3"
+                    md="2"
+                  >
+                    <v-card variant="outlined" class="image-preview-card">
+                      <v-img :src="photo" aspect-ratio="1" cover class="rounded-t" />
+                      <v-card-actions class="pa-1 justify-center">
+                        <v-btn
+                          icon
+                          size="x-small"
+                          color="error"
+                          @click="removeExistingPhoto(index)"
+                          :disabled="uploadingImages"
+                        >
+                          <v-icon>mdi-delete</v-icon>
+                        </v-btn>
+                      </v-card-actions>
+                    </v-card>
+                  </v-col>
+                </v-row>
+              </div>
+
               <!-- File Input -->
               <v-file-input
+                v-model="selectedUploadFiles"
                 multiple
                 prepend-icon="mdi-camera"
                 variant="outlined"
-                label="Upload photos"
+                label="Upload photos (optional)"
                 accept="image/*"
                 :loading="uploadingImages"
-                :disabled="uploadingImages || imagePreviews.length >= 5"
-                @change="handlePhotoUpload"
+                :disabled="uploadingImages || totalAttachedPhotoCount >= 5"
+                @update:model-value="handlePhotoUpload"
                 :rules="[
-                  (files: File[]) => !files || files.length <= 5 || 'Maximum 5 images allowed',
+                  () => totalAttachedPhotoCount <= 5 || 'Maximum 5 images allowed',
                   (files: File[]) =>
                     !files ||
                     Array.from(files).every((file) => file.size <= 5 * 1024 * 1024) ||
@@ -799,10 +1094,8 @@ watch(orderItems, () => {
               <!-- Image Previews -->
               <div v-if="imagePreviews.length > 0" class="mt-3">
                 <div class="text-caption text-grey mb-2">
-                  {{ imagePreviews.length }} image{{
-                    imagePreviews.length !== 1 ? 's' : ''
-                  }}
-                  selected ({{ 5 - imagePreviews.length }} remaining)
+                  {{ totalAttachedPhotoCount }} image{{ totalAttachedPhotoCount !== 1 ? 's' : '' }}
+                  attached ({{ 5 - totalAttachedPhotoCount }} remaining)
                 </div>
                 <v-row dense>
                   <v-col
@@ -847,9 +1140,15 @@ watch(orderItems, () => {
               color="primary"
               variant="flat"
               :loading="isSubmitting"
-              :disabled="!newReview.rating || !newReview.comment.trim()"
+              :disabled="!newReview.rating"
             >
-              Submit Review
+              {{
+                isEditingReview
+                  ? 'Save Changes'
+                  : newReview.comment.trim() || totalAttachedPhotoCount
+                    ? 'Submit Review'
+                    : 'Submit Rating'
+              }}
             </v-btn>
           </v-card-actions>
         </v-card>
@@ -873,6 +1172,72 @@ watch(orderItems, () => {
 </template>
 
 <style scoped>
+:root {
+  --rate-safe-top: env(safe-area-inset-top, 0px);
+  --rate-safe-right: env(safe-area-inset-right, 0px);
+  --rate-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --rate-safe-left: env(safe-area-inset-left, 0px);
+}
+
+.rate-page {
+  background: linear-gradient(180deg, #f8fafc 0%, #eef5ff 38%, #f8fafc 100%);
+  min-height: 100dvh;
+}
+
+.top-nav {
+  padding-top: var(--rate-safe-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12) !important;
+}
+
+.top-nav :deep(.v-toolbar__content) {
+  min-height: 56px !important;
+  height: 56px !important;
+  padding: 0 max(8px, var(--rate-safe-right)) 0 max(8px, var(--rate-safe-left)) !important;
+}
+
+.top-nav :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  letter-spacing: 0.2px;
+}
+
+.top-nav :deep(.v-btn),
+.top-nav :deep(.v-toolbar-title) {
+  color: white !important;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .top-nav {
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .top-nav {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
+}
+
+.rate-container {
+  padding-top: calc(72px + var(--rate-safe-top)) !important;
+  padding-bottom: calc(28px + var(--rate-safe-bottom)) !important;
+  padding-left: max(12px, var(--rate-safe-left)) !important;
+  padding-right: max(12px, var(--rate-safe-right)) !important;
+}
+
+.intro-card {
+  background: linear-gradient(135deg, rgba(63, 131, 199, 0.12), rgba(255, 255, 255, 0.95));
+  border: 1px solid rgba(63, 131, 199, 0.12);
+  box-shadow: 0 20px 40px rgba(15, 23, 42, 0.08);
+}
+
+.section-card {
+  border-radius: 20px !important;
+  overflow: hidden;
+  box-shadow: 0 14px 32px rgba(15, 23, 42, 0.06) !important;
+}
+
 .border-b {
   border-bottom: 1px solid rgba(0, 0, 0, 0.12);
 }
@@ -882,8 +1247,8 @@ watch(orderItems, () => {
 }
 
 .reviews-list {
-  max-height: 600px;
-  overflow-y: auto;
+  display: grid;
+  gap: 16px;
 }
 
 .image-preview-card {
@@ -894,6 +1259,37 @@ watch(orderItems, () => {
 .image-preview-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.review-entry-card {
+  border-radius: 18px !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.review-entry-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.08) !important;
+}
+
+.review-filter-select {
+  max-width: 150px;
+  min-width: 140px;
+}
+
+.review-action-btn {
+  text-transform: none;
+  font-weight: 600;
+}
+
+.quick-rate-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.review-section-header {
+  gap: 12px;
 }
 
 /* Custom scrollbar */
@@ -913,5 +1309,39 @@ watch(orderItems, () => {
 
 .reviews-list::-webkit-scrollbar-thumb:hover {
   background: #a8a8a8;
+}
+
+@media (max-width: 600px) {
+  .rate-container {
+    padding-top: calc(68px + var(--rate-safe-top)) !important;
+  }
+
+  .review-section-header {
+    align-items: stretch !important;
+  }
+
+  .review-filter-select {
+    max-width: none;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .quick-rate-row {
+    align-items: flex-start;
+  }
+
+  .product-review-item :deep(.v-list-item__append) {
+    width: 100%;
+    margin-top: 12px;
+  }
+
+  .product-review-item :deep(.v-list-item__append .v-btn) {
+    width: 100%;
+  }
+
+  .review-entry-card :deep(.v-card-text > .d-flex) {
+    flex-direction: column;
+    gap: 12px;
+  }
 }
 </style>

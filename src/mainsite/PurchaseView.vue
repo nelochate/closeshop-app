@@ -2311,58 +2311,56 @@ watch(
 
 <template>
   <v-app>
+    <v-app-bar class="app-bar" color="#438fda" flat>
+      <v-btn icon @click="router.back()" variant="text" color="white">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title class="app-bar-title text-white">
+        <strong>Checkout</strong>
+      </v-toolbar-title>
+      <v-spacer></v-spacer>
+    </v-app-bar>
+
     <v-main class="main-app">
-      <!-- Validation Banner -->
-      <v-alert
-        v-if="validationErrors.length > 0"
-        type="warning"
-        class="validation-banner mx-3 mt-3"
-        density="compact"
-        elevation="2"
-        border="start"
-        border-color="warning"
-      >
-        <div class="d-flex align-center">
-          <v-icon size="20" class="mr-2">mdi-alert-circle-outline</v-icon>
-          <div class="flex-grow-1">
-            <strong class="text-subtitle-2">Complete required fields:</strong>
-            <div class="d-flex flex-wrap gap-1 mt-1">
-              <v-chip
-                v-for="error in validationErrors"
-                :key="error"
-                size="x-small"
-                color="warning"
-                variant="flat"
-                class="mr-1 mb-1"
-              >
-                {{ error }}
-              </v-chip>
-            </div>
-          </div>
-          <v-btn
-            icon
-            size="x-small"
-            @click="validationErrors = []"
-            class="ml-2"
-          >
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </div>
-      </v-alert>
-
-      <!-- App Bar -->
-      <v-app-bar class="app-bar" color="#438fda" flat>
-        <v-btn icon @click="router.back()" variant="text" color="white">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-        <v-toolbar-title class="app-bar-title text-white">
-          <strong>Checkout</strong>
-        </v-toolbar-title>
-        <v-spacer></v-spacer>
-
-      </v-app-bar>
-
       <v-container fluid class="px-3 py-4 main-container">
+        <!-- Validation Banner -->
+        <v-alert
+          v-if="validationErrors.length > 0"
+          type="warning"
+          class="validation-banner mb-4"
+          density="compact"
+          elevation="2"
+          border="start"
+          border-color="warning"
+        >
+          <div class="d-flex align-center">
+            <v-icon size="20" class="mr-2">mdi-alert-circle-outline</v-icon>
+            <div class="flex-grow-1">
+              <strong class="text-subtitle-2">Complete required fields:</strong>
+              <div class="d-flex flex-wrap gap-1 mt-1">
+                <v-chip
+                  v-for="error in validationErrors"
+                  :key="error"
+                  size="x-small"
+                  color="warning"
+                  variant="flat"
+                  class="mr-1 mb-1"
+                >
+                  {{ error }}
+                </v-chip>
+              </div>
+            </div>
+            <v-btn
+              icon
+              size="x-small"
+              @click="validationErrors = []"
+              class="ml-2"
+            >
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </div>
+        </v-alert>
+
         <!-- Updated Summary Card with Transaction Number -->
         <v-card class="mb-4 summary-card" elevation="2" rounded="lg">
           <v-card-text class="pa-4">
@@ -2762,7 +2760,7 @@ watch(
         </div>
 
         <!-- Note to Seller -->
-        <v-card class="mb-4 note-card" elevation="1" rounded="lg">
+        <v-card class="mb-4 note-card2" elevation="1" rounded="lg">
           <v-card-title class="card-title">
             <v-icon color="primary" class="mr-2" size="small">mdi-message-text-outline</v-icon>
             Note to Seller
@@ -2785,7 +2783,7 @@ watch(
       <!-- Bottom Action Bar -->
       <div class="bottom-action-bar">
         <v-container class="px-3">
-          <div class="d-flex align-center justify-space-between">
+          <div class="d-flex align-center justify-space-between bottom-action-content">
             <div class="order-summary">
               <div class="text-caption text-grey">Total Amount</div>
               <div class="text-h5 font-weight-bold text-white">
@@ -2983,20 +2981,54 @@ watch(
   </v-app>
 </template>
 <style scoped>
+:root {
+  --purchase-safe-top: env(safe-area-inset-top, 0px);
+  --purchase-safe-right: env(safe-area-inset-right, 0px);
+  --purchase-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --purchase-safe-left: env(safe-area-inset-left, 0px);
+}
+
 /* Main Layout */
 .main-app {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  min-height: 100dvh;
+  padding-left: var(--purchase-safe-left);
+  padding-right: var(--purchase-safe-right);
 }
 
 .main-container {
   max-width: 800px;
   margin: 0 auto;
-  padding-bottom: 100px !important;
+  padding-top: calc(68px + var(--purchase-safe-top)) !important;
+  padding-bottom: calc(132px + var(--purchase-safe-bottom)) !important;
+  padding-left: max(12px, var(--purchase-safe-left)) !important;
+  padding-right: max(12px, var(--purchase-safe-right)) !important;
 }
 
 /* App Bar */
 .app-bar {
+  background: linear-gradient(135deg, #438fda 0%, #2f6ca9 100%) !important;
   box-shadow: 0 2px 12px rgba(67, 143, 218, 0.15);
+  padding-top: var(--purchase-safe-top);
+}
+
+.app-bar :deep(.v-toolbar__content) {
+  min-height: 56px !important;
+  height: 56px !important;
+  padding: 0 max(8px, var(--purchase-safe-right)) 0 max(8px, var(--purchase-safe-left)) !important;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .app-bar {
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .app-bar {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
 }
 
 .app-bar-title {
@@ -3020,6 +3052,12 @@ watch(
 .note-card {
   border: 1px solid #e5e7eb;
   transition: all 0.3s ease;
+}
+
+.note-card2 {
+  border: 1px solid #e5e7eb;
+  transition: all 0.3s ease;
+  margin-bottom: 170px !important;
 }
 
 .delivery-card:hover,
@@ -3220,9 +3258,21 @@ watch(
   left: 0;
   right: 0;
   background: linear-gradient(135deg, #438fda 0%, #3b82f6 100%);
-  padding: 12px 0;
+  padding: 12px max(12px, var(--purchase-safe-right)) calc(12px + var(--purchase-safe-bottom))
+    max(12px, var(--purchase-safe-left));
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
   z-index: 1000;
+  backdrop-filter: blur(16px);
+}
+
+.bottom-action-bar :deep(.v-container) {
+  max-width: 800px;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.bottom-action-content {
+  gap: 16px;
 }
 
 .order-summary {
@@ -3375,7 +3425,7 @@ watch(
 
 /* Validation */
 .validation-banner {
-  border-radius: 8px;
+  border-radius: 14px;
   animation: slideDown 0.3s ease;
 }
 
@@ -3397,8 +3447,8 @@ watch(
 /* Responsive Design */
 @media (max-width: 600px) {
   .main-container {
-    padding-left: 12px !important;
-    padding-right: 12px !important;
+    padding-top: calc(64px + var(--purchase-safe-top)) !important;
+    padding-bottom: calc(148px + var(--purchase-safe-bottom)) !important;
   }
 
   .options-grid {
@@ -3420,6 +3470,24 @@ watch(
   .checkout-btn {
     min-width: 140px;
     padding: 8px 16px;
+  }
+
+  .bottom-action-content {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+    padding-right:15px;
+    padding-left:15px;
+
+  }
+
+  .order-summary {
+    width: 100%;
+  }
+
+  .checkout-btn {
+    width: 100%;
+    min-width: 0;
   }
 }
 
@@ -3624,7 +3692,7 @@ watch(
 
 /* Toast Notification */
 .copy-toast {
-  margin-top: 60px;
+  margin-top: calc(64px + var(--purchase-safe-top));
 }
 
 /* Monospace font for transaction number */
@@ -3674,7 +3742,7 @@ watch(
   }
 
   .copy-toast {
-    margin-top: 56px;
+    margin-top: calc(56px + var(--purchase-safe-top));
   }
 }
 

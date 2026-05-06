@@ -1,13 +1,18 @@
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onUnmounted, computed, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
+import {
+  buildAvatarFallback,
+  getProfileDisplayName,
+  normalizeIdentityText,
+} from '@/utils/accountIdentity'
 
 const route = useRoute()
 const router = useRouter()
-const productId = route.params.id
+const productId = computed(() => route.params.id)
 const cart = useCartStore()
 
 // State management
@@ -25,6 +30,7 @@ const selectedSize = ref(null)
 const selectedVariety = ref(null)
 const openImageDialog = ref(false)
 const previewIndex = ref(0)
+const openReviewImageDialog = ref(false)
 
 // DOM refs
 const productImgRef = ref(null)
@@ -45,6 +51,9 @@ const currentImage = ref('')
 const openVarietyDialog = ref(false)
 const varietyPreviewIndex = ref(0)
 const varietyImages = ref([])
+const reviews = ref([])
+const reviewsLoading = ref(false)
+const reviewError = ref('')
 
 // Snackbar for notifications
 const snackbar = ref(false)
@@ -53,6 +62,8 @@ const snackbarColor = ref('success')
 
 // User
 const user = ref(null)
+let reviewsSubscription = null
+let reviewsRefreshTimeoutId = null
 
 // Fetch user
 const fetchUser = async () => {
@@ -84,6 +95,140 @@ const showSnackbar = (message, color = 'success') => {
   snackbar.value = true
 }
 
+const normalizeReviewPhotos = (photos) => {
+  if (Array.isArray(photos)) {
+    return photos.filter((photo) => normalizeIdentityText(photo))
+  }
+
+  if (typeof photos === 'string') {
+    try {
+      const parsed = JSON.parse(photos)
+      if (Array.isArray(parsed)) {
+        return parsed.filter((photo) => normalizeIdentityText(photo))
+      }
+    } catch {
+      return normalizeIdentityText(photos) ? [photos] : []
+    }
+  }
+
+  return []
+}
+
+const mapReviewsWithProfiles = async (reviewRows = []) => {
+  const reviewerIds = [...new Set(reviewRows.map((review) => review.user_id).filter(Boolean))]
+  let profilesById = new Map()
+
+  if (reviewerIds.length > 0) {
+    const { data: profileRows, error: profileError } = await supabase
+      .from('profiles')
+      .select('id, first_name, last_name, full_name, avatar_url')
+      .in('id', reviewerIds)
+
+    if (profileError) {
+      console.warn('Could not load product reviewer profiles:', profileError)
+    } else {
+      profilesById = new Map((profileRows || []).map((profile) => [profile.id, profile]))
+    }
+  }
+
+  return reviewRows.map((review) => {
+    const reviewerProfile = review.user_id ? profilesById.get(review.user_id) : null
+    const reviewerName =
+      getProfileDisplayName(reviewerProfile) || normalizeIdentityText(review.user_name) || 'Customer'
+    const reviewerAvatar =
+      normalizeIdentityText(reviewerProfile?.avatar_url) ||
+      normalizeIdentityText(review.user_avatar) ||
+      buildAvatarFallback(reviewerName)
+
+    return {
+      ...review,
+      rating: Number(review.rating || 0),
+      likes: Number(review.likes || 0),
+      photos: normalizeReviewPhotos(review.photos),
+      reviewer_name: reviewerName,
+      reviewer_avatar: reviewerAvatar,
+    }
+  })
+}
+
+const fetchProductReviews = async ({ silent = false } = {}) => {
+  if (!productId.value) {
+    reviews.value = []
+    return
+  }
+
+  if (!silent) {
+    reviewsLoading.value = true
+  }
+
+  reviewError.value = ''
+
+  try {
+    const { data, error: reviewsError } = await supabase
+      .from('reviews')
+      .select('*')
+      .eq('product_id', productId.value)
+      .order('created_at', { ascending: false })
+
+    if (reviewsError) throw reviewsError
+
+    reviews.value = await mapReviewsWithProfiles(data || [])
+  } catch (err) {
+    console.error('Error loading product reviews:', err)
+    reviewError.value = err?.message || 'Failed to load reviews.'
+  } finally {
+    if (!silent) {
+      reviewsLoading.value = false
+    }
+  }
+}
+
+const scheduleReviewsRefresh = () => {
+  if (reviewsRefreshTimeoutId) {
+    window.clearTimeout(reviewsRefreshTimeoutId)
+  }
+
+  reviewsRefreshTimeoutId = window.setTimeout(() => {
+    void fetchProductReviews({ silent: true })
+  }, 180)
+}
+
+const cleanupReviewsSubscription = () => {
+  if (reviewsRefreshTimeoutId) {
+    window.clearTimeout(reviewsRefreshTimeoutId)
+    reviewsRefreshTimeoutId = null
+  }
+
+  if (reviewsSubscription) {
+    supabase.removeChannel(reviewsSubscription)
+    reviewsSubscription = null
+  }
+}
+
+const subscribeToProductReviews = () => {
+  if (!productId.value) {
+    return
+  }
+
+  cleanupReviewsSubscription()
+
+  reviewsSubscription = supabase
+    .channel(`product-reviews:${productId.value}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'reviews',
+        filter: `product_id=eq.${productId.value}`,
+      },
+      () => {
+        scheduleReviewsRefresh()
+      },
+    )
+    .subscribe()
+}
+
 // Fetch product
 const fetchProduct = async () => {
   loading.value = true
@@ -109,7 +254,7 @@ const fetchProduct = async () => {
           owner_id
         )
       `)
-      .eq('id', productId)
+      .eq('id', productId.value)
       .single()
 
     if (err) throw err
@@ -195,6 +340,47 @@ const isOwner = computed(() => {
   if (!user.value || !product.value?.shop?.owner_id) return false
   return user.value.id === product.value.shop.owner_id
 })
+
+const reviewCount = computed(() => reviews.value.length)
+
+const averageRating = computed(() => {
+  if (!reviews.value.length) return 0
+
+  const totalRating = reviews.value.reduce((sum, review) => sum + Number(review.rating || 0), 0)
+  return Math.round((totalRating / reviews.value.length) * 10) / 10
+})
+
+const reviewSummaryLabel = computed(() => {
+  if (!reviewCount.value) {
+    return 'No reviews yet'
+  }
+
+  if (reviewCount.value === 1) {
+    return '1 review'
+  }
+
+  return `${reviewCount.value} reviews`
+})
+
+const openReviewImagePreview = (imageUrl) => {
+  currentImage.value = imageUrl
+  openReviewImageDialog.value = true
+}
+
+const closeReviewImagePreview = () => {
+  openReviewImageDialog.value = false
+  currentImage.value = ''
+}
+
+const formatReviewDate = (dateString) => {
+  if (!dateString) return ''
+
+  return new Date(dateString).toLocaleDateString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  })
+}
 
 // Check if variety is selected
 const isVarietySelected = (variety) => {
@@ -521,11 +707,43 @@ const shareProduct = async () => {
   }
 }
 
+const loadProductPage = async () => {
+  await Promise.all([fetchProduct(), fetchProductReviews()])
+  subscribeToProductReviews()
+}
+
 // Initialize on mount
 onMounted(async () => {
   await cart.initialize()
-  await fetchUser()
-  await fetchProduct()
+  await Promise.all([fetchUser(), loadProductPage()])
+})
+
+watch(
+  () => route.params.id,
+  async (newProductId, oldProductId) => {
+    if (!newProductId || newProductId === oldProductId) {
+      return
+    }
+
+    selectedSize.value = null
+    selectedVariety.value = null
+    dialogSelectedSize.value = null
+    dialogSelectedVariety.value = null
+    buyNowSelectedSize.value = null
+    buyNowSelectedVariety.value = null
+    dialogQuantity.value = 1
+    buyNowQuantity.value = 1
+    currentImage.value = ''
+    openImageDialog.value = false
+    openReviewImageDialog.value = false
+    reviewError.value = ''
+
+    await loadProductPage()
+  },
+)
+
+onUnmounted(() => {
+  cleanupReviewsSubscription()
 })
 </script>
 
@@ -618,12 +836,29 @@ onMounted(async () => {
               </v-btn>
             </v-card-actions>
             <v-card-text class="text-center pa-0">
-              <v-img 
-                :src="product.main_img_urls[previewIndex]" 
-                max-height="600" 
-                contain 
-                class="rounded-b" 
+              <v-img
+                :src="product.main_img_urls[previewIndex]"
+                max-height="600"
+                contain
+                class="rounded-b"
               />
+            </v-card-text>
+          </v-card>
+        </v-dialog>
+
+        <v-dialog
+          v-model="openReviewImageDialog"
+          max-width="800px"
+          @click:outside="closeReviewImagePreview"
+        >
+          <v-card>
+            <v-card-actions class="d-flex justify-end pa-2">
+              <v-btn icon @click="closeReviewImagePreview">
+                <v-icon>mdi-close</v-icon>
+              </v-btn>
+            </v-card-actions>
+            <v-card-text class="text-center pa-0">
+              <v-img :src="currentImage" max-height="600" contain class="rounded-b" />
             </v-card-text>
           </v-card>
         </v-dialog>
@@ -950,6 +1185,21 @@ onMounted(async () => {
         <!-- Product Info -->
         <div class="product-info mb-4">
           <h2 class="product-title mb-2">{{ product.prod_name }}</h2>
+          <div class="product-review-summary mb-2">
+            <v-rating
+              :model-value="averageRating"
+              readonly
+              half-increments
+              density="compact"
+              color="amber"
+              active-color="amber"
+              size="small"
+            />
+            <span class="product-review-summary__score">
+              {{ reviewCount ? averageRating.toFixed(1) : 'New' }}
+            </span>
+            <span class="product-review-summary__meta">{{ reviewSummaryLabel }}</span>
+          </div>
           <p class="product-price mb-2">₱{{ displayPrice }}</p>
 
           <!-- Selection Options -->
@@ -1088,6 +1338,107 @@ onMounted(async () => {
           <p class="product-description mb-2">{{ product.prod_description }}</p>
           <p class="product-meta">Total Sold: {{ product.sold }}</p>
         </div>
+
+        <section class="reviews-section mb-4" aria-label="Customer reviews">
+          <div class="reviews-section__header">
+            <div>
+              <div class="reviews-section__eyebrow">Customer Reviews</div>
+              <h3 class="reviews-section__title">What buyers are saying</h3>
+            </div>
+            <v-chip color="primary" variant="tonal" size="small" class="reviews-section__chip">
+              Live updates
+            </v-chip>
+          </div>
+
+          <div class="reviews-summary-card mb-4">
+            <div class="reviews-summary-card__score">
+              {{ reviewCount ? averageRating.toFixed(1) : '--' }}
+            </div>
+            <div class="reviews-summary-card__details">
+              <v-rating
+                :model-value="averageRating"
+                readonly
+                half-increments
+                density="compact"
+                color="amber"
+                active-color="amber"
+                size="small"
+              />
+              <div class="reviews-summary-card__meta">
+                {{
+                  reviewCount
+                    ? `${reviewSummaryLabel} for this product`
+                    : 'No customer reviews yet'
+                }}
+              </div>
+            </div>
+          </div>
+
+          <div v-if="reviewsLoading" class="reviews-loading">
+            <v-progress-circular indeterminate color="primary" size="28" />
+            <span>Loading reviews...</span>
+          </div>
+
+          <v-alert v-else-if="reviewError" type="warning" variant="tonal" class="mb-0">
+            {{ reviewError }}
+          </v-alert>
+
+          <div v-else-if="!reviews.length" class="reviews-empty-state">
+            <v-icon size="40" color="grey-lighten-1">mdi-comment-outline</v-icon>
+            <div class="reviews-empty-state__title">No reviews yet</div>
+            <div class="reviews-empty-state__subtitle">
+              Reviews for this product will appear here as soon as customers submit them.
+            </div>
+          </div>
+
+          <div v-else class="reviews-list">
+            <article v-for="review in reviews" :key="review.id" class="review-card">
+              <div class="review-card__top">
+                <div class="reviewer">
+                  <v-avatar size="44" class="reviewer__avatar">
+                    <v-img :src="review.reviewer_avatar" alt="Reviewer avatar" />
+                  </v-avatar>
+                  <div class="reviewer__details">
+                    <div class="reviewer__name">
+                      {{ review.reviewer_name }}
+                    </div>
+                    <div class="reviewer__meta">
+                      <v-rating
+                        :model-value="review.rating"
+                        readonly
+                        half-increments
+                        density="compact"
+                        color="amber"
+                        active-color="amber"
+                        size="x-small"
+                      />
+                      <span>{{ formatReviewDate(review.created_at) }}</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <p v-if="review.comment?.trim()" class="review-card__comment">
+                {{ review.comment }}
+              </p>
+              <p v-else class="review-card__comment review-card__comment--muted">
+                Rated this product without a written comment.
+              </p>
+
+              <div v-if="review.photos?.length" class="review-photo-grid">
+                <button
+                  v-for="(photo, index) in review.photos"
+                  :key="`${review.id}-${index}`"
+                  type="button"
+                  class="review-photo-grid__item"
+                  @click="openReviewImagePreview(photo)"
+                >
+                  <img :src="photo" alt="Review photo" />
+                </button>
+              </div>
+            </article>
+          </div>
+        </section>
 
         <!-- Shop Info -->
         <v-card
@@ -1290,6 +1641,195 @@ v-main,
   font-size: 0.9rem;
 }
 
+.product-review-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.product-review-summary__score {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.product-review-summary__meta {
+  font-size: 0.88rem;
+  color: #64748b;
+}
+
+.reviews-section {
+  background: white;
+  border-radius: 20px;
+  padding: 24px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+}
+
+.reviews-section__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.reviews-section__eyebrow {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #3f83c7;
+  margin-bottom: 4px;
+}
+
+.reviews-section__title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #1e293b;
+  margin: 0;
+}
+
+.reviews-summary-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8fbff, #eef6ff);
+  border: 1px solid #dbeafe;
+}
+
+.reviews-summary-card__score {
+  font-size: 2rem;
+  font-weight: 800;
+  line-height: 1;
+  color: #1d4ed8;
+}
+
+.reviews-summary-card__details {
+  display: grid;
+  gap: 4px;
+}
+
+.reviews-summary-card__meta {
+  color: #64748b;
+  font-size: 0.9rem;
+}
+
+.reviews-loading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: #475569;
+  padding: 8px 0;
+}
+
+.reviews-empty-state {
+  border: 1px dashed #cbd5e1;
+  border-radius: 18px;
+  padding: 28px 20px;
+  text-align: center;
+  color: #64748b;
+}
+
+.reviews-empty-state__title {
+  margin-top: 10px;
+  font-weight: 700;
+  color: #334155;
+}
+
+.reviews-empty-state__subtitle {
+  margin-top: 6px;
+  font-size: 0.92rem;
+  line-height: 1.5;
+}
+
+.reviews-list {
+  display: grid;
+  gap: 16px;
+}
+
+.review-card {
+  border: 1px solid #e2e8f0;
+  border-radius: 18px;
+  padding: 18px;
+  background: #fff;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.review-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.06);
+}
+
+.review-card__top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.review-card__comment {
+  margin: 14px 0 0;
+  color: #334155;
+  line-height: 1.65;
+}
+
+.review-card__comment--muted {
+  color: #64748b;
+  font-style: italic;
+}
+
+.reviewer {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.reviewer__details {
+  min-width: 0;
+}
+
+.reviewer__name {
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.reviewer__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 0.82rem;
+  color: #64748b;
+  margin-top: 4px;
+}
+
+.review-photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.review-photo-grid__item {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  border-radius: 14px;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.review-photo-grid__item img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+}
+
 /* ===============================
    OPTION / VARIETY CARDS
 ================================= */
@@ -1325,7 +1865,7 @@ v-main,
   border-radius: 18px;
   background: white;
   box-shadow: 0 5px 14px rgba(0,0,0,0.05);
-  margin-top: 20px;
+  margin-bottom: 50px !important;
 }
 
 .shop-name {
@@ -1428,6 +1968,21 @@ v-main,
     font-size: 0.9rem;
   }
 
+  .reviews-section {
+    padding: 18px;
+    border-radius: 18px;
+  }
+
+  .reviews-section__header,
+  .reviews-summary-card,
+  .review-card__top {
+    flex-direction: column;
+  }
+
+  .review-photo-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .varieties-grid {
     grid-template-columns: 1fr;
     gap: 10px;
@@ -1456,6 +2011,18 @@ v-main,
 
   .product-price {
     font-size: 1.25rem;
+  }
+
+  .reviews-summary-card__score {
+    font-size: 1.7rem;
+  }
+
+  .reviews-section__title {
+    font-size: 1rem;
+  }
+
+  .review-card {
+    padding: 14px;
   }
 
   .bottom-btn {
