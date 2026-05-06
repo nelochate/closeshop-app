@@ -264,6 +264,16 @@ const rateOrder = (orderId) => {
   }
 }
 
+const shouldShowReviewAction = (order) =>
+  !!order &&
+  ((selectedSection.value === 'completed' && isOrderCompleted(order)) || order.has_pending_review)
+
+const getReviewActionLabel = (order) => {
+  if (!order) return 'Review'
+  if (order.has_pending_review) return 'Review'
+  return 'Edit Review'
+}
+
 // Check if user has a shop and get its status
 const checkUserShop = async () => {
   if (!user.value?.id) {
@@ -1239,14 +1249,14 @@ onBeforeRouteUpdate((to, from, next) => {
                         View Order
                       </v-btn>
                       <v-btn
-                        v-if="order.has_pending_review"
+                        v-if="shouldShowReviewAction(order)"
                         color="secondary"
                         variant="flat"
                         size="small"
                         @click="rateOrder(order.id)"
                       >
                         <v-icon left small>mdi-star</v-icon>
-                        Review
+                        {{ getReviewActionLabel(order) }}
                       </v-btn>
                     </div>
                   </v-card-actions>

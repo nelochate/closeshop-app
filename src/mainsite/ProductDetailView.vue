@@ -54,6 +54,7 @@ const varietyImages = ref([])
 const reviews = ref([])
 const reviewsLoading = ref(false)
 const reviewError = ref('')
+const reviewNavigationId = ref('')
 
 // Snackbar for notifications
 const snackbar = ref(false)
@@ -370,6 +371,79 @@ const openReviewImagePreview = (imageUrl) => {
 const closeReviewImagePreview = () => {
   openReviewImageDialog.value = false
   currentImage.value = ''
+}
+
+const isCurrentUsersReview = (review) =>
+  !!review?.user_id && !!user.value?.id && review.user_id === user.value.id
+
+const findLatestReviewableOrderId = async (targetProductId) => {
+  if (!user.value?.id || !targetProductId) {
+    return null
+  }
+
+  const { data, error } = await supabase
+    .from('orders')
+    .select(
+      `
+      id,
+      status,
+      delivered_at,
+      completed_at,
+      created_at,
+      order_items!inner (
+        product_id
+      )
+    `,
+    )
+    .eq('user_id', user.value.id)
+    .eq('order_items.product_id', targetProductId)
+    .in('status', ['picked_up', 'delivered', 'completed'])
+    .order('created_at', { ascending: false })
+    .limit(10)
+
+  if (error) {
+    throw error
+  }
+
+  const targetOrder = (data || []).find(
+    (order) =>
+      order.status === 'completed' ||
+      !!order.completed_at ||
+      order.status === 'delivered' ||
+      (order.status === 'picked_up' && !!order.delivered_at),
+  )
+
+  return targetOrder?.id || null
+}
+
+const goToEditReview = async (review) => {
+  if (!isCurrentUsersReview(review)) {
+    return
+  }
+
+  try {
+    reviewNavigationId.value = review.id
+    const targetOrderId = await findLatestReviewableOrderId(review.product_id)
+
+    if (!targetOrderId) {
+      showSnackbar('Could not find the order for this review.', 'warning')
+      return
+    }
+
+    await router.push({
+      name: 'rateview',
+      params: { orderId: targetOrderId },
+      query: {
+        productId: String(review.product_id),
+        mode: 'edit',
+      },
+    })
+  } catch (error) {
+    console.error('Error opening review editor:', error)
+    showSnackbar('Unable to open the review editor right now.', 'error')
+  } finally {
+    reviewNavigationId.value = ''
+  }
 }
 
 const formatReviewDate = (dateString) => {
@@ -1416,6 +1490,18 @@ onUnmounted(() => {
                     </div>
                   </div>
                 </div>
+                <v-btn
+                  v-if="isCurrentUsersReview(review)"
+                  size="small"
+                  variant="text"
+                  color="secondary"
+                  class="review-card__edit-btn"
+                  :loading="reviewNavigationId === review.id"
+                  @click="goToEditReview(review)"
+                >
+                  <v-icon start size="16">mdi-pencil</v-icon>
+                  Edit Review
+                </v-btn>
               </div>
 
               <p v-if="review.comment?.trim()" class="review-card__comment">
@@ -1768,6 +1854,11 @@ v-main,
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
+}
+
+.review-card__edit-btn {
+  flex-shrink: 0;
+  align-self: flex-start;
 }
 
 .review-card__comment {

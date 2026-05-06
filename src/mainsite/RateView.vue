@@ -361,6 +361,49 @@ const getProductForReview = (review: any) => {
   )
 }
 
+const clearRequestedReviewQuery = async () => {
+  if (!route.query.productId && !route.query.mode) {
+    return
+  }
+
+  const nextQuery = { ...route.query }
+  delete nextQuery.productId
+  delete nextQuery.mode
+
+  await router.replace({
+    name: 'rateview',
+    params: { orderId: orderId.value },
+    query: nextQuery,
+  })
+}
+
+const maybeOpenRequestedReviewDialog = async () => {
+  const requestedProductId = normalizeIdentityText(route.query.productId)
+  const requestedMode = normalizeIdentityText(route.query.mode)
+
+  if (!requestedProductId) {
+    return
+  }
+
+  const targetOrderItem = orderItems.value.find((item) => item.product_id === requestedProductId)
+  const targetProduct = targetOrderItem?.product
+
+  if (!targetProduct) {
+    await clearRequestedReviewQuery()
+    return
+  }
+
+  const existingReview = getUserReview(requestedProductId)
+
+  if (requestedMode === 'edit' && existingReview) {
+    openEditReviewDialog(targetProduct, existingReview)
+  } else {
+    openReviewDialog(targetProduct, draftRatings.value[requestedProductId] || 0)
+  }
+
+  await clearRequestedReviewQuery()
+}
+
 // Handle photo upload
 const handlePhotoUpload = (value: File[] | File | null) => {
   const files = Array.isArray(value) ? value : value ? [value] : []
@@ -638,6 +681,7 @@ onMounted(async () => {
   }
   await loadOrderItems()
   await loadReviews()
+  await maybeOpenRequestedReviewDialog()
 })
 
 // Clean up on unmount
