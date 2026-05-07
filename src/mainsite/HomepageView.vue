@@ -1,5 +1,5 @@
 <script setup>
-import { ref, onMounted, onUnmounted, computed } from 'vue' // Added computed
+import { ref, onMounted, onUnmounted, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
@@ -10,43 +10,46 @@ import {
   getVisibleUnreadNotificationCount,
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
-import { useCartStore } from '@/stores/cart'
-
+import {
+  locationNamesMatch,
+  parseCoordinate,
+  resolveCoordinateAddress,
+  validateCoordinates,
+} from '@/utils/location'
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const activeTab = ref('home')
-const cart = useCartStore()
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
 const errorMsg = ref('')
-
-// notification state
+const searchQuery = ref('')
 const unreadNotifications = ref(0)
 const notificationSubscription = ref(null)
-
-// Add subscription for real-time product updates
 const productsSubscription = ref(null)
+const showSurvey = ref(false)
+const hasAnsweredSurvey = ref(false)
+const showSurveyBubble = ref(false)
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
-
-// Safe area insets for notches and camera cutouts
+const PRIMARY_SERVICE_AREA = {
+  cityName: 'Butuan City',
+  provinceName: 'Agusan del Norte',
+}
 const heroPaddingTop = ref('env(safe-area-inset-top)')
+let homepageInitialized = false
+let networkStatusListener = null
+let surveyBubbleTimeout = null
+let surveyBubbleHideTimeout = null
 
 // Refresh handler function
 const handleRefresh = async () => {
+  errorMsg.value = ''
   console.log('🔄 Pull-to-refresh triggered - Refreshing home page...')
 
   try {
-    // Refresh shops
-    await fetchShops()
-
-    // Refresh products
-    await fetchProducts()
-
-    // Refresh notification count
-    await fetchUnreadNotificationCount()
+    await Promise.all([fetchShops(), refreshProductsData(), fetchUnreadNotificationCount()])
 
     console.log('✅ Home page refresh complete!')
   } catch (error) {
@@ -55,33 +58,28 @@ const handleRefresh = async () => {
   }
 }
 
-// Function to get safe area insets dynamically
 const updateSafeAreaInsets = () => {
   const computedStyle = getComputedStyle(document.documentElement)
   const topInset = computedStyle.getPropertyValue('env(safe-area-inset-top)')
 
-  console.log('Safe area top inset:', topInset)
-
-  // Set padding values based on safe area
   if (topInset && topInset !== '0px') {
     heroPaddingTop.value = `calc(12px + ${topInset})`
-  } else {
-    // Fallback for devices without notch detection
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
-    const isAndroid = /Android/.test(navigator.userAgent)
+    return
+  }
 
-    if (isIOS) {
-      heroPaddingTop.value = 'calc(12px + 44px)' // iOS status bar height
-    } else if (isAndroid) {
-      heroPaddingTop.value = 'calc(12px + 24px)' // Android status bar height
-    } else {
-      heroPaddingTop.value = '12px'
-    }
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent)
+  const isAndroid = /Android/.test(navigator.userAgent)
+
+  if (isIOS) {
+    heroPaddingTop.value = 'calc(12px + 44px)'
+  } else if (isAndroid) {
+    heroPaddingTop.value = 'calc(12px + 24px)'
+  } else {
+    heroPaddingTop.value = '12px'
   }
 }
 
-//Search Functionality
-const searchQuery = ref('')
+// Search functionality
 function goToSearch() {
   if (router.currentRoute.value.name !== 'search') {
     router.push({ name: 'search', query: { q: searchQuery.value || '' } })
@@ -89,7 +87,6 @@ function goToSearch() {
 }
 
 function updateSearch() {
-  // instantly sync search input with SearchView via query param
   router.replace({ name: 'search', query: { q: searchQuery.value } })
 }
 
@@ -207,6 +204,50 @@ function saveLastKnownLocation(coords) {
 }
 
 /* 🌐 Network Status */
+function isPrimaryServiceAreaLocation(city, province) {
+  if (!locationNamesMatch(city, PRIMARY_SERVICE_AREA.cityName)) return false
+  if (province && !locationNamesMatch(province, PRIMARY_SERVICE_AREA.provinceName)) return false
+  return true
+}
+
+async function normalizeFetchedShopLocation(shop) {
+  const lat = parseCoordinate(shop.latitude)
+  const lng = parseCoordinate(shop.longitude)
+
+  const normalizedShop = {
+    ...shop,
+    latitude: lat ?? shop.latitude,
+    longitude: lng ?? shop.longitude,
+    city: typeof shop.city === 'string' ? shop.city.trim() : shop.city,
+    province: typeof shop.province === 'string' ? shop.province.trim() : shop.province,
+    barangay: typeof shop.barangay === 'string' ? shop.barangay.trim() : shop.barangay,
+  }
+
+  if (lat == null || lng == null || !validateCoordinates(lat, lng)) {
+    return normalizedShop
+  }
+
+  if (normalizedShop.city && normalizedShop.province) {
+    return normalizedShop
+  }
+
+  try {
+    const { components, resolved } = await resolveCoordinateAddress(lat, lng)
+
+    normalizedShop.city = normalizedShop.city || resolved.city || components.city || null
+    normalizedShop.province =
+      normalizedShop.province || resolved.province || components.province || null
+
+    if (!normalizedShop.barangay && components.barangay) {
+      normalizedShop.barangay = components.barangay
+    }
+  } catch (error) {
+    console.warn(`Unable to normalize location fields for shop ${shop.id}:`, error)
+  }
+
+  return normalizedShop
+}
+
 async function checkNetworkStatus() {
   try {
     const status = await Network.getStatus()
@@ -215,7 +256,8 @@ async function checkNetworkStatus() {
       alert('No internet connection. Please connect to Wi-Fi or mobile data.')
     }
 
-    Network.addListener('networkStatusChange', (status) => {
+    if (!networkStatusListener) {
+      networkStatusListener = await Network.addListener('networkStatusChange', (status) => {
       console.log('🌐 Network changed:', status)
       if (!status.connected) {
         alert('⚠️ You are offline.')
@@ -223,6 +265,7 @@ async function checkNetworkStatus() {
         console.log('✅ Back online.')
       }
     })
+    }
   } catch (err) {
     console.error('Network check error:', err)
   }
@@ -232,7 +275,6 @@ async function checkNetworkStatus() {
 async function fetchShops() {
   let userLat = null
   let userLon = null
-  let locationAccuracy = 'none'
 
   try {
     // Get user location with fallbacks
@@ -240,10 +282,8 @@ async function fetchShops() {
     if (locationResult.coords) {
       userLat = locationResult.coords.latitude
       userLon = locationResult.coords.longitude
-      locationAccuracy = locationResult.accuracy
     }
 
-    console.log(`📍 Using location with accuracy: ${locationAccuracy}`)
   } catch (locationError) {
     console.warn('📍 Could not get user location, showing all shops:', locationError)
     // Continue without location - we'll show all shops
@@ -261,6 +301,13 @@ async function fetchShops() {
 
     if (error) throw error
 
+    const normalizedShops = await Promise.all(
+      (data || []).map((shop) => normalizeFetchedShopLocation(shop)),
+    )
+    const butuanShops = normalizedShops.filter((shop) =>
+      isPrimaryServiceAreaLocation(shop.city, shop.province),
+    )
+
     // Compute distance only if we have user location
     function calculateDistance(lat1, lon1, lat2, lon2) {
       const R = 6371 // Earth radius in km
@@ -275,13 +322,11 @@ async function fetchShops() {
       return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
     }
 
-    let mapped = data.map((s) => {
+    let mapped = butuanShops.map((s) => {
       let distance = null
-      let distanceAccuracy = 'unknown'
 
       if (userLat && userLon && s.latitude && s.longitude) {
         distance = calculateDistance(userLat, userLon, s.latitude, s.longitude)
-        distanceAccuracy = locationAccuracy
       }
 
       return {
@@ -291,8 +336,6 @@ async function fetchShops() {
         logo: s.logo_url,
         address: [s.building, s.street, s.barangay, s.city, s.province].filter(Boolean).join(', '),
         distance,
-        distanceAccuracy,
-        hasExactLocation: !!(s.latitude && s.longitude),
       }
     })
 
@@ -429,26 +472,6 @@ async function fetchUnreadNotificationCount() {
   unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
 }
 
-const cleanupHomepageRuntime = () => {
-  window.removeEventListener('resize', updateSafeAreaInsets)
-  window.removeEventListener('orientationchange', updateSafeAreaInsets)
-
-  if (notificationSubscription.value) {
-    notificationSubscription.value.unsubscribe()
-    notificationSubscription.value = null
-  }
-
-  if (surveyBubbleTimeout) {
-    clearTimeout(surveyBubbleTimeout)
-    surveyBubbleTimeout = null
-  }
-
-  if (surveyBubbleHideTimeout) {
-    clearTimeout(surveyBubbleHideTimeout)
-    surveyBubbleHideTimeout = null
-  }
-}
-
 const startHomepageRuntime = async ({ refresh = false } = {}) => {
   updateSafeAreaInsets()
   window.addEventListener('resize', updateSafeAreaInsets)
@@ -512,6 +535,7 @@ const startHomepageRuntime = async ({ refresh = false } = {}) => {
 async function setupProductsSubscription() {
   if (productsSubscription.value) {
     productsSubscription.value.unsubscribe()
+    productsSubscription.value = null
   }
 
   // Subscribe to real-time updates on products table
@@ -578,6 +602,12 @@ onMounted(async () => {
     loading.value = true
     errorMsg.value = ''
 
+    try {
+      hasAnsweredSurvey.value = localStorage.getItem('surveyAnswered') === 'true'
+    } catch (error) {
+      console.error('Could not load survey state:', error)
+    }
+
     // Only run these on mobile builds
     if (Capacitor.isNativePlatform()) {
       await checkNetworkStatus()
@@ -607,11 +637,18 @@ onMounted(async () => {
 
     // Load shops and products in parallel
     await Promise.all([fetchShops(), fetchProducts()])
+    homepageInitialized = true
 
     // Show survey bubble after a delay (3 seconds)
-    setTimeout(() => {
-      showSurveyBubble.value = true
-    }, 3000)
+    if (!hasAnsweredSurvey.value) {
+      surveyBubbleTimeout = setTimeout(() => {
+        showSurveyBubble.value = true
+      }, 3000)
+
+      surveyBubbleHideTimeout = setTimeout(() => {
+        showSurveyBubble.value = false
+      }, 15000)
+    }
   } catch (err) {
     console.error('❌ Error in onMounted:', err)
     errorMsg.value = 'Failed to load app data'
@@ -627,73 +664,71 @@ onUnmounted(() => {
 
   if (notificationSubscription.value) {
     notificationSubscription.value.unsubscribe()
+    notificationSubscription.value = null
   }
 
   // Clean up products subscription
   if (productsSubscription.value) {
     productsSubscription.value.unsubscribe()
+    productsSubscription.value = null
     console.log('📡 Unsubscribed from product updates')
   }
 })
 
 /* 🧭 Navigation */
+onUnmounted(() => {
+  if (networkStatusListener) {
+    void networkStatusListener.remove()
+    networkStatusListener = null
+  }
+
+  if (surveyBubbleTimeout) {
+    clearTimeout(surveyBubbleTimeout)
+    surveyBubbleTimeout = null
+  }
+
+  if (surveyBubbleHideTimeout) {
+    clearTimeout(surveyBubbleHideTimeout)
+    surveyBubbleHideTimeout = null
+  }
+})
+
 const seeMoreNearby = () => router.push('/mapsearch')
 const goNotifications = () => router.push('/notificationview')
 const goToProduct = (id) => router.push({ name: 'product-detail', params: { id } })
 const goToShop = (id) => router.push({ name: 'shop-view', params: { id } })
 
-//for embedded survey
-const showSurvey = ref(false)
-const hasAnsweredSurvey = ref(false)
-const showSurveyBubble = ref(false)
-
 function openSurvey() {
+  if (surveyBubbleTimeout) {
+    clearTimeout(surveyBubbleTimeout)
+    surveyBubbleTimeout = null
+  }
+
+  if (surveyBubbleHideTimeout) {
+    clearTimeout(surveyBubbleHideTimeout)
+    surveyBubbleHideTimeout = null
+  }
+
   showSurvey.value = true
-  showSurveyBubble.value = false // Hide bubble when user opens the survey
+  showSurveyBubble.value = false
 }
 
 function markSurveyAnswered() {
+  if (surveyBubbleTimeout) {
+    clearTimeout(surveyBubbleTimeout)
+    surveyBubbleTimeout = null
+  }
+
+  if (surveyBubbleHideTimeout) {
+    clearTimeout(surveyBubbleHideTimeout)
+    surveyBubbleHideTimeout = null
+  }
+
   hasAnsweredSurvey.value = true
   localStorage.setItem('surveyAnswered', 'true')
   showSurvey.value = false
   showSurveyBubble.value = false
 }
-
-// Add these helper functions
-const locationAccuracy = ref('none')
-
-const getLocationStatusColor = (accuracy) => {
-  switch (accuracy) {
-    case 'high':
-      return 'success'
-    case 'medium':
-      return 'warning'
-    case 'cached':
-      return 'info'
-    default:
-      return 'default'
-  }
-}
-
-const getLocationStatusText = (accuracy) => {
-  switch (accuracy) {
-    case 'high':
-      return 'Accurate'
-    case 'medium':
-      return 'Approximate'
-    case 'cached':
-      return 'Last Known'
-    default:
-      return 'No Location'
-  }
-}
-
-// Auto-hide bubble after 15 seconds
-onMounted(() => {
-  setTimeout(() => {
-    showSurveyBubble.value = false
-  }, 15000)
-})
 
 // Optional: Add a computed property for formatted product data
 const formattedProducts = computed(() => {
@@ -772,14 +807,6 @@ const hotPicks = computed(() => {
           <div class="section-header mt-6">
             <h3 class="section-title">Stores Within Butuan</h3>
             <div class="location-status">
-              <v-chip
-                v-if="locationAccuracy !== 'none'"
-                :color="getLocationStatusColor(locationAccuracy)"
-                size="small"
-              >
-                <v-icon small class="mr-1">mdi-crosshairs-gps</v-icon>
-                {{ getLocationStatusText(locationAccuracy) }}
-              </v-chip>
               <button class="see-more" @click="seeMoreNearby"><u>See more</u></button>
             </div>
           </div>
@@ -795,8 +822,8 @@ const hotPicks = computed(() => {
             </template>
             <template v-else-if="nearby.length === 0">
               <div class="empty-card">
-                <div class="empty-title">Nothing nearby yet</div>
-                <div class="empty-sub">Location-based results coming soon.</div>
+                <div class="empty-title">No Butuan shops yet</div>
+                <div class="empty-sub">Approved shops in Butuan City will appear here.</div>
               </div>
             </template>
             <template v-else>
@@ -889,7 +916,7 @@ const hotPicks = computed(() => {
           <template v-else>
             <div class="product-grid">
               <div
-                v-for="item in products"
+                v-for="item in formattedProducts"
                 :key="item.id"
                 class="product-card"
                 :class="{

@@ -3319,7 +3319,7 @@ watch(
   bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(135deg, #438fda 0%, #3b82f6 100%);
+  background: linear-gradient(135deg, #4a92db 0%, #5290cf 100%);
   padding: 12px max(12px, var(--purchase-safe-right)) calc(12px + var(--purchase-safe-bottom))
     max(12px, var(--purchase-safe-left));
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
@@ -3635,11 +3635,11 @@ watch(
 
 /* Summary Card Enhancements */
 .summary-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #5a90c6 0%, #3169a1 100%);
   color: white;
   position: relative;
   overflow: hidden;
-  margin-top: -65px !important;
+  margin-top: -75px !important;
 }
 
 .summary-card .text-primary {

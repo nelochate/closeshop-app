@@ -5,7 +5,6 @@ import { supabase } from '@/utils/supabase'
 import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import {
   notifyAssignedRiderOrderStatus,
-  notifyAvailableRidersNewDeliveryRequest,
   notifyCustomerOrderStatus,
   notifySellerOrderStatus,
 } from '@/utils/orderNotifications'
@@ -45,7 +44,7 @@ const shop = ref<any>(null)
 const shippingAddress = ref<any>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
-const activeTab = ref('details')
+const activeTab = ref<'details' | 'timeline'>('details')
 const currentUser = ref<any>(null)
 const riderDetails = ref<any>(null)
 const userRole = ref<'buyer' | 'seller' | 'rider' | null>(null)
@@ -63,6 +62,22 @@ const selectedImageTitle = ref('')
 const customerDecisionLoading = ref<'completed' | 'not_received' | null>(null)
 const cancellationActionLoading = ref<'cancel' | 'request' | 'approve' | 'decline' | null>(null)
 let statusSubscription: any = null
+
+type NotificationStatus =
+  | typeof ORDER_CANCEL_REQUESTED_STATUS
+  | 'accepted_by_rider'
+  | 'picked_up'
+  | 'delivered'
+  | 'cancelled'
+  | 'cancellation_request_declined'
+  | 'not_received'
+
+type BuyerCancellationNotice = {
+  type: 'info' | 'warning' | 'error'
+  icon: string
+  title: string
+  message: string
+}
 
 const fetchCurrentRiderProfile = async (profileId: string) => {
   try {
@@ -119,7 +134,6 @@ const getCurrentUserAndRole = async () => {
       userRole.value = 'rider'
     }
 
-    console.log('User role:', userRole.value)
   } catch (err) {
     console.error('Error getting user role:', err)
   }
@@ -156,183 +170,6 @@ const fetchRiderDetails = async () => {
   }
 }
 
-// Calculate time remaining for cancellation
-const calculateTimeRemaining = () => {
-  if (!order.value || !order.value.created_at) return CANCEL_WINDOW_SECONDS
-  if (order.value.status !== 'pending_approval') return 0
-
-  const orderCreatedAt = getAppTimestampValue(order.value.created_at)
-  if (!orderCreatedAt) return CANCEL_WINDOW_SECONDS
-  const currentTime = Date.now()
-  const timeElapsed = (currentTime - orderCreatedAt) / 1000
-  const maxCancelTime = 5 * 60
-
-  return Math.max(0, maxCancelTime - timeElapsed)
-}
-
-const formatTimeRemaining = () => {
-  const remaining = Math.max(0, Math.ceil(timeRemaining.value))
-  if (remaining <= 0) return '00:00'
-  const minutes = Math.floor(remaining / 60)
-  const seconds = remaining % 60
-  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
-}
-
-const startCancelTimer = () => {
-  if (timerInterval) clearInterval(timerInterval)
-
-  const initialRemaining = calculateTimeRemaining()
-  timeRemaining.value = initialRemaining
-  canCancel.value = initialRemaining > 0 && order.value?.status === 'pending_approval'
-
-  if (initialRemaining > 0 && order.value?.status === 'pending_approval') {
-    timerInterval = setInterval(() => {
-      const newRemaining = calculateTimeRemaining()
-      timeRemaining.value = newRemaining
-      canCancel.value = newRemaining > 0 && order.value?.status === 'pending_approval'
-      if (newRemaining <= 0 && timerInterval) {
-        clearInterval(timerInterval)
-        timerInterval = null
-        canCancel.value = false
-      }
-    }, 1000)
-  }
-}
-
-// Function to update order status after cancellation window and update product stock/sold
-const confirmOrderAndUpdateStock = async () => {
-  try {
-    // Get all pending_approval orders that are older than 5 minutes
-    const cutoffTime = new Date(Date.now() - CANCEL_WINDOW_SECONDS * 1000).toISOString()
-
-    const { data: pendingOrders, error: fetchError } = await supabase
-      .from('orders')
-      .select('id')
-      .eq('status', 'pending_approval')
-      .lt('created_at', cutoffTime)
-
-    if (fetchError) throw fetchError
-
-    if (pendingOrders && pendingOrders.length > 0) {
-      const orderIds = pendingOrders.map((o: any) => o.id)
-
-      // 📦 Fetch all order items for these orders to update product stock
-      const { data: orderItemsData, error: itemsError } = await supabase
-        .from('order_items')
-        .select('product_id, quantity, selected_variety')
-        .in('order_id', orderIds)
-
-      if (itemsError) throw itemsError
-
-      // 📊 Update product stock and sold counts
-      if (orderItemsData && orderItemsData.length > 0) {
-        // Group items by product_id to handle multiple items of same product
-        const productUpdates: { [key: string]: { quantity: number; variety: string | null } } = {}
-
-        orderItemsData.forEach((item: any) => {
-          const productId = item.product_id
-          if (!productUpdates[productId]) {
-            productUpdates[productId] = { quantity: 0, variety: item.selected_variety }
-          }
-          productUpdates[productId].quantity += item.quantity
-        })
-
-        // Update each product's stock (decrease) and sold (increase)
-        for (const [productId, { quantity }] of Object.entries(productUpdates)) {
-          try {
-            // Get current product data
-            const { data: productData, error: fetchProdError } = await supabase
-              .from('products')
-              .select('stock, sold, varieties')
-              .eq('id', productId)
-              .single()
-
-            if (fetchProdError) {
-              console.error(`Error fetching product ${productId}:`, fetchProdError)
-              continue
-            }
-
-            // Calculate new stock and sold values
-            const newStock = Math.max(0, (productData.stock || 0) - quantity)
-            const newSold = (productData.sold || 0) + quantity
-
-            // Update the product
-            const { error: updateProdError } = await supabase
-              .from('products')
-              .update({
-                stock: newStock,
-                sold: newSold,
-              })
-              .eq('id', productId)
-
-            if (updateProdError) {
-              console.error(`Error updating product ${productId}:`, updateProdError)
-            } else {
-              console.log(`✅ Updated product ${productId}: sold +${quantity}, stock ${newStock}`)
-            }
-          } catch (err) {
-            console.error(`Error processing product ${productId}:`, err)
-          }
-        }
-      }
-
-      // Update all expired pending orders to waiting_for_rider
-      const { error: updateError } = await supabase
-        .from('orders')
-        .update({
-          status: 'waiting_for_rider',
-          approved_at: new Date().toISOString(),
-        })
-        .in('id', orderIds)
-        .eq('status', 'pending_approval')
-
-      if (updateError) throw updateError
-      console.log(
-        `✅ Updated ${pendingOrders.length} orders from pending_approval to waiting_for_rider`,
-      )
-    }
-  } catch (err) {
-    console.error('❌ Error confirming expired orders:', err)
-  }
-}
-const cancelOrder = async () => {
-  const remaining = calculateTimeRemaining()
-  if (remaining <= 0 || isCancelDisabled.value) {
-    alert('Cancellation window has expired.')
-    return
-  }
-
-  if (!confirm(`Cancel this order? You have ${formatTimeRemaining()} left.`)) return
-
-  try {
-    // First, get the order items to calculate stock restoration
-    const { data: orderItemsData, error: itemsError } = await supabase
-      .from('order_items')
-      .select('product_id, quantity')
-      .eq('order_id', orderId)
-
-    if (itemsError) throw itemsError
-
-    // Update order status to cancelled
-    const { error } = await supabase
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-      })
-      .eq('id', orderId)
-
-    if (error) throw error
-
-    if (timerInterval) clearInterval(timerInterval)
-    await fetchOrderDetails()
-    alert('Order cancelled successfully.')
-  } catch (err) {
-    console.error('Error cancelling order:', err)
-    alert('Failed to cancel order.')
-  }
-}
-
 // Subscribe to real-time updates
 const subscribeToOrderUpdates = () => {
   if (statusSubscription) supabase.removeChannel(statusSubscription)
@@ -348,7 +185,6 @@ const subscribeToOrderUpdates = () => {
         filter: `id=eq.${orderId}`,
       },
       (payload) => {
-        console.log('Order update:', payload.new.status)
         order.value = { ...order.value, ...payload.new }
         fetchRiderDetails()
         getCurrentUserAndRole()
@@ -357,7 +193,7 @@ const subscribeToOrderUpdates = () => {
     .subscribe()
 }
 
-// Modified fetchOrderDetails to include product stock info
+// Fetch order details
 const fetchOrderDetails = async () => {
   try {
     loading.value = true
@@ -371,21 +207,8 @@ const fetchOrderDetails = async () => {
         `
         *,
         order_items (
-          id,
-          product_id,
-          quantity,
-          price,
-          selected_size,
-          selected_variety,
-          products (
-            id,
-            prod_name,
-            main_img_urls,
-            description,
-            shop_id,
-            stock,
-            sold
-          )
+          id, product_id, quantity, price, selected_size, selected_variety,
+          products (id, prod_name, main_img_urls, description, shop_id)
         ),
         buyer:profiles!orders_user_id_fkey (id, first_name, last_name, avatar_url, phone),
         address:addresses!orders_address_id_fkey ( * )
@@ -411,6 +234,7 @@ const fetchOrderDetails = async () => {
     }
 
     await loadTrackingLocations()
+
     await getCurrentUserAndRole()
 
     if (!userRole.value) {
@@ -434,19 +258,6 @@ const fetchOrderDetails = async () => {
     loading.value = false
   }
 }
-
-// Update onMounted
-onMounted(async () => {
-  await fetchOrderDetails()
-  startExpiryCheck() // Start periodic check for expired orders
-})
-
-// Update onUnmounted
-onUnmounted(() => {
-  if (timerInterval) clearInterval(timerInterval)
-  if (statusSubscription) supabase.removeChannel(statusSubscription)
-  cleanupExpiryCheck() // Clean up expiry check interval
-})
 
 // Fetch shop details
 const fetchShopDetails = async (shopId: string) => {
@@ -511,7 +322,10 @@ const subtotal = computed(() => {
 })
 
 const deliveryFee = computed(() => {
-  return resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value)
+  return resolveOrderDeliveryFee({
+    ...(order.value || {}),
+    subtotal: subtotal.value,
+  })
 })
 
 const totalAmount = computed(() =>
@@ -706,7 +520,7 @@ const buyerCancelButtonText = computed(() => {
   if (isBuyerCancellationLocked.value) return 'Cancellation Unavailable'
   return 'Cancel Order'
 })
-const buyerCancellationNotice = computed(() => {
+const buyerCancellationNotice = computed<BuyerCancellationNotice | null>(() => {
   if (!isBuyer.value || !order.value) return null
 
   if (canBuyerCancelDirectly.value) {
@@ -896,7 +710,6 @@ const timelineSteps = computed(() => {
       title: 'Order Placed',
       description: 'Your order has been placed and is waiting for seller approval',
       status: 'completed',
-      timestamp: order.value?.created_at,
       icon: 'mdi-cart-check',
       date: order.value?.created_at,
       actor: 'Customer',
@@ -906,7 +719,6 @@ const timelineSteps = computed(() => {
       title: 'Order Approved',
       description: 'Seller has approved your order and is looking for a rider',
       status: getStepStatus('approved'),
-      timestamp: order.value?.approved_at,
       icon: 'mdi-store-check',
       date: order.value?.approved_at,
       actor: 'Seller',
@@ -916,7 +728,6 @@ const timelineSteps = computed(() => {
       title: 'Rider Assigned',
       description: 'A rider has accepted your order and is on the way',
       status: getStepStatus('rider_assigned'),
-      timestamp: order.value?.accepted_at,
       icon: 'mdi-motorbike',
       date: order.value?.accepted_at,
       actor: 'Rider',
@@ -926,7 +737,6 @@ const timelineSteps = computed(() => {
       title: 'Order Picked Up',
       description: 'Rider has picked up your order and is heading to you',
       status: getStepStatus('picked_up'),
-      timestamp: order.value?.picked_up_at,
       icon: 'mdi-package-up',
       date: order.value?.picked_up_at,
       actor: 'Rider',
@@ -936,7 +746,6 @@ const timelineSteps = computed(() => {
       title: 'Order Delivered',
       description: 'Your order has been successfully delivered',
       status: getStepStatus('delivered'),
-      timestamp: order.value?.delivered_at,
       icon: 'mdi-home-check',
       date: order.value?.delivered_at,
       actor: 'Rider',
@@ -950,7 +759,6 @@ const timelineSteps = computed(() => {
       description:
         'The customer reported that the order was not received and the case is waiting for resolution.',
       status: getStepStatus('delivery_issue'),
-      timestamp: order.value?.updated_at,
       icon: 'mdi-alert-circle',
       date: order.value?.updated_at,
       actor: 'Customer',
@@ -1039,6 +847,90 @@ const getOrderNotificationData = () => ({
   customer_name: buyerDisplayName.value,
 })
 
+const notifyCustomerStatus = async ({
+  status,
+  createdAt,
+  orderData = getOrderNotificationData(),
+}: {
+  status: NotificationStatus
+  createdAt?: string
+  orderData?: any
+}) =>
+  notifyCustomerOrderStatus({
+    orderId,
+    status,
+    createdAt,
+    orderData,
+  } as any)
+
+const notifySellerStatus = async ({
+  status,
+  createdAt,
+  actorUserId = currentUser.value?.id,
+  orderData = getOrderNotificationData(),
+}: {
+  status: NotificationStatus
+  createdAt?: string
+  actorUserId?: string | null
+  orderData?: any
+}) =>
+  notifySellerOrderStatus({
+    orderId,
+    status,
+    createdAt,
+    actorUserId,
+    orderData,
+  } as any)
+
+const notifyAssignedRiderStatus = async ({
+  status,
+  createdAt,
+  actorUserId = currentUser.value?.id,
+  orderData = getOrderNotificationData(),
+}: {
+  status: NotificationStatus
+  createdAt?: string
+  actorUserId?: string | null
+  orderData?: any
+}) =>
+  notifyAssignedRiderOrderStatus({
+    orderId,
+    status,
+    createdAt,
+    actorUserId,
+    orderData,
+  } as any)
+
+const createNotificationRecord = async ({
+  userId,
+  type,
+  title,
+  message,
+  relatedId = orderId,
+  relatedType = 'order',
+  isRead = false,
+  createdAt,
+}: {
+  userId: string
+  type: string
+  title: string
+  message: string
+  relatedId?: string | null
+  relatedType?: string | null
+  isRead?: boolean
+  createdAt?: string
+}) =>
+  createNotificationRecordIfEnabled({
+    userId,
+    type,
+    title,
+    message,
+    relatedId,
+    relatedType,
+    isRead,
+    createdAt,
+  } as any)
+
 const createSellerCancellationRequestFallbackNotification = async (createdAt: string) => {
   const sellerUserId = shop.value?.owner_id
   if (!sellerUserId || sellerUserId === currentUser.value?.id) {
@@ -1050,7 +942,7 @@ const createSellerCancellationRequestFallbackNotification = async (createdAt: st
     : 'the order'
   const customerLabel = buyerDisplayName.value ? ` for ${buyerDisplayName.value}` : ''
 
-  const notificationResult = await createNotificationRecordIfEnabled({
+  const notificationResult = await createNotificationRecord({
     userId: sellerUserId,
     type: 'shipping_update',
     title: 'Cancellation Requested',
@@ -1151,12 +1043,10 @@ const cancelOrder = async () => {
       }
 
       try {
-        const notificationResult = await notifySellerOrderStatus({
-          orderId,
+        const notificationResult = await notifySellerStatus({
           status: ORDER_CANCEL_REQUESTED_STATUS,
           createdAt: requestedAt,
           actorUserId: currentUser.value.id,
-          orderData: getOrderNotificationData(),
         })
 
         if (!notificationResult?.created) {
@@ -1187,8 +1077,12 @@ const cancelOrder = async () => {
     } catch (err) {
       console.error('Error requesting cancellation:', err)
       if (
-        err?.code === '23514' &&
-        typeof err?.message === 'string' &&
+        typeof err === 'object' &&
+        err !== null &&
+        'code' in err &&
+        'message' in err &&
+        err.code === '23514' &&
+        typeof err.message === 'string' &&
         err.message.includes('orders_status_check')
       ) {
         alert(
@@ -1208,28 +1102,15 @@ const approveOrder = async () => {
   if (!confirm('Approve this order? It will be made available for riders.')) return
 
   try {
-    const approvedAt = new Date().toISOString()
     const { error } = await supabase
       .from('orders')
       .update({
         status: 'waiting_for_rider',
-        approved_at: approvedAt,
+        approved_at: new Date().toISOString(),
       })
       .eq('id', orderId)
 
     if (error) throw error
-
-    try {
-      await notifyAvailableRidersNewDeliveryRequest({
-        orderId,
-        createdAt: approvedAt,
-        actorUserId: currentUser.value?.id || null,
-        orderData: getOrderNotificationData(),
-      })
-    } catch (notificationError) {
-      console.warn('Could not notify available riders after order approval:', notificationError)
-    }
-
     alert('Order approved! Riders can now accept it.')
     await fetchOrderDetails()
   } catch (err) {
@@ -1268,11 +1149,9 @@ const approveCancellationRequest = async () => {
     }
 
     try {
-      await notifyCustomerOrderStatus({
-        orderId,
+      await notifyCustomerStatus({
         status: 'cancelled',
         createdAt: cancelledAt,
-        orderData: getOrderNotificationData(),
       })
     } catch (notificationError) {
       console.warn('Could not notify customer about the approved cancellation:', notificationError)
@@ -1318,25 +1197,12 @@ const declineCancellationRequest = async () => {
     }
 
     try {
-      await notifyCustomerOrderStatus({
-        orderId,
+      await notifyCustomerStatus({
         status: 'cancellation_request_declined',
         createdAt: respondedAt,
-        orderData: getOrderNotificationData(),
       })
     } catch (notificationError) {
       console.warn('Could not notify customer about the declined cancellation request:', notificationError)
-    }
-
-    try {
-      await notifyAvailableRidersNewDeliveryRequest({
-        orderId,
-        createdAt: respondedAt,
-        actorUserId: currentUser.value?.id || null,
-        orderData: getOrderNotificationData(),
-      })
-    } catch (notificationError) {
-      console.warn('Could not notify available riders after returning the order to waiting for rider:', notificationError)
     }
 
     alert('Cancellation request declined. Order returned to waiting for rider.')
@@ -1404,36 +1270,10 @@ const acceptOrderAsRider = async () => {
     }
 
     try {
-      await notifyCustomerOrderStatus({
-        orderId,
+      await notifySellerStatus({
         status: 'accepted_by_rider',
         createdAt: acceptedAt,
         actorUserId: currentUser.value?.id,
-        orderData: {
-          ...order.value,
-          address: shippingAddress.value,
-          buyer: buyer.value,
-          shop: shop.value,
-          shop_name: shop.value?.business_name,
-        },
-      })
-    } catch (notificationError) {
-      console.warn('Could not notify customer about rider assignment:', notificationError)
-    }
-
-    try {
-      await notifySellerOrderStatus({
-        orderId,
-        status: 'accepted_by_rider',
-        createdAt: acceptedAt,
-        actorUserId: currentUser.value?.id,
-        orderData: {
-          ...order.value,
-          address: shippingAddress.value,
-          buyer: buyer.value,
-          shop: shop.value,
-          shop_name: shop.value?.business_name,
-        },
       })
     } catch (notificationError) {
       console.warn('Could not notify seller about rider acceptance:', notificationError)
@@ -1475,8 +1315,7 @@ const markAsPickedUp = async () => {
     }
 
     try {
-      await notifyCustomerOrderStatus({
-        orderId,
+      await notifyCustomerStatus({
         status: 'picked_up',
         createdAt: pickedUpAt,
         orderData: {
@@ -1489,18 +1328,10 @@ const markAsPickedUp = async () => {
     }
 
     try {
-      await notifySellerOrderStatus({
-        orderId,
+      await notifySellerStatus({
         status: 'picked_up',
         createdAt: pickedUpAt,
         actorUserId: currentUser.value?.id,
-        orderData: {
-          ...order.value,
-          address: shippingAddress.value,
-          buyer: buyer.value,
-          shop: shop.value,
-          shop_name: shop.value?.business_name,
-        },
       })
     } catch (notificationError) {
       console.warn('Could not notify seller about picked up status:', notificationError)
@@ -1662,8 +1493,7 @@ const markAsDelivered = async () => {
     closeProofDialog()
 
     try {
-      await notifyCustomerOrderStatus({
-        orderId,
+      await notifyCustomerStatus({
         status: 'delivered',
         createdAt: deliveredAt,
         orderData: {
@@ -1676,18 +1506,10 @@ const markAsDelivered = async () => {
     }
 
     try {
-      await notifySellerOrderStatus({
-        orderId,
+      await notifySellerStatus({
         status: 'delivered',
         createdAt: deliveredAt,
         actorUserId: currentUser.value?.id,
-        orderData: {
-          ...order.value,
-          address: shippingAddress.value,
-          buyer: buyer.value,
-          shop: shop.value,
-          shop_name: shop.value?.business_name,
-        },
       })
     } catch (notificationError) {
       console.warn('Could not notify seller about delivered status:', notificationError)
@@ -1702,8 +1524,6 @@ const markAsDelivered = async () => {
     uploadingProof.value = false
   }
 }
-
-//stock management
 
 const confirmOrderReceived = async () => {
   if (!showCustomerDeliveryActions.value || !currentUser.value?.id) return
@@ -1771,36 +1591,20 @@ const reportOrderNotReceived = async () => {
     }
 
     try {
-      await notifySellerOrderStatus({
-        orderId,
+      await notifySellerStatus({
         status: 'not_received',
         createdAt: reportedAt,
         actorUserId: currentUser.value.id,
-        orderData: {
-          ...order.value,
-          address: shippingAddress.value,
-          buyer: buyer.value,
-          shop: shop.value,
-          shop_name: shop.value?.business_name,
-        },
       })
     } catch (notificationError) {
       console.warn('Could not notify seller about the delivery issue:', notificationError)
     }
 
     try {
-      await notifyAssignedRiderOrderStatus({
-        orderId,
+      await notifyAssignedRiderStatus({
         status: 'not_received',
         createdAt: reportedAt,
         actorUserId: currentUser.value.id,
-        orderData: {
-          ...order.value,
-          address: shippingAddress.value,
-          buyer: buyer.value,
-          shop: shop.value,
-          shop_name: shop.value?.business_name,
-        },
       })
     } catch (notificationError) {
       console.warn(

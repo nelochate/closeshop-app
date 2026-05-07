@@ -1108,17 +1108,6 @@ onUnmounted(() => {
           </div>
         </v-card>
 
-
-      <!-- Earnings Card -->
-      <v-card class="stat-card" elevation="0">
-        <div class="stat-content">
-          <v-icon size="32" color="#ff9800">mdi-currency-php</v-icon>
-          <div class="stat-info">
-            <div class="stat-value">{{ stats.totalEarnings.toLocaleString() }}</div>
-            <div class="stat-label">Total Earnings</div>
-          </div>
-        </div>
-      </v-card>
       </div>
 
 

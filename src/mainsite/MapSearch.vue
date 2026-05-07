@@ -3101,20 +3101,29 @@ onUnmounted(() => {
                   </span>
                 </v-btn>
               </template>
+
               <v-card class="display-options-card" rounded="xl">
                 <v-card-title class="display-options-title">
-                  <div>
-                    <div class="text-subtitle-1 font-weight-bold">Display Options</div>
+                  <div class="w-100">
+                    <!-- Title Row -->
+                    <div class="d-flex align-center justify-space-between">
+                      <div class="text-subtitle-1 font-weight-bold">
+                        Display Options
+                      </div>
+
+                      <v-btn icon @click="showDisplayOptionsMenu = false" variant="text" size="small"
+                        aria-label="Close shop menu">
+                        <v-icon>mdi-close</v-icon>
+                      </v-btn>
+                    </div>
+
+                    <!-- Subtitle -->
                     <div class="text-caption text-medium-emphasis">
-                      Browse shops by your current municipality or switch to another province and
-                      municipality.
+                      Browse other provinces and/or city/municipality
                     </div>
                   </div>
-                  <v-chip size="small" color="primary" variant="tonal">
-                    {{ activeLocationModeLabel }} {{ activeAreaScopeLabel }}
-                  </v-chip>
                 </v-card-title>
-
+                
                 <v-card-text class="pt-0">
                   <div class="display-options-section">
                     <div class="display-options-section-title">Shop Coverage</div>
@@ -3145,9 +3154,7 @@ onUnmounted(() => {
                   <div class="display-options-section">
                     <div class="display-options-section-title">Browse Another Area</div>
                     <div class="display-options-helper">
-                      Select a province, then optionally choose a city or municipality, including
-                      independent cities when available, to move the map and reload nearby shops
-                      there.
+                      Currently, the primary area of this app is within Butuan City. Select the province 'Agusan del Norte' city/municipality to 'City of Butuan' to view all registered shops.
                     </div>
 
                     <v-autocomplete
@@ -3186,10 +3193,6 @@ onUnmounted(() => {
 
                   <div class="display-options-section">
                     <div class="display-options-section-title">Map Boundary</div>
-                    <div class="display-options-helper">
-                      Show the active province or municipality outline so you can see the area being
-                      used for shop results.
-                    </div>
                     <v-btn
                       block
                       variant="outlined"
@@ -3768,12 +3771,12 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  background: rgba(255, 255, 255, 0.95);
+  background: rgba(255, 255, 255, 0.023) !important;
   backdrop-filter: blur(10px);
   border-radius: 20px;
   padding: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0)!important;
   pointer-events: auto;
 }
 

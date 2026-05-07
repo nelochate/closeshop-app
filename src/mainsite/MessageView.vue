@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onUnmounted, onActivated, onDeactivated } from 'vue'
+import { ref, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
@@ -23,6 +23,7 @@ let conversationsSubscription: any = null
 let refreshInterval: ReturnType<typeof setInterval> | null = null
 let timeUpdateInterval: ReturnType<typeof setInterval> | null = null
 let hasLoadedConversations = false
+let runtimeStartPromise: Promise<void> | null = null
 
 const formatConversationTime = (timestamp?: string | null) =>
   formatLiveTimestamp(timestamp, currentTime.value)
@@ -371,29 +372,44 @@ const subscribeToMessages = () => {
 }
 
 const startMessageViewRuntime = async ({ refresh = false } = {}) => {
-  currentTime.value = Date.now()
-
-  if (!timeUpdateInterval) {
-    timeUpdateInterval = setInterval(() => {
-      currentTime.value = Date.now()
-    }, 30000)
+  if (runtimeStartPromise) {
+    return runtimeStartPromise
   }
 
-  if (!hasLoadedConversations || refresh) {
-    await fetchConversations()
-    hasLoadedConversations = true
-  }
+  runtimeStartPromise = (async () => {
+    currentTime.value = Date.now()
 
-  if (!conversationsSubscription) {
-    conversationsSubscription = subscribeToMessages()
-  }
+    if (!timeUpdateInterval) {
+      timeUpdateInterval = setInterval(() => {
+        currentTime.value = Date.now()
+      }, 30000)
+    }
 
-  if (!refreshInterval) {
-    refreshInterval = setInterval(fetchConversations, 30000)
+    if (!hasLoadedConversations || refresh) {
+      await fetchConversations()
+      hasLoadedConversations = !error.value
+    }
+
+    if (!conversationsSubscription) {
+      conversationsSubscription = subscribeToMessages()
+    }
+
+    if (!refreshInterval) {
+      refreshInterval = setInterval(() => {
+        void fetchConversations()
+      }, 30000)
+    }
+  })()
+
+  try {
+    await runtimeStartPromise
+  } finally {
+    runtimeStartPromise = null
   }
 }
 
 const cleanupMessageViewRuntime = () => {
+  runtimeStartPromise = null
   conversationsSubscription?.unsubscribe()
   conversationsSubscription = null
 
@@ -424,6 +440,10 @@ const startNewConversation = () => {
   console.log('➕ Start new conversation')
   // router.push({ name: 'new-conversation' })
 }
+
+onMounted(() => {
+  void startMessageViewRuntime({ refresh: true })
+})
 
 onActivated(() => {
   void startMessageViewRuntime({ refresh: true })
@@ -700,7 +720,7 @@ onUnmounted(() => {
 }
 
 .conversations-list {
-  margin-top: -55px;
+  margin-top: -64px;
   background: white;
   padding: 0;
 }

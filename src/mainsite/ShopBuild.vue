@@ -1,9 +1,18 @@
 <script setup lang="ts">
-import { ref, watch, onMounted, nextTick, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick, computed } from 'vue'
+import type { LocationOption, ShopAddressComponents } from '@/utils/location'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { StatusBar, Style } from '@capacitor/status-bar'
+import {
+  ensureLocationPermission,
+  findMatchingLocationOption,
+  formatShopAddress,
+  getPreciseCurrentPosition,
+  parseCoordinate,
+  resolveCoordinateAddress,
+} from '@/utils/location'
 // -------------------- MAPBOX --------------------
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -81,9 +90,7 @@ const hideAppBar = async () => {
 
   try {
     await StatusBar.hide()
-  } catch (error) {
-    console.log('StatusBar plugin not available on web')
-  }
+  } catch {}
 }
 
 const showAppBar = async () => {
@@ -93,9 +100,7 @@ const showAppBar = async () => {
   try {
     await StatusBar.show()
     await StatusBar.setStyle({ style: Style.Light })
-  } catch (error) {
-    console.log('StatusBar plugin not available on web')
-  }
+  } catch {}
 }
 // -------------------- SHOP INFO --------------------
 const shopName = ref('')
@@ -126,14 +131,6 @@ const showSecretKey = ref(false)
 const showWebhookSecret = ref(false)
 const copied = ref(false)
 const gcashError = ref('')
-const debugInfo = ref('')
-const currentUser = ref<any>(null)
-
-// Debug Supabase client
-console.log('🔧 Supabase client initialized:', {
-  hasAuth: !!supabase.auth,
-  hasFrom: !!supabase.from,
-})
 
 // Computed webhook URL
 const webhookUrl = computed(() => {
@@ -153,135 +150,6 @@ const copyWebhookUrl = async () => {
   } catch (err) {
     console.error('Failed to copy:', err)
   }
-}
-
-// -------------------- TEST FUNCTIONS --------------------
-const testSupabaseConnection = async () => {
-  try {
-    console.log('🔍 Testing Supabase connection...')
-    const { data, error } = await supabase.from('shops').select('count').limit(1)
-
-    if (error) {
-      console.error('❌ Supabase connection error:', error)
-      showSnackbar('Supabase connection failed: ' + error.message, 'error')
-    } else {
-      console.log('✅ Supabase connection successful')
-      showSnackbar('Supabase connection successful!', 'success')
-    }
-  } catch (err) {
-    console.error('❌ Network error:', err)
-    showSnackbar('Network error: ' + err, 'error')
-  }
-}
-
-const checkAuthStatus = async () => {
-  console.log('========== CHECKING AUTH STATUS ==========')
-
-  try {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser()
-
-    console.log('Auth check result:', { user, error })
-
-    if (user) {
-      console.log('✅ User is authenticated:', {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-      })
-      currentUser.value = user
-      showSnackbar(`Logged in as: ${user.email}`, 'success')
-    } else {
-      console.log('❌ No authenticated user found')
-      showSnackbar('No user logged in', 'error')
-    }
-
-    // Also check session
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession()
-    console.log('Session check:', { session, sessionError })
-  } catch (err) {
-    console.error('❌ Auth check exception:', err)
-    showSnackbar('Auth check failed: ' + err, 'error')
-  }
-
-  console.log('========== END AUTH CHECK ==========')
-}
-
-const testAuthDirectly = async () => {
-  console.log('========== TEST AUTH DIRECTLY ==========')
-  try {
-    const {
-      data: { session },
-      error,
-    } = await supabase.auth.getSession()
-    console.log('Session check:', { session, error })
-
-    const {
-      data: { user },
-      error: userError,
-    } = await supabase.auth.getUser()
-    console.log('User check:', { user, error: userError })
-
-    if (user) {
-      showSnackbar(`Logged in as: ${user.email}`, 'success')
-    } else {
-      showSnackbar('Not logged in', 'error')
-    }
-  } catch (err) {
-    console.error('Auth test error:', err)
-    showSnackbar('Auth test failed', 'error')
-  }
-}
-
-const testSimpleUpdate = async () => {
-  console.log('========== TEST SIMPLE UPDATE ==========')
-
-  if (!currentShopId.value) {
-    console.error('❌ No shop ID')
-    showSnackbar('No shop ID found', 'error')
-    return
-  }
-
-  try {
-    console.log('Attempting simple update with ID:', currentShopId.value)
-
-    const testValue = { test: 'simple value ' + new Date().toISOString() }
-    console.log('Test data:', testValue)
-
-    const { data, error } = await supabase
-      .from('shops')
-      .update({
-        gcash_enabled: true,
-        paymongo_config: testValue,
-      })
-      .eq('id', currentShopId.value)
-      .select()
-
-    console.log('Simple update result:', { data, error })
-
-    if (error) {
-      console.error('❌ Error details:', {
-        message: error.message,
-        code: error.code,
-        details: error.details,
-        hint: error.hint,
-      })
-      showSnackbar('Update failed: ' + error.message, 'error')
-    } else {
-      console.log('✅ Update successful!', data)
-      showSnackbar('Test update successful!', 'success')
-    }
-  } catch (err) {
-    console.error('❌ Exception:', err)
-    showSnackbar('Exception: ' + err, 'error')
-  }
-
-  console.log('========== END TEST ==========')
 }
 
 // -------------------- IMAGE UPLOAD HANDLERS --------------------
@@ -320,9 +188,9 @@ const address = {
 
 // -------------------- PSGC --------------------
 const regions = ref<any[]>([])
-const provinces = ref<any[]>([])
-const cities = ref<any[]>([])
-const barangaysList = ref<any[]>([])
+const provinces = ref<LocationOption[]>([])
+const cities = ref<LocationOption[]>([])
+const barangaysList = ref<LocationOption[]>([])
 
 const selectedRegion = ref<any>(null)
 const selectedProvince = ref<any>(null)
@@ -338,9 +206,33 @@ const loadingBarangays = ref(false)
 // -------------------- MAP --------------------
 const latitude = ref<number | null>(8.9489)
 const longitude = ref<number | null>(125.5406)
-const map = ref<mapboxgl.Map | null>(null)
-let shopMarker: mapboxgl.Marker | null = null
+const map = ref<any>(null)
+let shopMarker: any = null
 const mapInitialized = ref(false)
+const detectedLocationAccuracy = ref<number | null>(null)
+const detectingLocation = ref(false)
+const locationLoadingStage = ref<'gps' | 'reverse-geocoding' | 'saving' | null>(null)
+const syncingDetectedAddress = ref(false)
+const syncingLocationSelections = ref(false)
+let manualLocationSyncTimer: ReturnType<typeof setTimeout> | null = null
+
+const locationLoadingMessage = computed(() => {
+  switch (locationLoadingStage.value) {
+    case 'gps':
+      return 'Getting your exact GPS location...'
+    case 'reverse-geocoding':
+      return 'Resolving your address from the selected coordinates...'
+    case 'saving':
+      return 'Saving your detected location details...'
+    default:
+      return ''
+  }
+})
+
+const DEFAULT_SHOP_LOCATION = {
+  lat: 8.9489,
+  lng: 125.5406,
+}
 
 // -------------------- OPEN DAYS --------------------
 const openDays = ref<number[]>([1, 2, 3, 4, 5, 6]) // Default: Monday to Saturday
@@ -407,60 +299,41 @@ const getPaymentLabel = (option: string) => {
 const isSavingGcash = ref(false)
 
 const saveGcashConfig = async () => {
-  // Prevent multiple simultaneous calls
   if (isSavingGcash.value) {
-    console.log('⏳ Already saving, please wait...')
     return
   }
 
-  // Clear previous errors
   gcashError.value = ''
-  debugInfo.value = ''
-
-  console.log('========== START SAVE GCASH CONFIG ==========')
-  console.log('🔍 Checking authentication...')
 
   isSavingGcash.value = true
   savingGcash.value = true
 
-  let timeoutId: NodeJS.Timeout
+  let timeoutId: ReturnType<typeof setTimeout> | null = null
 
   try {
-    // Step 1: Get current session
-    console.log('🔍 Getting current session...')
     const {
       data: { session },
       error: sessionError,
     } = await supabase.auth.getSession()
 
     if (sessionError) {
-      console.error('❌ Session error:', sessionError)
       throw new Error('Session error: ' + sessionError.message)
     }
 
     if (!session) {
-      console.error('❌ No session found')
       throw new Error('You must be logged in')
     }
 
     const user = session.user
-    console.log('✅ Authenticated:', { id: user.id, email: user.email })
 
-    // Step 2: Validate shop ID
     if (!currentShopId.value) {
-      console.error('❌ No shop ID')
       throw new Error('No shop ID found')
     }
 
-    console.log('Shop ID:', currentShopId.value)
-
-    // Step 3: Validate inputs
     if (!paymongoPublicKey.value || !paymongoSecretKey.value) {
-      console.error('❌ Missing keys')
       throw new Error('Please enter both public and secret keys')
     }
 
-    // Validate key format
     if (!paymongoPublicKey.value.startsWith('pk_')) {
       throw new Error('Invalid public key format. Should start with "pk_"')
     }
@@ -469,10 +342,6 @@ const saveGcashConfig = async () => {
       throw new Error('Invalid secret key format. Should start with "sk_"')
     }
 
-    console.log('Keys validation passed')
-
-    // Step 4: Check if shop exists and verify ownership
-    console.log('Checking shop ownership...')
     const { data: shop, error: shopError } = await supabase
       .from('shops')
       .select('id, owner_id, paymongo_config, gcash_enabled')
@@ -480,23 +349,16 @@ const saveGcashConfig = async () => {
       .maybeSingle()
 
     if (shopError) {
-      console.error('❌ Shop fetch error:', shopError)
       throw new Error(`Error fetching shop: ${shopError.message}`)
     }
 
     if (!shop) {
-      console.error('❌ Shop not found')
       throw new Error('Shop not found')
     }
 
     if (shop.owner_id !== user.id) {
-      console.error('❌ Ownership mismatch')
       throw new Error('You do not have permission to update this shop')
     }
-
-    console.log('✅ Ownership verified')
-
-    // Step 5: Prepare data with proper JSONB structure
     const paymongoConfig = {
       public_key: paymongoPublicKey.value.trim(),
       secret_key: paymongoSecretKey.value.trim(),
@@ -506,50 +368,33 @@ const saveGcashConfig = async () => {
       updated_at: new Date().toISOString(),
     }
 
-    // Ensure payment_options is an array and includes 'gcash'
     const currentPaymentOptions = paymentOptions.value || []
     const updatedPaymentOptions = [...new Set([...currentPaymentOptions, 'gcash'])]
 
-    // Filter to only allow 'cod' and 'gcash' as per your schema constraint
     const validPaymentOptions = updatedPaymentOptions.filter(
       (opt) => opt === 'cod' || opt === 'gcash',
     )
-
-    console.log('Prepared data:', {
-      paymongoConfig,
-      validPaymentOptions,
-      gcash_enabled: true,
-    })
-
-    // Step 6: Attempt update with timeout
     const updatePromise = supabase
       .from('shops')
       .update({
-        paymongo_config: paymongoConfig, // This will be stored as JSONB
+        paymongo_config: paymongoConfig,
         gcash_enabled: true,
         payment_options: validPaymentOptions,
-        payment_enabled: true, // Enable payments overall
+        payment_enabled: true,
         updated_at: new Date().toISOString(),
       })
       .eq('id', currentShopId.value)
       .eq('owner_id', user.id)
       .select()
 
-    // Create timeout promise
-    timeoutId = setTimeout(() => {
-      console.log('⏰ Operation timeout reached')
-    }, 15000)
+    timeoutId = setTimeout(() => undefined, 15000)
 
-    // Execute update
     const { data, error } = await updatePromise
 
-    // Clear timeout
     clearTimeout(timeoutId)
+    timeoutId = null
 
     if (error) {
-      console.error('❌ Update error:', error)
-
-      // Check for specific error codes
       if (error.code === '42501') {
         throw new Error('Permission denied. Check RLS policies.')
       } else if (error.code === '23505') {
@@ -562,7 +407,6 @@ const saveGcashConfig = async () => {
     }
 
     if (!data || data.length === 0) {
-      // Check if the update actually happened but no data returned
       const { data: checkData } = await supabase
         .from('shops')
         .select('gcash_enabled, paymongo_config, payment_options')
@@ -570,8 +414,6 @@ const saveGcashConfig = async () => {
         .single()
 
       if (checkData?.gcash_enabled) {
-        console.log('✅ Update was successful despite no data return')
-        // Update local state
         gcashEnabled.value = true
         paymentOptions.value = validPaymentOptions
         showSnackbar('GCash configuration saved successfully!', 'success')
@@ -580,21 +422,13 @@ const saveGcashConfig = async () => {
         throw new Error('Update failed - no data returned and verification failed')
       }
     }
-
-    console.log('✅ Update successful!', data[0])
-
-    // Update local state
     gcashEnabled.value = true
     paymentOptions.value = validPaymentOptions
 
     showSnackbar('GCash configuration saved successfully!', 'success')
   } catch (error: any) {
-    console.error('❌ Error:', error)
-
-    // Clear timeout if it exists
     if (timeoutId) clearTimeout(timeoutId)
 
-    // Provide user-friendly error messages based on error type
     if (error.message?.includes('timeout')) {
       gcashError.value = 'Operation timed out. Please check your connection and try again.'
     } else if (error.message?.includes('JWT') || error.message?.includes('token')) {
@@ -616,56 +450,6 @@ const saveGcashConfig = async () => {
   } finally {
     savingGcash.value = false
     isSavingGcash.value = false
-    console.log('========== END SAVE GCASH CONFIG ==========')
-  }
-}
-
-// Add this helper function to test RLS policies
-const testRlsPolicy = async () => {
-  if (!currentShopId.value) {
-    showSnackbar('No shop ID', 'error')
-    return
-  }
-
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-
-    console.log('Testing RLS policies...')
-    console.log('User ID:', user?.id)
-    console.log('Shop ID:', currentShopId.value)
-
-    // Test 1: Can we select the shop?
-    const { data: selectData, error: selectError } = await supabase
-      .from('shops')
-      .select('id, owner_id, gcash_enabled')
-      .eq('id', currentShopId.value)
-      .single()
-
-    console.log('SELECT test:', { selectData, selectError })
-
-    // Test 2: Can we update a simple field?
-    const { data: updateData, error: updateError } = await supabase
-      .from('shops')
-      .update({
-        test_field: 'test_value',
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', currentShopId.value)
-      .eq('owner_id', user?.id)
-      .select()
-
-    console.log('UPDATE test:', { updateData, updateError })
-
-    if (updateError) {
-      showSnackbar(`RLS test failed: ${updateError.message}`, 'error')
-    } else {
-      showSnackbar('RLS test passed! You can update the shop.', 'success')
-    }
-  } catch (err) {
-    console.error('RLS test error:', err)
-    showSnackbar('RLS test failed', 'error')
   }
 }
 
@@ -709,49 +493,6 @@ const disconnectGcash = async () => {
     savingGcash.value = false
   }
 }
-const testDirectUpdate = async () => {
-  console.log('========== TEST DIRECT UPDATE ==========')
-
-  if (!currentShopId.value) {
-    console.error('❌ No shop ID')
-    return
-  }
-
-  try {
-    // Hardcode the user ID from your logs
-    const userId = '4bc1583e-3a3f-4c18-88a5-d6832329f81d' // Your user ID from logs
-
-    const testConfig = {
-      public_key: 'pk_test_xxx',
-      secret_key: 'sk_test_xxx',
-      test_mode: true,
-      test_date: new Date().toISOString(),
-    }
-
-    console.log('Attempting direct update with hardcoded user...')
-
-    const { data, error } = await supabase
-      .from('shops')
-      .update({
-        paymongo_config: testConfig,
-        gcash_enabled: true,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', currentShopId.value)
-      .eq('owner_id', userId) // Use hardcoded user ID
-      .select()
-
-    console.log('Direct update result:', { data, error })
-
-    if (error) {
-      console.error('❌ Error:', error)
-    } else {
-      console.log('✅ Success!', data)
-    }
-  } catch (err) {
-    console.error('❌ Exception:', err)
-  }
-}
 const testGcashConnection = async () => {
   if (!currentShopId.value) return
 
@@ -785,86 +526,142 @@ const testGcashConnection = async () => {
 }
 
 // -------------------- PSGC MAPPING FUNCTIONS --------------------
-const findRegionCodeByName = (name: string) => {
-  return regions.value.find((region) => region.name.includes(name))?.code || null
+const applyAddressComponents = (components: ShopAddressComponents) => {
+  address.house_no.value = components.houseNo || ''
+  address.building.value = components.building || ''
+  address.street.value = components.street || ''
+  address.postal.value = components.postal || ''
+  address.barangay.value = components.barangay || ''
+  address.city.value = components.city || ''
+  address.province.value = components.province || ''
+  address.region.value = components.region || ''
 }
 
-const findProvinceCodeByName = (name: string) => {
-  return provinces.value.find((province) => province.name === name)?.code || null
+const getAddressComponentsSnapshot = (): ShopAddressComponents => ({
+  houseNo: address.house_no.value.trim(),
+  building: address.building.value.trim(),
+  street: address.street.value.trim(),
+  postal: address.postal.value.trim(),
+  barangay: address.barangay.value.trim(),
+  city: address.city.value.trim(),
+  province: address.province.value.trim(),
+  region: address.region.value.trim(),
+})
+
+const buildManualAddressQueries = () => {
+  const parts = {
+    house: address.house_no.value.trim(),
+    building: address.building.value.trim(),
+    street: address.street.value.trim(),
+    barangay: address.barangay.value.trim(),
+    city: address.city.value.trim(),
+    province: address.province.value.trim(),
+    region: address.region.value.trim(),
+    postal: address.postal.value.trim(),
+  }
+
+  const queries = [
+    [
+      parts.house,
+      parts.building,
+      parts.street,
+      parts.barangay,
+      parts.city,
+      parts.province,
+      parts.region,
+      parts.postal,
+      'Philippines',
+    ],
+    [parts.building, parts.street, parts.barangay, parts.city, parts.province, parts.region, 'Philippines'],
+    [parts.barangay, parts.city, parts.province, parts.region, 'Philippines'],
+    [parts.city, parts.province, parts.region, 'Philippines'],
+  ]
+    .map((segments) => segments.filter(Boolean).join(', '))
+    .filter(Boolean)
+
+  return [...new Set(queries)]
 }
 
-const findCityCodeByName = (name: string) => {
-  return cities.value.find((city) => city.name === name)?.code || null
+const updateMapMarkerPosition = (lat: number, lng: number, zoom = 17) => {
+  latitude.value = lat
+  longitude.value = lng
+
+  if (mapInitialized.value && currentStep.value === 6) {
+    map.value?.setCenter([lng, lat])
+    map.value?.setZoom(zoom)
+    shopMarker?.setLngLat([lng, lat])
+  }
 }
 
-const findBarangayCodeByName = (name: string) => {
-  return barangaysList.value.find((barangay) => barangay.name === name)?.code || null
+const syncDetectedPsgcSelections = async (components: ShopAddressComponents) => {
+  syncingLocationSelections.value = true
+
+  try {
+    if (!regions.value.length) {
+      await fetchRegions()
+    }
+
+    const matchedRegion = findMatchingLocationOption(regions.value, components.region)
+    selectedRegion.value = matchedRegion?.code || null
+    address.region.value = matchedRegion?.name || components.region || ''
+
+    if (matchedRegion?.code) {
+      await fetchProvinces(matchedRegion.code)
+    } else {
+      provinces.value = []
+    }
+
+    const matchedProvince = findMatchingLocationOption(provinces.value, components.province)
+    selectedProvince.value = matchedProvince?.code || null
+    address.province.value = matchedProvince?.name || components.province || ''
+
+    if (matchedProvince?.code) {
+      await fetchCities(matchedProvince.code)
+    } else {
+      cities.value = []
+    }
+
+    const matchedCity = findMatchingLocationOption(cities.value, components.city)
+    selectedCity.value = matchedCity?.code || null
+    address.city.value = matchedCity?.name || components.city || ''
+
+    if (matchedCity?.code) {
+      await fetchBarangays(matchedCity.code)
+    } else {
+      barangaysList.value = []
+    }
+
+    const matchedBarangay = findMatchingLocationOption(barangaysList.value, components.barangay)
+    selectedBarangay.value = matchedBarangay?.code || null
+    address.barangay.value = matchedBarangay?.name || components.barangay || ''
+  } finally {
+    syncingLocationSelections.value = false
+  }
 }
 
 // -------------------- REVERSE GEOCODE --------------------
 const reverseGeocode = async (lat: number, lng: number): Promise<string> => {
   try {
-    const res = await fetch(
-      `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}`,
-    )
-    const data = await res.json()
+    syncingDetectedAddress.value = true
 
-    if (data?.display_name) {
-      const address = data.display_name
-      fullAddress.value = address
-      showSnackbar(`📍 Address detected: ${address}`, 'success')
-      return address
-    } else {
+    const { displayName, components } = await resolveCoordinateAddress(lat, lng)
+    const detectedAddress = displayName || formatShopAddress(components)
+
+    fullAddress.value = detectedAddress
+    applyAddressComponents(components)
+    await syncDetectedPsgcSelections(components)
+
+    if (!detectedAddress) {
       showSnackbar('Address not found for this location', 'error')
-      return ''
     }
+
+    return detectedAddress
   } catch (err) {
     console.error('Reverse geocoding failed:', err)
     showSnackbar('Failed to fetch address', 'error')
     return ''
-  }
-}
-
-// -------------------- AUTOFILL ADDRESS FROM GEOCODE --------------------
-const autofillAddressFromGeocode = async (addressString: string) => {
-  if (!addressString) return
-
-  try {
-    const lowerAddress = addressString.toLowerCase()
-
-    // Try to find region
-    if (lowerAddress.includes('caraga')) {
-      const caragaRegion = regions.value.find((r) => r.name.toLowerCase().includes('caraga'))
-      if (caragaRegion) {
-        selectedRegion.value = caragaRegion.code
-        address.region.value = caragaRegion.name
-      }
-    }
-
-    // Try to find province (Agusan del Norte)
-    if (lowerAddress.includes('agusan del norte')) {
-      const agusanProvince = provinces.value.find((p) =>
-        p.name.toLowerCase().includes('agusan del norte'),
-      )
-      if (agusanProvince) {
-        selectedProvince.value = agusanProvince.code
-        address.province.value = agusanProvince.name
-      }
-    }
-
-    // Try to find city (Butuan)
-    if (lowerAddress.includes('butuan')) {
-      const butuanCity = cities.value.find((c) => c.name.toLowerCase().includes('butuan'))
-      if (butuanCity) {
-        selectedCity.value = butuanCity.code
-        address.city.value = butuanCity.name
-      }
-    }
-
-    // Set the full detected address
-    fullAddress.value = addressString
-  } catch (err) {
-    console.error('Error autofilling address:', err)
+  } finally {
+    syncingDetectedAddress.value = false
   }
 }
 
@@ -927,27 +724,23 @@ const initMap = (lat: number, lng: number) => {
     shopMarker.on('dragend', async () => {
       if (!shopMarker) return
       const lngLat = shopMarker.getLngLat()
-      latitude.value = lngLat.lat
-      longitude.value = lngLat.lng
-      await saveCoordinates(lngLat.lat, lngLat.lng)
+      updateMapMarkerPosition(lngLat.lat, lngLat.lng)
       await reverseGeocode(lngLat.lat, lngLat.lng)
+      await saveCoordinates(lngLat.lat, lngLat.lng)
     })
 
-    map.value.on('click', async (e) => {
+    map.value.on('click', async (e: any) => {
       const { lng, lat } = e.lngLat
-      latitude.value = lat
-      longitude.value = lng
-      shopMarker?.setLngLat([lng, lat])
-      await saveCoordinates(lat, lng)
+      updateMapMarkerPosition(lat, lng)
       await reverseGeocode(lat, lng)
+      await saveCoordinates(lat, lng)
     })
 
     map.value.on('load', () => {
       mapInitialized.value = true
-      console.log('Mapbox map loaded successfully')
     })
 
-    map.value.on('error', (e) => {
+    map.value.on('error', (e: any) => {
       console.error('Mapbox error:', e.error)
     })
   } catch (error) {
@@ -1088,8 +881,16 @@ const saveCoordinates = async (lat: number, lng: number) => {
       .update({
         latitude: lat,
         longitude: lng,
-        detected_address: fullAddress.value,
-        manual_status: 'auto',
+        detected_address: fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,
+        barangay: address.barangay.value || null,
+        building: address.building.value || null,
+        street: address.street.value || null,
+        postal: address.postal.value || null,
+        house_no: address.house_no.value || null,
+        city: address.city.value || null,
+        province: address.province.value || null,
+        region: address.region.value || null,
+        manual_status: addressOption.value === 'manual' ? 'manual' : 'auto',
         updated_at: new Date().toISOString(),
       })
       .eq('id', currentShopId.value)
@@ -1109,11 +910,20 @@ const saveCoordinates = async (lat: number, lng: number) => {
 
 const getCoordinatesFromAddress = async (address: string) => {
   try {
+    if (!address.trim()) return null
+
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(address)}`,
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=5&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(address)}`,
+      {
+        headers: {
+          'Accept-Language': 'en',
+        },
+      },
     )
     const data = await res.json()
-    if (data.length > 0) return { lat: parseFloat(data[0].lat), lon: parseFloat(data[0].lon) }
+    const lat = parseCoordinate(data[0]?.lat)
+    const lon = parseCoordinate(data[0]?.lon)
+    if (lat != null && lon != null) return { lat, lon }
     return null
   } catch (error) {
     console.error('Failed to fetch coordinates:', error)
@@ -1121,19 +931,52 @@ const getCoordinatesFromAddress = async (address: string) => {
   }
 }
 
+const syncManualCoordinatesFromAddress = async () => {
+  if (addressOption.value !== 'manual') return
+
+  const queries = buildManualAddressQueries()
+  if (!queries.length) return
+
+  for (const query of queries) {
+    const coords = await getCoordinatesFromAddress(query)
+    if (!coords) continue
+
+    fullAddress.value = formatShopAddress(getAddressComponentsSnapshot(), query)
+    updateMapMarkerPosition(coords.lat, coords.lon, 17)
+    await saveCoordinates(coords.lat, coords.lon)
+    return
+  }
+}
+
 // -------------------- SEARCH PLACE --------------------
-const searchQuery = ref('')
+const searchQuery = ref<string | null>('')
+const normalizedSearchQuery = computed(() => String(searchQuery.value || '').trim())
 const searchLoading = ref(false)
 const searchResults = ref<any[]>([])
 const showSearchResults = ref(false)
 
 const searchPlace = async () => {
-  if (!searchQuery.value.trim()) return
+  if (!normalizedSearchQuery.value) return
   searchLoading.value = true
   showSearchResults.value = false
   try {
+    const contextualQuery = [
+      normalizedSearchQuery.value,
+      address.city.value || null,
+      address.province.value || null,
+      address.region.value || null,
+      'Philippines',
+    ]
+      .filter(Boolean)
+      .join(', ')
+
     const res = await fetch(
-      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(searchQuery.value)}`,
+      `https://nominatim.openstreetmap.org/search?format=jsonv2&limit=8&addressdetails=1&countrycodes=ph&q=${encodeURIComponent(contextualQuery)}`,
+      {
+        headers: {
+          'Accept-Language': 'en',
+        },
+      },
     )
     const data = await res.json()
     searchResults.value = data
@@ -1145,15 +988,18 @@ const searchPlace = async () => {
   }
 }
 
-const selectSearchResult = (result: any) => {
-  latitude.value = parseFloat(result.lat)
-  longitude.value = parseFloat(result.lon)
-  if (map.value) {
-    map.value.setCenter([longitude.value, latitude.value])
-    shopMarker?.setLngLat([longitude.value, latitude.value])
+const selectSearchResult = async (result: any) => {
+  const lat = parseCoordinate(result.lat)
+  const lng = parseCoordinate(result.lon)
+  if (lat == null || lng == null) {
+    showSnackbar('Selected place has invalid coordinates', 'error')
+    return
   }
-  fullAddress.value = result.display_name
+
+  updateMapMarkerPosition(lat, lng, 17.5)
   showSearchResults.value = false
+  await reverseGeocode(lat, lng)
+  await saveCoordinates(lat, lng)
 }
 
 const clearSearch = () => {
@@ -1167,15 +1013,8 @@ const fetchRegions = async () => {
   loadingRegions.value = true
   try {
     const res = await fetch('https://psgc.cloud/api/regions')
-    const data = await res.json()
+    const data = (await res.json()) as LocationOption[]
     regions.value = data.sort((a, b) => a.name.localeCompare(b.name))
-
-    const caragaRegion = data.find((r: any) => r.name.includes('Caraga'))
-    if (caragaRegion) {
-      selectedRegion.value = caragaRegion.code
-      address.region.value = caragaRegion.name
-      console.log('Selected region:', caragaRegion.name)
-    }
   } catch (error) {
     console.error('Failed to fetch regions:', error)
   } finally {
@@ -1189,15 +1028,8 @@ const fetchProvinces = async (regionCode: string) => {
   loadingProvinces.value = true
   try {
     const res = await fetch(`https://psgc.cloud/api/regions/${regionCode}/provinces`)
-    const data = await res.json()
+    const data = (await res.json()) as LocationOption[]
     provinces.value = data.sort((a, b) => a.name.localeCompare(b.name))
-
-    const agusanDelNorte = data.find((p: any) => p.name === 'Agusan del Norte')
-    if (agusanDelNorte) {
-      selectedProvince.value = agusanDelNorte.code
-      address.province.value = agusanDelNorte.name
-      console.log('Selected province:', agusanDelNorte.name)
-    }
   } catch (error) {
     console.error('Failed to fetch provinces:', error)
   } finally {
@@ -1213,15 +1045,8 @@ const fetchCities = async (provinceCode: string) => {
     const res = await fetch(
       `https://psgc.cloud/api/provinces/${provinceCode}/cities-municipalities`,
     )
-    const data = await res.json()
+    const data = (await res.json()) as LocationOption[]
     cities.value = data.sort((a, b) => a.name.localeCompare(b.name))
-
-    const butuanCity = data.find((c: any) => c.name === 'City of Butuan')
-    if (butuanCity) {
-      selectedCity.value = butuanCity.code
-      address.city.value = butuanCity.name
-      console.log('Selected city:', butuanCity.name)
-    }
   } catch (error) {
     console.error('Failed to fetch cities:', error)
   } finally {
@@ -1235,7 +1060,7 @@ const fetchBarangays = async (cityCode: string) => {
   loadingBarangays.value = true
   try {
     const res = await fetch(`https://psgc.cloud/api/cities-municipalities/${cityCode}/barangays`)
-    const data = await res.json()
+    const data = (await res.json()) as LocationOption[]
     barangaysList.value = data.sort((a, b) => a.name.localeCompare(b.name))
   } catch (error) {
     console.error('Failed to fetch barangays:', error)
@@ -1263,8 +1088,6 @@ const loadShopData = async () => {
       return
     }
 
-    console.log('Raw loaded data:', data)
-
     currentShopId.value = data.id
     avatarUrl.value = data.logo_url
     physicalUrl.value = data.physical_store
@@ -1282,8 +1105,8 @@ const loadShopData = async () => {
     address.province.value = data.province || ''
     address.region.value = data.region || ''
 
-    latitude.value = data.latitude || 8.9489
-    longitude.value = data.longitude || 125.5406
+    latitude.value = parseCoordinate(data.latitude) ?? DEFAULT_SHOP_LOCATION.lat
+    longitude.value = parseCoordinate(data.longitude) ?? DEFAULT_SHOP_LOCATION.lng
     fullAddress.value = data.detected_address || ''
 
     deliveryOptions.value = data.delivery_options || []
@@ -1303,10 +1126,18 @@ const loadShopData = async () => {
     }
     gcashEnabled.value = data.gcash_enabled || false
 
-    console.log('After setting values:', {
-      shopName: shopName.value,
-      description: description.value,
-    })
+    if (data.region || data.province || data.city || data.barangay) {
+      await syncDetectedPsgcSelections({
+        houseNo: data.house_no || '',
+        building: data.building || '',
+        street: data.street || '',
+        postal: data.postal || '',
+        barangay: data.barangay || '',
+        city: data.city || '',
+        province: data.province || '',
+        region: data.region || '',
+      })
+    }
 
     await nextTick()
   } catch (err) {
@@ -1318,42 +1149,61 @@ const loadShopData = async () => {
 
 // Update address fields when PSGC selections change
 watch(selectedRegion, (regionCode) => {
+  if (syncingLocationSelections.value) return
+
   selectedProvince.value = null
   selectedCity.value = null
   selectedBarangay.value = null
   provinces.value = []
   cities.value = []
   barangaysList.value = []
+  address.province.value = ''
+  address.city.value = ''
+  address.barangay.value = ''
   if (regionCode) {
     fetchProvinces(regionCode)
     const regionObj = regions.value.find((r) => r.code === regionCode)
     if (regionObj) address.region.value = regionObj.name
+  } else {
+    address.region.value = ''
   }
 })
 
 watch(selectedProvince, (provinceCode) => {
+  if (syncingLocationSelections.value) return
+
   selectedCity.value = null
   selectedBarangay.value = null
   cities.value = []
   barangaysList.value = []
+  address.city.value = ''
+  address.barangay.value = ''
   if (provinceCode) {
     fetchCities(provinceCode)
     const provinceObj = provinces.value.find((p) => p.code === provinceCode)
     if (provinceObj) address.province.value = provinceObj.name
+  } else {
+    address.province.value = ''
   }
 })
 
 watch(selectedCity, (cityCode) => {
+  if (syncingLocationSelections.value) return
+
   selectedBarangay.value = null
   barangaysList.value = []
+  address.barangay.value = ''
   if (cityCode) {
     fetchBarangays(cityCode)
     const cityObj = cities.value.find((c) => c.code === cityCode)
     if (cityObj) address.city.value = cityObj.name
+  } else {
+    address.city.value = ''
   }
 })
 
 watch(selectedBarangay, async (barangayCode) => {
+  if (syncingLocationSelections.value) return
   if (!barangayCode || !selectedCity.value) return
 
   const barangayObj = barangaysList.value.find((b) => b.code === barangayCode)
@@ -1367,62 +1217,68 @@ watch(selectedBarangay, async (barangayCode) => {
     const full = `${barangayObj.name}, ${cityObj.name}, ${provinceObj.name}, ${regionObj.name}, Philippines`
     fullAddress.value = full
 
-    const coords = await getCoordinatesFromAddress(full)
-    if (coords) {
-      latitude.value = coords.lat
-      longitude.value = coords.lon
-      if (mapInitialized.value && currentStep.value === 6) {
-        map.value?.setCenter([coords.lon, coords.lat])
-        shopMarker?.setLngLat([coords.lon, coords.lat])
-      }
+    await syncManualCoordinatesFromAddress()
+  }
+})
+
+watch(
+  [
+    () => address.house_no.value,
+    () => address.building.value,
+    () => address.street.value,
+    () => address.postal.value,
+  ],
+  () => {
+    if (addressOption.value !== 'manual' || syncingDetectedAddress.value) return
+    if (!selectedBarangay.value || !selectedCity.value || !selectedProvince.value || !selectedRegion.value) return
+
+    if (manualLocationSyncTimer) {
+      clearTimeout(manualLocationSyncTimer)
     }
-  }
-})
 
-// Update map when full address changes
-watch(fullAddress, async (newVal) => {
-  if (!newVal || !mapInitialized.value || currentStep.value !== 6) return
-
-  const coords = await getCoordinatesFromAddress(newVal)
-  if (coords) {
-    latitude.value = coords.lat
-    longitude.value = coords.lon
-    map.value?.setCenter([coords.lon, coords.lat])
-    shopMarker?.setLngLat([coords.lon, coords.lat])
-    await saveCoordinates(coords.lat, coords.lon)
-  }
-})
+    manualLocationSyncTimer = setTimeout(() => {
+      void syncManualCoordinatesFromAddress()
+    }, 450)
+  },
+)
 
 // -------------------- GET LOCATION --------------------
-const getLocation = () => {
-  if (!navigator.geolocation) {
-    showSnackbar('Geolocation not supported', 'error')
-    return
+const getLocation = async () => {
+  if (detectingLocation.value) return
+
+  detectingLocation.value = true
+  locationLoadingStage.value = 'gps'
+
+  try {
+    await ensureLocationPermission()
+
+    const position = await getPreciseCurrentPosition()
+    const nextLatitude = position.coords.latitude
+    const nextLongitude = position.coords.longitude
+    detectedLocationAccuracy.value = position.coords.accuracy ?? null
+
+    addressOption.value = 'map'
+    updateMapMarkerPosition(nextLatitude, nextLongitude, 18)
+
+    locationLoadingStage.value = 'reverse-geocoding'
+    await reverseGeocode(nextLatitude, nextLongitude)
+
+    locationLoadingStage.value = 'saving'
+    await saveCoordinates(nextLatitude, nextLongitude)
+
+    if (detectedLocationAccuracy.value && detectedLocationAccuracy.value > 80) {
+      showSnackbar(
+        `Location detected with +/-${Math.round(detectedLocationAccuracy.value)}m accuracy. Drag the pin if needed.`,
+        'success',
+      )
+    }
+  } catch (err) {
+    console.error(err)
+    showSnackbar(err instanceof Error ? err.message : 'Failed to get location', 'error')
+  } finally {
+    detectingLocation.value = false
+    locationLoadingStage.value = null
   }
-
-  addressOption.value = 'map'
-
-  navigator.geolocation.getCurrentPosition(
-    async (pos) => {
-      latitude.value = pos.coords.latitude
-      longitude.value = pos.coords.longitude
-
-      if (mapInitialized.value && currentStep.value === 6) {
-        map.value?.setCenter([longitude.value, latitude.value])
-        map.value?.setZoom(17)
-        shopMarker?.setLngLat([longitude.value, latitude.value])
-      }
-
-      const detectedAddress = await reverseGeocode(latitude.value, longitude.value)
-      await autofillAddressFromGeocode(detectedAddress)
-      await saveCoordinates(latitude.value, longitude.value)
-    },
-    (err) => {
-      console.error(err)
-      showSnackbar('Failed to get location', 'error')
-    },
-    { enableHighAccuracy: true, timeout: 10000 },
-  )
 }
 
 const saveShop = async () => {
@@ -1439,9 +1295,6 @@ const saveShop = async () => {
       error: userError,
     } = await supabase.auth.getUser()
     if (userError || !user) throw new Error('User not found')
-
-    console.log('Current user:', user.id)
-    console.log('Current shop ID:', currentShopId.value)
 
     let addressSource = 'detected'
     const hasManualAddressFields =
@@ -1479,7 +1332,8 @@ const saveShop = async () => {
       delivery_options: deliveryOptions.value,
       payment_options: paymentOptions.value,
       meetup_details: meetUpDetails.value || null,
-      detected_address: fullAddress.value || null,
+      detected_address:
+        fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,
       address_source: addressSource,
       valid_id_front: validIdFrontUrl.value,
       valid_id_back: validIdBackUrl.value,
@@ -1503,24 +1357,16 @@ const saveShop = async () => {
       shopData.gcash_enabled = true
     }
 
-    console.log('Shop data to save:', shopData)
-
     let savedShopId
-    let result
 
     if (!currentShopId.value) {
-      // Insert new shop
       const insertData = {
         ...shopData,
         owner_id: user.id,
         status: 'pending',
       }
 
-      console.log('Inserting new shop...')
-
       const { data, error } = await supabase.from('shops').insert(insertData).select()
-
-      console.log('Insert response:', { data, error })
 
       if (error) throw error
 
@@ -1528,13 +1374,8 @@ const saveShop = async () => {
         throw new Error('Insert succeeded but no data returned')
       }
 
-      result = data[0]
       savedShopId = data[0].id
-      console.log('Insert successful:', data[0])
     } else {
-      // Update existing shop
-      console.log('Updating shop with ID:', currentShopId.value)
-
       const { data: existingShop, error: checkError } = await supabase
         .from('shops')
         .select('id, owner_id')
@@ -1557,8 +1398,6 @@ const saveShop = async () => {
         .eq('owner_id', user.id)
         .select()
 
-      console.log('Update response:', { data, error })
-
       if (error) {
         console.error('Update error:', error)
         throw error
@@ -1568,8 +1407,6 @@ const saveShop = async () => {
         throw new Error('Update failed - no data returned. Check RLS policies.')
       }
 
-      console.log('Update successful:', data[0])
-      result = data[0]
       savedShopId = currentShopId.value
     }
 
@@ -1588,86 +1425,19 @@ const saveShop = async () => {
     }, 1500)
   } catch (err) {
     console.error('Save shop error:', err)
-    console.error('Error details:', {
-      message: err.message,
-      code: err.code,
-      details: err.details,
-      hint: err.hint,
-    })
-    showSnackbar(err.message || 'Failed to save shop', 'error')
+    showSnackbar(err instanceof Error ? err.message : 'Failed to save shop', 'error')
   } finally {
     saving.value = false
   }
 }
-const diagnoseAuth = async () => {
-  console.log('========== AUTH DIAGNOSTICS ==========')
-
-  try {
-    // Test 1: Check if we can get session (fast)
-    console.log('Test 1: getSession()')
-    const { data: sessionData, error: sessionError } = await supabase.auth.getSession()
-    console.log('Session result:', {
-      hasSession: !!sessionData.session,
-      user: sessionData.session?.user?.email,
-      expiresAt: sessionData.session?.expires_at
-        ? new Date(sessionData.session.expires_at * 1000).toLocaleString()
-        : 'N/A',
-      error: sessionError,
-    })
-
-    // Test 2: Check if we can refresh session
-    console.log('Test 2: refreshSession()')
-    const { data: refreshData, error: refreshError } = await supabase.auth.refreshSession()
-    console.log('Refresh result:', {
-      success: !!refreshData.session,
-      user: refreshData.session?.user?.email,
-      error: refreshError,
-    })
-
-    // Test 3: Check current shop ID and ownership
-    if (currentShopId.value) {
-      console.log('Test 3: Check shop ownership')
-      const { data: shop, error: shopError } = await supabase
-        .from('shops')
-        .select('id, owner_id, business_name')
-        .eq('id', currentShopId.value)
-        .single()
-
-      console.log('Shop check:', {
-        shop: shop,
-        currentUserId: sessionData.session?.user?.id,
-        isOwner: shop?.owner_id === sessionData.session?.user?.id,
-        error: shopError,
-      })
-    }
-
-    showSnackbar('Auth diagnostics complete - check console', 'success')
-  } catch (err) {
-    console.error('Diagnostic error:', err)
-    showSnackbar('Diagnostic failed', 'error')
-  }
-
-  console.log('========== END DIAGNOSTICS ==========')
-}
 // -------------------- MOUNT --------------------
 onMounted(async () => {
-  console.log('🔧 Component mounted, running diagnostics...')
-  await testSupabaseConnection()
-  await checkAuthStatus()
   await fetchRegions()
   await nextTick()
 
   if (shopId.value) {
     await loadShopData()
   }
-})
-
-watch([selectedRegion, selectedProvince, selectedCity], ([region, province, city]) => {
-  console.log('Current selections:', {
-    region: region ? regions.value.find((r) => r.code === region)?.name : 'None',
-    province: province ? provinces.value.find((p) => p.code === province)?.name : 'None',
-    city: city ? cities.value.find((c) => c.code === city)?.name : 'None',
-  })
 })
 
 const isMobile = ref(window.innerWidth < 768)
@@ -1680,6 +1450,15 @@ const updateMobileState = () => {
 
 onMounted(() => {
   window.addEventListener('resize', updateMobileState)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', updateMobileState)
+
+  if (manualLocationSyncTimer) {
+    clearTimeout(manualLocationSyncTimer)
+    manualLocationSyncTimer = null
+  }
 })
 
 </script>
@@ -1702,6 +1481,7 @@ onMounted(() => {
         <strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong>
       </v-toolbar-title>
     </v-app-bar>
+
     <v-main class="pb-16">
       <!-- Progress Steps -->
       <v-card class="steps-card" flat>
@@ -1769,7 +1549,7 @@ onMounted(() => {
       </v-overlay>
 
       <!-- Form Section -->
-      <div class="form-section pa-4" v-if="!loadingShopData" :key="currentShopId">
+      <div class="form-section pa-4" v-if="!loadingShopData" :key="currentShopId || 'new-shop'">
         <!-- Step 1: Business Information -->
         <v-card v-if="currentStep === 1" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
@@ -1922,11 +1702,6 @@ onMounted(() => {
               <div class="text-caption">
                 Choose which payment methods you accept. Click on GCash to configure.
               </div>
-            </v-alert>
-
-            <!-- Debug Info (visible during development) -->
-            <v-alert v-if="debugInfo" type="info" variant="tonal" class="mb-4" dense>
-              <pre class="text-caption">{{ debugInfo }}</pre>
             </v-alert>
 
             <!-- Error Display -->
@@ -2154,84 +1929,6 @@ onMounted(() => {
                     </div>
                   </v-col>
 
-                  <!-- Diagnostic Buttons - UPDATED with more options -->
-                  <v-col cols="12">
-                    <v-row>
-                      <v-col cols="4">
-                        <v-btn
-                          color="info"
-                          variant="outlined"
-                          @click="testSupabaseConnection"
-                          block
-                          size="x-small"
-                        >
-                          Test DB
-                        </v-btn>
-                      </v-col>
-                      <v-col cols="4">
-                        <v-btn
-                          color="info"
-                          variant="outlined"
-                          @click="checkAuthStatus"
-                          block
-                          size="x-small"
-                        >
-                          Check Auth
-                        </v-btn>
-                      </v-col>
-                      <v-col cols="4">
-                        <v-btn
-                          color="purple"
-                          variant="outlined"
-                          @click="testAuthDirectly"
-                          block
-                          size="x-small"
-                        >
-                          Test Auth
-                        </v-btn>
-                      </v-col>
-                    </v-row>
-                    <v-btn
-                      color="warning"
-                      variant="outlined"
-                      @click="testSimpleUpdate"
-                      block
-                      class="mt-2"
-                      size="small"
-                    >
-                      <v-icon left>mdi-test-tube</v-icon>
-                      Test Simple Update
-                    </v-btn>
-                  </v-col>
-
-                  <!-- Add this near your other diagnostic buttons -->
-                  <v-col cols="12">
-                    <v-btn
-                      color="info"
-                      variant="outlined"
-                      @click="diagnoseAuth"
-                      block
-                      size="small"
-                      class="mt-2"
-                    >
-                      <v-icon left>mdi-stethoscope</v-icon>
-                      Run Auth Diagnostics
-                    </v-btn>
-                  </v-col>
-                  <!-- Add this near your other diagnostic buttons in step 5 -->
-                  <v-col cols="12">
-                    <v-btn
-                      color="info"
-                      variant="outlined"
-                      @click="testRlsPolicy"
-                      block
-                      size="small"
-                      class="mt-2"
-                    >
-                      <v-icon left>mdi-shield-lock</v-icon>
-                      Test RLS Policies
-                    </v-btn>
-                  </v-col>
                   <!-- Action Buttons -->
                   <v-col cols="12">
                     <div class="d-flex gap-2 mt-2">
@@ -2300,7 +1997,7 @@ onMounted(() => {
             </v-chip>
           </v-card-title>
           <v-card-text>
-            <v-radio-group v-model="addressOption" inline class="mb-4">
+            <v-radio-group v-model="addressOption" inline class="mb-4" :disabled="detectingLocation">
               <v-radio label="Enter address manually" value="manual" />
               <v-radio label="Use current location (Detect Address)" value="map" />
             </v-radio-group>
@@ -2402,7 +2099,7 @@ onMounted(() => {
                   @click="searchPlace"
                   class="mb-3 search-btn"
                   :loading="searchLoading"
-                  :disabled="!searchQuery.trim()"
+                  :disabled="!normalizedSearchQuery"
                   block
                 >
                   <v-icon left>mdi-magnify</v-icon>
@@ -2435,15 +2132,42 @@ onMounted(() => {
           <!-- Map Container -->
           <div class="map-container">
             <div id="map" class="map" />
-            <v-btn icon @click="getLocation" class="locate-btn" title="Detect Address">
+            <div v-if="detectingLocation" class="map-loading-overlay">
+              <v-progress-circular indeterminate color="primary" size="44" width="4" />
+              <div class="map-loading-title">Detecting location</div>
+              <div class="map-loading-message">{{ locationLoadingMessage }}</div>
+            </div>
+            <v-btn
+              icon
+              @click="getLocation"
+              class="locate-btn"
+              title="Detect Address"
+              :loading="detectingLocation"
+              :disabled="detectingLocation"
+            >
               <v-icon>mdi-crosshairs-gps</v-icon>
             </v-btn>
           </div>
 
           <div v-if="addressOption === 'map'" class="pa-4">
-            <v-btn block color="primary" @click="getLocation" class="mt-2 mb-4" size="large">
+            <v-alert v-if="detectingLocation" type="info" variant="tonal" class="mb-3" border="start">
+              <template #title>
+                <strong>Detecting your location</strong>
+              </template>
+              {{ locationLoadingMessage }}
+            </v-alert>
+
+            <v-btn
+              block
+              color="primary"
+              @click="getLocation"
+              class="mt-2 mb-4"
+              size="large"
+              :loading="detectingLocation"
+              :disabled="detectingLocation"
+            >
               <v-icon left>mdi-crosshairs-gps</v-icon>
-              Detect Address from Current Location
+              {{ detectingLocation ? 'Detecting Current Location...' : 'Detect Location' }}
             </v-btn>
 
             <!-- Display detected address -->
@@ -2811,6 +2535,34 @@ onMounted(() => {
   border-radius: 12px;
 }
 
+.map-loading-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1001;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 20px;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(2px);
+}
+
+.map-loading-title {
+  font-size: 1rem;
+  font-weight: 700;
+  color: #1e293b;
+}
+
+.map-loading-message {
+  max-width: 260px;
+  font-size: 0.82rem;
+  color: #475569;
+  line-height: 1.45;
+}
+
 .shop-marker {
   cursor: move;
 }
@@ -2865,22 +2617,24 @@ onMounted(() => {
   margin: 2px;
 }
 
-/* App Bar Styles */
+/* =========================================
+   APP BAR
+========================================= */
 .app-bar {
-  transition: transform 0.3s ease;
-  position: fixed !important;
-  top: 0;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  padding-top: var(--sat, 0px);
-  height: calc(56px + var(--sat, 0px)) !important;
-  min-height: calc(56px + var(--sat, 0px)) !important;
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
-.app-bar.app-bar-hidden {
-  transform: translateY(-100%);
-  display: none;
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
 }
 
 .pb-16 {
@@ -3519,6 +3273,18 @@ body.camera-active .v-dialog {
 @media (prefers-color-scheme: dark) {
   .image-picker-dialog {
     background: #1e293b;
+  }
+
+  .map-loading-overlay {
+    background: rgba(15, 23, 42, 0.82);
+  }
+
+  .map-loading-title {
+    color: #f8fafc;
+  }
+
+  .map-loading-message {
+    color: #cbd5e1;
   }
 
   .dialog-header {
