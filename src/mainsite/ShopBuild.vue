@@ -1687,18 +1687,7 @@ onMounted(() => {
 <template>
   <v-app>
     <!-- Top App Bar -->
-<<<<<<< HEAD
-    <v-app-bar
-      class="app-bar"
-      flat
-      color="#3f83c7"
-      dark
-      density="comfortable"
-      :class="{ 'app-bar-hidden': isCameraActive }"
-    >
-=======
     <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
->>>>>>> dev-ochate
       <v-btn icon @click="goBack" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -1706,12 +1695,8 @@ onMounted(() => {
         <strong>{{ currentShopId ? 'Edit Shop' : 'Create Shop' }}</strong>
       </v-toolbar-title>
     </v-app-bar>
-<<<<<<< HEAD
-    <v-main class="pb-16">
-=======
 
     <v-main class="shop-build-main">
->>>>>>> dev-ochate
       <!-- Progress Steps -->
       <v-card class="steps-card" flat>
         <v-card-text class="steps-container">
@@ -2882,15 +2867,6 @@ onMounted(() => {
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
-<<<<<<< HEAD
-.app-bar.app-bar-hidden {
-  transform: translateY(-100%);
-  display: none;
-}
-
-.pb-16 {
-  padding-top: calc(75px + env(safe-area-inset-top, 0px)) !important;
-=======
 .app-bar :deep(.v-toolbar__content) {
   height: 56px !important;
   padding: 0 max(8px, var(--sar, 0px)) 0 max(8px, var(--sal, 0px));
@@ -2956,7 +2932,6 @@ onMounted(() => {
   .shop-build-main {
     padding-top: 56px !important;
   }
->>>>>>> dev-ochate
 }
 
 /* Steps Card Styles */

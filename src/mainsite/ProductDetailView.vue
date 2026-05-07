@@ -30,6 +30,7 @@ const selectedVariety = ref(null)
 const openImageDialog = ref(false)
 const previewIndex = ref(0)
 const openReviewImageDialog = ref(false)
+const currentImage = ref('')
 
 // DOM refs
 const productImgRef = ref(null)
@@ -292,6 +293,83 @@ const fetchProduct = async () => {
   } finally {
     loading.value = false
   }
+}
+
+// ✅ NEW: Setup real-time product subscription
+const setupProductRealtimeSubscription = () => {
+  console.log('📡 Setting up real-time product subscription...')
+
+  // Clean up existing subscription if any
+  if (productSubscription) {
+    console.log('📡 Cleaning up existing product subscription')
+    productSubscription.unsubscribe()
+    productSubscription = null
+  }
+
+  if (!productId.value) {
+    console.log('📡 No product ID, skipping subscription')
+    return
+  }
+
+  // Subscribe to changes on this specific product
+  productSubscription = supabase
+    .channel(`product:${productId.value}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+        schema: 'public',
+        table: 'products',
+        filter: `id=eq.${productId.value}`,
+      },
+      async (payload) => {
+        console.log('📡 Real-time product update received:', payload)
+        
+        // Refresh product data when changes occur
+        if (payload.eventType === 'UPDATE') {
+          // Update specific fields without full reload
+          if (payload.new) {
+            if (payload.new.stock !== undefined) {
+              product.value.stock = payload.new.stock
+            }
+            if (payload.new.price !== undefined) {
+              product.value.price = payload.new.price
+            }
+            if (payload.new.sold !== undefined) {
+              product.value.sold = payload.new.sold
+            }
+            
+            // Update variety stock if needed
+            if (product.value.varieties && payload.new.varieties) {
+              try {
+                const updatedVarieties = typeof payload.new.varieties === 'string' 
+                  ? JSON.parse(payload.new.varieties) 
+                  : payload.new.varieties
+                product.value.varieties = updatedVarieties
+                
+                // Update selected variety if it exists
+                if (selectedVariety.value) {
+                  const updatedVariety = updatedVarieties.find(v => v.name === selectedVariety.value.name)
+                  if (updatedVariety) {
+                    selectedVariety.value = updatedVariety
+                  }
+                }
+              } catch (e) {
+                console.warn('Could not parse updated varieties:', e)
+              }
+            }
+            
+            showSnackbar('Product information has been updated', 'info')
+          }
+        } else if (payload.eventType === 'DELETE') {
+          showSnackbar('This product is no longer available', 'error')
+          setTimeout(() => router.back(), 2000)
+        }
+      },
+    )
+    .subscribe((status) => {
+      console.log('📡 Product subscription status:', status)
+    })
 }
 
 // Computed properties
@@ -814,6 +892,15 @@ const loadProductPage = async () => {
   subscribeToProductReviews()
 }
 
+// Clean up product subscription
+const cleanupProductSubscription = () => {
+  if (productSubscription) {
+    productSubscription.unsubscribe()
+    productSubscription = null
+    console.log('📡 Unsubscribed from product updates')
+  }
+}
+
 // Initialize on mount
 onMounted(async () => {
   await cart.initialize()
@@ -846,10 +933,7 @@ watch(
 
 onUnmounted(() => {
   cleanupReviewsSubscription()
-})
-
-onUnmounted(() => {
-  cleanup()
+  cleanupProductSubscription()
 })
 </script>
 

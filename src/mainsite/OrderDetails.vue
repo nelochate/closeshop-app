@@ -62,6 +62,62 @@ const selectedImageTitle = ref('')
 const customerDecisionLoading = ref<'completed' | 'not_received' | null>(null)
 const cancellationActionLoading = ref<'cancel' | 'request' | 'approve' | 'decline' | null>(null)
 let statusSubscription: any = null
+let timerInterval: any = null // Add timer interval variable
+
+// Add expiry check functions
+const checkForExpiredOrders = async () => {
+  try {
+    const { data: expiredOrders, error } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        payment_status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      })
+      .eq('status', 'pending_approval')
+      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
+      .select('id')
+
+    if (error) {
+      console.error('Error checking expired orders:', error)
+      return
+    }
+
+    if (expiredOrders && expiredOrders.length > 0) {
+      console.log(`Cancelled ${expiredOrders.length} expired orders`)
+      
+      // Refresh current order if it was expired
+      if (expiredOrders.some((o: any) => o.id === orderId)) {
+        await fetchOrderDetails()
+      }
+    }
+  } catch (err) {
+    console.error('Error in expiry check:', err)
+  }
+}
+
+const startExpiryCheck = () => {
+  // Clear existing interval if any
+  if (timerInterval) {
+    clearInterval(timerInterval)
+  }
+  
+  // Run initial check
+  checkForExpiredOrders()
+  
+  // Set up interval to check every hour
+  timerInterval = setInterval(() => {
+    checkForExpiredOrders()
+  }, 60 * 60 * 1000) // Check every hour
+}
+
+const cleanupExpiryCheck = () => {
+  if (timerInterval) {
+    clearInterval(timerInterval)
+    timerInterval = null
+  }
+}
 
 const fetchCurrentRiderProfile = async (profileId: string) => {
   try {
@@ -257,17 +313,17 @@ const fetchOrderDetails = async () => {
   }
 }
 
-// Update onMounted
+// onMounted
 onMounted(async () => {
   await fetchOrderDetails()
-  startExpiryCheck() // Start periodic check for expired orders
+  startExpiryCheck() // Now this function exists
 })
 
-// Update onUnmounted
+// onUnmounted
 onUnmounted(() => {
   if (timerInterval) clearInterval(timerInterval)
   if (statusSubscription) supabase.removeChannel(statusSubscription)
-  cleanupExpiryCheck() // Clean up expiry check interval
+  cleanupExpiryCheck() // Now this function exists
 })
 
 // Fetch shop details

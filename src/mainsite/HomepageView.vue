@@ -432,83 +432,48 @@ async function fetchUnreadNotificationCount() {
   unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
 }
 
-const cleanupHomepageRuntime = () => {
-  window.removeEventListener('resize', updateSafeAreaInsets)
-  window.removeEventListener('orientationchange', updateSafeAreaInsets)
+/* ✅ NEW: Setup real-time products subscription */
+async function setupProductsSubscription() {
+  console.log('📡 Setting up real-time products subscription...')
 
-  if (notificationSubscription.value) {
-    notificationSubscription.value.unsubscribe()
-    notificationSubscription.value = null
+  // Clean up existing subscription if any
+  if (productsSubscription.value) {
+    console.log('📡 Cleaning up existing products subscription')
+    productsSubscription.value.unsubscribe()
+    productsSubscription.value = null
   }
 
-  if (surveyBubbleTimeout) {
-    clearTimeout(surveyBubbleTimeout)
-    surveyBubbleTimeout = null
+  // Get current user
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  
+  if (!user) {
+    console.log('📡 No user logged in, skipping products subscription')
+    return
   }
 
-  if (surveyBubbleHideTimeout) {
-    clearTimeout(surveyBubbleHideTimeout)
-    surveyBubbleHideTimeout = null
-  }
-}
+  // Subscribe to product changes on shops that the user owns
+  productsSubscription.value = supabase
+    .channel('products-changes')
+    .on(
+      'postgres_changes',
+      {
+        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
+        schema: 'public',
+        table: 'products',
+        filter: `shop_id=in.(select id from shops where owner_id=eq.${user.id})`,
+      },
+      async (payload) => {
+        console.log('📡 Real-time product update received:', payload)
 
-const startHomepageRuntime = async ({ refresh = false } = {}) => {
-  updateSafeAreaInsets()
-  window.addEventListener('resize', updateSafeAreaInsets)
-  window.addEventListener('orientationchange', updateSafeAreaInsets)
-
-  try {
-    if (!homepageInitialized || refresh) {
-      loading.value = true
-      errorMsg.value = ''
-
-      if (Capacitor.isNativePlatform()) {
-        await checkNetworkStatus()
-
-        const locationPromise = requestLocationPermission()
-          .then((hasPermission) => {
-            if (hasPermission) {
-              console.log('ðŸ“ Location permission granted, will use for sorting')
-            }
-            return hasPermission
-          })
-          .catch((err) => {
-            console.warn('ðŸ“ Location setup completed with warnings:', err)
-            return false
-          })
-
-        await Promise.race([locationPromise, new Promise((resolve) => setTimeout(resolve, 2000))])
-      }
-
-      await Promise.all([fetchShops(), fetchProducts()])
-      homepageInitialized = true
-    }
-
-    await setupNotificationListener()
-
-    if (refresh) {
-      await fetchUnreadNotificationCount()
-    }
-
-    if (surveyBubbleTimeout) {
-      clearTimeout(surveyBubbleTimeout)
-    }
-    surveyBubbleTimeout = setTimeout(() => {
-      showSurveyBubble.value = true
-    }, 3000)
-
-    if (surveyBubbleHideTimeout) {
-      clearTimeout(surveyBubbleHideTimeout)
-    }
-    surveyBubbleHideTimeout = setTimeout(() => {
-      showSurveyBubble.value = false
-    }, 15000)
-  } catch (err) {
-    console.error('âŒ Error in homepage runtime:', err)
-    errorMsg.value = 'Failed to load app data'
-  } finally {
-    loading.value = false
-  }
+        // Refresh products to get the latest data
+        await fetchProducts()
+      },
+    )
+    .subscribe((status) => {
+      console.log('📡 Products subscription status:', status)
+    })
 }
 
 /* 🚀 Main Lifecycle */
@@ -669,6 +634,11 @@ const hotPicks = computed(() => {
     rank: index + 1
   }))
 })
+
+// Add missing variable declarations
+let surveyBubbleTimeout = null
+let surveyBubbleHideTimeout = null
+let homepageInitialized = false
 
 </script>
 
