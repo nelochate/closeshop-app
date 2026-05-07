@@ -404,9 +404,6 @@ const displayPrice = computed(() => {
 
 const displayStock = computed(() => {
   if (!product.value) return 0
-  if (selectedVariety.value && selectedVariety.value.stock !== undefined) {
-    return selectedVariety.value.stock
-  }
   return product.value.stock || 0
 })
 
@@ -442,17 +439,11 @@ const stockSummaryText = computed(() => getAvailabilityLabel(displayStock.value)
 
 const dialogDisplayStock = computed(() => {
   if (!product.value) return 0
-  if (dialogSelectedVariety.value && dialogSelectedVariety.value.stock !== undefined) {
-    return dialogSelectedVariety.value.stock
-  }
   return product.value.stock || 0
 })
 
 const buyNowDisplayStock = computed(() => {
   if (!product.value) return 0
-  if (buyNowSelectedVariety.value && buyNowSelectedVariety.value.stock !== undefined) {
-    return buyNowSelectedVariety.value.stock
-  }
   return product.value.stock || 0
 })
 
@@ -681,13 +672,13 @@ const confirmAddToCart = async () => {
 
   try {
     const varietyData = finalVariety
-      ? {
-          name: finalVariety.name,
-          price: finalVariety.price,
-          stock: finalVariety.stock,
-          images: finalVariety.images || [],
-        }
-      : null
+        ? {
+            name: finalVariety.name,
+            price: finalVariety.price,
+            stock: product.value.stock,
+            images: finalVariety.images || [],
+          }
+        : null
 
     const result = await cart.addToCart(
       product.value.id,
@@ -1088,7 +1079,7 @@ onUnmounted(() => {
                     :class="{ 'option-selected': dialogSelectedVariety?.name === variety.name }"
                     @click="dialogSelectedVariety = variety"
                     variant="outlined"
-                    :disabled="variety.stock === 0"
+                    :disabled="product.stock === 0"
                   >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
@@ -1233,7 +1224,7 @@ onUnmounted(() => {
                     :class="{ 'option-selected': buyNowSelectedVariety?.name === variety.name }"
                     @click="buyNowSelectedVariety = variety"
                     variant="outlined"
-                    :disabled="variety.stock === 0"
+                    :disabled="product.stock === 0"
                   >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
@@ -1380,7 +1371,7 @@ onUnmounted(() => {
                   :class="{ 'variety-card--selected': isVarietySelected(variety) }"
                   @click="selectedVariety = variety"
                   variant="outlined"
-                  :disabled="variety.stock === 0"
+                  :disabled="product.stock === 0"
                 >
                   <v-card-text class="pa-3">
                     <div class="variety-content">
@@ -1389,7 +1380,6 @@ onUnmounted(() => {
                       </v-avatar>
                       <div class="variety-info">
                         <div class="variety-name">{{ variety.name }}</div>
-                        <div class="variety-type">{{ getAvailabilityLabel(variety.stock) }}</div>
                       </div>
                       <div class="variety-price">{{ formatCurrency(variety.price || product.price) }}</div>
                       <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">

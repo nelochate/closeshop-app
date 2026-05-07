@@ -30,8 +30,7 @@ begin
   for order_item in
     select
       oi.product_id,
-      greatest(coalesce(oi.quantity, 0), 0)::integer as quantity,
-      nullif(btrim(coalesce(oi.selected_variety, '')), '') as selected_variety
+      greatest(coalesce(oi.quantity, 0), 0)::integer as quantity
     from public.order_items oi
     where oi.order_id = new.id
       and oi.product_id is not null
@@ -40,40 +39,7 @@ begin
     update public.products p
        set
          stock = greatest(coalesce(p.stock, 0) - order_item.quantity, 0),
-         sold = coalesce(p.sold, 0) + order_item.quantity,
-         varieties = case
-           when order_item.selected_variety is null
-             or p.varieties is null
-             or jsonb_typeof(p.varieties) <> 'array'
-           then p.varieties
-           else (
-             select coalesce(jsonb_agg(
-               case
-                 when element->>'name' = order_item.selected_variety then
-                   jsonb_set(
-                     element,
-                     '{stock}',
-                     to_jsonb(
-                       greatest(
-                         coalesce(
-                           case
-                             when coalesce(element->>'stock', '') ~ '^-?[0-9]+$'
-                             then (element->>'stock')::integer
-                             else 0
-                           end,
-                           0
-                         ) - order_item.quantity,
-                         0
-                       )
-                     ),
-                     true
-                   )
-                 else element
-               end
-               order by ordinal
-             ), p.varieties)
-             from jsonb_array_elements(p.varieties) with ordinality as variety(element, ordinal)
-           )
+         sold = coalesce(p.sold, 0) + order_item.quantity
        where p.id = order_item.product_id;
   end loop;
 
