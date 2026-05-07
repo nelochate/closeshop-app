@@ -1879,13 +1879,7 @@ onMounted(() => {
           <v-card-text>
             <v-checkbox v-model="deliveryOptions" label="Deliver" value="courier" />
             <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
-            <v-text-field
-              v-if="deliveryOptions.includes('meetup')"
-              v-model="meetUpDetails"
-              label="Meet-up details"
-              outlined
-              class="mt-2"
-            />
+            
           </v-card-text>
           <v-card-actions class="step-actions">
             <v-btn variant="outlined" @click="prevStep" class="prev-btn">
