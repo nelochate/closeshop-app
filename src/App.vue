@@ -21,6 +21,7 @@ const STATUS_BAR_DARK_BACKDROP_EXCLUDED_ROUTE_NAMES = new Set([
   'mapsearch',
   'messageview',
   'profileview',
+  'login',
 ])
 const ROUTE_REMOUNT_ELIGIBLE_NAMES = new Set([
   'homepage',
