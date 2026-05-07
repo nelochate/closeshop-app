@@ -14,6 +14,7 @@ import {
   resolveCounterpartyIdentity,
   type CounterpartyViewerRole,
 } from '@/utils/chatIdentity'
+
 const imageCache = new Map()
 const router = useRouter()
 const route = useRoute()
@@ -42,6 +43,7 @@ const messagesEndEl = ref<HTMLElement | null>(null)
 const composerInputEl = ref<any>(null)
 const viewportHeight = ref(typeof window !== 'undefined' ? window.innerHeight : 0)
 const orderMessageDetailsCache = new Map<string, OrderMessageDetails | null>()
+const pendingProduct = ref<any>(null)
 
 let subscription: any = null
 let timeUpdateInterval: any = null
@@ -167,7 +169,8 @@ const handleComposerFocus = () => {
 
 const trimMessageContent = (content: string | null | undefined) => content?.trim() ?? ''
 
-const isUnsentMessage = (message: any) => trimMessageContent(message?.content) === UNSENT_MESSAGE_TEXT
+const isUnsentMessage = (message: any) =>
+  trimMessageContent(message?.content) === UNSENT_MESSAGE_TEXT
 
 const isPendingMessage = (message: any) => String(message?.id ?? '').startsWith('temp-')
 
@@ -191,7 +194,19 @@ const shouldShowMessageActions = (message: any) =>
 
 const isEditedMessage = (message: any) =>
   !isUnsentMessage(message) &&
-  Boolean(message?.__edited || message?.edited_at || (message?.updated_at && message.updated_at !== message.created_at))
+  Boolean(
+    message?.__edited ||
+      message?.edited_at ||
+      (message?.updated_at && message.updated_at !== message.created_at),
+  )
+
+// Remove pending product
+const removePendingProduct = () => {
+  pendingProduct.value = null
+  sessionStorage.removeItem('pendingProduct')
+  // Remove the product preview from the message input
+  newMessage.value = newMessage.value.replace(/^📦\s*[^\n]+\n\n/, '')
+}
 
 // ✅ Fetch other user's profile and shop info
 const fetchOtherUserInfo = async () => {
@@ -268,7 +283,8 @@ const fetchOtherUserInfo = async () => {
     if (!resolvedProfile && conversationId.value && currentUserId) {
       const { data: conversationWithProfiles, error: conversationProfileError } = await supabase
         .from('conversations')
-        .select(`
+        .select(
+          `
           id,
           user1,
           user2,
@@ -284,7 +300,8 @@ const fetchOtherUserInfo = async () => {
             last_name,
             avatar_url
           )
-        `)
+        `,
+        )
         .eq('id', conversationId.value)
         .maybeSingle()
 
@@ -319,7 +336,10 @@ const fetchOtherUserInfo = async () => {
 // ✅ Check authentication before any operation
 const checkAuth = async (): Promise<string | null> => {
   try {
-    const { data: { user }, error } = await supabase.auth.getUser()
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser()
     if (error) {
       console.error('Auth error:', error)
       return null
@@ -400,7 +420,9 @@ const appendMessage = (message: any) => {
 }
 
 const replaceMessage = (message: any) => {
-  const messageIndex = messages.value.findIndex((existingMessage) => existingMessage.id === message.id)
+  const messageIndex = messages.value.findIndex(
+    (existingMessage) => existingMessage.id === message.id,
+  )
 
   if (messageIndex >= 0) {
     const existingMessage = messages.value[messageIndex]
@@ -498,7 +520,7 @@ const getOrCreateConversation = async () => {
       console.error('User not authenticated')
       return
     }
-    
+
     userId.value = currentUserId
 
     if (conversationId.value) {
@@ -515,7 +537,9 @@ const getOrCreateConversation = async () => {
     const { data: existing, error: fetchError } = await supabase
       .from('conversations')
       .select('id, user1, user2')
-      .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId.value}),and(user1.eq.${otherUserId.value},user2.eq.${userId.value})`)
+      .or(
+        `and(user1.eq.${userId.value},user2.eq.${otherUserId.value}),and(user1.eq.${otherUserId.value},user2.eq.${userId.value})`,
+      )
       .maybeSingle()
 
     if (fetchError) {
@@ -559,15 +583,17 @@ const getOrCreateConversation = async () => {
 
       if (createError) {
         console.error('Conversation create error:', createError)
-        
+
         // If it's a duplicate key error, try to fetch again
         if (createError.code === '23505') {
           const { data: retry } = await supabase
             .from('conversations')
             .select('id, user1, user2')
-            .or(`and(user1.eq.${userId.value},user2.eq.${otherUserId.value}),and(user1.eq.${otherUserId.value},user2.eq.${userId.value})`)
+            .or(
+              `and(user1.eq.${userId.value},user2.eq.${otherUserId.value}),and(user1.eq.${otherUserId.value},user2.eq.${userId.value})`,
+            )
             .maybeSingle()
-          
+
           if (retry) {
             conversationId.value = retry.id
             conversationParticipants.value = {
@@ -596,7 +622,7 @@ const getOrCreateConversation = async () => {
 // ✅ IMPROVED: Extract product ID from order message with multiple patterns
 const extractProductIdFromOrder = (content: string): string | null => {
   console.log('🔍 Extracting product ID from:', content)
-  
+
   const patterns = [
     /Product ID:\s*([a-f0-9-]{36})/i,
     /product_id=([a-f0-9-]{36})/i,
@@ -605,7 +631,7 @@ const extractProductIdFromOrder = (content: string): string | null => {
     /product[:\s]+([a-f0-9-]{36})/i,
     /item[:\s]+([a-f0-9-]{36})/i,
   ]
-  
+
   for (const pattern of patterns) {
     const match = content.match(pattern)
     if (match && match[1]) {
@@ -613,7 +639,7 @@ const extractProductIdFromOrder = (content: string): string | null => {
       return match[1]
     }
   }
-  
+
   console.log('❌ No product ID found in message')
   return null
 }
@@ -621,7 +647,7 @@ const extractProductIdFromOrder = (content: string): string | null => {
 // ✅ IMPROVED: Extract product name from order message
 const extractProductNameFromOrder = (content: string): string | null => {
   console.log('🔍 Extracting product name from:', content)
-  
+
   const patterns = [
     /New Order Received!\s*(.+?)\s*\(\s*x\d+\s*\)/,
     /Item:\s*(.+?)\s*\(\s*x\d+\s*\)/,
@@ -629,7 +655,7 @@ const extractProductNameFromOrder = (content: string): string | null => {
     /(.+?)\s*\(\s*x\d+\s*\)/,
     /ordered\s+(.+?)\s*\(\s*x\d+\s*\)/i,
   ]
-  
+
   for (const pattern of patterns) {
     const match = content.match(pattern)
     if (match && match[1]) {
@@ -638,7 +664,7 @@ const extractProductNameFromOrder = (content: string): string | null => {
       return productName
     }
   }
-  
+
   console.log('❌ No product name found in message')
   return null
 }
@@ -696,10 +722,11 @@ const getProductIdFromOrderItems = async (orderContent: string): Promise<string 
 const findProductById = async (productId: string): Promise<any> => {
   try {
     console.log('🔍 Searching for product by ID:', productId)
-    
+
     const { data: product, error } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         price,
@@ -708,7 +735,8 @@ const findProductById = async (productId: string): Promise<any> => {
         description,
         has_varieties,
         varieties
-      `)
+      `,
+      )
       .eq('id', productId)
       .single()
 
@@ -723,7 +751,7 @@ const findProductById = async (productId: string): Promise<any> => {
     }
 
     console.log('✅ Found product by ID:', product.prod_name)
-    
+
     if (product.shop_id) {
       const { data: shop } = await supabase
         .from('shops')
@@ -744,14 +772,15 @@ const findProductById = async (productId: string): Promise<any> => {
 const findProductByName = async (productName: string): Promise<any> => {
   try {
     console.log('🔍 Searching for product by name:', productName)
-    
+
     const cleanProductName = productName.replace(/[^\w\s-]/g, '').trim()
-    
+
     if (!cleanProductName) return null
 
     let { data: products, error } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         price,
@@ -760,7 +789,8 @@ const findProductByName = async (productName: string): Promise<any> => {
         description,
         has_varieties,
         varieties
-      `)
+      `,
+      )
       .ilike('prod_name', `%${cleanProductName}%`)
       .limit(5)
 
@@ -776,7 +806,7 @@ const findProductByName = async (productName: string): Promise<any> => {
 
     const product = products[0]
     console.log('✅ Found product by name:', product.prod_name)
-    
+
     if (product.shop_id) {
       const { data: shop } = await supabase
         .from('shops')
@@ -799,9 +829,11 @@ const generateFallbackProductId = (): string => {
 }
 
 // ✅ IMPROVED: Get guaranteed product info for order notification
-const getOrderProductInfo = async (content: string): Promise<{product: any, productId: string}> => {
+const getOrderProductInfo = async (
+  content: string,
+): Promise<{ product: any; productId: string }> => {
   console.log('🛒 Processing order notification for product info')
-  
+
   // Strategy 1: Try to get product ID from order_items table
   const orderProductId = await getProductIdFromOrderItems(content)
   if (orderProductId) {
@@ -835,7 +867,7 @@ const getOrderProductInfo = async (content: string): Promise<{product: any, prod
   // Strategy 4: If no product found, create a fallback product object
   const fallbackProductId = orderProductId || extractedProductId || generateFallbackProductId()
   console.log('⚠️ Using fallback product with ID:', fallbackProductId)
-  
+
   const fallbackProduct = {
     id: fallbackProductId,
     prod_name: productName || 'Ordered Product',
@@ -845,7 +877,7 @@ const getOrderProductInfo = async (content: string): Promise<{product: any, prod
     description: 'Product from order',
     shop: null,
     has_varieties: false,
-    varieties: null
+    varieties: null,
   }
 
   return { product: fallbackProduct, productId: fallbackProductId }
@@ -865,7 +897,8 @@ const hydrateOrderMessageDetails = async (content: string): Promise<OrderMessage
   try {
     const { data, error } = await supabase
       .from('orders')
-      .select(`
+      .select(
+        `
         id,
         address:addresses!orders_address_id_fkey (
           recipient_name
@@ -874,7 +907,8 @@ const hydrateOrderMessageDetails = async (content: string): Promise<OrderMessage
           first_name,
           last_name
         )
-      `)
+      `,
+      )
       .eq('id', orderId)
       .maybeSingle()
 
@@ -910,7 +944,8 @@ const hydrateProductMessage = async (message: any) => {
   try {
     const { data: product, error: productError } = await supabase
       .from('products')
-      .select(`
+      .select(
+        `
         id,
         prod_name,
         price,
@@ -919,7 +954,8 @@ const hydrateProductMessage = async (message: any) => {
         description,
         has_varieties,
         varieties
-      `)
+      `,
+      )
       .eq('id', message.product_id)
       .single()
 
@@ -981,7 +1017,11 @@ const formatOrderMessageContent = (message: any) => {
   return content.replace(/^Customer:\s*.*$/m, `Customer: ${customerName}`)
 }
 
-const runMessageUpdate = async (messageId: string, payload: Record<string, any>, withSelect = true) => {
+const runMessageUpdate = async (
+  messageId: string,
+  payload: Record<string, any>,
+  withSelect = true,
+) => {
   const query = supabase.from('messages').update(payload).eq('id', messageId)
 
   if (withSelect) {
@@ -1228,7 +1268,7 @@ const markMessageAsRead = async (messageId: string) => {
   }
 }
 
-// ✅ FIXED: Send a regular text message with workaround for notifications trigger
+// Send message with product attachment support
 const sendMessage = async () => {
   if (isEditingMessage.value) {
     await saveEditedMessage()
@@ -1238,7 +1278,15 @@ const sendMessage = async () => {
   if (sending.value || isUpdatingMessage.value) return
 
   sendError.value = null
-  const messageContent = newMessage.value.trim()
+  let messageContent = newMessage.value.trim()
+
+  // Check for pending product
+  let attachedProduct = pendingProduct.value
+
+  if (attachedProduct && messageContent) {
+    // Remove product emoji prefix if it's there
+    messageContent = messageContent.replace(/^📦\s*[^\n]+\n\n/, '')
+  }
 
   if (!messageContent) {
     return
@@ -1261,91 +1309,122 @@ const sendMessage = async () => {
     }
 
     const createdAt = new Date().toISOString()
-    const msg = {
-      conversation_id: conversationId.value,
-      sender_id: currentUserId,
-      receiver_id: otherUserId.value,
-      content: messageContent,
-      is_read: false,
-      product_id: null,
-      created_at: createdAt,
-    }
 
-    const { data, error } = await supabase
-      .from('messages')
-      .insert([
-        {
-          conversation_id: msg.conversation_id,
-          sender_id: msg.sender_id,
-          receiver_id: msg.receiver_id,
-          content: msg.content,
-          is_read: msg.is_read,
-          created_at: msg.created_at,
-        },
-      ])
-      .select()
-      .single()
-
-    if (error) {
-      console.error('Supabase error sending message:', error)
-
-      if (error.message.includes('notifications')) {
-        const { error: simpleError } = await supabase
-          .from('messages')
-          .insert([
-            {
-              conversation_id: msg.conversation_id,
-              sender_id: msg.sender_id,
-              receiver_id: msg.receiver_id,
-              content: msg.content,
-              is_read: msg.is_read,
-              product_id: null,
-              created_at: msg.created_at,
-            },
-          ])
-
-        if (simpleError) {
-          console.error('Fallback insert also failed:', simpleError)
-          sendError.value = 'Unable to send the message right now. Please try again.'
-        } else {
-          const manualMsg = {
-            id: `temp-${Date.now()}`,
-            ...msg,
-            product: null,
-            orderProduct: null,
-            orderProductId: null,
-          }
-          appendMessage(manualMsg)
-          await updateConversationActivity(msg.conversation_id)
-          await syncMessageNotificationAfterSend({
-            senderId: msg.sender_id,
-            receiverId: msg.receiver_id,
-            createdAt: msg.created_at,
-            content: msg.content,
-            isOrderMessage: false,
-          })
-          shouldClearComposer = true
-          void scrollToBottom('smooth')
+    // If there's an attached product, send as product message
+    if (attachedProduct) {
+      await sendProductMessage(attachedProduct)
+      // Then send the text message separately if there's additional content
+      if (messageContent && messageContent !== attachedProduct.prod_name) {
+        const msg = {
+          conversation_id: conversationId.value,
+          sender_id: currentUserId,
+          receiver_id: otherUserId.value,
+          content: messageContent,
+          is_read: false,
+          product_id: null,
+          created_at: createdAt,
         }
-      } else {
-        sendError.value = error.message || 'Unable to send the message right now.'
-      }
-      return
-    }
 
-    if (data) {
-      const enrichedMessage = await enrichMessage(data)
-      appendMessage(enrichedMessage)
-      await updateConversationActivity(msg.conversation_id)
-      await syncMessageNotificationAfterSend({
-        senderId: msg.sender_id,
-        receiverId: msg.receiver_id,
-        createdAt: msg.created_at,
-        content: msg.content,
-        isOrderMessage: false,
-      })
+        const { data, error } = await supabase.from('messages').insert([msg]).select().single()
+
+        if (!error && data) {
+          const enrichedMessage = await enrichMessage(data)
+          appendMessage(enrichedMessage)
+          await updateConversationActivity(msg.conversation_id)
+        }
+      }
       shouldClearComposer = true
-      void scrollToBottom('smooth')
+      // Clear pending product after sending
+      pendingProduct.value = null
+      sessionStorage.removeItem('pendingProduct')
+    } else {
+      // Regular message sending
+      const msg = {
+        conversation_id: conversationId.value,
+        sender_id: currentUserId,
+        receiver_id: otherUserId.value,
+        content: messageContent,
+        is_read: false,
+        product_id: null,
+        created_at: createdAt,
+      }
+
+      const { data, error } = await supabase
+        .from('messages')
+        .insert([
+          {
+            conversation_id: msg.conversation_id,
+            sender_id: msg.sender_id,
+            receiver_id: msg.receiver_id,
+            content: msg.content,
+            is_read: msg.is_read,
+            created_at: msg.created_at,
+          },
+        ])
+        .select()
+        .single()
+
+      if (error) {
+        console.error('Supabase error sending message:', error)
+
+        if (error.message.includes('notifications')) {
+          const { error: simpleError } = await supabase
+            .from('messages')
+            .insert([
+              {
+                conversation_id: msg.conversation_id,
+                sender_id: msg.sender_id,
+                receiver_id: msg.receiver_id,
+                content: msg.content,
+                is_read: msg.is_read,
+                product_id: null,
+                created_at: msg.created_at,
+              },
+            ])
+
+          if (simpleError) {
+            console.error('Fallback insert also failed:', simpleError)
+            sendError.value = 'Unable to send the message right now. Please try again.'
+          } else {
+            const manualMsg = {
+              id: `temp-${Date.now()}`,
+              ...msg,
+              product: null,
+              orderProduct: null,
+              orderProductId: null,
+            }
+            appendMessage(manualMsg)
+            await updateConversationActivity(msg.conversation_id)
+            await syncMessageNotificationAfterSend({
+              senderId: msg.sender_id,
+              receiverId: msg.receiver_id,
+              createdAt: msg.created_at,
+              content: msg.content,
+              isOrderMessage: false,
+            })
+            shouldClearComposer = true
+            void scrollToBottom('smooth')
+          }
+        } else {
+          sendError.value = error.message || 'Unable to send the message right now.'
+        }
+        return
+      }
+
+      if (data) {
+        const enrichedMessage = await enrichMessage(data)
+        appendMessage(enrichedMessage)
+        await updateConversationActivity(msg.conversation_id)
+        await syncMessageNotificationAfterSend({
+          senderId: msg.sender_id,
+          receiverId: msg.receiver_id,
+          createdAt: msg.created_at,
+          content: msg.content,
+          isOrderMessage: false,
+        })
+        shouldClearComposer = true
+        void scrollToBottom('smooth')
+      }
     }
   } catch (error) {
     console.error('Unexpected error sending message:', error)
@@ -1394,7 +1473,7 @@ const sendProductMessage = async (product: any) => {
 // ✅ ALWAYS WORKING: View product details - INCLUDES VARIETIES
 const viewProduct = (productId: string) => {
   console.log('👁️ Viewing product with ID:', productId)
-  
+
   if (productId && !productId.startsWith('order-')) {
     console.log('✅ Navigating to product page:', productId)
     router.push({ name: 'product-detail', params: { id: productId } })
@@ -1418,10 +1497,9 @@ const getOrderMessageOrderId = (msg: any): string | null =>
   extractOrderIdFromContent(msg.content || '')
 
 // ✅ Get product image
-// REPLACE your existing getProductImage function with this one
-const getProductImage = (product) => {
+const getProductImage = (product: any) => {
   if (!product?.main_img_urls) return '/placeholder.png'
-  
+
   let imageUrl = '/placeholder.png'
   try {
     if (typeof product.main_img_urls === 'string') {
@@ -1433,13 +1511,18 @@ const getProductImage = (product) => {
   } catch {
     imageUrl = '/placeholder.png'
   }
-  
+
   // Return optimized thumbnail (200x200 for chat)
   return getOptimizedImageUrl(imageUrl, 200, 200)
 }
+
 // ✅ Check if message is an order notification
 const isOrderNotification = (content: string) => {
-  return content.includes('New Order Received!') || content.includes('Order ID:') || content.includes('Transaction #:')
+  return (
+    content.includes('New Order Received!') ||
+    content.includes('Order ID:') ||
+    content.includes('Transaction #:')
+  )
 }
 
 // ✅ Get user display name
@@ -1449,6 +1532,85 @@ const userDisplayName = computed(() => otherUserIdentity.value.displayName)
 const userAvatar = computed(() => otherUserIdentity.value.avatar)
 
 const goBack = () => router.back()
+
+// Receive shared product from session storage
+const receiveSharedProduct = () => {
+  const sharedProduct = sessionStorage.getItem('sharedProduct')
+  const autoMessage = sessionStorage.getItem('chatAutoMessage')
+
+  if (sharedProduct && autoMessage) {
+    try {
+      const product = JSON.parse(sharedProduct)
+
+      // Create a product preview in the message input instead of auto-sending
+      const productPreview = `📦 ${product.prod_name}\n\n${autoMessage}`
+
+      // Set the message in the input field
+      newMessage.value = productPreview
+
+      // Store the pending product reactively
+      pendingProduct.value = product
+
+      // Focus the composer so user can edit before sending
+      setTimeout(() => {
+        focusComposer()
+
+        // Optional: Show a toast notification
+        if (window.$toast) {
+          window.$toast.info('Product draft added to message', {
+            position: 'top-center',
+            duration: 3000,
+          })
+        }
+      }, 100)
+
+      // Clear storage
+      sessionStorage.removeItem('sharedProduct')
+      sessionStorage.removeItem('chatAutoMessage')
+
+      // Store in sessionStorage for persistence
+      sessionStorage.setItem('pendingProduct', JSON.stringify(product))
+    } catch (error) {
+      console.error('Error processing shared product:', error)
+    }
+  }
+
+  // Check for pending product from previous session
+  const storedPendingProduct = sessionStorage.getItem('pendingProduct')
+  if (storedPendingProduct && !pendingProduct.value) {
+    try {
+      pendingProduct.value = JSON.parse(storedPendingProduct)
+    } catch (error) {
+      console.error('Error loading stored pending product:', error)
+    }
+  }
+}
+
+// Add this function to optimize image URLs
+const getOptimizedImageUrl = (url: string, width = 200, height = 200) => {
+  if (!url) return '/placeholder.png'
+  if (url.startsWith('/') || url.startsWith('data:')) return url
+
+  // For Supabase Storage images - add transformation parameters
+  if (url.includes('supabase.co')) {
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}width=${width}&height=${height}&quality=80&resize=contain`
+  }
+
+  // For other image hosts (Cloudinary, etc.)
+  if (url.includes('cloudinary.com')) {
+    return url.replace('/upload/', `/upload/w_${width},h_${height},c_fill,q_auto/`)
+  }
+
+  return url
+}
+
+// Add this function if not already there
+const getCachedImage = (url: string) => {
+  if (imageCache.has(url)) return imageCache.get(url)
+  imageCache.set(url, url)
+  return url
+}
 
 onMounted(async () => {
   setupViewportListeners()
@@ -1474,67 +1636,6 @@ onUnmounted(() => {
   if (timeUpdateInterval) clearInterval(timeUpdateInterval)
   viewportCleanup?.()
 })
-
-
-
-
-// Add this function inside your <script setup> section
-const receiveSharedProduct = () => {
-  const sharedProduct = sessionStorage.getItem('sharedProduct')
-  const autoMessage = sessionStorage.getItem('chatAutoMessage')
-  
-  if (sharedProduct && autoMessage) {
-    try {
-      const product = JSON.parse(sharedProduct)
-      
-      setTimeout(async () => {
-        if (conversationId.value && userId.value && otherUserId.value) {
-          // Send as a product message (using your existing sendProductMessage function)
-          // You already have sendProductMessage defined - use it!
-          await sendProductMessage(product)
-          
-          // Then send the follow-up question
-          newMessage.value = autoMessage
-          await sendMessage()
-          
-          // Clear storage
-          sessionStorage.removeItem('sharedProduct')
-          sessionStorage.removeItem('chatAutoMessage')
-        }
-      }, 1000)
-    } catch (error) {
-      console.error('Error processing shared product:', error)
-    }
-  }
-}
-
-
-// Add this function to optimize image URLs
-const getOptimizedImageUrl = (url, width = 200, height = 200) => {
-  if (!url) return '/placeholder.png'
-  if (url.startsWith('/') || url.startsWith('data:')) return url
-  
-  // For Supabase Storage images - add transformation parameters
-  if (url.includes('supabase.co')) {
-    const separator = url.includes('?') ? '&' : '?'
-    return `${url}${separator}width=${width}&height=${height}&quality=80&resize=contain`
-  }
-  
-  // For other image hosts (Cloudinary, etc.)
-  if (url.includes('cloudinary.com')) {
-    return url.replace('/upload/', `/upload/w_${width},h_${height},c_fill,q_auto/`)
-  }
-  
-  return url
-}
-
-
-// Add this function if not already there
-const getCachedImage = (url) => {
-  if (imageCache.has(url)) return imageCache.get(url)
-  imageCache.set(url, url)
-  return url
-}
 </script>
 
 <template>
@@ -1744,6 +1845,17 @@ const getCachedImage = (url) => {
             <v-btn variant="text" size="small" @click="cancelEditingMessage">Cancel</v-btn>
           </div>
 
+          <!-- Product attachment indicator -->
+          <div v-if="pendingProduct" class="product-attachment">
+            <div class="attachment-preview">
+              <v-icon size="16" color="primary">mdi-package-variant</v-icon>
+              <span class="attachment-text">{{ pendingProduct.prod_name || 'Product' }} attached</span>
+              <v-btn icon size="x-small" variant="text" @click="removePendingProduct">
+                <v-icon size="14">mdi-close</v-icon>
+              </v-btn>
+            </div>
+          </div>
+
           <div class="input-container">
             <v-textarea
               ref="composerInputEl"
@@ -1785,6 +1897,7 @@ const getCachedImage = (url) => {
     </v-main>
   </v-app>
 </template>
+
 <style scoped>
 .chat-page {
   min-height: var(--chat-viewport-height, 100dvh);
@@ -1869,11 +1982,7 @@ const getCachedImage = (url) => {
 .chat-container {
   flex: 1;
   overflow-y: auto;
-  padding:
-    18px
-    max(16px, var(--chat-safe-right))
-    16px
-    max(16px, var(--chat-safe-left));
+  padding: 18px max(16px, var(--chat-safe-right)) 16px max(16px, var(--chat-safe-left));
   overscroll-behavior: contain;
   scroll-padding-bottom: 24px;
 }
@@ -1955,7 +2064,6 @@ const getCachedImage = (url) => {
   cursor: pointer;
 }
 
-/* NEW: Product image wrapper with loading state */
 .product-image-wrapper {
   width: 84px;
   height: 84px;
@@ -1971,7 +2079,6 @@ const getCachedImage = (url) => {
   transition: opacity 0.2s ease;
 }
 
-/* NEW: Image placeholder while loading */
 .image-placeholder {
   width: 100%;
   height: 100%;
@@ -2115,10 +2222,7 @@ const getCachedImage = (url) => {
 }
 
 .chat-footer {
-  padding:
-    12px
-    max(16px, var(--chat-safe-right))
-    max(12px, var(--chat-safe-bottom))
+  padding: 12px max(16px, var(--chat-safe-right)) max(12px, var(--chat-safe-bottom))
     max(16px, var(--chat-safe-left));
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(18px);
@@ -2247,6 +2351,26 @@ const getCachedImage = (url) => {
   background: transparent;
 }
 
+.product-attachment {
+  width: min(100%, 900px);
+  margin: 0 auto 8px;
+}
+
+.attachment-preview {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #eff6ff;
+  border-radius: 20px;
+  font-size: 0.85rem;
+}
+
+.attachment-text {
+  color: #1e40af;
+  font-weight: 500;
+}
+
 @media (max-width: 600px) {
   .chat-page {
     --chat-header-height: calc(56px + var(--chat-safe-top));
@@ -2258,11 +2382,7 @@ const getCachedImage = (url) => {
   }
 
   .chat-container {
-    padding:
-      14px
-      max(12px, var(--chat-safe-right))
-      12px
-      max(12px, var(--chat-safe-left));
+    padding: 14px max(12px, var(--chat-safe-right)) 12px max(12px, var(--chat-safe-left));
   }
 
   .bubble {
@@ -2294,10 +2414,7 @@ const getCachedImage = (url) => {
   }
 
   .chat-footer {
-    padding:
-      10px
-      max(12px, var(--chat-safe-right))
-      max(10px, var(--chat-safe-bottom))
+    padding: 10px max(12px, var(--chat-safe-right)) max(10px, var(--chat-safe-bottom))
       max(12px, var(--chat-safe-left));
   }
 
