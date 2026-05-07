@@ -271,7 +271,7 @@ const shouldShowReviewAction = (order) =>
 const getReviewActionLabel = (order) => {
   if (!order) return 'Review'
   if (order.has_pending_review) return 'Review'
-  return 'Edit Review'
+  return 'See Review'
 }
 
 // Check if user has a shop and get its status
