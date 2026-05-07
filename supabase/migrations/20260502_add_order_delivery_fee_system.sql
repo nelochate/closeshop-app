@@ -39,6 +39,24 @@ begin
 end;
 $$;
 
+create or replace function public.calculate_order_delivery_distance_km(
+  shop_latitude double precision,
+  shop_longitude double precision,
+  customer_latitude double precision,
+  customer_longitude double precision
+)
+returns numeric
+language sql
+immutable
+as $$
+  select public.calculate_order_delivery_distance_km(
+    shop_latitude::numeric,
+    shop_longitude::numeric,
+    customer_latitude::numeric,
+    customer_longitude::numeric
+  );
+$$;
+
 create or replace function public.calculate_order_delivery_fee(distance_km numeric)
 returns numeric
 language plpgsql
@@ -73,6 +91,7 @@ end;
 $$;
 
 grant execute on function public.calculate_order_delivery_distance_km(numeric, numeric, numeric, numeric) to authenticated;
+grant execute on function public.calculate_order_delivery_distance_km(double precision, double precision, double precision, double precision) to authenticated;
 grant execute on function public.calculate_order_delivery_fee(numeric) to authenticated;
 
 create or replace function public.sync_order_delivery_fee()

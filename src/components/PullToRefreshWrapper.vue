@@ -33,7 +33,7 @@
 </template>
 
 <script setup>
-import { computed, nextTick, ref, watch, onMounted, onUnmounted } from 'vue'
+import { computed, nextTick, ref, watch, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
 import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { Haptics } from '@capacitor/haptics'
@@ -115,6 +115,7 @@ let lastInactiveAt = 0
 let lastRefreshAt = 0
 let lastResumeHandledAt = 0
 let lastInteractionAt = Date.now()
+let runtimeListenersBound = false
 
 const showIndicator = computed(() => pullDistance.value > 0 || isRefreshing.value)
 const indicatorOffset = computed(() => (isRefreshing.value ? 0 : pullDistance.value))
@@ -317,7 +318,9 @@ const handleTouchMove = async (event) => {
   isReadyToRefresh.value = deltaY >= props.threshold
   markInteraction()
 
-  event.preventDefault()
+  if (event.cancelable) {
+    event.preventDefault()
+  }
 
   if (isReadyToRefresh.value && !hapticTriggered && Capacitor.isNativePlatform()) {
     try {
@@ -386,7 +389,11 @@ const handlePageShow = () => {
   }
 }
 
-onMounted(() => {
+const attachRuntimeListeners = () => {
+  if (runtimeListenersBound) {
+    return
+  }
+
   attachTouchListeners()
   lastInteractionAt = Date.now()
 
@@ -410,9 +417,15 @@ onMounted(() => {
       console.warn('Failed to register app state listener:', error)
     })
   }
-})
+ 
+  runtimeListenersBound = true
+}
 
-onUnmounted(() => {
+const detachRuntimeListeners = () => {
+  if (!runtimeListenersBound) {
+    return
+  }
+
   clearPendingResumeRefresh()
   detachTouchListeners()
 
@@ -424,7 +437,32 @@ onUnmounted(() => {
 
   if (appStateListenerHandle?.remove) {
     appStateListenerHandle.remove()
+    appStateListenerHandle = null
   }
+
+  runtimeListenersBound = false
+}
+
+onMounted(() => {
+  attachRuntimeListeners()
+})
+
+onActivated(() => {
+  attachRuntimeListeners()
+
+  if (!document.hidden) {
+    void handleAppActive('activated')
+  }
+})
+
+onDeactivated(() => {
+  handleAppInactive()
+  detachRuntimeListeners()
+})
+
+onUnmounted(() => {
+  handleAppInactive()
+  detachRuntimeListeners()
 })
 </script>
 

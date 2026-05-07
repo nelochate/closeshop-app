@@ -3,12 +3,14 @@ local
 color closeshop_background
 color ic_launcher_background
 drawable ic_launcher
+drawable ic_push_notification
 drawable splash
 layout activity_main
 mipmap closeshop
 mipmap closeshop_foreground
 mipmap closeshop_round
 string app_name
+string default_notification_channel_id
 string gcm_defaultSenderId
 string google_android_client_id
 string google_api_key

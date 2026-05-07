@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { Capacitor } from '@capacitor/core'
 import {
   requiredValidator,
   emailValidator,
@@ -8,6 +9,7 @@ import {
   confirmedValidator,
 } from '@/utils/validators'
 import { supabase, formActionDefault } from '@/utils/supabase'
+import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
 
 const router = useRouter()
 
@@ -23,10 +25,26 @@ const formDataDefault = {
 const formData = ref({ ...formDataDefault })
 const formAction = ref({ ...formActionDefault })
 const refVform = ref()
+const isMobile = Capacitor.isNativePlatform()
+const isDevelopment = import.meta.env.DEV
 
 // Password visibility states
 const showPassword = ref(false)
 const showConfirmPassword = ref(false)
+
+const getEmailConfirmationRedirectUrl = () => {
+  const callbackPath = '/auth/callback?redirectTo=/email-confirmed&flow=signup-confirmation'
+
+  if (isMobile) {
+    return `https://closeshop.vercel.app${callbackPath}`
+  }
+
+  if (isDevelopment) {
+    return `${window.location.origin}${callbackPath}`
+  }
+
+  return `https://closeshop.vercel.app${callbackPath}`
+}
 
 // Register function
 const onSubmit = async () => {
@@ -37,7 +55,7 @@ const onSubmit = async () => {
     email: formData.value.email,
     password: formData.value.password,
     options: {
-      emailRedirectTo: `${window.location.origin}/`,
+      emailRedirectTo: getEmailConfirmationRedirectUrl(),
       data: {
         first_name: formData.value.firstName,
         last_name: formData.value.lastName,
@@ -53,11 +71,19 @@ const onSubmit = async () => {
       formAction.value.formErrorMessage = ''
     }, 3000)
   } else if (data?.user) {
+    const fullName = [formData.value.firstName, formData.value.lastName].filter(Boolean).join(' ').trim()
+
     // 2. Insert into profiles table
-    const { error: profileError } = await supabase.from('profiles').insert({
-      id: data.user.id, // link to auth.users.id
-      first_name: formData.value.firstName,
-      last_name: formData.value.lastName,
+    const { error: profileError } = await withSchemaColumnFallback({
+      payload: {
+        id: data.user.id, // link to auth.users.id
+        email: formData.value.email,
+        first_name: formData.value.firstName,
+        last_name: formData.value.lastName,
+        full_name: fullName || null,
+      },
+      requiredColumns: ['id', 'first_name', 'last_name'],
+      execute: (currentPayload) => supabase.from('profiles').insert(currentPayload),
     })
 
     if (profileError) {

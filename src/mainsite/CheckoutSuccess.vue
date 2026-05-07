@@ -293,6 +293,7 @@ interface OrderRecord {
   delivery_fee?: number | null
   total_amount?: number | null
   status?: string | null
+  payment_status?: string | null
   payment_method?: string | null
   delivery_option?: string | null
   delivery_date?: string | null
@@ -308,7 +309,9 @@ interface PaymentRecord {
   id?: string
   status?: string | null
   method?: string | null
+  payment_method?: string | null
   amount?: number | null
+  created_at?: string | null
 }
 
 interface RawOrderItemRecord {
@@ -498,7 +501,7 @@ const getStatusColor = (value?: string | null) => {
 
 const subtotal = computed(() => calculateOrderItemsSubtotal(items.value))
 const deliveryFee = computed(() =>
-  resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value),
+  resolveOrderDeliveryFee(order.value || {}, undefined, subtotal.value as any),
 )
 const totalAmount = computed(() =>
   Number(order.value?.total_amount ?? calculateOrderTotalAmount(subtotal.value, deliveryFee.value)),
@@ -507,6 +510,7 @@ const totalAmount = computed(() =>
 const buyerName = computed(() => getRecipientName(order.value?.address, order.value?.buyer))
 const buyerPhone = computed(
   () =>
+    normalizeText((order.value as any)?.contact_number) ||
     normalizeText(order.value?.address?.phone) ||
     normalizeText(order.value?.buyer?.phone) ||
     'No phone number provided',
@@ -516,7 +520,9 @@ const orderStatusLabel = computed(() => formatLabel(order.value?.status, 'Pendin
 const paymentMethodLabel = computed(() =>
   formatLabel(order.value?.payment_method || payment.value?.method, 'Cash'),
 )
-const paymentStatusLabel = computed(() => formatLabel(payment.value?.status, 'Pending'))
+const paymentStatusLabel = computed(() =>
+  formatLabel(payment.value?.status || order.value?.payment_status, 'Pending'),
+)
 const orderReference = computed(
   () => normalizeText(order.value?.transaction_number) || normalizeText(order.value?.id) || 'N/A',
 )
@@ -529,57 +535,49 @@ const deliverySchedule = computed(() => {
   return date ? formatDisplayDate(date) : formatDisplayTime(time)
 })
 
-// Fetch cart count function
-const fetchCartCount = async () => {
-  try {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) {
-      cartItemCount.value = 0
-      return
-    }
-    
-    const { count, error } = await supabase
-      .from('cart_items')
-      .select('*', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-    
-    if (!error) {
-      cartItemCount.value = count || 0
-    }
-  } catch (err) {
-    console.error('Error fetching cart count:', err)
-    cartItemCount.value = 0
+const normalizePaymentRecord = (record: any): PaymentRecord | null => {
+  if (!record) return null
+
+  return {
+    id: normalizeText(record.id) || undefined,
+    status: normalizeText(record.status) || null,
+    method: normalizeText(record.method || record.payment_method) || null,
+    payment_method: normalizeText(record.payment_method) || null,
+    amount: record.amount === null || record.amount === undefined ? null : Number(record.amount),
+    created_at: normalizeText(record.created_at) || null,
   }
 }
 
-// Go to cart function
-const goToCart = async () => {
-  checkingCart.value = true
-  
+const loadLatestPayment = async (currentOrderId: string) => {
   try {
-    const { data: { user } } = await supabase.auth.getUser()
-    
-    if (!user) {
-      alert('Please login to view your cart')
-      router.push('/login')
-      return
+    const { data, error: paymentError } = await supabase
+      .from('payments')
+      .select('*')
+      .eq('order_id', currentOrderId)
+
+    if (paymentError) {
+      console.warn('Could not load payment details for this order:', paymentError)
+      return null
     }
-    
-    // Refresh cart count before navigating
-    await fetchCartCount()
-    
-    if (cartItemCount.value === 0) {
-      alert('Your cart is empty. Add some items first!')
-      return
-    }
-    
-    // Navigate to cart
-    router.push({ name: 'cartview' })
-  } catch (err) {
-    console.error('Error navigating to cart:', err)
-    alert('Unable to open cart. Please try again.')
-  } finally {
-    checkingCart.value = false
+
+    const paymentRows = Array.isArray(data) ? [...data] : []
+
+    paymentRows.sort((left: any, right: any) => {
+      const leftTimestamp = Date.parse(normalizeText(left?.created_at))
+      const rightTimestamp = Date.parse(normalizeText(right?.created_at))
+      const leftIsValid = Number.isFinite(leftTimestamp)
+      const rightIsValid = Number.isFinite(rightTimestamp)
+
+      if (leftIsValid && rightIsValid) return rightTimestamp - leftTimestamp
+      if (rightIsValid) return 1
+      if (leftIsValid) return -1
+      return 0
+    })
+
+    return normalizePaymentRecord(paymentRows[0])
+  } catch (paymentError) {
+    console.warn('Could not load payment details for this order:', paymentError)
+    return null
   }
 }
 
@@ -644,20 +642,14 @@ const loadOrderDetails = async () => {
         `,
         )
         .eq('order_id', orderId),
-      supabase
-        .from('payments')
-        .select('id, status, method, amount')
-        .eq('order_id', orderId)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle(),
+      loadLatestPayment(orderId),
     ])
 
     if (orderResponse.error) throw orderResponse.error
     if (itemsResponse.error) throw itemsResponse.error
 
     order.value = orderResponse.data as OrderRecord
-    payment.value = paymentResponse.error ? null : (paymentResponse.data as PaymentRecord | null)
+    payment.value = paymentResponse
 
     const orderItems = (itemsResponse.data || []) as RawOrderItemRecord[]
     items.value = orderItems.map((item, index) => ({
@@ -683,6 +675,233 @@ onMounted(() => {
   loadOrderDetails()
 })
 </script>
+
+<template>
+  <v-app>
+      <!-- Top App Bar -->
+      <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+        <v-btn variant="text" icon @click="router.push('/')" class="back-btn">
+          <v-icon>mdi-arrow-left</v-icon>
+        </v-btn>
+        <v-toolbar-title>
+          <strong>Order Summary</strong>
+        </v-toolbar-title>
+        <v-spacer />
+      </v-app-bar>
+
+    <v-main class="success-page">
+      <div class="page-shell">
+        <div v-if="loading" class="state-card">
+          <v-progress-circular indeterminate color="primary" size="56" />
+          <p class="state-title">Loading your order details...</p>
+          <p class="state-copy">We're preparing your checkout summary.</p>
+        </div>
+
+        <div v-else-if="error" class="state-card">
+          <v-alert type="error" variant="tonal" class="w-100">
+            {{ error }}
+          </v-alert>
+          <div class="action-stack">
+            <v-btn color="primary" size="large" block @click="loadOrderDetails">Try Again</v-btn>
+            <v-btn variant="outlined" size="large" block @click="router.push('/')">Go to Home</v-btn>
+          </div>
+        </div>
+
+        <template v-else>
+          <section class="hero-card">
+            <div class="hero-header">
+              <v-avatar size="30" class="hero-icon">
+                <v-icon size="30">mdi-check</v-icon>
+              </v-avatar>
+
+              <div class="hero-copy">
+                <p class="hero-eyebrow">Order placed</p>
+                <h1 class="hero-title">Thank you for your order</h1>
+                <p class="hero-description">
+                  Your order has been saved successfully. We'll use the selected delivery address
+                  below for fulfillment.
+                </p>
+              </div>
+            </div>
+
+            <div class="hero-meta">
+              <div class="hero-pill">
+                <span class="hero-pill__label">Transaction</span>
+                <strong>{{ orderReference }}</strong>
+              </div>
+              <v-chip
+                :color="getStatusColor(order?.status)"
+                variant="tonal"
+                class="status-chip"
+              >
+                {{ orderStatusLabel }}
+              </v-chip>
+            </div>
+
+            <div class="hero-total">
+              <span>Total Amount</span>
+              <strong>{{ formatCurrency(totalAmount) }}</strong>
+            </div>
+          </section>
+
+          <div class="content-stack">
+            <v-card class="info-card" rounded="xl" elevation="0">
+              <v-card-title class="section-title">
+                <v-icon start color="primary">mdi-account-circle-outline</v-icon>
+                Buyer Info
+              </v-card-title>
+              <v-card-text class="section-body">
+                <div class="info-row">
+                  <span class="info-label">Recipient</span>
+                  <span class="info-value strong-text">{{ buyerName }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Phone</span>
+                  <span class="info-value">{{ buyerPhone }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Address</span>
+                  <span class="info-value address-value">{{ buyerAddress }}</span>
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card class="info-card" rounded="xl" elevation="0">
+              <v-card-title class="section-title">
+                <v-icon start color="primary">mdi-package-variant-closed-check</v-icon>
+                Order Summary
+              </v-card-title>
+              <v-card-text class="section-body">
+                <div class="info-row" v-if="order?.shop?.business_name">
+                  <span class="info-label">Shop</span>
+                  <span class="info-value">{{ order.shop.business_name }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Order Placed</span>
+                  <span class="info-value">{{ formatDateTime(order?.created_at) }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Delivery</span>
+                  <span class="info-value">{{
+                    formatLabel(order?.delivery_option, 'Standard Delivery')
+                  }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Schedule</span>
+                  <span class="info-value">{{ deliverySchedule }}</span>
+                </div>
+                <div class="info-row" v-if="order?.note">
+                  <span class="info-label">Note</span>
+                  <span class="info-value">{{ order.note }}</span>
+                </div>
+
+                <div class="totals-box">
+                  <div class="totals-row">
+                    <span>Items ({{ items.length }})</span>
+                    <strong>{{ formatCurrency(subtotal) }}</strong>
+                  </div>
+                  <div class="totals-row">
+                    <span>Delivery Fee</span>
+                    <strong>{{ formatCurrency(deliveryFee) }}</strong>
+                  </div>
+                  <div class="totals-row totals-row--grand">
+                    <span>Total</span>
+                    <strong>{{ formatCurrency(totalAmount) }}</strong>
+                  </div>
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card class="info-card" rounded="xl" elevation="0">
+              <v-card-title class="section-title">
+                <v-icon start color="primary">mdi-credit-card-outline</v-icon>
+                Payment Info
+              </v-card-title>
+              <v-card-text class="section-body">
+                <div class="info-row">
+                  <span class="info-label">Method</span>
+                  <span class="info-value">{{ paymentMethodLabel }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Payment Status</span>
+                  <span class="info-value payment-status">
+                    <v-chip
+                      :color="getStatusColor(payment?.status || order?.payment_status || 'pending')"
+                      variant="tonal"
+                      size="small"
+                    >
+                      {{ paymentStatusLabel }}
+                    </v-chip>
+                  </span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Transaction No.</span>
+                  <span class="info-value">{{ orderReference }}</span>
+                </div>
+                <div class="info-row">
+                  <span class="info-label">Amount</span>
+                  <span class="info-value strong-text">{{
+                    formatCurrency(payment?.amount ?? totalAmount)
+                  }}</span>
+                </div>
+              </v-card-text>
+            </v-card>
+
+            <v-card class="info-card" rounded="xl" elevation="0">
+              <v-card-title class="section-title">
+                <v-icon start color="primary">mdi-format-list-bulleted-square</v-icon>
+                Order Items
+              </v-card-title>
+              <v-card-text class="section-body">
+                <div v-if="items.length" class="item-list">
+                  <div v-for="item in items" :key="item.id" class="item-row">
+                    <v-avatar rounded="lg" size="56" class="item-avatar">
+                      <v-img :src="item.image" :alt="item.name" cover />
+                    </v-avatar>
+
+                    <div class="item-copy">
+                      <div class="item-name">{{ item.name }}</div>
+                      <div
+                        v-if="item.selectedSize || item.selectedVariety"
+                        class="item-variant"
+                      >
+                        <span v-if="item.selectedSize">Size: {{ item.selectedSize }}</span>
+                        <span v-if="item.selectedVariety">
+                          Variety: {{ item.selectedVariety }}
+                        </span>
+                      </div>
+                      <div class="item-meta">
+                        {{ item.quantity }} x {{ formatCurrency(item.price) }}
+                      </div>
+                    </div>
+
+                    <div class="item-total">
+                      {{ formatCurrency(item.price * item.quantity) }}
+                    </div>
+                  </div>
+                </div>
+
+                <div v-else class="empty-items">
+                  <v-icon color="grey-lighten-1" size="28">mdi-package-variant</v-icon>
+                  <span>No order items were found for this order.</span>
+                </div>
+              </v-card-text>
+            </v-card>
+          </div>
+
+          <div class="action-stack">
+            <v-btn color="primary" size="large" block @click="router.push('/')">
+              Continue Shopping
+            </v-btn>
+            <v-btn variant="outlined" size="large" block @click="router.push('/cart')">
+              View Cart
+            </v-btn>
+          </div>
+        </template>
+      </div>
+    </v-main>
+  </v-app>
+</template>
 
 <style scoped>
 /* CSS Variables for safe area insets */

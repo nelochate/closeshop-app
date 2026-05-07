@@ -3,13 +3,14 @@ import {
   deriveProfileIdentityFromAuthUser,
   normalizeIdentityText,
 } from '@/utils/accountIdentity'
+import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
 
 type SyncProfileOptions = {
   user?: any | null
   defaultRole?: string
 }
 
-const PROFILE_SELECT = 'id, first_name, last_name, avatar_url, role'
+const PROFILE_SELECT = '*'
 
 const normalizeNameValue = (value?: string | null) => normalizeIdentityText(value).toLowerCase()
 
@@ -67,11 +68,20 @@ export const syncProfileFromAuthUser = async ({
       insertPayload.avatar_url = derivedIdentity.avatar_url
     }
 
-    const { data: createdProfile, error: insertError } = await supabase
-      .from('profiles')
-      .insert([insertPayload])
-      .select(PROFILE_SELECT)
-      .single()
+    if (normalizeIdentityText(derivedIdentity.full_name)) {
+      insertPayload.full_name = derivedIdentity.full_name
+    }
+
+    if (normalizeIdentityText(derivedIdentity.email)) {
+      insertPayload.email = derivedIdentity.email
+    }
+
+    const { data: createdProfile, error: insertError } = await withSchemaColumnFallback({
+      payload: insertPayload,
+      requiredColumns: ['id', 'role'],
+      execute: (currentPayload) =>
+        supabase.from('profiles').insert([currentPayload]).select(PROFILE_SELECT).single(),
+    })
 
     if (insertError) {
       if (insertError.code === '23505') {
@@ -101,6 +111,7 @@ export const syncProfileFromAuthUser = async ({
     existingProfile.first_name,
     existingProfile.last_name,
   )
+  const derivedFullName = normalizeIdentityText(derivedIdentity.full_name)
 
   if (
     (shouldReplacePlaceholderName || !normalizeIdentityText(existingProfile.first_name)) &&
@@ -123,16 +134,31 @@ export const syncProfileFromAuthUser = async ({
     updates.avatar_url = derivedIdentity.avatar_url
   }
 
+  if (
+    (shouldReplacePlaceholderName || !normalizeIdentityText(existingProfile.full_name)) &&
+    derivedFullName
+  ) {
+    updates.full_name = derivedIdentity.full_name
+  }
+
+  if (!normalizeIdentityText(existingProfile.email) && normalizeIdentityText(derivedIdentity.email)) {
+    updates.email = derivedIdentity.email
+  }
+
   if (Object.keys(updates).length === 0) {
     return existingProfile
   }
 
-  const { data: updatedProfile, error: updateError } = await supabase
-    .from('profiles')
-    .update(updates)
-    .eq('id', user.id)
-    .select(PROFILE_SELECT)
-    .single()
+  const { data: updatedProfile, error: updateError } = await withSchemaColumnFallback({
+    payload: updates,
+    execute: (currentPayload) =>
+      supabase
+        .from('profiles')
+        .update(currentPayload)
+        .eq('id', user.id)
+        .select(PROFILE_SELECT)
+        .single(),
+  })
 
   if (updateError) {
     console.error('Failed to backfill profile identity from auth user:', updateError)

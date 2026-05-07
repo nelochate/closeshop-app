@@ -10,7 +10,13 @@
 
             <div>
               <p class="location-header__eyebrow">
-                {{ fullScreenViewerMode === 'rider' ? 'Rider navigation' : 'Order tracking' }}
+                {{
+                  fullScreenViewerMode === 'rider'
+                    ? 'Rider navigation'
+                    : fullScreenViewerMode === 'seller'
+                      ? 'Seller tracking'
+                      : 'Customer tracking'
+                }}
               </p>
               <h1>Full-Screen Delivery Map</h1>
               <p class="location-header__subtext">{{ headerSummary }}</p>
@@ -64,6 +70,7 @@
           :rider-location="persistedRiderTrackingLocation"
           :viewer-mode="fullScreenViewerMode"
           :track-own-location="shouldTrackOwnLocation"
+          :persist-rider-location-enabled="trackingPersistenceEnabled"
           :fullscreen="true"
           :panel-collapsed="!showMapDetails"
           :title="trackingTitle"
@@ -84,6 +91,7 @@ import {
   buildShopAddress,
   extractPersistedRiderCoordinates,
   resolveTrackingLocation,
+  supportsOrderTrackingPersistence,
 } from '@/utils/orderTracking'
 
 const route = useRoute()
@@ -95,6 +103,7 @@ const refreshing = ref(false)
 const errorMessage = ref('')
 const orderData = ref(null)
 const currentRiderNumericId = ref(null)
+const currentUserId = ref(null)
 const pickupTrackingLocation = ref(null)
 const deliveryTrackingLocation = ref(null)
 const showMapDetails = ref(typeof window === 'undefined' ? true : window.innerWidth > 1080)
@@ -161,15 +170,27 @@ const fullScreenViewerMode = computed(() => {
     return 'rider'
   }
 
+  if (currentUserId.value && orderData.value?.shop?.owner_id === currentUserId.value) {
+    return 'seller'
+  }
+
   return 'customer'
 })
 
+const isAssignedRider = computed(
+  () => !!currentRiderNumericId.value && orderData.value?.rider_id === currentRiderNumericId.value,
+)
+
 const shouldTrackOwnLocation = computed(() => {
   return (
-    !!currentRiderNumericId.value &&
+    isAssignedRider.value &&
     !['delivered', 'completed', 'cancelled'].includes(orderData.value?.status)
   )
 })
+
+const trackingPersistenceEnabled = computed(() =>
+  supportsOrderTrackingPersistence(orderData.value),
+)
 
 const persistedRiderTrackingLocation = computed(() => {
   const persisted = extractPersistedRiderCoordinates(orderData.value)
@@ -179,7 +200,7 @@ const persistedRiderTrackingLocation = computed(() => {
   return {
     ...persisted,
     name: 'Assigned rider',
-    address: `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+    address: persisted.address || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
   }
 })
 
@@ -203,6 +224,8 @@ const fetchCurrentRider = async () => {
     const {
       data: { user },
     } = await supabase.auth.getUser()
+
+    currentUserId.value = user?.id ?? null
 
     if (!user) return
 
@@ -287,6 +310,7 @@ const fetchOrderDetails = async ({ silent = false } = {}) => {
         ),
         shop:shop_id (
           id,
+          owner_id,
           business_name,
           house_no,
           building,

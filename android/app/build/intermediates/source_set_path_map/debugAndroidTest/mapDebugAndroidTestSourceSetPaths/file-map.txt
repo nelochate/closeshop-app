@@ -1,6 +1,0 @@
-closeshop.dev.test.app-tracing-1.2.0-0 C:\Users\charles\.gradle\caches\8.11.1\transforms\4f99dd3ff182cbeaccaabef5a9bb0914\transformed\tracing-1.2.0\res
-closeshop.dev.test.app-core-1.6.1-1 C:\Users\charles\.gradle\caches\8.11.1\transforms\6ae109dd443e4ff466ed6863f4c16eb5\transformed\core-1.6.1\res
-closeshop.dev.test.app-androidTest-2 C:\Users\charles\Desktop\capstone\closeshop-dev\android\app\build\generated\res\resValues\androidTest\debug
-closeshop.dev.test.app-mergeDebugAndroidTestResources-3 C:\Users\charles\Desktop\capstone\closeshop-dev\android\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\merged.dir
-closeshop.dev.test.app-mergeDebugAndroidTestResources-4 C:\Users\charles\Desktop\capstone\closeshop-dev\android\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\stripped.dir
-closeshop.dev.test.app-debugAndroidTest-5 C:\Users\charles\Desktop\capstone\closeshop-dev\android\app\build\intermediates\merged_res\debugAndroidTest\mergeDebugAndroidTestResources

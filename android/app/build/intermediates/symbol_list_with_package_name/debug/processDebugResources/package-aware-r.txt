@@ -3636,7 +3636,9 @@ drawable ic_mtrl_chip_close_circle
 drawable ic_other_sign_in
 drawable ic_passkey
 drawable ic_password
+drawable ic_push_notification
 drawable ic_search_black_24
+drawable ic_transparent
 drawable icon_background
 drawable m3_avd_hide_password
 drawable m3_avd_show_password
@@ -4456,6 +4458,7 @@ mipmap closeshop
 mipmap closeshop_foreground
 mipmap closeshop_round
 plurals mtrl_badge_content_description
+raw firebase_common_keep
 string abc_action_bar_home_description
 string abc_action_bar_up_description
 string abc_action_menu_overflow_description
@@ -4525,6 +4528,7 @@ string common_signin_button_text_long
 string confirm_device_credential_password
 string copy_toast_msg
 string default_error_msg
+string default_notification_channel_id
 string error_a11y_label
 string error_icon_content_description
 string exposed_dropdown_menu_content_description
@@ -4533,6 +4537,7 @@ string fab_transformation_sheet_behavior
 string fallback_menu_item_copy_link
 string fallback_menu_item_open_in_browser
 string fallback_menu_item_share_link
+string fcm_fallback_notification_channel_label
 string fingerprint_dialog_touch_sensor
 string fingerprint_error_hw_not_available
 string fingerprint_error_hw_not_present

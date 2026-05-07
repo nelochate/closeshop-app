@@ -1,15 +1,47 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, onMounted, computed } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { useCheckoutStore } from '@/stores/checkout'
 
 const router = useRouter()
+const route = useRoute()
+const checkoutStore = useCheckoutStore()
 const addresses = ref<any[]>([])
 const showSuccess = ref(false)
 const successMessage = ref('')
 const isLoading = ref(false)
 const isDetectingLocation = ref(false)
 const showLocationOptions = ref(false)
+
+const isCheckoutSelectionMode = computed(() => route.query.mode === 'checkout')
+const checkoutReturnTarget = computed(() => {
+  const returnTo = typeof route.query.returnTo === 'string' ? route.query.returnTo.trim() : ''
+  return returnTo || checkoutStore.returnPath || '/purchaseview'
+})
+
+const handleBackNavigation = () => {
+  if (isCheckoutSelectionMode.value) {
+    router.replace(checkoutReturnTarget.value)
+    return
+  }
+
+  router.back()
+}
+
+const isSelectedForCheckout = (addressId: string) => checkoutStore.selectedAddress?.id === addressId
+
+const selectAddressForCheckout = async (selectedAddress: any) => {
+  if (!isCheckoutSelectionMode.value) return
+
+  checkoutStore.setSelectedAddress(selectedAddress)
+  checkoutStore.setReturnPath(checkoutReturnTarget.value)
+  await router.replace(checkoutReturnTarget.value)
+}
+
+const openAddAddressForm = () => {
+  router.push({ name: 'edit-address', query: route.query })
+}
 
 // Load addresses
 const loadAddresses = async () => {
@@ -20,10 +52,26 @@ const loadAddresses = async () => {
     .from('addresses')
     .select('*')
     .eq('user_id', userData.user.id)
-    .order('created_at', { ascending: false })
+    .order('is_default', { ascending: false })
+    .order('updated_at', { ascending: false })
 
   if (error) console.error('Error loading addresses:', error)
-  else addresses.value = data
+  else {
+    addresses.value = data || []
+
+    if (isCheckoutSelectionMode.value && addresses.value.length > 0) {
+      const selectedAddressId = checkoutStore.selectedAddress?.id
+      const matchingSelectedAddress = selectedAddressId
+        ? addresses.value.find(addr => addr.id === selectedAddressId)
+        : null
+
+      if (matchingSelectedAddress) {
+        checkoutStore.setSelectedAddress(matchingSelectedAddress)
+      } else {
+        checkoutStore.setSelectedAddress(addresses.value[0])
+      }
+    }
+  }
 }
 
 // Delete address
@@ -32,6 +80,9 @@ const deleteAddress = async (id: string) => {
   const { error } = await supabase.from('addresses').delete().eq('id', id)
   if (!error) {
     addresses.value = addresses.value.filter(a => a.id !== id)
+    if (checkoutStore.selectedAddress?.id === id) {
+      checkoutStore.clearSelectedAddress()
+    }
     successMessage.value = 'Address deleted successfully'
     showSuccess.value = true
   }
@@ -58,6 +109,15 @@ const setDefaultAddress = async (id: string) => {
     if (error) throw error
 
     await loadAddresses()
+
+    const selectedAddress = addresses.value.find(addr => addr.id === id)
+    if (isCheckoutSelectionMode.value && selectedAddress) {
+      checkoutStore.setSelectedAddress(selectedAddress)
+      checkoutStore.setReturnPath(checkoutReturnTarget.value)
+      await router.replace(checkoutReturnTarget.value)
+      return
+    }
+
     successMessage.value = 'Default address updated'
     showSuccess.value = true
   } catch (error) {
@@ -68,7 +128,7 @@ const setDefaultAddress = async (id: string) => {
 
 // Edit address navigation
 const editAddress = (id: string) => {
-  router.push({ name: 'edit-address', params: { id } })
+  router.push({ name: 'edit-address', params: { id }, query: route.query })
 }
 
 // Detect current location options
@@ -204,6 +264,21 @@ const saveCurrentLocationAddress = async (addressData: any) => {
     }
 
     await loadAddresses()
+
+    if (isCheckoutSelectionMode.value) {
+      const currentLocationAddress =
+        addresses.value.find(addr => addr.recipient_name === 'My Current Location') ||
+        addresses.value.find(addr => addr.is_default) ||
+        addresses.value[0]
+
+      if (currentLocationAddress) {
+        checkoutStore.setSelectedAddress(currentLocationAddress)
+        checkoutStore.setReturnPath(checkoutReturnTarget.value)
+        await router.replace(checkoutReturnTarget.value)
+        return
+      }
+    }
+
     showSuccess.value = true
   } catch (error) {
     console.error('Error saving current location:', error)
@@ -234,7 +309,7 @@ onMounted(loadAddresses)
 <template>
   <v-app>
     <v-app-bar flat color="#3f83c7" class="top-nav">
-      <v-btn icon @click="router.back()"><v-icon>mdi-arrow-left</v-icon></v-btn>
+      <v-btn icon @click="handleBackNavigation"><v-icon>mdi-arrow-left</v-icon></v-btn>
       <v-toolbar-title>My Addresses</v-toolbar-title>
     </v-app-bar>
 
@@ -253,7 +328,16 @@ onMounted(loadAddresses)
 
           <v-row>
             <v-col cols="12" v-for="addr in addresses" :key="addr.id">
-              <v-card class="mb-3" :class="{ 'border-primary': addr.is_default }" variant="outlined">
+              <v-card
+                class="mb-3"
+                :class="{
+                  'border-primary': addr.is_default,
+                  'checkout-selection-card': isCheckoutSelectionMode,
+                  'checkout-selection-card-active': isSelectedForCheckout(addr.id),
+                }"
+                variant="outlined"
+                @click="selectAddressForCheckout(addr)"
+              >
                 <v-card-text>
                   <div class="d-flex justify-space-between align-start">
                     <div class="flex-grow-1">
@@ -267,6 +351,11 @@ onMounted(loadAddresses)
                       <div v-if="addr.recipient_name === 'My Current Location'" class="d-flex align-center mb-2">
                         <v-icon color="green" small class="me-1">mdi-crosshairs-gps</v-icon>
                         <span class="text-green font-weight-bold text-caption">CURRENT LOCATION</span>
+                      </div>
+
+                      <div v-if="isCheckoutSelectionMode && isSelectedForCheckout(addr.id)" class="d-flex align-center mb-2">
+                        <v-icon color="success" small class="me-1">mdi-check-circle</v-icon>
+                        <span class="text-success font-weight-bold text-caption">SELECTED FOR THIS ORDER</span>
                       </div>
 
                       <!-- Recipient Info -->
@@ -295,12 +384,21 @@ onMounted(loadAddresses)
                     <!-- Action Buttons -->
                     <div class="d-flex flex-column align-end" style="gap: 8px;">
                       <v-btn
+                        v-if="isCheckoutSelectionMode"
+                        size="small"
+                        color="primary"
+                        variant="outlined"
+                        @click.stop="selectAddressForCheckout(addr)"
+                      >
+                        {{ isSelectedForCheckout(addr.id) ? 'Selected' : 'Use for Order' }}
+                      </v-btn>
+                      <v-btn
                         v-if="addr.recipient_name !== 'My Current Location'"
                         icon
                         size="small"
                         color="primary"
                         variant="text"
-                        @click="editAddress(addr.id)"
+                        @click.stop="editAddress(addr.id)"
                       >
                         <v-icon>mdi-pencil</v-icon>
                       </v-btn>
@@ -309,7 +407,7 @@ onMounted(loadAddresses)
                         size="small"
                         color="red"
                         variant="text"
-                        @click="deleteAddress(addr.id)"
+                        @click.stop="deleteAddress(addr.id)"
                       >
                         <v-icon>mdi-delete</v-icon>
                       </v-btn>
@@ -318,7 +416,7 @@ onMounted(loadAddresses)
                         size="small"
                         color="secondary"
                         variant="text"
-                        @click="setDefaultAddress(addr.id)"
+                        @click.stop="setDefaultAddress(addr.id)"
                       >
                         Set Default
                       </v-btn>
@@ -358,7 +456,7 @@ onMounted(loadAddresses)
             block
             color="primary"
             class="rounded-lg text-white"
-            @click="router.push({ name: 'edit-address' })"
+            @click="openAddAddressForm"
             size="large"
           >
             <v-icon class="me-2">mdi-plus</v-icon>
@@ -470,5 +568,14 @@ onMounted(loadAddresses)
 
 .v-card:hover {
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+.checkout-selection-card {
+  cursor: pointer;
+}
+
+.checkout-selection-card-active {
+  border: 2px solid rgb(76, 175, 80) !important;
+  box-shadow: 0 6px 18px rgba(76, 175, 80, 0.16);
 }
 </style>

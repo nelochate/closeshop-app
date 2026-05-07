@@ -1,3 +1,6 @@
+import { supabase } from '@/utils/supabase'
+import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
+
 export const MAPBOX_ACCESS_TOKEN =
   import.meta.env.VITE_MAPBOX_ACCESS_TOKEN ||
   'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
@@ -10,6 +13,8 @@ export interface TrackingCoordinates {
   lat: number
   lng: number
   updatedAt?: string | null
+  name?: string
+  address?: string
 }
 
 export interface TrackingLocation extends TrackingCoordinates {
@@ -18,6 +23,8 @@ export interface TrackingLocation extends TrackingCoordinates {
 }
 
 type RecordLike = Record<string, any> | null | undefined
+
+let cachedTrackingPersistenceColumns: string[] | null = null
 
 const riderCoordinateKeyPairs = [
   ['rider_latitude', 'rider_longitude'],
@@ -128,6 +135,8 @@ const parseCoordinateRecord = (value: unknown): TrackingCoordinates | null => {
   return {
     lat: Number(lat),
     lng: Number(lng),
+    name: typeof record.name === 'string' ? record.name : undefined,
+    address: typeof record.address === 'string' ? record.address : undefined,
     updatedAt:
       (record.updatedAt as string | undefined) ||
       (record.updated_at as string | undefined) ||
@@ -167,6 +176,102 @@ export const extractPersistedRiderCoordinates = (order: RecordLike): TrackingCoo
   }
 
   return null
+}
+
+export const supportsOrderTrackingPersistence = (order: RecordLike) =>
+  !!order && Object.prototype.hasOwnProperty.call(order, 'tracking_location')
+
+export const buildRiderTrackingLocation = ({
+  lat,
+  lng,
+  name = 'Assigned rider',
+  address = '',
+  updatedAt = new Date().toISOString(),
+}: {
+  lat: unknown
+  lng: unknown
+  name?: string
+  address?: string
+  updatedAt?: string | null
+}): TrackingLocation | null => {
+  if (!hasValidCoordinates(lat, lng)) return null
+
+  return {
+    lat: Number(toCoordinate(lat)),
+    lng: Number(toCoordinate(lng)),
+    name,
+    address,
+    updatedAt,
+  }
+}
+
+const buildTrackingPersistencePayload = (location: TrackingLocation) => {
+  const snapshot = {
+    lat: location.lat,
+    lng: location.lng,
+    name: location.name,
+    address: location.address || null,
+    updatedAt: location.updatedAt || new Date().toISOString(),
+  }
+
+  return {
+    tracking_location: snapshot,
+  }
+}
+
+export const persistOrderTrackingLocation = async ({
+  orderId,
+  location,
+}: {
+  orderId: string
+  location: TrackingLocation | null
+}) => {
+  if (!orderId) {
+    return { persisted: false, reason: 'missing-order-id' as const }
+  }
+
+  if (!location) {
+    return { persisted: false, reason: 'missing-location' as const }
+  }
+
+  const basePayload = buildTrackingPersistencePayload(location)
+  const payload =
+    cachedTrackingPersistenceColumns === null
+      ? basePayload
+      : Object.fromEntries(
+          Object.entries(basePayload).filter(([columnName]) =>
+            cachedTrackingPersistenceColumns.includes(columnName),
+          ),
+        )
+
+  if (!Object.keys(payload).length) {
+    return { persisted: false, reason: 'tracking-columns-unavailable' as const }
+  }
+
+  const { data, error, appliedPayload } = await withSchemaColumnFallback({
+    payload,
+    execute: (currentPayload) =>
+      supabase.from('orders').update(currentPayload).eq('id', orderId).select('id'),
+  })
+
+  if (error) {
+    return { persisted: false, error, appliedPayload }
+  }
+
+  const appliedColumns = Object.keys(appliedPayload || {})
+
+  if (!appliedColumns.length) {
+    cachedTrackingPersistenceColumns = []
+    return { persisted: false, reason: 'tracking-columns-unavailable' as const }
+  }
+
+  cachedTrackingPersistenceColumns = appliedColumns
+
+  return {
+    persisted: true,
+    data,
+    appliedPayload,
+  }
 }
 
 export const geocodeAddress = async (query: string): Promise<TrackingCoordinates | null> => {
