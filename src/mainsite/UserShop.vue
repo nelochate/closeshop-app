@@ -3,10 +3,17 @@ import { ref, onMounted, computed, watch, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
-import { notifyAvailableRidersNewDeliveryRequest } from '@/utils/orderNotifications'
+import {
+  notifyAvailableRidersNewDeliveryRequest,
+  notifyCustomerOrderStatus,
+} from '@/utils/orderNotifications'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime } from '@/utils/dateTime'
-import { isOrderCancellationRequestedStatus, normalizeOrderStatus } from '@/utils/orderStatus'
+import {
+  ORDER_CANCEL_REQUESTED_STATUSES,
+  isOrderCancellationRequestedStatus,
+  normalizeOrderStatus,
+} from '@/utils/orderStatus'
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
@@ -29,6 +36,7 @@ const handleRefresh = async () => {
 
 type OrderSectionId =
   | 'pending_approval'
+  | 'cancel_requests'
   | 'waiting_for_rider'
   | 'active'
   | 'delivered'
@@ -54,6 +62,8 @@ const orders = ref<any[]>([])
 const loadingOrders = ref(false)
 const ordersError = ref('')
 const approvingOrderId = ref(null)
+const cancellationActionOrderId = ref<string | null>(null)
+const cancellationActionType = ref<'approve' | 'decline' | null>(null)
 const currentTime = ref(Date.now())
 let currentTimeInterval: ReturnType<typeof setInterval> | null = null
 let ordersSubscription: any = null
@@ -92,6 +102,7 @@ const activeOrderTab = ref<OrderTab>('pending_approval')
 const orderCounts = computed(() => {
   const counts = {
     pending_approval: 0,
+    cancel_requests: 0,
     waiting_for_rider: 0,
     active: 0,
     delivered: 0,
@@ -101,9 +112,9 @@ const orderCounts = computed(() => {
 
   orders.value.forEach((order) => {
     if (order.status === 'pending_approval') counts.pending_approval++
-    else if (
-      order.status === 'waiting_for_rider' || isOrderCancellationRequestedStatus(order.status)
-    ) {
+    else if (isOrderCancellationRequestedStatus(order.status)) {
+      counts.cancel_requests++
+    } else if (order.status === 'waiting_for_rider') {
       counts.waiting_for_rider++
     } else if (
       order.status === 'accepted_by_rider' ||
@@ -126,10 +137,11 @@ const pendingApprovalOrders = computed(() => {
 })
 
 const waitingForRiderOrders = computed(() => {
-  return orders.value.filter(
-    (order) =>
-      order.status === 'waiting_for_rider' || isOrderCancellationRequestedStatus(order.status),
-  )
+  return orders.value.filter((order) => order.status === 'waiting_for_rider')
+})
+
+const cancellationRequestOrders = computed(() => {
+  return orders.value.filter((order) => isOrderCancellationRequestedStatus(order.status))
 })
 
 const activeOrdersWithRiders = computed(() => {
@@ -332,6 +344,121 @@ const rejectOrder = async (order: any) => {
   }
 }
 
+const getOrderNotificationData = (order: any = {}) => ({
+  ...order,
+  shop_owner_id: shopOwnerUserId.value,
+  shop_name: businessName.value || order.shop_name,
+  customer_name: order.customer_name,
+})
+
+const approveCancellationRequest = async (order: any) => {
+  if (!confirm(`Approve cancellation request for order #${getTransactionNumber(order)}?`)) {
+    return
+  }
+
+  const cancelledAt = new Date().toISOString()
+  cancellationActionOrderId.value = order.id
+  cancellationActionType.value = 'approve'
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        payment_status: 'cancelled',
+        cancelled_at: cancelledAt,
+        updated_at: cancelledAt,
+      })
+      .eq('id', order.id)
+      .in('status', ORDER_CANCEL_REQUESTED_STATUSES)
+      .is('rider_id', null)
+      .select('id')
+
+    if (error) throw error
+
+    if (!data || data.length === 0) {
+      await fetchOrders()
+      alert('This cancellation request is no longer available to approve.')
+      return
+    }
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId: order.id,
+        status: 'cancelled',
+        createdAt: cancelledAt,
+        orderData: getOrderNotificationData(order),
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about the approved cancellation:', notificationError)
+    }
+
+    alert('Cancellation approved. Order marked as cancelled.')
+    await fetchOrders()
+  } catch (error) {
+    console.error('Error approving cancellation request:', error)
+    alert('Failed to approve the cancellation request. Please try again.')
+  } finally {
+    cancellationActionOrderId.value = null
+    cancellationActionType.value = null
+  }
+}
+
+const declineCancellationRequest = async (order: any) => {
+  if (
+    !confirm(
+      `Decline cancellation request for order #${getTransactionNumber(order)} and return it to waiting for rider?`,
+    )
+  ) {
+    return
+  }
+
+  const respondedAt = new Date().toISOString()
+  cancellationActionOrderId.value = order.id
+  cancellationActionType.value = 'decline'
+
+  try {
+    const { data, error } = await supabase
+      .from('orders')
+      .update({
+        status: 'waiting_for_rider',
+        updated_at: respondedAt,
+      })
+      .eq('id', order.id)
+      .in('status', ORDER_CANCEL_REQUESTED_STATUSES)
+      .is('rider_id', null)
+      .select('id')
+
+    if (error) throw error
+
+    if (!data || data.length === 0) {
+      await fetchOrders()
+      alert('This cancellation request is no longer available to decline.')
+      return
+    }
+
+    try {
+      await notifyCustomerOrderStatus({
+        orderId: order.id,
+        status: 'cancellation_request_declined',
+        createdAt: respondedAt,
+        orderData: getOrderNotificationData(order),
+      })
+    } catch (notificationError) {
+      console.warn('Could not notify customer about the declined cancellation:', notificationError)
+    }
+
+    alert('Cancellation request declined. Order returned to waiting for rider.')
+    await fetchOrders()
+  } catch (error) {
+    console.error('Error declining cancellation request:', error)
+    alert('Failed to decline the cancellation request. Please try again.')
+  } finally {
+    cancellationActionOrderId.value = null
+    cancellationActionType.value = null
+  }
+}
+
 const viewOrderDetails = (orderId: string) => {
   router.push({ name: 'order-details', params: { id: orderId } })
 }
@@ -353,6 +480,12 @@ const orderSections: Array<{
     title: 'Pending Approval',
     icon: 'mdi-clock-outline',
     color: 'warning',
+  },
+  {
+    id: 'cancel_requests',
+    title: 'Cancel Requests',
+    icon: 'mdi-alert-circle-outline',
+    color: 'deep-orange',
   },
   {
     id: 'waiting_for_rider',
@@ -383,6 +516,7 @@ const orderSections: Array<{
 const transactionOptions: Array<{ title: string; value: OrderTab }> = [
   { title: 'All Orders', value: 'all' },
   { title: 'Pending Approval', value: 'pending_approval' },
+  { title: 'Cancel Requests', value: 'cancel_requests' },
   { title: 'Waiting for Rider', value: 'waiting_for_rider' },
   { title: 'Active Deliveries', value: 'active' },
   { title: 'Delivered', value: 'delivered' },
@@ -577,6 +711,8 @@ const filteredOrders = computed(() => {
   switch (activeOrderTab.value) {
     case 'pending_approval':
       return pendingApprovalOrders.value
+    case 'cancel_requests':
+      return cancellationRequestOrders.value
     case 'waiting_for_rider':
       return waitingForRiderOrders.value
     case 'active':
@@ -1361,6 +1497,106 @@ const getOrderDeliveryDisplay = (order: any): string => {
                   >
                     <v-icon start size="14">mdi-close-circle</v-icon>
                     Reject
+                  </v-btn>
+                  <v-btn
+                    color="primary"
+                    size="small"
+                    variant="outlined"
+                    @click="viewOrderDetails(order.id)"
+                    class="action-btn-icon"
+                  >
+                    <v-icon size="14">mdi-eye</v-icon>
+                  </v-btn>
+                </div>
+              </v-card-text>
+            </v-card>
+          </template>
+
+          <!-- Cancellation Requests Section -->
+          <template v-else-if="activeOrderTab === 'cancel_requests'">
+            <v-card
+              v-for="order in filteredOrders"
+              :key="order.id"
+              class="mb-3 order-card elevation-1"
+              :rounded="isMobile ? 'lg' : 'xl'"
+              :style="{ borderLeft: '4px solid #fb8c00' }"
+            >
+              <v-card-text :class="isMobile ? 'pa-3' : 'pa-4'">
+                <div class="d-flex justify-space-between align-start mb-2">
+                  <div>
+                    <span class="text-subtitle-2 font-weight-bold text-primary">
+                      #{{ getTransactionNumber(order) }}
+                    </span>
+                    <div class="text-caption text-medium-emphasis">
+                      {{ formatDate(order.updated_at || order.created_at) }}
+                    </div>
+                  </div>
+                  <v-chip color="warning" size="x-small">
+                    <v-icon start size="10">mdi-alert-circle-outline</v-icon>
+                    Cancel Request
+                  </v-chip>
+                </div>
+
+                <div class="mb-2 pa-2 rounded-lg" style="background: #fff3cd">
+                  <div class="d-flex align-center">
+                    <v-icon color="warning" size="18" class="mr-2">mdi-timer-sand</v-icon>
+                    <div class="text-caption font-weight-medium">
+                      Buyer is waiting for your cancellation decision.
+                    </div>
+                  </div>
+                </div>
+
+                <div class="d-flex align-center mb-2">
+                  <v-avatar size="28" color="warning" class="mr-2">
+                    <span class="text-white text-caption">
+                      {{ order.customer_name?.charAt(0) || 'C' }}
+                    </span>
+                  </v-avatar>
+                  <div>
+                    <div class="text-caption font-weight-medium">{{ order.customer_name }}</div>
+                    <div class="text-caption text-medium-emphasis">{{ order.customer_phone }}</div>
+                  </div>
+                </div>
+
+                <div class="d-flex justify-space-between align-center mb-3">
+                  <div class="text-caption">{{ order.items.length }} item(s)</div>
+                  <div class="text-caption font-weight-bold text-primary">
+                    ₱{{ Number(order.total_amount).toLocaleString() }}
+                  </div>
+                </div>
+
+                <div class="action-buttons-wrapper">
+                  <v-btn
+                    color="error"
+                    size="small"
+                    variant="flat"
+                    @click="approveCancellationRequest(order)"
+                    :loading="
+                      cancellationActionOrderId === order.id &&
+                      cancellationActionType === 'approve'
+                    "
+                    :disabled="cancellationActionOrderId === order.id"
+                    :block="isMobile"
+                    class="action-btn-small"
+                  >
+                    <v-icon start size="14">mdi-check-circle</v-icon>
+                    Approve Cancel
+                  </v-btn>
+                  <v-btn
+                    color="primary"
+                    size="small"
+                    variant="outlined"
+                    @click="declineCancellationRequest(order)"
+                    :loading="
+                      cancellationActionOrderId === order.id &&
+                      cancellationActionType === 'decline'
+                    "
+                    :disabled="cancellationActionOrderId === order.id"
+                    :block="isMobile"
+                    class="action-btn-small"
+                  >
+                    <v-icon start size="14">mdi-close-circle</v-icon>
+                    Decline
                   </v-btn>
                   <v-btn
                     color="primary"
