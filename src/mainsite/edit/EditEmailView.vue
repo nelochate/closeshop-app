@@ -3,11 +3,12 @@ import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
+import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
 
 const router = useRouter()
 const authStore = useAuthUserStore()
 
-const email = ref(authStore.profile?.email || '')
+const email = ref(authStore.profile?.email || authStore.userData?.email || '')
 const isLoading = ref(false)
 const showSuccess = ref(false)
 const successMessage = ref('')
@@ -18,12 +19,35 @@ const saveEmail = async () => {
     const { data: userData } = await supabase.auth.getUser()
     if (!userData?.user) throw new Error('User not found')
 
-    const { error } = await supabase.auth.updateUser({ email: email.value })
+    const { data: emailUpdateData, error } = await supabase.auth.updateUser({ email: email.value })
     if (error) throw error
+
+    await withSchemaColumnFallback({
+      payload: {
+        email: email.value,
+        updated_at: new Date().toISOString(),
+      },
+      execute: (currentPayload) =>
+        supabase
+          .from('profiles')
+          .update(currentPayload)
+          .eq('id', userData.user.id),
+    })
+
+    if (authStore.profile) {
+      authStore.profile.email = email.value
+    }
+
+    if (authStore.userData) {
+      authStore.userData = {
+        ...authStore.userData,
+        ...(emailUpdateData?.user || {}),
+        email: email.value,
+      }
+    }
 
     successMessage.value = 'Email updated! Please verify your new email.'
     showSuccess.value = true
-    await authStore.hydrateFromSession()
 
     setTimeout(() => router.replace({ name: 'profileview', query: { refreshed: Date.now() } }), 2000)
   } catch (e) {

@@ -1,13 +1,15 @@
 <script setup lang="ts">
-import { ref, onMounted, watch, nextTick, onUnmounted } from 'vue'
+import { ref, onMounted, watch, nextTick, onUnmounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Geolocation } from '@capacitor/geolocation'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
+import { useCheckoutStore } from '@/stores/checkout'
 
 const router = useRouter()
 const route = useRoute()
+const checkoutStore = useCheckoutStore()
 
 // Set Mapbox token
 mapboxgl.accessToken =
@@ -25,6 +27,30 @@ const addressMode = ref('manual')
 const isEdit = ref(false)
 const addressId = ref(route.params.id || null)
 const showEditFields = ref(false)
+const isCheckoutSelectionMode = computed(() => route.query.mode === 'checkout')
+const checkoutReturnTarget = computed(() => {
+  const returnTo = typeof route.query.returnTo === 'string' ? route.query.returnTo.trim() : ''
+  return returnTo || checkoutStore.returnPath || '/purchaseview'
+})
+
+const buildAddressListRoute = () => {
+  const query: Record<string, any> = {
+    refreshed: Date.now(),
+  }
+
+  if (typeof route.query.mode === 'string' && route.query.mode) {
+    query.mode = route.query.mode
+  }
+
+  if (typeof route.query.returnTo === 'string' && route.query.returnTo) {
+    query.returnTo = route.query.returnTo
+  }
+
+  return {
+    name: 'my-address',
+    query,
+  }
+}
 
 // Loading states for PSGC dropdowns
 const loadingRegions = ref(false)
@@ -1045,14 +1071,20 @@ const saveAddress = async () => {
         .update(addressData)
         .eq('id', addressId.value)
         .eq('user_id', profileId)
+        .select()
+        .single()
     } else {
-      result = await supabase.from('addresses').insert([
-        {
-          ...addressData,
-          user_id: profileId,
-          created_at: new Date().toISOString(),
-        },
-      ])
+      result = await supabase
+        .from('addresses')
+        .insert([
+          {
+            ...addressData,
+            user_id: profileId,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select()
+        .single()
     }
 
     if (result.error) {
@@ -1072,7 +1104,21 @@ const saveAddress = async () => {
       : 'Address added successfully!'
     showSuccess.value = true
 
-    setTimeout(() => router.replace({ name: 'my-address', query: { refreshed: Date.now() } }), 1500)
+    const savedAddress = result.data
+
+    setTimeout(() => {
+      if (isCheckoutSelectionMode.value) {
+        if (savedAddress) {
+          checkoutStore.setSelectedAddress(savedAddress)
+        }
+
+        checkoutStore.setReturnPath(checkoutReturnTarget.value)
+        router.replace(checkoutReturnTarget.value)
+        return
+      }
+
+      router.replace(buildAddressListRoute())
+    }, 1500)
   } catch (err: any) {
     console.error(err)
     snackbarMessage.value = 'Error: ' + (err.message || 'Failed to save address')

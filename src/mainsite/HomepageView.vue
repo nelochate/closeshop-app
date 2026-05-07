@@ -4,18 +4,19 @@ import { useRouter } from 'vue-router'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import { supabase } from '@/utils/supabase'
 import { Geolocation } from '@capacitor/geolocation'
-//import { PushNotifications } from '@capacitor/push-notifications'
 import { Network } from '@capacitor/network'
 import { Capacitor } from '@capacitor/core'
 import {
   getVisibleUnreadNotificationCount,
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
+import { useCartStore } from '@/stores/cart'
 
 import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const activeTab = ref('home')
+const cart = useCartStore()
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
@@ -44,6 +45,9 @@ const handleRefresh = async () => {
     // Refresh products
     await fetchProducts()
 
+    // Refresh cart badge state
+    await cart.ensureFresh({ force: true, silent: true })
+    
     // Refresh notification count
     await fetchUnreadNotificationCount()
 
@@ -202,58 +206,6 @@ function saveLastKnownLocation(coords) {
     localStorage.setItem('lastKnownLocation', JSON.stringify(locationData))
   } catch (e) {
     console.warn('Could not save location cache', e)
-  }
-}
-
-/* 🔔 Push Notifications — Native Only (Capacitor) */
-async function setupPushNotifications() {
-  try {
-    // Step 1: Check permission
-    let permStatus = await PushNotifications.checkPermissions()
-    if (permStatus.receive !== 'granted') {
-      const req = await PushNotifications.requestPermissions()
-      if (req.receive !== 'granted') {
-        console.warn('❌ Notifications permission denied.')
-        return
-      }
-    }
-
-    // Step 2: Register with APNS/FCM (handled internally by Capacitor)
-    // await PushNotifications.register()
-
-    // Step 3: Handle successful registration (token received)
-    PushNotifications.addListener('registration', async (token) => {
-      console.log('✅ Push token (Capacitor):', token.value)
-
-      // Optional: Save token to Supabase for your backend
-      const {
-        data: { user },
-      } = await supabase.auth.getUser()
-      if (user) {
-        const { error } = await supabase
-          .from('user_fcm_tokens')
-          .upsert({ user_id: user.id, token: token.value }, { onConflict: 'user_id' })
-        if (error) console.error('Error saving push token:', error)
-        else console.log('✅ Token saved to Supabase')
-      }
-    })
-
-    // Step 4: Handle registration errors
-    PushNotifications.addListener('registrationError', (error) => {
-      console.error('❌ Push registration error:', error)
-    })
-
-    // Step 5: Handle foreground notifications
-    PushNotifications.addListener('pushNotificationReceived', (notification) => {
-      console.log('📩 Push received:', notification)
-    })
-
-    // Step 6: Handle user tapping a notification
-    PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
-      console.log('🖱️ Notification action:', action.notification)
-    })
-  } catch (err) {
-    console.error('⚠️ setupPushNotifications error:', err)
   }
 }
 
@@ -423,6 +375,10 @@ async function setupNotificationListener() {
   } = await supabase.auth.getUser()
   if (!user) return
 
+  if (notificationSubscription.value) {
+    return
+  }
+
   // Fetch initial unread count
   await fetchUnreadNotificationCount()
 
@@ -447,14 +403,6 @@ async function setupNotificationListener() {
         }
 
         unreadNotifications.value++
-
-        // Show native notification if enabled
-        if (Notification.permission === 'granted') {
-          new Notification('CloseShop', {
-            body: visibleNotification.message,
-            icon: '/icon.png',
-          })
-        }
       },
     )
     .on(
@@ -484,62 +432,48 @@ async function fetchUnreadNotificationCount() {
   unreadNotifications.value = await getVisibleUnreadNotificationCount(user.id)
 }
 
-// NEW: Setup real-time product updates subscription
+/* ✅ NEW: Setup real-time products subscription */
 async function setupProductsSubscription() {
+  console.log('📡 Setting up real-time products subscription...')
+
+  // Clean up existing subscription if any
   if (productsSubscription.value) {
+    console.log('📡 Cleaning up existing products subscription')
     productsSubscription.value.unsubscribe()
+    productsSubscription.value = null
   }
 
-  // Subscribe to real-time updates on products table
+  // Get current user
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
+  
+  if (!user) {
+    console.log('📡 No user logged in, skipping products subscription')
+    return
+  }
+
+  // Subscribe to product changes on shops that the user owns
   productsSubscription.value = supabase
     .channel('products-changes')
     .on(
       'postgres_changes',
       {
-        event: 'UPDATE',
+        event: '*', // Listen to all events (INSERT, UPDATE, DELETE)
         schema: 'public',
         table: 'products',
+        filter: `shop_id=in.(select id from shops where owner_id=eq.${user.id})`,
       },
-      (payload) => {
-        console.log('🔄 Product updated in real-time:', payload)
+      async (payload) => {
+        console.log('📡 Real-time product update received:', payload)
 
-        // Update the sold count for the specific product
-        const updatedProduct = payload.new
-        const productIndex = products.value.findIndex((p) => p.id === updatedProduct.id)
-
-        if (productIndex !== -1) {
-          const oldSold = products.value[productIndex].sold
-          const newSold = updatedProduct.sold || 0
-
-          // Update product with sold and stock
-          products.value[productIndex] = {
-            ...products.value[productIndex],
-            sold: newSold,
-            stock: updatedProduct.stock || 0,
-          }
-
-          // Log the update
-          if (newSold > oldSold) {
-            console.log(`🔥 Product ${updatedProduct.id} sales increased: ${oldSold} → ${newSold}`)
-          } else if (newSold < oldSold) {
-            console.log(`📉 Product ${updatedProduct.id} sales adjusted: ${oldSold} → ${newSold}`)
-          }
-          console.log(
-            `✅ Updated product ${updatedProduct.id}: sold=${newSold}, stock=${updatedProduct.stock}`,
-          )
-        }
+        // Refresh products to get the latest data
+        await fetchProducts()
       },
     )
-    .subscribe()
-
-  console.log('📡 Subscribed to real-time product updates')
-}
-
-// NEW: Function to refresh all products data
-async function refreshProductsData() {
-  console.log('🔄 Refreshing products data...')
-  await fetchProducts()
-  console.log('✅ Products data refreshed')
+    .subscribe((status) => {
+      console.log('📡 Products subscription status:', status)
+    })
 }
 
 /* 🚀 Main Lifecycle */
@@ -570,8 +504,6 @@ onMounted(async () => {
           console.warn('📍 Location setup completed with warnings:', err)
           return false
         })
-
-      await setupPushNotifications()
 
       // Wait a bit for location if possible, but don't block
       await Promise.race([locationPromise, new Promise((resolve) => setTimeout(resolve, 2000))])
@@ -703,28 +635,33 @@ const hotPicks = computed(() => {
   }))
 })
 
+// Add missing variable declarations
+let surveyBubbleTimeout = null
+let surveyBubbleHideTimeout = null
+let homepageInitialized = false
+
 </script>
 
 <template>
   <v-app>
-    <PullToRefreshWrapper :on-refresh="handleRefresh">
-      <v-main class="page">
-        <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
-          <div class="hero-row">
-            <v-text-field
-              v-model="searchQuery"
-              class="search-field"
-              variant="solo"
-              rounded="pill"
-              hide-details
-              clearable
-              density="comfortable"
-              placeholder="Search product or shop..."
-              prepend-inner-icon="mdi-magnify"
-              append-inner-icon="mdi-earth"
-              @focus="goToSearch"
-              @input="updateSearch"
-            />
+  <PullToRefreshWrapper :on-refresh="handleRefresh">
+    <v-main class="page">
+      <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
+        <div class="hero-row">
+          <v-text-field
+            v-model="searchQuery"
+            class="search-field"
+            variant="solo"
+            rounded="pill"
+            hide-details
+            clearable
+            density="comfortable"
+            placeholder="Looking for something?"
+            prepend-inner-icon="mdi-magnify"
+            append-inner-icon="mdi-earth"
+            @focus="goToSearch"
+            @input="updateSearch"
+          />
 
             <!-- Notification Button with Badge -->
             <div class="notification-wrapper">

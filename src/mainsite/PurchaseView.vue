@@ -3,12 +3,13 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { removeRecentMessageNotification } from '@/utils/chatNotifications'
+import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import { syncProfileFromAuthUser } from '@/utils/profileSync'
+import { useCheckoutStore } from '@/stores/checkout'
 import {
   calculateCheckoutDeliveryPricing,
   calculateOrderItemsSubtotal,
   calculateOrderTotalAmount,
-  isMissingDeliveryFeeColumnError,
 } from '@/utils/deliveryPricing.js'
 
 const route = useRoute()
@@ -24,10 +25,10 @@ const transactionNumber = ref('')
 const buyer = ref<any>(null)
 const address = ref<any>(null)
 const addresses = ref<any[]>([])
-const showAddressDialog = ref(false)
 const deliveryOption = ref('meetup')
 const paymentMethod = ref('')
 const note = ref('')
+const checkoutStore = useCheckoutStore()
 // 📋 CLIPBOARD STATE
 const showCopySuccess = ref(false)
 const copyButtonText = ref('Copy')
@@ -38,11 +39,6 @@ const deliveryTime = ref('')
 const selectedHour = ref('')
 const selectedMinute = ref('')
 const selectedPeriod = ref<'AM' | 'PM'>('AM')
-
-// 👤 CONTACT STATE
-const showContactDialog = ref(false)
-const contactPhone = ref('')
-const contactEmail = ref('')
 
 // 🚫 VALIDATION STATE
 const validationErrors = ref<string[]>([])
@@ -58,6 +54,54 @@ const shopSchedule = ref({
   manualStatus: 'auto',
   paymentOptions: ['cod'] as string[], // Default payment options
 })
+
+const normalizeContactNumber = (value: unknown) =>
+  typeof value === 'string' ? value.trim() : ''
+
+const isValidPhilippinePhoneNumber = (value: unknown) =>
+  /^(09|\+639)\d{9}$/.test(normalizeContactNumber(value).replace(/\s+/g, ''))
+
+const selectedAddressContactNumber = computed(() => normalizeContactNumber(address.value?.phone))
+const hasValidSelectedAddressContactNumber = computed(() =>
+  isValidPhilippinePhoneNumber(selectedAddressContactNumber.value),
+)
+const purchaseReturnPath = computed(() =>
+  router.resolve({
+    name: 'purchaseview',
+    params: route.params,
+    query: route.query,
+  }).fullPath,
+)
+
+const syncSelectedCheckoutAddress = (availableAddresses: any[] = addresses.value) => {
+  if (!availableAddresses.length) {
+    address.value = null
+    checkoutStore.clearSelectedAddress()
+    return
+  }
+
+  const storedAddressId = checkoutStore.selectedAddress?.id
+  const storedAddressMatch = storedAddressId
+    ? availableAddresses.find((savedAddress) => savedAddress.id === storedAddressId)
+    : null
+
+  const defaultAddress =
+    availableAddresses.find((savedAddress) => savedAddress.is_default) || availableAddresses[0]
+
+  address.value = storedAddressMatch || defaultAddress
+  checkoutStore.setSelectedAddress(address.value)
+}
+
+const goToAddressSelection = () => {
+  checkoutStore.setReturnPath(purchaseReturnPath.value)
+  router.push({
+    name: 'my-address',
+    query: {
+      mode: 'checkout',
+      returnTo: purchaseReturnPath.value,
+    },
+  })
+}
 
 // 🎫 GENERATE TRANSACTION NUMBER (BASE FUNCTION)
 const generateTransactionNumber = () => {
@@ -100,6 +144,102 @@ const generateUniqueTransactionNumber = async (): Promise<string> => {
   }
 
   return generateTransactionNumber() + '-' + Math.random().toString(36).substring(2, 4)
+}
+
+const getSupabaseErrorText = (error: any) => {
+  const message = String(error?.message || '')
+  const details = String(error?.details || '')
+  const hint = String(error?.hint || '')
+  return `${message} ${details} ${hint}`.toLowerCase()
+}
+
+const isMissingSchemaColumnError = (error: any, columnName: string) => {
+  const code = String(error?.code || '')
+  const combinedText = getSupabaseErrorText(error)
+  const normalizedColumnName = columnName.toLowerCase()
+
+  return (
+    combinedText.includes(normalizedColumnName) &&
+    (code === 'PGRST204' ||
+      code === '42703' ||
+      combinedText.includes('column') ||
+      combinedText.includes('schema cache'))
+  )
+}
+
+const createOrderWithSchemaFallback = async (payload: Record<string, any>) => {
+  const requiredColumns = new Set(['user_id', 'address_id', 'total_amount', 'status'])
+  const currentPayload: Record<string, any> = { ...payload }
+
+  while (true) {
+    const response = await supabase.from('orders').insert(currentPayload).select().single()
+
+    if (!response.error) {
+      return response
+    }
+
+    const missingColumn = Object.keys(currentPayload).find(
+      (columnName) =>
+        !requiredColumns.has(columnName) &&
+        isMissingSchemaColumnError(response.error, columnName),
+    )
+
+    if (!missingColumn) {
+      return response
+    }
+
+    console.warn(
+      `orders.${missingColumn} is not available in this Supabase project yet. Retrying order creation without that column.`,
+    )
+
+    delete currentPayload[missingColumn]
+  }
+}
+
+const createPaymentRecordWithSchemaFallback = async ({
+  orderId,
+  amount,
+  method,
+}: {
+  orderId: string
+  amount: number
+  method: string
+}) => {
+  const createdAt = new Date().toISOString()
+  const payloadVariants = [
+    { order_id: orderId, amount, status: 'pending', method, payment_date: createdAt },
+    { order_id: orderId, amount, status: 'pending', method, created_at: createdAt },
+    { order_id: orderId, amount, status: 'pending', method },
+    { order_id: orderId, amount, status: 'pending', payment_method: method, payment_date: createdAt },
+    { order_id: orderId, amount, status: 'pending', payment_method: method, created_at: createdAt },
+    { order_id: orderId, amount, status: 'pending', payment_method: method },
+    { order_id: orderId, amount, status: 'pending', payment_date: createdAt },
+    { order_id: orderId, amount, status: 'pending', created_at: createdAt },
+    { order_id: orderId, amount, status: 'pending' },
+  ]
+
+  let lastError: any = null
+
+  for (const payload of payloadVariants) {
+    const { error } = await supabase.from('payments').insert(payload)
+
+    if (!error) {
+      return { error: null }
+    }
+
+    lastError = error
+
+    const attemptedColumns = Object.keys(payload)
+    const canRetryWithAnotherShape = attemptedColumns.some((columnName) =>
+      isMissingSchemaColumnError(error, columnName),
+    )
+
+    if (!canRetryWithAnotherShape) {
+      return { error }
+    }
+  }
+
+  return { error: lastError }
 }
 
 // 🔄 INITIALIZE PAGE
@@ -492,37 +632,6 @@ const fetchCartItems = async () => {
   }
 }
 
-// 📞 LOAD CONTACT INFO
-const loadContactInfo = async () => {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) return
-
-    // Get contact info from profile - ONLY PHONE
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('phone')
-      .eq('id', user.id)
-      .single()
-
-    if (profile) {
-      contactPhone.value = profile.phone || ''
-    }
-
-    // Clear email since it's not in profile schema
-    contactEmail.value = user.email || ''
-
-    // Also check if address has phone
-    if (address.value?.phone) {
-      contactPhone.value = address.value.phone
-    }
-  } catch (err) {
-    console.error('❌ Error loading contact info:', err)
-  }
-}
-
 // 🎯 INITIALIZATION - FIXED VERSION
 onMounted(async () => {
   console.log('🚀 Purchase View Mounted')
@@ -814,66 +923,6 @@ const fetchAllCartItems = async () => {
   }
 }
 
-// 📞 UPDATE CONTACT INFO
-const updateContactInfo = async () => {
-  try {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser()
-    if (!user) {
-      alert('Please log in to update contact info')
-      return
-    }
-
-    // Validate phone
-    if (!contactPhone.value || contactPhone.value.trim() === '') {
-      alert('Please enter a valid phone number')
-      return
-    }
-
-    // Basic phone format validation
-    const phoneRegex = /^(09|\+639)\d{9}$/
-    const cleanPhone = contactPhone.value.replace(/\s+/g, '')
-    if (!phoneRegex.test(cleanPhone)) {
-      alert('Please enter a valid Philippine phone number (09xxxxxxxxx or +639xxxxxxxxx)')
-      return
-    }
-
-    // Update profile - ONLY PHONE (no email column)
-    const { error: profileError } = await supabase
-      .from('profiles')
-      .update({
-        phone: contactPhone.value,
-        // REMOVED: email: contactEmail.value || user.email
-      })
-      .eq('id', user.id)
-
-    if (profileError) {
-      console.error('❌ Profile update error:', profileError)
-      throw profileError
-    }
-
-    // Also update current address phone if address exists
-    if (address.value) {
-      const { error: addressError } = await supabase
-        .from('addresses')
-        .update({ phone: contactPhone.value })
-        .eq('id', address.value.id)
-
-      if (addressError) {
-        console.warn('⚠️ Could not update address phone:', addressError)
-      }
-    }
-
-    alert('Contact information updated successfully!')
-    showContactDialog.value = false
-    await loadUserData() // Refresh user data
-  } catch (err) {
-    console.error('❌ Error updating contact info:', err)
-    alert('Failed to update contact information')
-  }
-}
-
 // ✅ VALIDATE ALL FIELDS BEFORE CHECKOUT - UPDATED TO CHECK PAYMENT METHOD
 const validateAllFields = (): boolean => {
   validationErrors.value = []
@@ -894,11 +943,11 @@ const validateAllFields = (): boolean => {
   }
   // REMOVED: No need to check individual address fields since users can only pick from saved addresses
 
-  // 4. Check contact info - REQUIRED
-  if (!contactPhone.value || contactPhone.value.trim() === '') {
-    validationErrors.value.push('Contact phone number is required')
-  } else if (!/^(09|\+639)\d{9}$/.test(contactPhone.value.replace(/\s+/g, ''))) {
-    validationErrors.value.push('Please enter a valid Philippine phone number')
+  // 4. Check selected address contact info - REQUIRED
+  if (!selectedAddressContactNumber.value) {
+    validationErrors.value.push('Selected address must include a contact number')
+  } else if (!hasValidSelectedAddressContactNumber.value) {
+    validationErrors.value.push('Selected address needs a valid Philippine contact number')
   }
 
   // 5. Check delivery schedule
@@ -951,9 +1000,6 @@ const loadUserData = async () => {
 
     buyer.value = profile
 
-    // Load contact info
-    await loadContactInfo()
-
     // Load addresses
     await loadUserAddresses()
 
@@ -986,44 +1032,13 @@ const loadUserAddresses = async () => {
     }
 
     addresses.value = userAddresses || []
-
-    if (addresses.value.length > 0) {
-      // Use the first default address (there should be only one due to unique constraint)
-      const defaultAddress = addresses.value.find((addr) => addr.is_default)
-
-      if (defaultAddress) {
-        address.value = defaultAddress
-        console.log('✅ Using default address:', defaultAddress)
-      } else {
-        // No default address, use the most recent
-        address.value = addresses.value[0]
-        console.log('ℹ️ No default address, using most recent:', address.value)
-      }
-    } else {
-      address.value = null
-      console.log('ℹ️ No addresses found for user')
-    }
+    syncSelectedCheckoutAddress(addresses.value)
 
     console.log('✅ Addresses loaded:', addresses.value)
     console.log('✅ Selected address:', address.value)
   } catch (err) {
     console.error('❌ Error loading addresses:', err)
   }
-}
-
-// 🏠 SELECT ADDRESS
-const selectAddress = (selectedAddress: any) => {
-  console.log('📍 Selecting address:', selectedAddress)
-  address.value = selectedAddress
-  showAddressDialog.value = false
-  console.log('✅ Address selected:', address.value)
-}
-
-// 🏠 ADD NEW ADDRESS
-const addNewAddress = () => {
-  showAddressDialog.value = false
-  // Navigate to add address page
-  router.push({ name: 'edit-address' })
 }
 
 // 🏠 FORMAT ADDRESS FOR DISPLAY - IMPROVED
@@ -1842,8 +1857,10 @@ const handleCheckout = async () => {
     const baseOrderPayload = {
       user_id: buyer.value.id,
       address_id: address.value.id,
+      contact_number: selectedAddressContactNumber.value,
       total_amount: totalPrice.value,
       status: 'pending_approval',
+      payment_status: 'pending',
       payment_method: paymentMethod.value,
       transaction_number: transactionNumber.value,
       delivery_option: deliveryOption.value,
@@ -1851,30 +1868,21 @@ const handleCheckout = async () => {
       delivery_time: deliveryTime.value,
       note: note.value,
       shop_id: shopId,
+      delivery_fee: deliveryFee.value,
     }
 
-    let orderResponse = await supabase
-      .from('orders')
-      .insert({
-        ...baseOrderPayload,
-        delivery_fee: deliveryFee.value,
-      })
-      .select()
-      .single()
-
-    if (orderResponse.error && isMissingDeliveryFeeColumnError(orderResponse.error)) {
-      console.warn(
-        'delivery_fee column is not available in this Supabase project yet. Retrying order creation without the column.',
-      )
-
-      orderResponse = await supabase.from('orders').insert(baseOrderPayload).select().single()
-    }
-
+    const orderResponse = await createOrderWithSchemaFallback(baseOrderPayload)
     const { data: order, error: orderError } = orderResponse
 
     if (orderError) {
       console.error('❌ Order creation error:', orderError)
-      alert('Failed to create order. Please try again.')
+      if (isMissingSchemaColumnError(orderError, 'contact_number')) {
+        alert(
+          'Checkout needs the latest database update for orders.contact_number. Run the newest Supabase migration, then try again.',
+        )
+      } else {
+        alert('Failed to create order. Please try again.')
+      }
       isProcessing.value = false
       return
     }
@@ -1917,19 +1925,20 @@ const handleCheckout = async () => {
     const finalOrderTotal = Number(persistedOrderTotals?.total_amount ?? totalPrice.value)
 
     // 3. Create payment record
-    const { error: paymentError } = await supabase.from('payments').insert({
-      order_id: order.id,
+    const { error: paymentError } = await createPaymentRecordWithSchemaFallback({
+      orderId: order.id,
       amount: finalOrderTotal,
-      status: 'pending',
       method: paymentMethod.value,
     })
 
     if (paymentError) {
-      console.error('❌ Payment record creation error:', paymentError)
-      throw paymentError
+      console.warn(
+        '⚠️ Payment record creation failed, but the order was created successfully. Continuing checkout flow.',
+        paymentError,
+      )
+    } else {
+      console.log('✅ Payment record created')
     }
-
-    console.log('✅ Payment record created')
 
     // 4. Send message to seller
     try {
@@ -2006,18 +2015,25 @@ const createSellerOrderNotification = async ({
   shopName: string
   orderId: string
 }) => {
-  const { error } = await supabase.from('notifications').insert({
-    user_id: sellerUserId,
-    type: 'order_placed',
-    title: `New order from ${customerName}`,
-    message: `${customerName} placed a new order at ${shopName}.`,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: new Date().toISOString(),
-  })
+  try {
+    const notificationResult = await createNotificationRecordIfEnabled({
+      userId: sellerUserId,
+      type: 'order_placed',
+      title: `New order from ${customerName}`,
+      message: `${customerName} placed a new order at ${shopName}.`,
+      relatedId: orderId,
+      relatedType: 'order',
+      isRead: false,
+      createdAt: new Date().toISOString(),
+    })
 
-  if (error) {
+    if (
+      !notificationResult.created &&
+      notificationResult.reason !== 'disabled-by-user-preference'
+    ) {
+      console.warn('⚠️ Could not create seller notification:', notificationResult)
+    }
+  } catch (error) {
     console.warn('⚠️ Could not create seller notification:', error)
   }
 }
@@ -2170,21 +2186,36 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       throw msgError
     }
 
-    await updateConversationActivity(conversationId)
-    await createSellerOrderNotification({
-      sellerUserId,
-      customerName,
-      shopName,
-      orderId,
-    })
-    await removeRecentMessageNotification({
-      receiverUserId: sellerUserId,
-      conversationId,
-      messageCreatedAt,
-      lookbackMs: 60000,
-      maxAttempts: 12,
-      retryDelayMs: 500,
-    })
+    try {
+      await updateConversationActivity(conversationId)
+    } catch (activityError) {
+      console.warn('⚠️ Could not update conversation activity:', activityError)
+    }
+
+    try {
+      await createSellerOrderNotification({
+        sellerUserId,
+        customerName,
+        shopName,
+        orderId,
+      })
+    } catch (notificationError) {
+      console.warn('⚠️ Could not notify seller about the new order:', notificationError)
+    }
+
+    try {
+      await removeRecentMessageNotification({
+        receiverUserId: sellerUserId,
+        conversationId,
+        senderUserId: buyerUserId,
+        messageCreatedAt,
+        lookbackMs: 60000,
+        maxAttempts: 12,
+        retryDelayMs: 500,
+      })
+    } catch (cleanupError) {
+      console.warn('⚠️ Could not clean up recent message notification duplicate:', cleanupError)
+    }
 
     console.log(`✅ Order message sent to ${shopName} successfully!`)
   } catch (err) {
@@ -2303,58 +2334,56 @@ watch(
 
 <template>
   <v-app>
+    <v-app-bar class="app-bar" color="#438fda" flat>
+      <v-btn icon @click="router.back()" variant="text" color="white">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title class="app-bar-title text-white">
+        <strong>Checkout</strong>
+      </v-toolbar-title>
+      <v-spacer></v-spacer>
+    </v-app-bar>
+
     <v-main class="main-app">
-      <!-- Validation Banner -->
-      <v-alert
-        v-if="validationErrors.length > 0"
-        type="warning"
-        class="validation-banner mx-3 mt-3"
-        density="compact"
-        elevation="2"
-        border="start"
-        border-color="warning"
-      >
-        <div class="d-flex align-center">
-          <v-icon size="20" class="mr-2">mdi-alert-circle-outline</v-icon>
-          <div class="flex-grow-1">
-            <strong class="text-subtitle-2">Complete required fields:</strong>
-            <div class="d-flex flex-wrap gap-1 mt-1">
-              <v-chip
-                v-for="error in validationErrors"
-                :key="error"
-                size="x-small"
-                color="warning"
-                variant="flat"
-                class="mr-1 mb-1"
-              >
-                {{ error }}
-              </v-chip>
-            </div>
-          </div>
-          <v-btn
-            icon
-            size="x-small"
-            @click="validationErrors = []"
-            class="ml-2"
-          >
-            <v-icon>mdi-close</v-icon>
-          </v-btn>
-        </div>
-      </v-alert>
-
-      <!-- App Bar -->
-      <v-app-bar class="app-bar" color="#438fda" flat>
-        <v-btn icon @click="router.back()" variant="text" color="white">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-        <v-toolbar-title class="app-bar-title text-white">
-          <strong>Checkout</strong>
-        </v-toolbar-title>
-        <v-spacer></v-spacer>
-
-      </v-app-bar>
-
       <v-container fluid class="px-3 py-4 main-container">
+        <!-- Validation Banner -->
+        <v-alert
+          v-if="validationErrors.length > 0"
+          type="warning"
+          class="validation-banner mb-4"
+          density="compact"
+          elevation="2"
+          border="start"
+          border-color="warning"
+        >
+          <div class="d-flex align-center">
+            <v-icon size="20" class="mr-2">mdi-alert-circle-outline</v-icon>
+            <div class="flex-grow-1">
+              <strong class="text-subtitle-2">Complete required fields:</strong>
+              <div class="d-flex flex-wrap gap-1 mt-1">
+                <v-chip
+                  v-for="error in validationErrors"
+                  :key="error"
+                  size="x-small"
+                  color="warning"
+                  variant="flat"
+                  class="mr-1 mb-1"
+                >
+                  {{ error }}
+                </v-chip>
+              </div>
+            </div>
+            <v-btn
+              icon
+              size="x-small"
+              @click="validationErrors = []"
+              class="ml-2"
+            >
+              <v-icon>mdi-close</v-icon>
+            </v-btn>
+          </div>
+        </v-alert>
+
         <!-- Updated Summary Card with Transaction Number -->
         <v-card class="mb-4 summary-card" elevation="2" rounded="lg">
           <v-card-text class="pa-4">
@@ -2467,99 +2496,75 @@ watch(
           </v-card-text>
         </v-card>
 
-        <!-- Delivery Details Card -->
         <v-card class="mb-4 delivery-card" elevation="1" rounded="lg">
-          <v-card-title class="card-title">
-            <v-icon color="primary" class="mr-2" size="small">mdi-truck-fast</v-icon>
-            Delivery Details
+          <v-card-title class="card-title d-flex align-center justify-space-between">
+            <div class="d-flex align-center cursor-pointer" @click="goToAddressSelection">
+              <v-icon color="primary" class="mr-2" size="small">mdi-map-marker</v-icon>
+              Delivery Address
+            </div>
+            <v-btn
+              size="x-small"
+              variant="text"
+              color="primary"
+              @click.stop="goToAddressSelection"
+              class="edit-btn"
+            >
+              Select Address
+            </v-btn>
           </v-card-title>
 
           <v-card-text>
-            <!-- Buyer Info Section -->
-            <div class="info-section mb-4">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 text-grey-darken-2">Buyer Information</div>
-                <v-btn
-                  size="x-small"
-                  variant="text"
-                  color="primary"
-                  @click="showContactDialog = true"
-                  class="edit-btn"
+            <div
+              class="address-box pa-3 rounded-lg"
+              :class="{ 'border-warning': !address || !hasValidSelectedAddressContactNumber }"
+              @click="goToAddressSelection"
+            >
+              <div class="d-flex align-start">
+                <v-icon
+                  size="small"
+                  :color="address && hasValidSelectedAddressContactNumber ? 'success' : 'warning'"
+                  class="mr-2 mt-1"
                 >
-                  <v-icon size="small">mdi-pencil</v-icon>
-                </v-btn>
-              </div>
-
-              <v-list density="compact" class="info-list">
-                <v-list-item class="px-0">
-                  <template #prepend>
-                    <v-icon size="small" color="grey-darken-1">mdi-account</v-icon>
-                  </template>
-                  <v-list-item-title class="text-body-2">
-                    {{ buyer?.first_name || 'Loading...' }} {{ buyer?.last_name }}
-                  </v-list-item-title>
-                </v-list-item>
-
-                <v-list-item class="px-0">
-                  <template #prepend>
-                    <v-icon size="small" color="grey-darken-1">mdi-phone</v-icon>
-                  </template>
-                  <v-list-item-title
-                    class="text-body-2"
-                    :class="{ 'text-warning': !contactPhone }"
-                  >
-                    {{ contactPhone || 'Contact number required' }}
-                  </v-list-item-title>
-                </v-list-item>
-              </v-list>
-            </div>
-
-            <!-- Address Section -->
-            <div class="info-section mb-4">
-              <div class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 text-grey-darken-2">Delivery Address</div>
-                <v-btn
-                  size="x-small"
-                  variant="text"
-                  color="primary"
-                  @click="showAddressDialog = true"
-                  class="edit-btn"
-                >
-                  <v-icon size="small">mdi-pencil</v-icon>
-                </v-btn>
-              </div>
-
-              <div
-                class="address-box pa-3 rounded-lg"
-                :class="{ 'border-warning': !address }"
-                @click="showAddressDialog = true"
-              >
-                <div class="d-flex align-start">
-                  <v-icon
-                    size="small"
-                    :color="address ? 'success' : 'warning'"
-                    class="mr-2 mt-1"
-                  >
-                    {{ address ? 'mdi-map-marker-check' : 'mdi-map-marker-alert' }}
-                  </v-icon>
-                  <div class="flex-grow-1">
-                    <div class="text-body-2 font-weight-medium">
-                      {{ address ? formatAddress(address) : 'Select delivery address' }}
-                    </div>
-                    <div v-if="address?.phone" class="text-caption text-grey mt-1">
-                      <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
-                      {{ address.phone }}
-                    </div>
+                  {{ address ? 'mdi-map-marker-check' : 'mdi-map-marker-alert' }}
+                </v-icon>
+                <div class="flex-grow-1">
+                  <div class="text-body-2 font-weight-medium">
+                    {{ address ? formatAddress(address) : 'Select Address' }}
                   </div>
-                  <v-icon size="small" color="grey">mdi-chevron-right</v-icon>
+                  <div v-if="address?.recipient_name" class="text-caption text-grey-darken-1 mt-1">
+                    {{ address.recipient_name }}
+                  </div>
+                  <div
+                    v-if="selectedAddressContactNumber"
+                    class="text-caption mt-1"
+                    :class="hasValidSelectedAddressContactNumber ? 'text-grey' : 'text-warning'"
+                  >
+                    <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
+                    {{ selectedAddressContactNumber }}
+                  </div>
+                  <div v-if="selectedAddressContactNumber && !hasValidSelectedAddressContactNumber" class="text-caption text-warning mt-1">
+                    Update this number in My Addresses before placing this order.
+                  </div>
+                  <div v-else-if="!selectedAddressContactNumber" class="text-caption text-warning mt-1">
+                    Add a valid contact number in My Addresses before placing this order.
+                  </div>
                 </div>
+                <v-icon size="small" color="grey">mdi-chevron-right</v-icon>
               </div>
             </div>
+          </v-card-text>
+        </v-card>
 
-            <!-- Schedule Section -->
+        <v-card class="mb-4 delivery-card" elevation="1" rounded="lg">
+          <v-card-title class="card-title">
+            <v-icon color="primary" class="mr-2" size="small">mdi-clock-outline</v-icon>
+            Delivery Schedule
+          </v-card-title>
+
+          <v-card-text>
             <div class="info-section">
               <div class="d-flex align-center justify-space-between mb-2">
-                <div class="text-subtitle-2 text-grey-darken-2">Delivery Schedule</div>
+                <div class="text-subtitle-2 text-grey-darken-2">Schedule</div>
                 <v-btn
                   size="x-small"
                   variant="text"
@@ -2778,7 +2783,7 @@ watch(
         </div>
 
         <!-- Note to Seller -->
-        <v-card class="mb-4 note-card" elevation="1" rounded="lg">
+        <v-card class="mb-4 note-card2" elevation="1" rounded="lg">
           <v-card-title class="card-title">
             <v-icon color="primary" class="mr-2" size="small">mdi-message-text-outline</v-icon>
             Note to Seller
@@ -2801,7 +2806,7 @@ watch(
       <!-- Bottom Action Bar -->
       <div class="bottom-action-bar">
         <v-container class="px-3">
-          <div class="d-flex align-center justify-space-between">
+          <div class="d-flex align-center justify-space-between bottom-action-content">
             <div class="order-summary">
               <div class="text-caption text-grey">Total Amount</div>
               <div class="text-h5 font-weight-bold text-white">
@@ -2815,7 +2820,7 @@ watch(
               color="white"
               size="large"
               @click="handleCheckout"
-              :disabled="!items.length || !buyer || !address || isProcessing"
+              :disabled="!items.length || !buyer || !address || !hasValidSelectedAddressContactNumber || isProcessing"
               :loading="isProcessing"
               class="checkout-btn"
               rounded="lg"
@@ -2843,124 +2848,6 @@ watch(
           <span>Transaction number copied to clipboard!</span>
         </div>
       </v-snackbar>
-
-      <!-- Address Selection Dialog -->
-      <v-dialog v-model="showAddressDialog" max-width="500" scrollable>
-        <v-card class="modern-dialog" rounded="lg">
-          <v-card-title class="dialog-header">
-            <div class="d-flex align-center">
-              <v-icon color="primary" class="mr-2">mdi-map-marker</v-icon>
-              <div>Select Delivery Address</div>
-            </div>
-          </v-card-title>
-
-          <v-card-text class="dialog-content">
-            <!-- Empty State -->
-            <div v-if="addresses.length === 0" class="empty-state text-center py-8">
-              <v-icon size="64" color="grey-lighten-2" class="mb-3">mdi-home-outline</v-icon>
-              <h3 class="text-h6 mb-2">No Addresses</h3>
-              <p class="text-body-2 text-grey mb-4">
-                Add a delivery address to continue with your order
-              </p>
-              <v-btn color="primary" @click="addNewAddress" prepend-icon="mdi-plus">
-                Add New Address
-              </v-btn>
-            </div>
-
-            <!-- Address List -->
-            <div v-else>
-              <div class="address-list">
-                <v-list class="px-0">
-                  <v-list-item
-                    v-for="addr in addresses"
-                    :key="addr.id"
-                    class="address-item mb-2"
-                    :class="{ 'address-item-selected': address?.id === addr.id }"
-                    @click="selectAddress(addr)"
-                    rounded="lg"
-                  >
-                    <template #prepend>
-                      <v-avatar
-                        :color="address?.id === addr.id ? 'primary' : 'grey-lighten-3'"
-                        size="40"
-                        class="address-icon"
-                      >
-                        <v-icon :color="address?.id === addr.id ? 'white' : 'grey'">
-                          mdi-home
-                        </v-icon>
-                      </v-avatar>
-                    </template>
-
-                    <v-list-item-title class="mb-1">
-                      <div class="d-flex align-center">
-                        <span class="font-weight-medium">{{ addr.recipient_name || 'No name' }}</span>
-                        <v-chip
-                          v-if="addr.is_default"
-                          size="x-small"
-                          color="primary"
-                          class="ml-2"
-                          density="compact"
-                        >
-                          Default
-                        </v-chip>
-                      </div>
-                    </v-list-item-title>
-
-                    <v-list-item-subtitle>
-                      <div class="text-body-2 mb-1">{{ formatAddress(addr) }}</div>
-                      <div v-if="addr.phone" class="text-caption text-grey">
-                        <v-icon size="x-small" class="mr-1">mdi-phone</v-icon>
-                        {{ addr.phone }}
-                      </div>
-                    </v-list-item-subtitle>
-
-                    <template #append>
-                      <v-icon
-                        v-if="address?.id === addr.id"
-                        color="primary"
-                        size="small"
-                      >
-                        mdi-check-circle
-                      </v-icon>
-                    </template>
-                  </v-list-item>
-                </v-list>
-              </div>
-
-              <v-divider class="my-4"></v-divider>
-
-              <v-btn
-                color="primary"
-                variant="outlined"
-                block
-                @click="addNewAddress"
-                prepend-icon="mdi-plus"
-              >
-                Add New Address
-              </v-btn>
-            </div>
-          </v-card-text>
-
-          <v-card-actions class="dialog-actions">
-            <v-btn
-              variant="text"
-              @click="showAddressDialog = false"
-              class="flex-grow-1"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              color="primary"
-              variant="flat"
-              @click="showAddressDialog = false"
-              class="flex-grow-1"
-              :disabled="!address"
-            >
-              Confirm
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
 
       <!-- DateTime Picker Dialog -->
       <v-dialog v-model="showDateTimePicker" max-width="420" class="datetime-dialog">
@@ -3113,87 +3000,58 @@ watch(
         </v-card>
       </v-dialog>
 
-      <!-- Contact Dialog -->
-      <v-dialog v-model="showContactDialog" max-width="500">
-        <v-card class="modern-dialog" rounded="lg">
-          <v-card-title class="dialog-header">
-            <div class="d-flex align-center">
-              <v-icon color="primary" class="mr-2">mdi-phone</v-icon>
-              <div>Contact Information</div>
-            </div>
-          </v-card-title>
-
-          <v-card-text class="dialog-content">
-            <div class="contact-form">
-              <v-alert
-                :type="contactPhone ? 'info' : 'warning'"
-                density="compact"
-                variant="tonal"
-                class="mb-4"
-              >
-                Phone number is required for delivery coordination
-              </v-alert>
-
-              <v-text-field
-                v-model="contactPhone"
-                label="Phone Number *"
-                placeholder="09123456789 or +639123456789"
-                variant="outlined"
-                type="tel"
-                :rules="[
-                  (v) => !!v || 'Phone number is required',
-                  (v) =>
-                    /^(09|\+639)\d{9}$/.test(v.replace(/\s+/g, '')) ||
-                    'Valid format: 09123456789 or +639123456789',
-                ]"
-                class="mb-3"
-                hide-details="auto"
-              ></v-text-field>
-
-              <div class="text-caption text-grey">
-                We'll use this number to contact you about your delivery
-              </div>
-            </div>
-          </v-card-text>
-
-          <v-card-actions class="dialog-actions">
-            <v-btn
-              variant="text"
-              @click="showContactDialog = false"
-              class="flex-grow-1"
-            >
-              Cancel
-            </v-btn>
-            <v-btn
-              color="primary"
-              variant="flat"
-              @click="updateContactInfo"
-              class="flex-grow-1"
-              :disabled="!contactPhone"
-            >
-              Save
-            </v-btn>
-          </v-card-actions>
-        </v-card>
-      </v-dialog>
     </v-main>
   </v-app>
 </template>
 <style scoped>
+:root {
+  --purchase-safe-top: env(safe-area-inset-top, 0px);
+  --purchase-safe-right: env(safe-area-inset-right, 0px);
+  --purchase-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --purchase-safe-left: env(safe-area-inset-left, 0px);
+}
+
 /* Main Layout */
 .main-app {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  min-height: 100dvh;
+  padding-left: var(--purchase-safe-left);
+  padding-right: var(--purchase-safe-right);
 }
 
 .main-container {
   max-width: 800px;
   margin: 0 auto;
-  padding-bottom: 100px !important;
+  padding-top: calc(68px + var(--purchase-safe-top)) !important;
+  padding-bottom: calc(132px + var(--purchase-safe-bottom)) !important;
+  padding-left: max(12px, var(--purchase-safe-left)) !important;
+  padding-right: max(12px, var(--purchase-safe-right)) !important;
 }
 
 /* App Bar */
 .app-bar {
+  background: linear-gradient(135deg, #438fda 0%, #2f6ca9 100%) !important;
   box-shadow: 0 2px 12px rgba(67, 143, 218, 0.15);
+  padding-top: var(--purchase-safe-top);
+}
+
+.app-bar :deep(.v-toolbar__content) {
+  min-height: 56px !important;
+  height: 56px !important;
+  padding: 0 max(8px, var(--purchase-safe-right)) 0 max(8px, var(--purchase-safe-left)) !important;
+}
+
+@supports (padding-top: env(safe-area-inset-top)) {
+  .app-bar {
+    height: calc(56px + env(safe-area-inset-top)) !important;
+  }
+}
+
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .app-bar {
+    padding-top: constant(safe-area-inset-top);
+    height: calc(56px + constant(safe-area-inset-top)) !important;
+  }
 }
 
 .app-bar-title {
@@ -3217,6 +3075,12 @@ watch(
 .note-card {
   border: 1px solid #e5e7eb;
   transition: all 0.3s ease;
+}
+
+.note-card2 {
+  border: 1px solid #e5e7eb;
+  transition: all 0.3s ease;
+  margin-bottom: 170px !important;
 }
 
 .delivery-card:hover,
@@ -3417,9 +3281,21 @@ watch(
   left: 0;
   right: 0;
   background: linear-gradient(135deg, #438fda 0%, #3b82f6 100%);
-  padding: 12px 0;
+  padding: 12px max(12px, var(--purchase-safe-right)) calc(12px + var(--purchase-safe-bottom))
+    max(12px, var(--purchase-safe-left));
   box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
   z-index: 1000;
+  backdrop-filter: blur(16px);
+}
+
+.bottom-action-bar :deep(.v-container) {
+  max-width: 800px;
+  padding-left: 0 !important;
+  padding-right: 0 !important;
+}
+
+.bottom-action-content {
+  gap: 16px;
 }
 
 .order-summary {
@@ -3572,7 +3448,7 @@ watch(
 
 /* Validation */
 .validation-banner {
-  border-radius: 8px;
+  border-radius: 14px;
   animation: slideDown 0.3s ease;
 }
 
@@ -3594,8 +3470,8 @@ watch(
 /* Responsive Design */
 @media (max-width: 600px) {
   .main-container {
-    padding-left: 12px !important;
-    padding-right: 12px !important;
+    padding-top: calc(64px + var(--purchase-safe-top)) !important;
+    padding-bottom: calc(148px + var(--purchase-safe-bottom)) !important;
   }
 
   .options-grid {
@@ -3617,6 +3493,24 @@ watch(
   .checkout-btn {
     min-width: 140px;
     padding: 8px 16px;
+  }
+
+  .bottom-action-content {
+    flex-direction: column;
+    align-items: stretch !important;
+    gap: 12px;
+    padding-right:15px;
+    padding-left:15px;
+
+  }
+
+  .order-summary {
+    width: 100%;
+  }
+
+  .checkout-btn {
+    width: 100%;
+    min-width: 0;
   }
 }
 
@@ -3821,7 +3715,7 @@ watch(
 
 /* Toast Notification */
 .copy-toast {
-  margin-top: 60px;
+  margin-top: calc(64px + var(--purchase-safe-top));
 }
 
 /* Monospace font for transaction number */
@@ -3871,7 +3765,7 @@ watch(
   }
 
   .copy-toast {
-    margin-top: 56px;
+    margin-top: calc(56px + var(--purchase-safe-top));
   }
 }
 

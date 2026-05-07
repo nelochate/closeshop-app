@@ -1,3 +1,0 @@
-closeshop.dev.test
-style WhiteBackgroundDialogTheme
-style WhiteBackgroundTheme

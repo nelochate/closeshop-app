@@ -907,6 +907,28 @@ const getShopId = () => {
 // Computed property for current shop ID
 const currentShopId = computed(() => getShopId())
 
+const shouldReturnToUserShop = computed(
+  () => route.query.returnTo === 'usershop' || route.query.from === 'shop-build',
+)
+
+const buildStatusRouteQuery = (shopId = currentShopId.value) => {
+  const nextQuery = {}
+
+  if (shopId) {
+    nextQuery.shopId = shopId
+  }
+
+  if (route.query.from === 'shop-build') {
+    nextQuery.from = 'shop-build'
+  }
+
+  if (route.query.returnTo === 'usershop') {
+    nextQuery.returnTo = 'usershop'
+  }
+
+  return nextQuery
+}
+
 // Find all shops for current user
 const fetchUserShops = async () => {
   try {
@@ -938,7 +960,7 @@ const findMyShop = async () => {
     } else if (shops.length === 1) {
       // Redirect to the single shop
       const shopId = shops[0].id
-      router.replace({ query: { shopId } })
+      router.replace({ query: buildStatusRouteQuery(shopId) })
       localStorage.setItem('lastCreatedShopId', shopId)
       await fetchData()
     } else {
@@ -946,7 +968,7 @@ const findMyShop = async () => {
       console.log('Multiple shops found:', shops)
       // For now, take the first one
       const shopId = shops[0].id
-      router.replace({ query: { shopId } })
+      router.replace({ query: buildStatusRouteQuery(shopId) })
       localStorage.setItem('lastCreatedShopId', shopId)
       await fetchData()
     }
@@ -995,7 +1017,7 @@ const fetchData = async () => {
         shop.value = firstShop
         localStorage.setItem('lastCreatedShopId', firstShop.id)
         // Update URL
-        router.replace({ query: { shopId: firstShop.id } })
+        router.replace({ query: buildStatusRouteQuery(firstShop.id) })
       } else {
         console.log('No shops found for user')
         loading.value = false
@@ -1102,7 +1124,7 @@ const forceLoadShop = async () => {
   const shops = await fetchUserShops()
   if (shops.length > 0) {
     const shopId = shops[0].id
-    router.replace({ query: { shopId } })
+    router.replace({ query: buildStatusRouteQuery(shopId) })
     localStorage.setItem('lastCreatedShopId', shopId)
     await fetchData()
   } else {
@@ -1120,7 +1142,7 @@ const copyShopLink = async () => {
 // Reload with shop ID in URL
 const reloadWithId = () => {
   if (!shop.value) return
-  router.replace({ query: { shopId: shop.value.id } })
+  router.replace({ query: buildStatusRouteQuery(shop.value.id) })
   fetchData()
 }
 
@@ -1251,7 +1273,14 @@ const getAddressSourceColor = (source) => {
 }
 
 // Navigation handlers
-const goBack = () => router.go(-1)
+const goBack = () => {
+  if (shouldReturnToUserShop.value) {
+    router.replace('/usershop')
+    return
+  }
+
+  router.go(-1)
+}
 const goToHome = () => router.push('/')
 const goToLogin = () => router.push('/login')
 const createShop = () => {

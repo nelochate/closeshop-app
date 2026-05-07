@@ -10,6 +10,13 @@ import {
   resolveVisibleNotification,
 } from '@/utils/chatNotifications'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
+import { normalizeOrderStatus } from '@/utils/orderStatus'
+import {
+  getAuthUserAvatarUrl as getStoredAuthAvatarUrl,
+  getAuthUserDisplayName as getStoredAuthDisplayName,
+  getProfileDisplayName,
+  normalizeIdentityText,
+} from '@/utils/accountIdentity'
 
 const activeTab = ref('account')
 
@@ -26,6 +33,8 @@ const shopCreationStatus = ref(null)
 
 const unreadNotifications = ref(0)
 const notificationSubscription = ref(null)
+const orderSubscription = ref(null)
+const reviewSubscription = ref(null)
 
 // Notification state
 const showApprovalToast = ref(false)
@@ -99,8 +108,7 @@ const handleRefresh = async () => {
   console.log('🔄 Refreshing profile...')
 
   await loadUser()
-  await loadOrderCounts()
-  await loadSectionItems(selectedSection.value)
+  await refreshOrderViews()
   await checkUserShop()
   await checkRiderStatus()
 
@@ -256,6 +264,16 @@ const rateOrder = (orderId) => {
   }
 }
 
+const shouldShowReviewAction = (order) =>
+  !!order &&
+  ((selectedSection.value === 'completed' && isOrderCompleted(order)) || order.has_pending_review)
+
+const getReviewActionLabel = (order) => {
+  if (!order) return 'Review'
+  if (order.has_pending_review) return 'Review'
+  return 'Edit Review'
+}
+
 // Check if user has a shop and get its status
 const checkUserShop = async () => {
   if (!user.value?.id) {
@@ -331,43 +349,6 @@ const handleAvatarError = () => {
   // The template will automatically show initials
 }
 
-// Helper function to get Google avatar URL (handles both custom and default avatars)
-const getGoogleAvatarUrl = (userData) => {
-  if (!userData) return null
-
-  // Check identities array first (most reliable for Google)
-  if (userData.identities && userData.identities.length > 0) {
-    const identity = userData.identities.find((i) => i.provider === 'google')
-    if (identity && identity.identity_data) {
-      const identityData = identity.identity_data
-
-      // Google provides avatar_url in identity_data
-      if (identityData.avatar_url) {
-        console.log('Found Google avatar URL:', identityData.avatar_url)
-        return identityData.avatar_url
-      }
-
-      // Sometimes Google uses 'picture' field
-      if (identityData.picture) {
-        console.log('Found Google picture URL:', identityData.picture)
-        return identityData.picture
-      }
-    }
-  }
-
-  // Check user_metadata as fallback
-  if (userData.user_metadata?.avatar_url) {
-    return userData.user_metadata.avatar_url
-  }
-
-  // Check raw_user_meta_data
-  if (userData.raw_user_meta_data?.avatar_url) {
-    return userData.raw_user_meta_data.avatar_url
-  }
-
-  return null
-}
-
 // Helper to get user initials for fallback avatar
 const getUserInitials = (fullName) => {
   if (!fullName || fullName === 'User') return '?'
@@ -379,35 +360,84 @@ const getUserInitials = (fullName) => {
   return (names[0].charAt(0) + names[names.length - 1].charAt(0)).toUpperCase()
 }
 
-// NEW HELPER FUNCTION: Get user display name from various auth provider formats
-const getUserDisplayName = (userData) => {
-  if (!userData) return 'User'
+const resolveDisplayedName = (authUser = authStore.userData, profileData = authStore.profile) => {
+  const profileName = normalizeIdentityText(getProfileDisplayName(profileData))
+  if (profileName) return profileName
 
-  // Check user_metadata first
-  if (userData.user_metadata) {
-    const metadata = userData.user_metadata
-    if (metadata.full_name) return metadata.full_name
-    if (metadata.name) return metadata.name
-    if (metadata.first_name && metadata.last_name) {
-      return `${metadata.first_name} ${metadata.last_name}`.trim()
+  const authName = normalizeIdentityText(getStoredAuthDisplayName(authUser))
+  if (authName) return authName
+
+  return normalizeIdentityText(authUser?.email)?.split('@')[0] || 'User'
+}
+
+const resolveDisplayedAvatar = (authUser = authStore.userData, profileData = authStore.profile) => {
+  const profileAvatar = normalizeIdentityText(profileData?.avatar_url)
+  if (profileAvatar) return profileAvatar
+
+  const authAvatar = normalizeIdentityText(getStoredAuthAvatarUrl(authUser))
+  return authAvatar || null
+}
+
+const syncProfileHeader = (authUser = authStore.userData, profileData = authStore.profile) => {
+  user.value = authUser || null
+  fullName.value = resolveDisplayedName(authUser, profileData)
+  avatarUrl.value = resolveDisplayedAvatar(authUser, profileData)
+}
+
+const displayedEmail = computed(
+  () => normalizeIdentityText(authStore.profile?.email) || normalizeIdentityText(user.value?.email) || '...',
+)
+
+const getUniqueOrderProductIds = (orders = []) => {
+  const productIds = orders.flatMap((order) =>
+    (order.order_items || []).map((item) => item.product_id).filter(Boolean),
+  )
+
+  return [...new Set(productIds)]
+}
+
+const fetchReviewedProductIds = async (productIds = []) => {
+  if (!user.value?.id || productIds.length === 0) {
+    return new Set()
+  }
+
+  try {
+    const { data, error } = await supabase
+      .from('reviews')
+      .select('product_id')
+      .eq('user_id', user.value.id)
+      .in('product_id', productIds)
+
+    if (error) throw error
+
+    return new Set((data || []).map((review) => review.product_id).filter(Boolean))
+  } catch (error) {
+    console.error('Error loading reviewed products:', error)
+    return new Set()
+  }
+}
+
+const annotateOrdersWithReviewState = async (orders = []) => {
+  const reviewedProductIds = await fetchReviewedProductIds(getUniqueOrderProductIds(orders))
+
+  return orders.map((order) => {
+    const uniqueProductIds = [
+      ...new Set((order.order_items || []).map((item) => item.product_id).filter(Boolean)),
+    ]
+    const pendingReviewProductIds = uniqueProductIds.filter(
+      (productId) => !reviewedProductIds.has(productId),
+    )
+
+    return {
+      ...order,
+      order_items: order.order_items || [],
+      has_pending_review:
+        isOrderDeliveredState(order) &&
+        order.status !== 'cancelled' &&
+        pendingReviewProductIds.length > 0,
+      pending_review_count: pendingReviewProductIds.length,
     }
-  }
-
-  // Check identities array (Google stores full_name here)
-  if (userData.identities && userData.identities.length > 0) {
-    const identityData = userData.identities[0].identity_data
-    if (identityData) {
-      if (identityData.full_name) return identityData.full_name
-      if (identityData.name) return identityData.name
-    }
-  }
-
-  // Fallback to email username
-  if (userData.email) {
-    return userData.email.split('@')[0]
-  }
-
-  return 'User'
+  })
 }
 
 // Check if user is a rider
@@ -470,105 +500,32 @@ const goToRiderDashboard = () => {
   }
 }
 
-const getSupabaseAuthAvatar = async () => {
-  try {
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser()
-    if (error) throw error
-
-    // Check in user_metadata
-    if (user?.user_metadata?.avatar_url) {
-      return user.user_metadata.avatar_url
-    }
-
-    // Check raw_app_meta_data
-    if (user?.raw_app_meta_data?.avatar_url) {
-      return user.raw_app_meta_data.avatar_url
-    }
-
-    return null
-  } catch (err) {
-    console.error('Error getting avatar from Supabase auth:', err)
-    return null
-  }
-}
-
-// Updated loadUser function
 const loadUser = async () => {
-  if (authStore.userData && authStore.profile) {
-    user.value = authStore.userData
-    fullName.value = getUserDisplayName(authStore.userData)
+  let authUser = authStore.userData
 
-    // Priority 1: Check if user has custom avatar in profiles table
-    if (
-      authStore.profile.avatar_url &&
-      !authStore.profile.avatar_url.includes('googleusercontent.com')
-    ) {
-      avatarUrl.value = authStore.profile.avatar_url
-      console.log('Using custom profile avatar')
-    }
-    // Priority 2: Check Supabase auth user_metadata
-    else {
-      const supabaseAvatar = await getSupabaseAuthAvatar()
-      if (supabaseAvatar) {
-        avatarUrl.value = supabaseAvatar
-        console.log('Using avatar from Supabase auth:', supabaseAvatar)
-      }
-      // Priority 3: Use Google's avatar (even default ones)
-      else {
-        const googleAvatar = getGoogleAvatarUrl(authStore.userData)
-        if (googleAvatar) {
-          avatarUrl.value = googleAvatar
-          console.log('Using Google avatar (may be default):', googleAvatar)
-        } else {
-          avatarUrl.value = null // Will show initials avatar
-          console.log('No avatar found, will use initials')
-        }
-      }
-    }
-
-    // After loading user, check for shop status
-    await checkUserShop()
-    await checkRiderStatus()
-    setupShopRealtimeSubscription()
-  } else {
-    const { data: userData, error } = await supabase.auth.getUser()
-    if (error || !userData?.user) {
-      console.error('No user found:', error?.message)
-      return
-    }
-    user.value = userData.user
-    fullName.value = getUserDisplayName(userData.user)
-
-    // Same avatar logic as above
-    if (
-      authStore.profile?.avatar_url &&
-      !authStore.profile.avatar_url.includes('googleusercontent.com')
-    ) {
-      avatarUrl.value = authStore.profile.avatar_url
-    } else {
-      const supabaseAvatar = await getSupabaseAuthAvatar()
-      if (supabaseAvatar) {
-        avatarUrl.value = supabaseAvatar
-        console.log('Using avatar from Supabase auth:', supabaseAvatar)
-      } else {
-        const googleAvatar = getGoogleAvatarUrl(userData.user)
-        avatarUrl.value = googleAvatar || null
-      }
-    }
-
-    console.log('Avatar loading debug:', {
-      fullName: fullName.value,
-      hasGoogleAvatar: !!getGoogleAvatarUrl(userData.user),
-      avatarUrl: avatarUrl.value,
-    })
-
-    await checkUserShop()
-    await checkRiderStatus()
-    setupShopRealtimeSubscription()
+  if (!authUser?.id) {
+    await authStore.hydrateFromSession()
+    authUser = authStore.userData
   }
+
+  if (!authUser?.id) {
+    console.error('No authenticated user found for profile view')
+    user.value = null
+    fullName.value = ''
+    avatarUrl.value = null
+    return
+  }
+
+  let profile = authStore.profile
+  if (!profile?.id) {
+    profile = await authStore.loadProfile(authUser.id, authUser)
+  }
+
+  syncProfileHeader(authUser, profile)
+
+  await checkUserShop()
+  await checkRiderStatus()
+  setupShopRealtimeSubscription()
 }
 
 const loadOrderCounts = async () => {
@@ -577,7 +534,18 @@ const loadOrderCounts = async () => {
   try {
     const { data: orders, error } = await supabase
       .from('orders')
-      .select('status, payment_status, delivered_at, completed_at, id')
+      .select(
+        `
+        status,
+        payment_status,
+        delivered_at,
+        completed_at,
+        id,
+        order_items (
+          product_id
+        )
+      `,
+      )
       .eq('user_id', user.value.id)
 
     if (error) {
@@ -586,36 +554,35 @@ const loadOrderCounts = async () => {
     }
 
     const currentOrders = await reconcileAutoCompletedOrders(orders || [])
+    const reviewAwareOrders = await annotateOrdersWithReviewState(currentOrders)
 
-    console.log('📊 All orders for counts:', currentOrders)
+    console.log('📊 All orders for counts:', reviewAwareOrders)
 
     navItems.value = navItems.value.map((item) => {
       let count = 0
       switch (item.id) {
         case 'my-purchases':
           // Show ALL orders regardless of status
-          count = currentOrders.filter((o) => o.status !== 'cancelled').length
+          count = reviewAwareOrders.filter((o) => o.status !== 'cancelled').length
           break
         case 'to-receive':
-          count = currentOrders.filter(
+          count = reviewAwareOrders.filter(
             (o) => isOrderPendingDelivery(o) || isOrderAwaitingCustomerConfirmation(o),
           ).length
           break
         case 'reviews':
-          count = currentOrders.filter(
-            (o) => isOrderDeliveredState(o) && o.status !== 'cancelled',
-          ).length
+          count = reviewAwareOrders.filter((o) => o.has_pending_review).length
           break
         case 'completed':
-          count = currentOrders.filter((o) => isOrderCompleted(o)).length
+          count = reviewAwareOrders.filter((o) => isOrderCompleted(o)).length
           break
         case 'cancelled':
-          count = currentOrders.filter(
+          count = reviewAwareOrders.filter(
             (o) => o.status === 'cancelled' || o.payment_status === 'cancelled',
           ).length
           break
         case 'failed':
-          count = currentOrders.filter(
+          count = reviewAwareOrders.filter(
             (o) =>
               o.payment_status === 'failed' ||
               o.status === 'failed' ||
@@ -659,6 +626,15 @@ const isOrderPendingDelivery = (order) => {
   if (order.status === 'waiting_for_rider' || order.status === 'accepted_by_rider') return true
 
   return order.status === 'picked_up' && !order.delivered_at && !order.completed_at
+}
+
+const isCompletedPendingReview = (order) => isOrderCompleted(order) && !!order?.has_pending_review
+
+const getPendingReviewText = (order) => {
+  const pendingCount = Number(order?.pending_review_count || 0)
+  if (pendingCount <= 0) return 'Review pending'
+  if (pendingCount === 1) return '1 item left to review'
+  return `${pendingCount} items left to review`
 }
 
 // FIXED: Load items for the selected section with correct filtering
@@ -735,15 +711,16 @@ const loadSectionItems = async (sectionId) => {
       sectionItems.value = []
     } else {
       const currentOrders = await reconcileAutoCompletedOrders(data || [])
+      const reviewAwareOrders = await annotateOrdersWithReviewState(currentOrders)
 
-      console.log(`📦 ${sectionId} items:`, currentOrders)
+      console.log(`📦 ${sectionId} items:`, reviewAwareOrders)
 
-      const filteredData = currentOrders.filter((order) => {
+      const filteredData = reviewAwareOrders.filter((order) => {
         switch (sectionId) {
           case 'to-receive':
             return isOrderPendingDelivery(order) || isOrderAwaitingCustomerConfirmation(order)
           case 'reviews':
-            return isOrderDeliveredState(order) && order.status !== 'cancelled'
+            return order.has_pending_review
           case 'completed':
             return isOrderCompleted(order) && order.status !== 'cancelled'
           case 'cancelled':
@@ -771,6 +748,8 @@ const loadSectionItems = async (sectionId) => {
         completed_at: order.completed_at,
         total_amount: order.total_amount,
         created_at: order.created_at,
+        has_pending_review: order.has_pending_review,
+        pending_review_count: order.pending_review_count,
         items: order.order_items.map((item) => ({
           id: item.id,
           product_id: item.product_id,
@@ -793,15 +772,24 @@ const loadSectionItems = async (sectionId) => {
   }
 }
 
+const refreshOrderViews = async () => {
+  await loadOrderCounts()
+  await loadSectionItems(selectedSection.value)
+}
+
 // Helper function to get status color
 const getStatusColor = (order) => {
+  const status = normalizeOrderStatus(order.status)
+
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'error'
+  if (isCompletedPendingReview(order)) return 'secondary'
   if (isOrderDeliveredState(order)) return 'success'
-  if (order.status === 'waiting_for_rider') return 'warning' // Orange/Yellow
-  if (order.status === 'accepted_by_rider') return 'info' // Blue
-  if (order.status === 'picked_up') return 'warning' // Orange/Yellow
+  if (status === 'cancel_requested') return 'warning'
+  if (status === 'waiting_for_rider') return 'warning' // Orange/Yellow
+  if (status === 'accepted_by_rider') return 'info' // Blue
+  if (status === 'picked_up') return 'warning' // Orange/Yellow
   if (order.payment_status === 'paid') return 'primary'
-  if (order.status === 'pending_approval') return 'warning' // Orange/Yellow
+  if (status === 'pending_approval') return 'warning' // Orange/Yellow
   if (order.payment_status === 'pending') return 'warning'
   if (order.payment_status === 'failed') return 'error'
   return 'grey'
@@ -809,14 +797,18 @@ const getStatusColor = (order) => {
 
 // Helper function to get status text
 const getStatusText = (order) => {
+  const status = normalizeOrderStatus(order.status)
+
   if (order.status === 'cancelled' || order.payment_status === 'cancelled') return 'Cancelled'
+  if (isCompletedPendingReview(order)) return 'Completed - Review Pending'
   if (isOrderCompleted(order)) return 'Completed'
   if (isOrderDeliveredState(order)) return 'Delivered'
-  if (order.status === 'waiting_for_rider') return 'Waiting for Rider' // Added
-  if (order.status === 'accepted_by_rider') return 'Rider Accepted' // Added
-  if (order.status === 'picked_up') return 'Picked Up' // Added
+  if (status === 'cancel_requested') return 'Cancellation Requested'
+  if (status === 'waiting_for_rider') return 'Waiting for Rider' // Added
+  if (status === 'accepted_by_rider') return 'Rider Accepted' // Added
+  if (status === 'picked_up') return 'Picked Up' // Added
   if (order.payment_status === 'paid') return 'To Receive'
-  if (order.status === 'pending_approval') return 'Pending Approval' // Added
+  if (status === 'pending_approval') return 'Pending Approval' // Added
   if (order.payment_status === 'pending') return 'Pending'
   if (order.payment_status === 'failed') return 'Failed'
   return 'Processing'
@@ -826,7 +818,11 @@ const getStatusText = (order) => {
 const setupOrderSubscription = () => {
   if (!user.value?.id) return
 
-  const orderChannel = supabase
+  if (orderSubscription.value) {
+    orderSubscription.value.unsubscribe()
+  }
+
+  orderSubscription.value = supabase
     .channel('customer-orders')
     .on(
       'postgres_changes',
@@ -839,13 +835,35 @@ const setupOrderSubscription = () => {
       async (payload) => {
         console.log('Order status changed:', payload)
         // Refresh counts and current section
-        await loadOrderCounts()
-        await loadSectionItems(selectedSection.value)
+        await refreshOrderViews()
       },
     )
     .subscribe()
+}
 
-  return orderChannel
+const setupReviewSubscription = () => {
+  if (!user.value?.id) return
+
+  if (reviewSubscription.value) {
+    reviewSubscription.value.unsubscribe()
+  }
+
+  reviewSubscription.value = supabase
+    .channel(`profile-review-updates-${user.value.id}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'reviews',
+        filter: `user_id=eq.${user.value.id}`,
+      },
+      async (payload) => {
+        console.log('Review state changed:', payload)
+        await refreshOrderViews()
+      },
+    )
+    .subscribe()
 }
 
 // Format date
@@ -916,14 +934,6 @@ const setupNotificationListener = async () => {
         }
 
         unreadNotifications.value++
-
-        // Show native notification if enabled
-        if (Notification.permission === 'granted') {
-          new Notification('CloseShop', {
-            body: visibleNotification.message,
-            icon: '/icon.png',
-          })
-        }
       },
     )
     .on(
@@ -958,23 +968,41 @@ const goNotifications = () => {
   router.push('/notificationview')
 }
 
+const handleReviewSubmitted = async (event) => {
+  const submittedUserId = event?.detail?.userId
+
+  if (submittedUserId && user.value?.id && submittedUserId !== user.value.id) {
+    return
+  }
+
+  await refreshOrderViews()
+}
+
 // Run when component mounts
 onMounted(async () => {
   await loadUser()
-  await loadOrderCounts()
   await debugCurrentUser()
-  await loadSectionItems(selectedSection.value)
+  await refreshOrderViews()
   setupShopRealtimeSubscription()
   await setupNotificationListener()
   setupOrderSubscription()
+  setupReviewSubscription()
+  window.addEventListener('profile:review-submitted', handleReviewSubmitted)
 })
 
 onUnmounted(() => {
   cleanupShopSubscription()
   cleanupRiderOrdersSubscription()
+  if (orderSubscription.value) {
+    orderSubscription.value.unsubscribe()
+  }
+  if (reviewSubscription.value) {
+    reviewSubscription.value.unsubscribe()
+  }
   if (notificationSubscription.value) {
     notificationSubscription.value.unsubscribe()
   }
+  window.removeEventListener('profile:review-submitted', handleReviewSubmitted)
 })
 
 // Watch for user changes
@@ -983,8 +1011,9 @@ watch(
   async (newId) => {
     if (newId) {
       await checkRiderStatus()
-      await loadOrderCounts()
-      await loadSectionItems(selectedSection.value)
+      await refreshOrderViews()
+      setupOrderSubscription()
+      setupReviewSubscription()
     }
   },
 )
@@ -994,7 +1023,7 @@ watch(
   () => authStore.userData,
   (newUser) => {
     if (newUser) {
-      fullName.value = getUserDisplayName(newUser)
+      syncProfileHeader(newUser, authStore.profile)
     }
   },
   { immediate: true },
@@ -1005,14 +1034,7 @@ watch(
   () => authStore.profile,
   (newProfile) => {
     if (newProfile) {
-      fullName.value = getUserDisplayName(authStore.userData)
-      // Profile avatar takes precedence
-      if (newProfile.avatar_url) {
-        avatarUrl.value = newProfile.avatar_url
-      } else if (authStore.userData) {
-        // Fallback to Google avatar
-        avatarUrl.value = getGoogleAvatarUrl(authStore.userData)
-      }
+      syncProfileHeader(authStore.userData, newProfile)
     }
   },
   { immediate: true, deep: true },
@@ -1101,7 +1123,7 @@ onBeforeRouteUpdate((to, from, next) => {
             <!-- Name above Email -->
             <div class="info-block">
               <h2 class="name-row">{{ fullName || user?.email?.split('@')[0] || 'User' }}</h2>
-              <p class="email-row">{{ user?.email || '...' }}</p>
+              <p class="email-row">{{ displayedEmail }}</p>
             </div>
           </div>
         </div>
@@ -1211,6 +1233,10 @@ onBeforeRouteUpdate((to, from, next) => {
                   <v-card-actions class="order-actions">
                     <div class="order-total">
                       <strong>Total: ₱{{ order.total_amount?.toLocaleString() }}</strong>
+                      <div v-if="order.has_pending_review" class="review-pending-note">
+                        <v-icon size="16" color="secondary">mdi-star-outline</v-icon>
+                        <span>{{ getPendingReviewText(order) }}</span>
+                      </div>
                     </div>
                     <div class="action-buttons">
                       <v-btn
@@ -1223,14 +1249,14 @@ onBeforeRouteUpdate((to, from, next) => {
                         View Order
                       </v-btn>
                       <v-btn
-                        v-if="isOrderDeliveredState(order)"
+                        v-if="shouldShowReviewAction(order)"
                         color="secondary"
                         variant="flat"
                         size="small"
                         @click="rateOrder(order.id)"
                       >
                         <v-icon left small>mdi-star</v-icon>
-                        Review
+                        {{ getReviewActionLabel(order) }}
                       </v-btn>
                     </div>
                   </v-card-actions>
@@ -1842,6 +1868,16 @@ onBeforeRouteUpdate((to, from, next) => {
 .order-total {
   font-size: 1.1rem;
   color: #354d7c;
+}
+
+.review-pending-note {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 0.86rem;
+  color: #6a1b9a;
+  font-weight: 600;
 }
 
 .action-buttons {

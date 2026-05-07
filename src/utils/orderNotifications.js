@@ -1,4 +1,10 @@
 import { supabase } from '@/utils/supabase'
+import {
+  LEGACY_ORDER_CANCEL_REQUESTED_STATUS,
+  ORDER_CANCEL_REQUESTED_STATUS,
+  isOrderCancellationRequestedStatus,
+} from '@/utils/orderStatus'
+import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 
 const getShopName = (orderData = {}) => {
   if (orderData.shop_name) return orderData.shop_name
@@ -101,6 +107,18 @@ const buildCustomerOrderStatusNotification = ({ status, shopName, transactionNum
   const shopLabel = shopName ? ` from ${shopName}` : ''
 
   switch (status) {
+    case 'cancelled':
+      return {
+        type: 'shipping_update',
+        title: 'Order Cancelled',
+        message: `${orderLabel}${shopLabel} was cancelled.`,
+      }
+    case 'cancellation_request_declined':
+      return {
+        type: 'shipping_update',
+        title: 'Cancellation Request Declined',
+        message: `The shop did not approve the cancellation request for ${orderLabel}${shopLabel}.`,
+      }
     case 'picked_up':
       return {
         type: 'shipping_update',
@@ -129,6 +147,13 @@ const buildSellerOrderStatusNotification = ({ status, transactionNumber, custome
   const customerLabel = customerName ? ` for ${customerName}` : ''
 
   switch (status) {
+    case ORDER_CANCEL_REQUESTED_STATUS:
+    case LEGACY_ORDER_CANCEL_REQUESTED_STATUS:
+      return {
+        type: 'shipping_update',
+        title: 'Cancellation Requested',
+        message: `Customer requested cancellation approval for ${orderLabel}${customerLabel}.`,
+      }
     case 'accepted_by_rider':
       return {
         type: 'shipping_update',
@@ -241,20 +266,18 @@ export const notifyCustomerOrderStatus = async ({
     return { created: false, reason: 'duplicate' }
   }
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: context.customerUserId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: context.customerUserId,
     type: notification.type,
     title: notification.title,
     message: notification.message,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt || new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: createdAt || new Date().toISOString(),
   })
 
-  if (error) throw error
-
-  return { created: true }
+  return notificationResult
 }
 
 export const notifySellerOrderStatus = async ({
@@ -292,7 +315,7 @@ export const notifySellerOrderStatus = async ({
     return { created: false, reason: 'missing-context' }
   }
 
-  const skipDuplicateCheck = status === 'not_received'
+  const skipDuplicateCheck = status === 'not_received' || isOrderCancellationRequestedStatus(status)
   const exists = skipDuplicateCheck
     ? false
     : await notificationAlreadyExists({
@@ -306,20 +329,18 @@ export const notifySellerOrderStatus = async ({
     return { created: false, reason: 'duplicate' }
   }
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: context.sellerUserId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: context.sellerUserId,
     type: notification.type,
     title: notification.title,
     message: notification.message,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt || new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: createdAt || new Date().toISOString(),
   })
 
-  if (error) throw error
-
-  return { created: true }
+  return notificationResult
 }
 
 export const notifyAssignedRiderOrderStatus = async ({
@@ -372,18 +393,16 @@ export const notifyAssignedRiderOrderStatus = async ({
     return { created: false, reason: 'duplicate' }
   }
 
-  const { error } = await supabase.from('notifications').insert({
-    user_id: riderProfileId,
+  const notificationResult = await createNotificationRecordIfEnabled({
+    userId: riderProfileId,
     type: notification.type,
     title: notification.title,
     message: notification.message,
-    related_id: orderId,
-    related_type: 'order',
-    is_read: false,
-    created_at: createdAt || new Date().toISOString(),
+    relatedId: orderId,
+    relatedType: 'order',
+    isRead: false,
+    createdAt: createdAt || new Date().toISOString(),
   })
 
-  if (error) throw error
-
-  return { created: true }
+  return notificationResult
 }

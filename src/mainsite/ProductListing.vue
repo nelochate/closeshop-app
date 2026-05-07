@@ -922,6 +922,7 @@ onMounted(() => {
   .product-name {
     font-size: 0.7rem;
   }
+
   
   .product-price {
     font-size: 0.8rem;
@@ -944,12 +945,15 @@ onMounted(() => {
   }
 }
 
-/* Dark Mode */
-@media (prefers-color-scheme: dark) {
-  .background-gradient {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+/* Tablet Adjustments */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .product-col {
+    margin-bottom: 16px;
   }
-  
+}
+
+/* Reduced Motion */
+@media (prefers-reduced-motion: reduce) {
   .product-card,
   .empty-state-card {
     background: #1e293b;
