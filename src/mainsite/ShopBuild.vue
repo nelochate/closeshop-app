@@ -4,7 +4,8 @@ import type { LocationOption, ShopAddressComponents } from '@/utils/location'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-import { StatusBar, Style } from '@capacitor/status-bar'
+import { StatusBar } from '@capacitor/status-bar'
+import { syncCurrentViewStatusBar } from '@/utils/statusBar'
 import {
   ensureLocationPermission,
   findMatchingLocationOption,
@@ -98,8 +99,7 @@ const showAppBar = async () => {
   document.body.classList.remove('camera-active')
 
   try {
-    await StatusBar.show()
-    await StatusBar.setStyle({ style: Style.Light })
+    await syncCurrentViewStatusBar({ waitForPaint: false })
   } catch {}
 }
 // -------------------- SHOP INFO --------------------

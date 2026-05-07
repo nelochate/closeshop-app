@@ -60,13 +60,21 @@ const routes = [
     path: '/cartview',
     name: 'cartview',
     component: CartView,
-    meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
+    meta: {
+      requiresAuth: true,
+      keepAlive: true,
+      localPullToRefresh: true,
+    },
   },
   {
     path: '/messageview',
     name: 'messageview',
     component: MessageView,
-    meta: { requiresAuth: true, keepAlive: true, localPullToRefresh: true },
+    meta: {
+      requiresAuth: true,
+      keepAlive: true,
+      localPullToRefresh: true,
+    },
   },
   {
     path: '/chatview/:id',

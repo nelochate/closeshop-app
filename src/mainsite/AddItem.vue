@@ -3,7 +3,8 @@ import { ref, onMounted, nextTick } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
-import { StatusBar, Style } from '@capacitor/status-bar'
+import { StatusBar } from '@capacitor/status-bar'
+import { syncCurrentViewStatusBar } from '@/utils/statusBar'
 
 // ------------------ Router ------------------
 const router = useRouter()
@@ -74,8 +75,7 @@ const showAppBar = async () => {
   document.body.classList.remove('camera-active')
   
   try {
-    await StatusBar.show()
-    await StatusBar.setStyle({ style: Style.Light })
+    await syncCurrentViewStatusBar({ waitForPaint: false })
   } catch (error) {
     console.log('StatusBar plugin not available on web')
   }

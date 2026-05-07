@@ -217,7 +217,9 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   left: 0;
   right: 0;
   z-index: 1000;
-  padding: 8px 12px 16px;
+  padding: 8px max(12px, var(--app-safe-area-left, 0px))
+    calc(16px + var(--app-bottom-safe-space, 0px))
+    max(12px, var(--app-safe-area-right, 0px));
   background: transparent;
 }
 
@@ -229,7 +231,9 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 
 /* Mobile styles */
 .nav-wrapper.mobile {
-  padding: 6px 10px 12px;
+  padding: 6px max(10px, var(--app-safe-area-left, 0px))
+    calc(12px + var(--app-bottom-safe-space, 0px))
+    max(10px, var(--app-safe-area-right, 0px));
 }
 
 /* Bottom Navigation Container */
@@ -395,29 +399,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   font-size: 9px;
   min-width: 16px;
   height: 16px;
-}
-
-/* Safe area for notched phones */
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .nav-wrapper {
-    padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  }
-
-  .nav-wrapper.mobile {
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
-
-  @media (max-width: 380px) {
-    .nav-wrapper.mobile {
-      padding-bottom: calc(10px + env(safe-area-inset-bottom));
-    }
-  }
-
-  @media (max-width: 350px) {
-    .nav-wrapper.mobile {
-      padding-bottom: calc(8px + env(safe-area-inset-bottom));
-    }
-  }
 }
 
 .nav-btn :deep(.v-btn__overlay) {
