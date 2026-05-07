@@ -5,6 +5,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
+import { deactivateCurrentPushToken } from '@/utils/mobilePushNotifications'
 import {
   getAuthUserAvatarUrl,
   getAuthUserDisplayName,
@@ -22,12 +23,16 @@ const uploading = ref(false)
 const showSuccess = ref(false)
 const successMessage = ref('')
 const snackbarColor = ref('success')
+const showDeleteAccountDialog = ref(false)
+const deleteAccountConfirmation = ref('')
 const primaryAuthProvider = ref('email')
 const originalEmail = ref('')
 const addressSummary = ref('No saved address yet. Add one to manage delivery contact numbers.')
 const avatarPublicUrl = ref('')
 const avatarVersion = ref(Date.now())
+const isDeletingAccount = ref(false)
 const PROFILE_SELECT = '*'
+const DELETE_ACCOUNT_CONFIRMATION_TEXT = 'DELETE'
 
 const formData = ref({
   fullName: '',
@@ -94,8 +99,15 @@ const isSaveDisabled = computed(
     isLoadingProfile.value ||
     isSaving.value ||
     uploading.value ||
+    isDeletingAccount.value ||
     !normalizeIdentityText(formData.value.fullName) ||
     !normalizeIdentityText(formData.value.email),
+)
+
+const isDeleteAccountConfirmationValid = computed(
+  () =>
+    normalizeIdentityText(deleteAccountConfirmation.value).toUpperCase() ===
+    DELETE_ACCOUNT_CONFIRMATION_TEXT,
 )
 
 const buildAddressSummary = (address) => {
@@ -560,6 +572,80 @@ const goToAddressBook = () => {
   router.push({ name: 'my-address' })
 }
 
+const openDeleteAccountDialog = () => {
+  if (isSaving.value || uploading.value || isDeletingAccount.value) {
+    return
+  }
+
+  deleteAccountConfirmation.value = ''
+  showDeleteAccountDialog.value = true
+}
+
+const closeDeleteAccountDialog = () => {
+  if (isDeletingAccount.value) {
+    return
+  }
+
+  showDeleteAccountDialog.value = false
+  deleteAccountConfirmation.value = ''
+}
+
+const deleteAccount = async () => {
+  if (!isDeleteAccountConfirmationValid.value || isDeletingAccount.value) {
+    return
+  }
+
+  try {
+    isDeletingAccount.value = true
+
+    const authUser = await resolveAuthUser()
+    if (!authUser?.id) {
+      throw new Error('User not authenticated')
+    }
+
+    await deactivateCurrentPushToken(authUser.id)
+
+    const { data, error } = await supabase.functions.invoke('delete-account', {
+      body: {
+        confirmDelete: true,
+      },
+    })
+
+    if (error) {
+      throw error
+    }
+
+    if (!data?.success) {
+      throw new Error(data?.error || 'Account deletion failed.')
+    }
+
+    localStorage.removeItem('lastCreatedShopId')
+    showDeleteAccountDialog.value = false
+    deleteAccountConfirmation.value = ''
+
+    try {
+      await authStore.forceLogout()
+    } catch (signOutError) {
+      console.warn('Account was deleted but local sign-out cleanup failed:', signOutError)
+      authStore.$reset?.()
+    }
+
+    await router.replace({
+      name: 'login',
+      query: { accountDeleted: Date.now() },
+    })
+  } catch (error) {
+    console.error('Error deleting account:', error)
+    showSuccessMessage(
+      `Failed to delete account: ${error?.message || 'Unknown error'}`,
+      'error',
+    )
+    hideSuccessMessageLater()
+  } finally {
+    isDeletingAccount.value = false
+  }
+}
+
 const goBack = () => {
   router.replace({
     name: 'profileview',
@@ -575,7 +661,13 @@ onMounted(() => {
 <template>
   <v-app>
     <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
-      <v-btn variant="text" icon @click="goBack" class="back-btn" :disabled="isSaving || uploading">
+      <v-btn
+        variant="text"
+        icon
+        @click="goBack"
+        class="back-btn"
+        :disabled="isSaving || uploading || isDeletingAccount"
+      >
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="font-bold">
@@ -673,16 +765,37 @@ onMounted(() => {
                         </div>
                       </div>
 
-                      <v-btn
-                        color="primary"
-                        variant="tonal"
-                        @click="goToAddressBook"
-                        :disabled="isSaving"
-                      >
-                        <v-icon start>mdi-map-marker-outline</v-icon>
-                        Open My Addresses
-                      </v-btn>
+                    <v-btn
+                      color="primary"
+                      variant="tonal"
+                      @click="goToAddressBook"
+                      :disabled="isSaving || isDeletingAccount"
+                    >
+                      <v-icon start>mdi-map-marker-outline</v-icon>
+                      Open My Addresses
+                    </v-btn>
+                  </div>
+                  </div>
+
+                  <div class="danger-card">
+                    <div class="danger-copy">
+                      <div class="text-subtitle-1 font-weight-bold">Delete Account</div>
+                      <div class="text-body-2 text-medium-emphasis">
+                        This permanently disables your CloseShop account, removes saved addresses,
+                        cart items, notifications, and reviews, anonymizes your profile, and hides
+                        any owned shop from the marketplace.
+                      </div>
                     </div>
+
+                    <v-btn
+                      color="error"
+                      variant="outlined"
+                      @click="openDeleteAccountDialog"
+                      :disabled="isSaving || uploading || isDeletingAccount"
+                    >
+                      <v-icon start>mdi-delete-alert-outline</v-icon>
+                      Delete Account
+                    </v-btn>
                   </div>
 
                   <div class="action-row">
@@ -702,7 +815,7 @@ onMounted(() => {
                       variant="outlined"
                       size="large"
                       class="cancel-btn"
-                      :disabled="isSaving || uploading"
+                      :disabled="isSaving || uploading || isDeletingAccount"
                       @click="goBack"
                     >
                       Cancel
@@ -758,6 +871,45 @@ onMounted(() => {
         </v-card-actions>
       </v-card>
     </v-bottom-sheet>
+
+    <v-dialog v-model="showDeleteAccountDialog" max-width="480" persistent>
+      <v-card class="delete-dialog-card">
+        <v-card-title class="delete-dialog-title">Delete Account</v-card-title>
+        <v-card-text class="delete-dialog-body">
+          <p class="delete-dialog-copy">
+            This action cannot be undone. Type <strong>{{ DELETE_ACCOUNT_CONFIRMATION_TEXT }}</strong>
+            to confirm account deletion.
+          </p>
+
+          <v-alert type="warning" variant="tonal" class="mb-4">
+            Your profile will be anonymized, saved addresses and notifications will be removed, and
+            any shop you own will be hidden from customers.
+          </v-alert>
+
+          <v-text-field
+            v-model="deleteAccountConfirmation"
+            label="Type DELETE to continue"
+            variant="outlined"
+            :disabled="isDeletingAccount"
+            autocomplete="off"
+          />
+        </v-card-text>
+        <v-card-actions class="delete-dialog-actions">
+          <v-btn variant="text" @click="closeDeleteAccountDialog" :disabled="isDeletingAccount">
+            Cancel
+          </v-btn>
+          <v-btn
+            color="error"
+            variant="flat"
+            :loading="isDeletingAccount"
+            :disabled="!isDeleteAccountConfirmationValid"
+            @click="deleteAccount"
+          >
+            Delete Account
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </v-app>
 </template>
 
@@ -898,6 +1050,22 @@ onMounted(() => {
   padding: 18px;
 }
 
+.danger-card {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 18px;
+  border: 1px solid rgba(220, 38, 38, 0.18);
+  background: linear-gradient(135deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.danger-copy {
+  display: grid;
+  gap: 8px;
+}
+
 .action-row {
   display: flex;
   gap: 12px;
@@ -927,6 +1095,32 @@ onMounted(() => {
   background-color: #f8fafc;
 }
 
+.delete-dialog-card {
+  border-radius: 20px;
+}
+
+.delete-dialog-title {
+  padding: 22px 24px 0;
+  font-weight: 700;
+  color: #8b1e2d;
+}
+
+.delete-dialog-body {
+  padding-top: 16px;
+}
+
+.delete-dialog-copy {
+  margin: 0 0 16px;
+  color: #475569;
+  line-height: 1.55;
+}
+
+.delete-dialog-actions {
+  padding: 0 24px 24px;
+  justify-content: flex-end;
+  gap: 12px;
+}
+
 @media (max-width: 600px) {
   .profile-container {
     padding-top: 16px;
@@ -941,6 +1135,10 @@ onMounted(() => {
   }
 
   .action-row {
+    flex-direction: column;
+  }
+
+  .danger-card {
     flex-direction: column;
   }
 
