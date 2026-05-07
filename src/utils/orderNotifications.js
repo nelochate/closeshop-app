@@ -438,6 +438,14 @@ export const notifyAssignedRiderOrderStatus = async ({
   return notificationResult
 }
 
+/**
+ * @param {{
+ *   orderId: string | null | undefined,
+ *   createdAt?: string | null,
+ *   actorUserId?: string | null,
+ *   orderData?: any,
+ * }} options
+ */
 export const notifyAvailableRidersNewDeliveryRequest = async ({
   orderId,
   createdAt = null,

@@ -7,9 +7,25 @@ import { notifyAvailableRidersNewDeliveryRequest } from '@/utils/orderNotificati
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime } from '@/utils/dateTime'
 import { isOrderCancellationRequestedStatus, normalizeOrderStatus } from '@/utils/orderStatus'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const goBack = () => router.back()
+
+// Refresh handler function
+const handleRefresh = async () => {
+  errorMsg.value = ''
+  console.log('🔄 Pull-to-refresh triggered - Refreshing home page...')
+
+  try {
+    await Promise.all([fetchShops(), refreshProductsData(), fetchUnreadNotificationCount()])
+
+    console.log('✅ Home page refresh complete!')
+  } catch (error) {
+    console.error('❌ Refresh failed:', error)
+    errorMsg.value = 'Failed to refresh data'
+  }
+}
 
 type OrderSectionId =
   | 'pending_approval'
@@ -41,6 +57,30 @@ const approvingOrderId = ref(null)
 const currentTime = ref(Date.now())
 let currentTimeInterval: ReturnType<typeof setInterval> | null = null
 let ordersSubscription: any = null
+
+const handleUserShopRefresh = async () => {
+  ordersError.value = ''
+  console.log('Refreshing shop dashboard...')
+
+  try {
+    await fetchShopData()
+
+    if (ordersError.value) {
+      throw new Error(ordersError.value)
+    }
+
+    console.log('Shop dashboard refresh complete!')
+  } catch (error) {
+    console.error('Refresh failed:', error)
+    ordersError.value = 'Failed to refresh shop data. Please try again.'
+  }
+}
+
+// Legacy aliases kept so older copied refresh code does not break type-checking.
+const errorMsg = ordersError
+const fetchShops = async () => fetchShopData()
+const refreshProductsData = async () => true
+const fetchUnreadNotificationCount = async () => true
 
 // Mobile state
 const isMobile = ref(window.innerWidth < 768)
@@ -612,6 +652,7 @@ const fetchShopData = async () => {
     }
   } catch (err: any) {
     console.error('Error loading shop info:', err?.message ?? err, err)
+    ordersError.value = 'Failed to load shop information. Please try again.'
   }
 }
 
@@ -948,6 +989,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
 <template>
   <v-app>
+    <PullToRefreshWrapper :on-refresh="handleUserShopRefresh">
     <!-- Top Bar - Mobile Optimized -->
     <v-app-bar
       class="top-bar"
@@ -964,11 +1006,6 @@ const getOrderDeliveryDisplay = (order: any): string => {
         {{ isMobile ? 'My Shop' : 'My Shop' }}
       </v-toolbar-title>
       <v-spacer></v-spacer>
-
-      <!-- Refresh Button -->
-      <v-btn icon @click="refreshOrders" class="mr-1" :loading="loadingOrders" size="small">
-        <v-icon>{{ isMobile ? 'mdi-refresh' : 'mdi-refresh' }}</v-icon>
-      </v-btn>
 
       <!-- Mobile Dropdown -->
       <v-menu :close-on-content-click="true">
@@ -1589,6 +1626,7 @@ const getOrderDeliveryDisplay = (order: any): string => {
         </div>
       </v-container>
     </v-main>
+</PullToRefreshWrapper>
   </v-app>
 </template>
 <style scoped>
@@ -1837,6 +1875,3 @@ const getOrderDeliveryDisplay = (order: any): string => {
   }
 }
 </style>
-
-
-

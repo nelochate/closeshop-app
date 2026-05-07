@@ -214,6 +214,7 @@ const detectingLocation = ref(false)
 const locationLoadingStage = ref<'gps' | 'reverse-geocoding' | 'saving' | null>(null)
 const syncingDetectedAddress = ref(false)
 const syncingLocationSelections = ref(false)
+const suppressLocationWatchEffects = ref(false)
 let manualLocationSyncTimer: ReturnType<typeof setTimeout> | null = null
 
 const locationLoadingMessage = computed(() => {
@@ -228,6 +229,20 @@ const locationLoadingMessage = computed(() => {
       return ''
   }
 })
+
+const withSuppressedLocationWatchEffects = async <T>(task: () => Promise<T> | T): Promise<T> => {
+  suppressLocationWatchEffects.value = true
+
+  try {
+    return await task()
+  } finally {
+    await nextTick()
+    suppressLocationWatchEffects.value = false
+  }
+}
+
+const shouldSkipLocationWatchEffects = () =>
+  suppressLocationWatchEffects.value || loadingShopData.value || currentStep.value !== 6
 
 const DEFAULT_SHOP_LOCATION = {
   lat: 8.9489,
@@ -594,49 +609,51 @@ const updateMapMarkerPosition = (lat: number, lng: number, zoom = 17) => {
 }
 
 const syncDetectedPsgcSelections = async (components: ShopAddressComponents) => {
-  syncingLocationSelections.value = true
+  return withSuppressedLocationWatchEffects(async () => {
+    syncingLocationSelections.value = true
 
-  try {
-    if (!regions.value.length) {
-      await fetchRegions()
+    try {
+      if (!regions.value.length) {
+        await fetchRegions()
+      }
+
+      const matchedRegion = findMatchingLocationOption(regions.value, components.region)
+      selectedRegion.value = matchedRegion?.code || null
+      address.region.value = matchedRegion?.name || components.region || ''
+
+      if (matchedRegion?.code) {
+        await fetchProvinces(matchedRegion.code)
+      } else {
+        provinces.value = []
+      }
+
+      const matchedProvince = findMatchingLocationOption(provinces.value, components.province)
+      selectedProvince.value = matchedProvince?.code || null
+      address.province.value = matchedProvince?.name || components.province || ''
+
+      if (matchedProvince?.code) {
+        await fetchCities(matchedProvince.code)
+      } else {
+        cities.value = []
+      }
+
+      const matchedCity = findMatchingLocationOption(cities.value, components.city)
+      selectedCity.value = matchedCity?.code || null
+      address.city.value = matchedCity?.name || components.city || ''
+
+      if (matchedCity?.code) {
+        await fetchBarangays(matchedCity.code)
+      } else {
+        barangaysList.value = []
+      }
+
+      const matchedBarangay = findMatchingLocationOption(barangaysList.value, components.barangay)
+      selectedBarangay.value = matchedBarangay?.code || null
+      address.barangay.value = matchedBarangay?.name || components.barangay || ''
+    } finally {
+      syncingLocationSelections.value = false
     }
-
-    const matchedRegion = findMatchingLocationOption(regions.value, components.region)
-    selectedRegion.value = matchedRegion?.code || null
-    address.region.value = matchedRegion?.name || components.region || ''
-
-    if (matchedRegion?.code) {
-      await fetchProvinces(matchedRegion.code)
-    } else {
-      provinces.value = []
-    }
-
-    const matchedProvince = findMatchingLocationOption(provinces.value, components.province)
-    selectedProvince.value = matchedProvince?.code || null
-    address.province.value = matchedProvince?.name || components.province || ''
-
-    if (matchedProvince?.code) {
-      await fetchCities(matchedProvince.code)
-    } else {
-      cities.value = []
-    }
-
-    const matchedCity = findMatchingLocationOption(cities.value, components.city)
-    selectedCity.value = matchedCity?.code || null
-    address.city.value = matchedCity?.name || components.city || ''
-
-    if (matchedCity?.code) {
-      await fetchBarangays(matchedCity.code)
-    } else {
-      barangaysList.value = []
-    }
-
-    const matchedBarangay = findMatchingLocationOption(barangaysList.value, components.barangay)
-    selectedBarangay.value = matchedBarangay?.code || null
-    address.barangay.value = matchedBarangay?.name || components.barangay || ''
-  } finally {
-    syncingLocationSelections.value = false
-  }
+  })
 }
 
 // -------------------- REVERSE GEOCODE --------------------
@@ -875,6 +892,7 @@ const pickImage = async (source: 'camera' | 'gallery') => {
 const saveCoordinates = async (lat: number, lng: number) => {
   try {
     if (!currentShopId.value) return
+    const addressSource = addressOption.value === 'manual' ? 'manual' : 'detected'
 
     const { error } = await supabase
       .from('shops')
@@ -890,7 +908,7 @@ const saveCoordinates = async (lat: number, lng: number) => {
         city: address.city.value || null,
         province: address.province.value || null,
         region: address.region.value || null,
-        manual_status: addressOption.value === 'manual' ? 'manual' : 'auto',
+        address_source: addressSource,
         updated_at: new Date().toISOString(),
       })
       .eq('id', currentShopId.value)
@@ -1096,19 +1114,6 @@ const loadShopData = async () => {
     openTime.value = data.open_time || ''
     closeTime.value = data.close_time || ''
 
-    address.barangay.value = data.barangay || ''
-    address.building.value = data.building || ''
-    address.street.value = data.street || ''
-    address.postal.value = data.postal || ''
-    address.house_no.value = data.house_no || ''
-    address.city.value = data.city || ''
-    address.province.value = data.province || ''
-    address.region.value = data.region || ''
-
-    latitude.value = parseCoordinate(data.latitude) ?? DEFAULT_SHOP_LOCATION.lat
-    longitude.value = parseCoordinate(data.longitude) ?? DEFAULT_SHOP_LOCATION.lng
-    fullAddress.value = data.detected_address || ''
-
     deliveryOptions.value = data.delivery_options || []
     paymentOptions.value = data.payment_options || []
     openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
@@ -1126,18 +1131,62 @@ const loadShopData = async () => {
     }
     gcashEnabled.value = data.gcash_enabled || false
 
-    if (data.region || data.province || data.city || data.barangay) {
-      await syncDetectedPsgcSelections({
-        houseNo: data.house_no || '',
-        building: data.building || '',
-        street: data.street || '',
-        postal: data.postal || '',
-        barangay: data.barangay || '',
-        city: data.city || '',
-        province: data.province || '',
-        region: data.region || '',
-      })
-    }
+    await withSuppressedLocationWatchEffects(async () => {
+      const hasSavedManualAddress =
+        Boolean(data.barangay) ||
+        Boolean(data.city) ||
+        Boolean(data.province) ||
+        Boolean(data.region) ||
+        Boolean(data.house_no) ||
+        Boolean(data.building) ||
+        Boolean(data.street) ||
+        Boolean(data.postal)
+
+      addressOption.value =
+        data.address_source === 'detected'
+          ? 'map'
+          : data.address_source === 'manual' || hasSavedManualAddress
+            ? 'manual'
+            : 'map'
+
+      address.barangay.value = data.barangay || ''
+      address.building.value = data.building || ''
+      address.street.value = data.street || ''
+      address.postal.value = data.postal || ''
+      address.house_no.value = data.house_no || ''
+      address.city.value = data.city || ''
+      address.province.value = data.province || ''
+      address.region.value = data.region || ''
+
+      latitude.value = parseCoordinate(data.latitude) ?? DEFAULT_SHOP_LOCATION.lat
+      longitude.value = parseCoordinate(data.longitude) ?? DEFAULT_SHOP_LOCATION.lng
+      fullAddress.value =
+        data.detected_address ||
+        formatShopAddress({
+          houseNo: data.house_no || '',
+          building: data.building || '',
+          street: data.street || '',
+          postal: data.postal || '',
+          barangay: data.barangay || '',
+          city: data.city || '',
+          province: data.province || '',
+          region: data.region || '',
+        }) ||
+        ''
+
+      if (data.region || data.province || data.city || data.barangay) {
+        await syncDetectedPsgcSelections({
+          houseNo: data.house_no || '',
+          building: data.building || '',
+          street: data.street || '',
+          postal: data.postal || '',
+          barangay: data.barangay || '',
+          city: data.city || '',
+          province: data.province || '',
+          region: data.region || '',
+        })
+      }
+    })
 
     await nextTick()
   } catch (err) {
@@ -1149,7 +1198,7 @@ const loadShopData = async () => {
 
 // Update address fields when PSGC selections change
 watch(selectedRegion, (regionCode) => {
-  if (syncingLocationSelections.value) return
+  if (syncingLocationSelections.value || shouldSkipLocationWatchEffects()) return
 
   selectedProvince.value = null
   selectedCity.value = null
@@ -1170,7 +1219,7 @@ watch(selectedRegion, (regionCode) => {
 })
 
 watch(selectedProvince, (provinceCode) => {
-  if (syncingLocationSelections.value) return
+  if (syncingLocationSelections.value || shouldSkipLocationWatchEffects()) return
 
   selectedCity.value = null
   selectedBarangay.value = null
@@ -1188,7 +1237,7 @@ watch(selectedProvince, (provinceCode) => {
 })
 
 watch(selectedCity, (cityCode) => {
-  if (syncingLocationSelections.value) return
+  if (syncingLocationSelections.value || shouldSkipLocationWatchEffects()) return
 
   selectedBarangay.value = null
   barangaysList.value = []
@@ -1203,7 +1252,7 @@ watch(selectedCity, (cityCode) => {
 })
 
 watch(selectedBarangay, async (barangayCode) => {
-  if (syncingLocationSelections.value) return
+  if (syncingLocationSelections.value || shouldSkipLocationWatchEffects()) return
   if (!barangayCode || !selectedCity.value) return
 
   const barangayObj = barangaysList.value.find((b) => b.code === barangayCode)
@@ -1229,7 +1278,12 @@ watch(
     () => address.postal.value,
   ],
   () => {
-    if (addressOption.value !== 'manual' || syncingDetectedAddress.value) return
+    if (
+      addressOption.value !== 'manual' ||
+      syncingDetectedAddress.value ||
+      shouldSkipLocationWatchEffects()
+    )
+      return
     if (!selectedBarangay.value || !selectedCity.value || !selectedProvince.value || !selectedRegion.value) return
 
     if (manualLocationSyncTimer) {

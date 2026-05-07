@@ -1,5 +1,6 @@
 <template>
-  <div class="status-view-wrapper">
+  <PullToRefreshWrapper :on-refresh="handleRefresh">
+    <div class="status-view-wrapper">
     <!-- Debug Banner (Shows at top when debug mode is on) -->
     <div v-if="debugMode" class="debug-banner">
       <div class="debug-content">
@@ -45,16 +46,6 @@
           <p class="subtitle">Complete shop information</p>
         </div>
         <div class="header-actions">
-          <v-btn 
-            icon 
-            @click="fetchData"
-            :loading="loading"
-            size="small"
-            variant="text"
-            class="header-refresh-btn"
-          >
-            <v-icon size="20">mdi-refresh</v-icon>
-          </v-btn>
           <!-- Debug toggle button -->
           <v-btn 
             icon 
@@ -852,13 +843,15 @@
         </div>
       </div>
     </main>
-  </div>
+    </div>
+  </PullToRefreshWrapper>
 </template>
 
 <script setup>
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -1298,6 +1291,9 @@ const goToMyShop = async () => {
 
 // Action handlers
 const refreshData = () => fetchData()
+const handleRefresh = async () => {
+  await fetchData()
+}
 
 const copyStatusLink = async () => {
   if (!shop.value) return
@@ -1549,11 +1545,6 @@ watch(() => route.query.shopId, (newShopId) => {
   color: rgba(255, 255, 255, 0.85);
   font-size: 0.875rem;
   margin: 0;
-}
-
-.header-refresh-btn {
-  color: white !important;
-  opacity: 0.8;
 }
 
 /* Main Content */

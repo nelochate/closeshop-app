@@ -34,9 +34,9 @@
 
 <script setup>
 import { computed, nextTick, ref, watch, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue'
-import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { Haptics } from '@capacitor/haptics'
+import { subscribeToAppRuntime } from '@/utils/appRuntime'
 
 const props = defineProps({
   onRefresh: {
@@ -109,7 +109,7 @@ let isPulling = false
 let hapticTriggered = false
 let startTarget = null
 let touchListenersBound = false
-let appStateListenerHandle = null
+let unsubscribeAppRuntime = null
 let resumeRefreshTimeoutId = null
 let lastInactiveAt = 0
 let lastRefreshAt = 0
@@ -368,27 +368,6 @@ watch(
   },
 )
 
-const handleVisibilityChange = () => {
-  if (document.hidden) {
-    handleAppInactive()
-    return
-  }
-
-  void handleAppActive('visibilitychange')
-}
-
-const handleWindowFocus = () => {
-  if (!document.hidden) {
-    void handleAppActive('focus')
-  }
-}
-
-const handlePageShow = () => {
-  if (!document.hidden) {
-    void handleAppActive('pageshow')
-  }
-}
-
 const attachRuntimeListeners = () => {
   if (runtimeListenersBound) {
     return
@@ -397,26 +376,17 @@ const attachRuntimeListeners = () => {
   attachTouchListeners()
   lastInteractionAt = Date.now()
 
-  window.addEventListener('focus', handleWindowFocus)
-  window.addEventListener('pageshow', handlePageShow)
   window.addEventListener('scroll', markInteraction, { passive: true })
   window.addEventListener('pointerdown', markInteraction, { passive: true })
-  document.addEventListener('visibilitychange', handleVisibilityChange)
 
-  if (Capacitor.isNativePlatform()) {
-    CapacitorApp.addListener('appStateChange', ({ isActive }) => {
-      if (isActive) {
-        void handleAppActive('capacitor')
-        return
-      }
+  unsubscribeAppRuntime = subscribeToAppRuntime(({ type, source }) => {
+    if (type === 'active') {
+      void handleAppActive(source)
+      return
+    }
 
-      handleAppInactive()
-    }).then((listenerHandle) => {
-      appStateListenerHandle = listenerHandle
-    }).catch((error) => {
-      console.warn('Failed to register app state listener:', error)
-    })
-  }
+    handleAppInactive()
+  })
  
   runtimeListenersBound = true
 }
@@ -429,15 +399,12 @@ const detachRuntimeListeners = () => {
   clearPendingResumeRefresh()
   detachTouchListeners()
 
-  window.removeEventListener('focus', handleWindowFocus)
-  window.removeEventListener('pageshow', handlePageShow)
   window.removeEventListener('scroll', markInteraction)
   window.removeEventListener('pointerdown', markInteraction)
-  document.removeEventListener('visibilitychange', handleVisibilityChange)
 
-  if (appStateListenerHandle?.remove) {
-    appStateListenerHandle.remove()
-    appStateListenerHandle = null
+  if (unsubscribeAppRuntime) {
+    unsubscribeAppRuntime()
+    unsubscribeAppRuntime = null
   }
 
   runtimeListenersBound = false

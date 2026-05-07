@@ -225,6 +225,18 @@ export const canUserReceiveNotificationRecord = async ({
   })
 }
 
+/**
+ * @param {{
+ *   userId: string | null | undefined,
+ *   type: string,
+ *   title: string,
+ *   message: string,
+ *   relatedId?: string | null,
+ *   relatedType?: string | null,
+ *   isRead?: boolean,
+ *   createdAt?: string | null,
+ * }} options
+ */
 export const createNotificationRecordIfEnabled = async ({
   userId,
   type,
