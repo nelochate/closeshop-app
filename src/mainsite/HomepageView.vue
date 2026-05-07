@@ -1664,7 +1664,8 @@ const hotPicks = computed(() => {
 .product-badge-hot {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
+  right: auto;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1677,6 +1678,10 @@ const hotPicks = computed(() => {
   box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
   z-index: 10;
   animation: hotPulse 2s infinite;
+}
+
+.product-card--hot .product-badge-low {
+  top: 40px;
 }
 
 .badge-fire {
