@@ -25,6 +25,7 @@ const addingToCart = ref(false)
 // Dialog states
 const showAddToCartDialog = ref(false)
 const showBuyNowDialog = ref(false)
+const showVarieties = ref(false)
 const selectedSize = ref(null)
 const selectedVariety = ref(null)
 
@@ -46,7 +47,7 @@ const buyNowQuantity = ref(1)
 const reviews = ref([])
 const reviewsLoading = ref(false)
 const reviewError = ref('')
-const reviewNavigationId = ref('')
+const selectedReviewRating = ref(null)
 
 // Snackbar for notifications
 const snackbar = ref(false)
@@ -405,9 +406,6 @@ const displayPrice = computed(() => {
 
 const displayStock = computed(() => {
   if (!product.value) return 0
-  if (selectedVariety.value && selectedVariety.value.stock !== undefined) {
-    return selectedVariety.value.stock
-  }
   return product.value.stock || 0
 })
 
@@ -443,17 +441,11 @@ const stockSummaryText = computed(() => getAvailabilityLabel(displayStock.value)
 
 const dialogDisplayStock = computed(() => {
   if (!product.value) return 0
-  if (dialogSelectedVariety.value && dialogSelectedVariety.value.stock !== undefined) {
-    return dialogSelectedVariety.value.stock
-  }
   return product.value.stock || 0
 })
 
 const buyNowDisplayStock = computed(() => {
   if (!product.value) return 0
-  if (buyNowSelectedVariety.value && buyNowSelectedVariety.value.stock !== undefined) {
-    return buyNowSelectedVariety.value.stock
-  }
   return product.value.stock || 0
 })
 
@@ -494,78 +486,41 @@ const reviewSummaryLabel = computed(() => {
   return `${reviewCount.value} reviews`
 })
 
-const isCurrentUsersReview = (review) =>
-  !!review?.user_id && !!user.value?.id && review.user_id === user.value.id
+const getReviewRatingBucket = (rating = 0) => {
+  const normalizedRating = Math.round(Number(rating || 0))
+  return Math.min(Math.max(normalizedRating, 1), 5)
+}
 
-const findLatestReviewableOrderId = async (targetProductId) => {
-  if (!user.value?.id || !targetProductId) {
-    return null
+const reviewRatingOptions = computed(() => [
+  {
+    label: 'All',
+    value: null,
+    count: reviews.value.length,
+  },
+  ...[5, 4, 3, 2, 1].map((rating) => ({
+    label: `${rating}`,
+    value: rating,
+    count: reviews.value.filter((review) => getReviewRatingBucket(review.rating) === rating).length,
+  })),
+])
+
+const filteredReviews = computed(() => {
+  if (!selectedReviewRating.value) {
+    return reviews.value
   }
 
-  const { data, error } = await supabase
-    .from('orders')
-    .select(
-      `
-      id,
-      status,
-      delivered_at,
-      completed_at,
-      created_at,
-      order_items!inner (
-        product_id
-      )
-    `,
-    )
-    .eq('user_id', user.value.id)
-    .eq('order_items.product_id', targetProductId)
-    .in('status', ['picked_up', 'delivered', 'completed'])
-    .order('created_at', { ascending: false })
-    .limit(10)
-
-  if (error) {
-    throw error
-  }
-
-  const targetOrder = (data || []).find(
-    (order) =>
-      order.status === 'completed' ||
-      !!order.completed_at ||
-      order.status === 'delivered' ||
-      (order.status === 'picked_up' && !!order.delivered_at),
+  return reviews.value.filter(
+    (review) => getReviewRatingBucket(review.rating) === selectedReviewRating.value,
   )
+})
 
-  return targetOrder?.id || null
-}
-
-const goToEditReview = async (review) => {
-  if (!isCurrentUsersReview(review)) {
-    return
+const filteredReviewsEmptyText = computed(() => {
+  if (!selectedReviewRating.value) {
+    return 'Reviews for this product will appear here as soon as customers submit them.'
   }
 
-  try {
-    reviewNavigationId.value = review.id
-    const targetOrderId = await findLatestReviewableOrderId(review.product_id)
-
-    if (!targetOrderId) {
-      showSnackbar('Could not find the order for this review.', 'warning')
-      return
-    }
-
-    await router.push({
-      name: 'rateview',
-      params: { orderId: targetOrderId },
-      query: {
-        productId: String(review.product_id),
-        mode: 'edit',
-      },
-    })
-  } catch (error) {
-    console.error('Error opening review editor:', error)
-    showSnackbar('Unable to open the review editor right now.', 'error')
-  } finally {
-    reviewNavigationId.value = ''
-  }
-}
+  return `No ${selectedReviewRating.value}-star reviews for this product yet.`
+})
 
 const formatReviewDate = (dateString) => {
   if (!dateString) return ''
@@ -648,6 +603,12 @@ const goToChat = async () => {
 
 const selectMainProduct = () => {
   selectedVariety.value = null
+  showVarieties.value = false
+}
+
+const selectVariety = (variety) => {
+  selectedVariety.value = variety
+  showVarieties.value = false
 }
 
 const incrementQuantity = () => {
@@ -755,13 +716,13 @@ const confirmAddToCart = async () => {
 
   try {
     const varietyData = finalVariety
-      ? {
-          name: finalVariety.name,
-          price: finalVariety.price,
-          stock: finalVariety.stock,
-          images: finalVariety.images || [],
-        }
-      : null
+        ? {
+            name: finalVariety.name,
+            price: finalVariety.price,
+            stock: product.value.stock,
+            images: finalVariety.images || [],
+          }
+        : null
 
     const result = await cart.addToCart(
       product.value.id,
@@ -950,6 +911,7 @@ watch(
     cleanupReviewsSubscription()
     selectedSize.value = null
     selectedVariety.value = null
+    showVarieties.value = false
     dialogSelectedSize.value = null
     dialogSelectedVariety.value = null
     buyNowSelectedSize.value = null
@@ -1162,7 +1124,7 @@ onUnmounted(() => {
                     :class="{ 'option-selected': dialogSelectedVariety?.name === variety.name }"
                     @click="dialogSelectedVariety = variety"
                     variant="outlined"
-                    :disabled="variety.stock === 0"
+                    :disabled="product.stock === 0"
                   >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
@@ -1307,7 +1269,7 @@ onUnmounted(() => {
                     :class="{ 'option-selected': buyNowSelectedVariety?.name === variety.name }"
                     @click="buyNowSelectedVariety = variety"
                     variant="outlined"
-                    :disabled="variety.stock === 0"
+                    :disabled="product.stock === 0"
                   >
                     <v-card-text class="pa-3 d-flex align-center">
                       <v-avatar size="40" class="mr-3">
@@ -1444,35 +1406,58 @@ onUnmounted(() => {
             </div>
 
             <div v-if="product.varieties && product.varieties.length" class="varieties-section">
-              <p class="selection-label">Available Varieties:</p>
+              <div class="varieties-toggle-row">
+                <div>
+                  <p class="selection-label mb-1">Varieties</p>
+                  <p class="varieties-toggle-row__summary">
+                    {{
+                      selectedVariety
+                        ? selectedVariety.name
+                        : `${product.varieties.length} option${product.varieties.length === 1 ? '' : 's'} available`
+                    }}
+                  </p>
+                </div>
 
-              <div class="varieties-grid">
-                <v-card
-                  v-for="variety in product.varieties"
-                  :key="variety.name"
-                  class="variety-card"
-                  :class="{ 'variety-card--selected': isVarietySelected(variety) }"
-                  @click="selectedVariety = variety"
-                  variant="outlined"
-                  :disabled="variety.stock === 0"
+                <v-btn
+                  icon
+                  variant="tonal"
+                  color="primary"
+                  class="varieties-toggle-btn"
+                  :aria-label="showVarieties ? 'Hide varieties' : 'Show varieties'"
+                  @click="showVarieties = !showVarieties"
                 >
-                  <v-card-text class="pa-3">
-                    <div class="variety-content">
-                      <v-avatar size="48" class="mr-3">
-                        <v-img :src="getVarietyImage(variety)" />
-                      </v-avatar>
-                      <div class="variety-info">
-                        <div class="variety-name">{{ variety.name }}</div>
-                        <div class="variety-type">{{ getAvailabilityLabel(variety.stock) }}</div>
-                      </div>
-                      <div class="variety-price">{{ formatCurrency(variety.price || product.price) }}</div>
-                      <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">
-                        mdi-check-circle
-                      </v-icon>
-                    </div>
-                  </v-card-text>
-                </v-card>
+                  <v-icon>{{ showVarieties ? 'mdi-chevron-up' : 'mdi-shape-outline' }}</v-icon>
+                </v-btn>
               </div>
+
+              <v-expand-transition>
+                <div v-if="showVarieties" class="varieties-grid">
+                  <v-card
+                    v-for="variety in product.varieties"
+                    :key="variety.name"
+                    class="variety-card"
+                    :class="{ 'variety-card--selected': isVarietySelected(variety) }"
+                    @click="selectVariety(variety)"
+                    variant="outlined"
+                    :disabled="product.stock === 0"
+                  >
+                    <v-card-text class="pa-3">
+                      <div class="variety-content">
+                        <v-avatar size="48" class="mr-3">
+                          <v-img :src="getVarietyImage(variety)" />
+                        </v-avatar>
+                        <div class="variety-info">
+                          <div class="variety-name">{{ variety.name }}</div>
+                        </div>
+                        <div class="variety-price">{{ formatCurrency(variety.price || product.price) }}</div>
+                        <v-icon v-if="isVarietySelected(variety)" color="primary" size="20">
+                          mdi-check-circle
+                        </v-icon>
+                      </div>
+                    </v-card-text>
+                  </v-card>
+                </div>
+              </v-expand-transition>
             </div>
           </div>
 
@@ -1592,7 +1577,30 @@ onUnmounted(() => {
           </div>
 
           <div v-else class="reviews-list">
-            <article v-for="review in reviews" :key="review.id" class="review-card">
+            <div class="review-filter" aria-label="Filter reviews by star rating">
+              <button
+                v-for="option in reviewRatingOptions"
+                :key="option.value ?? 'all'"
+                class="review-filter__chip"
+                :class="{ 'review-filter__chip--active': selectedReviewRating === option.value }"
+                type="button"
+                @click="selectedReviewRating = option.value"
+              >
+                <span>{{ option.label }}</span>
+                <v-icon v-if="option.value" size="14" color="amber">mdi-star</v-icon>
+                <span class="review-filter__count">{{ option.count }}</span>
+              </button>
+            </div>
+
+            <div v-if="!filteredReviews.length" class="reviews-empty-state reviews-empty-state--compact">
+              <v-icon size="32" color="grey-lighten-1">mdi-star-outline</v-icon>
+              <div class="reviews-empty-state__title">No matching reviews</div>
+              <div class="reviews-empty-state__subtitle">
+                {{ filteredReviewsEmptyText }}
+              </div>
+            </div>
+
+            <article v-for="review in filteredReviews" :key="review.id" class="review-card">
               <div class="review-card__top">
                 <div class="reviewer">
                   <v-avatar size="44" class="reviewer__avatar">
@@ -1616,18 +1624,6 @@ onUnmounted(() => {
                     </div>
                   </div>
                 </div>
-                <v-btn
-                  v-if="isCurrentUsersReview(review)"
-                  size="small"
-                  variant="text"
-                  color="secondary"
-                  class="review-card__edit-btn"
-                  :loading="reviewNavigationId === review.id"
-                  @click="goToEditReview(review)"
-                >
-                  <v-icon start size="16">mdi-pencil</v-icon>
-                  Edit Review
-                </v-btn>
               </div>
 
               <p v-if="review.comment?.trim()" class="review-card__comment">
@@ -1988,9 +1984,63 @@ v-main,
   line-height: 1.5;
 }
 
+.reviews-empty-state--compact {
+  padding: 22px 18px;
+}
+
 .reviews-list {
   display: grid;
   gap: 16px;
+}
+
+.review-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.review-filter__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 34px;
+  padding: 7px 12px;
+  border: 1px solid #dbeafe;
+  border-radius: 999px;
+  background: #f8fbff;
+  color: #334155;
+  font-size: 0.86rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background 0.2s ease,
+    border-color 0.2s ease,
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.review-filter__chip:hover {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+}
+
+.review-filter__chip--active {
+  background: #3f83c7;
+  border-color: #3f83c7;
+  color: white;
+}
+
+.review-filter__count {
+  min-width: 20px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.08);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.review-filter__chip--active .review-filter__count {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 .review-card {
@@ -2011,11 +2061,6 @@ v-main,
   justify-content: space-between;
   align-items: flex-start;
   gap: 12px;
-}
-
-.review-card__edit-btn {
-  flex-shrink: 0;
-  align-self: flex-start;
 }
 
 .review-card__comment {
@@ -2098,6 +2143,29 @@ v-main,
 .variety-card--selected {
   border: 2px solid #3f83c7 !important;
   background: #eef6ff;
+}
+
+.varieties-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid #dbeafe;
+  border-radius: 16px;
+  background: #f8fbff;
+  margin-bottom: 12px;
+}
+
+.varieties-toggle-row__summary {
+  margin: 0;
+  color: #64748b;
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.varieties-toggle-btn {
+  flex: 0 0 auto;
 }
 
 .varieties-grid {

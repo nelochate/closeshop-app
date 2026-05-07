@@ -29,6 +29,7 @@ const otherUserId = ref<string | null>(routeTargetId.value || null)
 const conversationId = ref<string | null>(null)
 const messages = ref<any[]>([])
 const newMessage = ref('')
+const draftProduct = ref<any | null>(null)
 const otherUserProfile = ref<any>(null)
 const currentUserShop = ref<any>(null)
 const shopInfo = ref<any>(null)
@@ -63,6 +64,9 @@ const formatMessageTime = (timestamp: string) => {
 const formatPrice = (value: number | string | null | undefined) => {
   return Number(value ?? 0).toFixed(2)
 }
+
+const getProductDisplayName = (product: any = {}) =>
+  product.prod_name || product.name || 'Product'
 
 const startTimeUpdates = () => {
   currentTime.value = Date.now()
@@ -105,6 +109,12 @@ const otherUserIdentity = computed(() =>
 )
 
 const isEditingMessage = computed(() => Boolean(editingMessageId.value))
+
+const canSendComposer = computed(
+  () =>
+    Boolean(newMessage.value.trim()) ||
+    Boolean(draftProduct.value && !isEditingMessage.value),
+)
 
 const editingTargetMessage = computed(
   () => messages.value.find((message) => message.id === editingMessageId.value) ?? null,
@@ -1045,6 +1055,12 @@ const cancelEditingMessage = () => {
   sendError.value = null
 }
 
+const clearProductDraft = () => {
+  draftProduct.value = null
+  sessionStorage.removeItem('sharedProduct')
+  sessionStorage.removeItem('chatAutoMessage')
+}
+
 const saveEditedMessage = async () => {
   const editingTarget = editingTargetMessage.value
   const nextContent = newMessage.value.trim()
@@ -1236,7 +1252,7 @@ const sendMessage = async () => {
   sendError.value = null
   const messageContent = newMessage.value.trim()
 
-  if (!messageContent) {
+  if (!messageContent && !draftProduct.value) {
     return
   }
 
@@ -1257,13 +1273,17 @@ const sendMessage = async () => {
     }
 
     const createdAt = new Date().toISOString()
+    const productDraft = draftProduct.value
+    const outgoingContent =
+      messageContent ||
+      (productDraft ? `Check out this product: ${getProductDisplayName(productDraft)}` : '')
     const msg = {
       conversation_id: conversationId.value,
       sender_id: currentUserId,
       receiver_id: otherUserId.value,
-      content: messageContent,
+      content: outgoingContent,
       is_read: false,
-      product_id: null,
+      product_id: productDraft?.id || null,
       created_at: createdAt,
     }
 
@@ -1276,6 +1296,7 @@ const sendMessage = async () => {
           receiver_id: msg.receiver_id,
           content: msg.content,
           is_read: msg.is_read,
+          product_id: msg.product_id,
           created_at: msg.created_at,
         },
       ])
@@ -1295,7 +1316,7 @@ const sendMessage = async () => {
               receiver_id: msg.receiver_id,
               content: msg.content,
               is_read: msg.is_read,
-              product_id: null,
+              product_id: msg.product_id,
               created_at: msg.created_at,
             },
           ])
@@ -1307,7 +1328,7 @@ const sendMessage = async () => {
           const manualMsg = {
             id: `temp-${Date.now()}`,
             ...msg,
-            product: null,
+            product: productDraft,
             orderProduct: null,
             orderProductId: null,
           }
@@ -1321,6 +1342,7 @@ const sendMessage = async () => {
             isOrderMessage: false,
           })
           shouldClearComposer = true
+          draftProduct.value = null
           void scrollToBottom('smooth')
         }
       } else {
@@ -1341,6 +1363,7 @@ const sendMessage = async () => {
         isOrderMessage: false,
       })
       shouldClearComposer = true
+      draftProduct.value = null
       void scrollToBottom('smooth')
     }
   } catch (error) {
@@ -1416,6 +1439,7 @@ const getOrderMessageOrderId = (msg: any): string | null =>
 // ✅ Get product image
 // REPLACE your existing getProductImage function with this one
 const getProductImage = (product) => {
+  if (product?.image) return getOptimizedImageUrl(product.image, 200, 200)
   if (!product?.main_img_urls) return '/placeholder.png'
   
   let imageUrl = '/placeholder.png'
@@ -1474,32 +1498,36 @@ onUnmounted(() => {
 
 
 
-// Add this function inside your <script setup> section
 const receiveSharedProduct = () => {
   const sharedProduct = sessionStorage.getItem('sharedProduct')
   const autoMessage = sessionStorage.getItem('chatAutoMessage')
   
-  if (sharedProduct && autoMessage) {
+  if (sharedProduct) {
     try {
-      const product = JSON.parse(sharedProduct)
-      
-      setTimeout(async () => {
-        if (conversationId.value && userId.value && otherUserId.value) {
-          // Send as a product message (using your existing sendProductMessage function)
-          // You already have sendProductMessage defined - use it!
-          await sendProductMessage(product)
-          
-          // Then send the follow-up question
-          newMessage.value = autoMessage
-          await sendMessage()
-          
-          // Clear storage
-          sessionStorage.removeItem('sharedProduct')
-          sessionStorage.removeItem('chatAutoMessage')
-        }
-      }, 1000)
+      const rawProduct = JSON.parse(sharedProduct)
+      const product = {
+        ...rawProduct,
+        prod_name: rawProduct.prod_name || rawProduct.name || 'Product',
+        main_img_urls: rawProduct.main_img_urls || rawProduct.image || null,
+        shop:
+          rawProduct.shop ||
+          (rawProduct.shop_name
+            ? {
+                business_name: rawProduct.shop_name,
+              }
+            : null),
+      }
+      draftProduct.value = product
+      newMessage.value = autoMessage || ''
+      sessionStorage.removeItem('sharedProduct')
+      sessionStorage.removeItem('chatAutoMessage')
+
+      setTimeout(() => {
+        void focusComposer()
+      }, 250)
     } catch (error) {
       console.error('Error processing shared product:', error)
+      clearProductDraft()
     }
   }
 }
@@ -1740,6 +1768,33 @@ const getCachedImage = (url) => {
             <v-btn variant="text" size="small" @click="cancelEditingMessage">Cancel</v-btn>
           </div>
 
+          <div v-if="draftProduct && !isEditingMessage" class="product-draft">
+            <div class="product-draft-image-wrapper">
+              <v-img
+                :src="getCachedImage(getProductImage(draftProduct))"
+                :alt="getProductDisplayName(draftProduct)"
+                class="product-draft-image"
+                cover
+              />
+            </div>
+
+            <div class="product-draft-info">
+              <span class="product-draft-label">Product draft</span>
+              <span class="product-draft-name">{{ getProductDisplayName(draftProduct) }}</span>
+              <span class="product-draft-price">PHP {{ formatPrice(draftProduct.price) }}</span>
+            </div>
+
+            <v-btn
+              icon
+              variant="text"
+              size="small"
+              class="product-draft-close"
+              @click="clearProductDraft"
+            >
+              <v-icon size="18">mdi-close</v-icon>
+            </v-btn>
+          </div>
+
           <div class="input-container">
             <v-textarea
               ref="composerInputEl"
@@ -1767,7 +1822,7 @@ const getCachedImage = (url) => {
               icon
               color="primary"
               class="send-btn"
-              :disabled="!newMessage.trim() || loading || sending || isUpdatingMessage"
+              :disabled="!canSendComposer || loading || sending || isUpdatingMessage"
               :loading="sending || isUpdatingMessage"
               @click="sendMessage"
             >
@@ -2155,6 +2210,69 @@ const getCachedImage = (url) => {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.product-draft {
+  width: min(100%, 900px);
+  margin: 0 auto 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 18px;
+  background: #f8fafc;
+  border: 1px solid rgba(63, 131, 199, 0.24);
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.06);
+}
+
+.product-draft-image-wrapper {
+  width: 54px;
+  height: 54px;
+  border-radius: 14px;
+  overflow: hidden;
+  flex-shrink: 0;
+  background: #e2e8f0;
+}
+
+.product-draft-image {
+  width: 100%;
+  height: 100%;
+}
+
+.product-draft-info {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.product-draft-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: #2563eb;
+}
+
+.product-draft-name {
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.product-draft-price {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #475569;
+}
+
+.product-draft-close {
+  flex-shrink: 0;
+  color: #64748b;
 }
 
 .input-container {

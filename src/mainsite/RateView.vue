@@ -28,8 +28,6 @@ const currentImage = ref('')
 const selectedProduct = ref<any>(null)
 const currentUserId = ref<string | null>(null)
 const draftRatings = ref<Record<string, number>>({})
-const editingReviewId = ref<string | null>(null)
-const existingPhotoUrls = ref<string[]>([])
 
 // Image upload state
 const uploadingImages = ref(false)
@@ -69,10 +67,7 @@ const newReview = ref({
   photos: [] as string[],
 })
 
-const isEditingReview = computed(() => !!editingReviewId.value)
-const totalAttachedPhotoCount = computed(
-  () => existingPhotoUrls.value.length + imagePreviews.value.length,
-)
+const totalAttachedPhotoCount = computed(() => imagePreviews.value.length)
 
 const normalizeReviewPhotos = (photos: unknown) => {
   if (Array.isArray(photos)) {
@@ -270,8 +265,6 @@ const clearDraftRating = (productId?: string | null) => {
 const resetReviewForm = () => {
   clearDraftRating(selectedProduct.value?.id)
   cleanupImagePreviews()
-  editingReviewId.value = null
-  existingPhotoUrls.value = []
   showReviewDialog.value = false
   selectedProduct.value = null
   newReview.value = {
@@ -293,7 +286,7 @@ const getUserReview = (productId: string) => {
 const openReviewDialog = (product: any, initialRating = 0) => {
   const existingReview = getUserReview(product.id)
   if (existingReview) {
-    openEditReviewDialog(product, existingReview)
+    alert('You have already reviewed this product. Reviews can only be submitted once.')
     return
   }
 
@@ -306,29 +299,11 @@ const openReviewDialog = (product: any, initialRating = 0) => {
 
   cleanupImagePreviews()
   selectedProduct.value = product
-  editingReviewId.value = null
-  existingPhotoUrls.value = []
   newReview.value = {
     product_id: product.id,
     rating: initialRating,
     comment: '',
     photos: [],
-  }
-  showReviewDialog.value = true
-}
-
-const openEditReviewDialog = (product: any, review: any) => {
-  const reviewPhotos = normalizeReviewPhotos(review?.photos)
-
-  cleanupImagePreviews()
-  selectedProduct.value = product
-  editingReviewId.value = review?.id || null
-  existingPhotoUrls.value = [...reviewPhotos]
-  newReview.value = {
-    product_id: product.id,
-    rating: Number(review?.rating || 0),
-    comment: review?.comment || '',
-    photos: [...reviewPhotos],
   }
   showReviewDialog.value = true
 }
@@ -346,19 +321,6 @@ const handleInlineRating = (product: any, value: number) => {
 // Check if user has already reviewed a product
 const hasUserReviewed = (productId: string) => {
   return !!getUserReview(productId)
-}
-
-const getProductForReview = (review: any) => {
-  const matchingOrderItem = orderItems.value.find((item) => item.product_id === review.product_id)
-
-  return (
-    matchingOrderItem?.product || {
-      id: review.product_id,
-      prod_name: review.product_name || 'Product',
-      main_img_urls: review.product_img || '/placeholder-product.png',
-      description: '',
-    }
-  )
 }
 
 const clearRequestedReviewQuery = async () => {
@@ -379,7 +341,6 @@ const clearRequestedReviewQuery = async () => {
 
 const maybeOpenRequestedReviewDialog = async () => {
   const requestedProductId = normalizeIdentityText(route.query.productId)
-  const requestedMode = normalizeIdentityText(route.query.mode)
 
   if (!requestedProductId) {
     return
@@ -395,8 +356,8 @@ const maybeOpenRequestedReviewDialog = async () => {
 
   const existingReview = getUserReview(requestedProductId)
 
-  if (requestedMode === 'edit' && existingReview) {
-    openEditReviewDialog(targetProduct, existingReview)
+  if (existingReview) {
+    alert('You have already reviewed this product. Reviews can only be submitted once.')
   } else {
     openReviewDialog(targetProduct, draftRatings.value[requestedProductId] || 0)
   }
@@ -455,11 +416,6 @@ const handlePhotoUpload = (value: File[] | File | null) => {
 const removeImage = (index: number) => {
   URL.revokeObjectURL(imagePreviews.value[index].url)
   imagePreviews.value.splice(index, 1)
-}
-
-const removeExistingPhoto = (index: number) => {
-  existingPhotoUrls.value.splice(index, 1)
-  newReview.value.photos = [...existingPhotoUrls.value]
 }
 
 // Upload images to Supabase Storage
@@ -530,8 +486,8 @@ const submitReview = async () => {
     return
   }
 
-  if (!isEditingReview.value && hasUserReviewed(newReview.value.product_id)) {
-    alert('You have already reviewed this product.')
+  if (hasUserReviewed(newReview.value.product_id)) {
+    alert('You have already reviewed this product. Reviews can only be submitted once.')
     return
   }
 
@@ -539,6 +495,23 @@ const submitReview = async () => {
   try {
     const { data: userData } = await supabase.auth.getUser()
     if (!userData.user) throw new Error('User not authenticated')
+
+    const { data: existingReview, error: existingReviewError } = await supabase
+      .from('reviews')
+      .select('id')
+      .eq('product_id', newReview.value.product_id)
+      .eq('user_id', userData.user.id)
+      .maybeSingle()
+
+    if (existingReviewError) throw existingReviewError
+
+    if (existingReview?.id) {
+      alert('You have already reviewed this product. Reviews can only be submitted once.')
+      resetReviewForm()
+      await loadReviews()
+      return
+    }
+
     const syncedProfile = await syncProfileFromAuthUser({ user: userData.user })
     const trimmedComment = newReview.value.comment.trim()
     const reviewerName =
@@ -556,7 +529,7 @@ const submitReview = async () => {
       uploadedPhotoUrls = await uploadImagesToStorage()
     }
 
-    const finalPhotoUrls = [...existingPhotoUrls.value, ...uploadedPhotoUrls]
+    const finalPhotoUrls = [...uploadedPhotoUrls]
 
     const reviewData = {
       rating: newReview.value.rating,
@@ -566,36 +539,15 @@ const submitReview = async () => {
       user_avatar: reviewerAvatar,
       is_verified: true,
     }
-    const wasEditingReview = isEditingReview.value
-
-    let data: any = null
-    let error: any = null
-
-    if (wasEditingReview && editingReviewId.value) {
-      const response = await supabase
-        .from('reviews')
-        .update(reviewData)
-        .eq('id', editingReviewId.value)
-        .eq('user_id', userData.user.id)
-        .select()
-        .single()
-
-      data = response.data
-      error = response.error
-    } else {
-      const response = await supabase
-        .from('reviews')
-        .insert({
-          ...reviewData,
-          product_id: newReview.value.product_id,
-          user_id: userData.user.id,
-        })
-        .select()
-        .single()
-
-      data = response.data
-      error = response.error
-    }
+    const { data, error } = await supabase
+      .from('reviews')
+      .insert({
+        ...reviewData,
+        product_id: newReview.value.product_id,
+        user_id: userData.user.id,
+      })
+      .select()
+      .single()
 
     if (error) throw error
 
@@ -611,15 +563,12 @@ const submitReview = async () => {
           orderId: orderId.value,
           productId: data.product_id,
           reviewId: data.id,
-          action: wasEditingReview ? 'updated' : 'created',
+          action: 'created',
         },
       }),
     )
 
-    console.log(
-      wasEditingReview ? 'Review updated successfully:' : 'Review submitted successfully:',
-      finalPhotoUrls,
-    )
+    console.log('Review submitted successfully:', finalPhotoUrls)
   } catch (error) {
     console.error('Error submitting review:', error)
     alert('Failed to submit review: ' + (error as Error).message)
@@ -798,17 +747,16 @@ onUnmounted(() => {
 
                 <template v-slot:append>
                   <v-btn
-                    :color="hasUserReviewed(item.product_id) ? 'secondary' : 'primary'"
+                    :color="hasUserReviewed(item.product_id) ? 'success' : 'primary'"
                     variant="outlined"
-                    @click="
-                      hasUserReviewed(item.product_id)
-                        ? openEditReviewDialog(item.product, getUserReview(item.product_id))
-                        : openReviewDialog(item.product, draftRatings[item.product_id] || 0)
-                    "
+                    :disabled="hasUserReviewed(item.product_id)"
+                    @click="openReviewDialog(item.product, draftRatings[item.product_id] || 0)"
                     class="review-action-btn"
                   >
-                    <v-icon left small>mdi-pencil</v-icon>
-                    {{ hasUserReviewed(item.product_id) ? 'Edit Review' : 'Add Details' }}
+                    <v-icon left small>
+                      {{ hasUserReviewed(item.product_id) ? 'mdi-lock-check' : 'mdi-pencil' }}
+                    </v-icon>
+                    {{ hasUserReviewed(item.product_id) ? 'Submitted' : 'Add Details' }}
                   </v-btn>
                 </template>
               </v-list-item>
@@ -985,16 +933,6 @@ onUnmounted(() => {
                           <v-icon left small>mdi-thumb-up</v-icon>
                           Helpful ({{ review.likes || 0 }})
                         </v-btn>
-                        <v-btn
-                          v-if="review.user_id === currentUserId"
-                          variant="text"
-                          size="small"
-                          color="secondary"
-                          @click="openEditReviewDialog(getProductForReview(review), review)"
-                        >
-                          <v-icon left small>mdi-pencil</v-icon>
-                          Edit review
-                        </v-btn>
                       </div>
                     </div>
                   </div>
@@ -1009,7 +947,7 @@ onUnmounted(() => {
       <v-dialog v-model="showReviewDialog" max-width="600px" persistent>
         <v-card>
           <v-card-title class="d-flex justify-space-between align-center">
-            <span>{{ isEditingReview ? 'Edit Your Review' : 'Write a Review' }}</span>
+            <span>Write a Review</span>
             <v-btn icon @click="closeReviewDialog">
               <v-icon>mdi-close</v-icon>
             </v-btn>
@@ -1040,7 +978,7 @@ onUnmounted(() => {
             <!-- Rating -->
             <div class="text-center mb-4">
               <div class="text-h6 mb-2">
-                {{ isEditingReview ? 'Update your rating' : 'How would you rate this product?' }}
+                How would you rate this product?
               </div>
               <div class="text-body-2 text-medium-emphasis mb-3">
                 Tap a star to rate. Writing a review and uploading photos are optional.
@@ -1072,34 +1010,6 @@ onUnmounted(() => {
             <!-- Photo Upload Section -->
             <div class="mb-4">
               <div class="text-body-2 mb-2">Add Photos (Optional)</div>
-
-              <div v-if="existingPhotoUrls.length > 0" class="mt-3">
-                <div class="text-caption text-grey mb-2">Current photos</div>
-                <v-row dense>
-                  <v-col
-                    v-for="(photo, index) in existingPhotoUrls"
-                    :key="`existing-${index}`"
-                    cols="4"
-                    sm="3"
-                    md="2"
-                  >
-                    <v-card variant="outlined" class="image-preview-card">
-                      <v-img :src="photo" aspect-ratio="1" cover class="rounded-t" />
-                      <v-card-actions class="pa-1 justify-center">
-                        <v-btn
-                          icon
-                          size="x-small"
-                          color="error"
-                          @click="removeExistingPhoto(index)"
-                          :disabled="uploadingImages"
-                        >
-                          <v-icon>mdi-delete</v-icon>
-                        </v-btn>
-                      </v-card-actions>
-                    </v-card>
-                  </v-col>
-                </v-row>
-              </div>
 
               <!-- File Input -->
               <v-file-input
@@ -1187,11 +1097,7 @@ onUnmounted(() => {
               :disabled="!newReview.rating"
             >
               {{
-                isEditingReview
-                  ? 'Save Changes'
-                  : newReview.comment.trim() || totalAttachedPhotoCount
-                    ? 'Submit Review'
-                    : 'Submit Rating'
+                newReview.comment.trim() || totalAttachedPhotoCount ? 'Submit Review' : 'Submit Rating'
               }}
             </v-btn>
           </v-card-actions>

@@ -212,15 +212,24 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 <style scoped>
 /* Base responsive container */
 .nav-wrapper {
+  --bottom-nav-side-gap: max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  --bottom-nav-right-gap: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+  --bottom-nav-bottom-gap: max(
+    18px,
+    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
+  );
+
   position: fixed;
   bottom: 0;
   left: 0;
   right: 0;
   z-index: 1000;
-  padding: 8px max(12px, var(--app-safe-area-left, 0px))
-    calc(16px + var(--app-bottom-safe-space, 0px))
-    max(12px, var(--app-safe-area-right, 0px));
+  width: 100%;
+  padding: 8px var(--bottom-nav-right-gap) var(--bottom-nav-bottom-gap)
+    var(--bottom-nav-side-gap);
   background: transparent;
+  box-sizing: border-box;
+  pointer-events: none;
 }
 
 /* Desktop styles (default) */
@@ -231,9 +240,18 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 
 /* Mobile styles */
 .nav-wrapper.mobile {
-  padding: 6px max(10px, var(--app-safe-area-left, 0px))
-    calc(12px + var(--app-bottom-safe-space, 0px))
-    max(10px, var(--app-safe-area-right, 0px));
+  --bottom-nav-side-gap: max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  --bottom-nav-right-gap: max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+  --bottom-nav-bottom-gap: max(
+    20px,
+    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
+  );
+
+  padding-top: 6px;
+}
+
+:global(.app-android-native) .nav-wrapper.mobile {
+  --bottom-nav-bottom-gap: max(28px, var(--app-bottom-safe-space, 0px));
 }
 
 /* Bottom Navigation Container */
@@ -245,6 +263,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   background: linear-gradient(135deg, #3f83c7 0%, #2a6ab0 100%) !important;
   border: 1px solid rgba(255, 255, 255, 0.1);
   overflow: hidden;
+  pointer-events: auto;
 }
 
 /* Message icon wrapper for positioning */
@@ -293,7 +312,10 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 /* Responsive adjustments for mobile */
 @media (max-width: 380px) {
   .nav-wrapper.mobile {
-    padding: 4px 8px 10px;
+    --bottom-nav-side-gap: max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    --bottom-nav-right-gap: max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+
+    padding-top: 4px;
   }
 
   .btn-content {
@@ -312,7 +334,10 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 
 @media (max-width: 350px) {
   .nav-wrapper.mobile {
-    padding: 3px 6px 8px;
+    --bottom-nav-side-gap: max(6px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    --bottom-nav-right-gap: max(6px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+
+    padding-top: 3px;
   }
 
   .btn-label {

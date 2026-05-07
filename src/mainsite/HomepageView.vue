@@ -1660,38 +1660,12 @@ const hotPicks = computed(() => {
   box-shadow: 0 6px 20px rgba(255, 107, 107, 0.25);
 }
 
-/* Out of Stock Card Styling */
-.product-card--out-of-stock {
-  opacity: 0.85;
-  filter: grayscale(0.15);
-  background: #fafafa;
-}
-
-.product-card--out-of-stock:hover {
-  opacity: 0.9;
-  filter: grayscale(0.1);
-  transform: translateY(-2px);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
-}
-
-.product-card--out-of-stock .product-title {
-  color: #6c757d;
-}
-
-.product-card--out-of-stock .product-price {
-  color: #adb5bd;
-  text-decoration: line-through;
-}
-
-.product-card--out-of-stock .product-sold {
-  color: #adb5bd;
-}
-
 /* Hot Badge */
 .product-badge-hot {
   position: absolute;
   top: 8px;
-  right: 8px;
+  left: 8px;
+  right: auto;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -1704,6 +1678,10 @@ const hotPicks = computed(() => {
   box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
   z-index: 10;
   animation: hotPulse 2s infinite;
+}
+
+.product-card--hot .product-badge-low {
+  top: 40px;
 }
 
 .badge-fire {
@@ -1759,44 +1737,6 @@ const hotPicks = computed(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-}
-
-/* Overlay for Out of Stock Products */
-.product-card--out-of-stock .product-img {
-  position: relative;
-}
-
-.product-card--out-of-stock .product-img::after {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.3);
-  pointer-events: none;
-}
-
-/* Sold Out Stamp Effect */
-.product-card--out-of-stock .product-info {
-  position: relative;
-}
-
-.product-card--out-of-stock .product-info::before {
-  content: 'SOLD OUT';
-  position: absolute;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%) rotate(-15deg);
-  font-size: 14px;
-  font-weight: 900;
-  color: rgba(220, 53, 69, 0.25);
-  letter-spacing: 2px;
-  white-space: nowrap;
-  pointer-events: none;
-  z-index: 5;
-  font-family: 'Arial Black', sans-serif;
-  text-transform: uppercase;
 }
 
 @keyframes hotPulse {
@@ -1975,10 +1915,6 @@ const hotPicks = computed(() => {
   .product-badge-hot {
     padding: 4px 8px;
     font-size: 9px;
-  }
-
-  .product-card--out-of-stock .product-info::before {
-    font-size: 10px;
   }
 }
 

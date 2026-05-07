@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
@@ -22,6 +22,8 @@ const products = ref<Product[]>([])
 const loading = ref(true)
 const deleting = ref(false)
 const isMobile = ref(window.innerWidth < 768)
+const shopId = ref<string | null>(null)
+const productsSubscription = ref<ReturnType<typeof supabase.channel> | null>(null)
 
 const confirmDialog = ref(false)
 const productToDelete = ref<Product | null>(null)
@@ -39,6 +41,54 @@ const showSnackbar = (msg: string, type: 'success' | 'error') => {
 // Update mobile state
 const updateMobileState = () => {
   isMobile.value = window.innerWidth < 768
+}
+
+const cleanupProductsSubscription = () => {
+  if (!productsSubscription.value) return
+
+  supabase.removeChannel(productsSubscription.value)
+  productsSubscription.value = null
+}
+
+const setupProductsSubscription = (targetShopId: string) => {
+  cleanupProductsSubscription()
+
+  productsSubscription.value = supabase
+    .channel(`seller-products:${targetShopId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'products',
+        filter: `shop_id=eq.${targetShopId}`,
+      },
+      (payload) => {
+        if (payload.eventType === 'DELETE') {
+          products.value = products.value.filter((product) => product.id !== payload.old.id)
+          return
+        }
+
+        const product = payload.new as Product
+        const productIndex = products.value.findIndex((item) => item.id === product.id)
+        const normalizedProduct = {
+          ...product,
+          image: product.main_img_urls?.[0] || 'https://via.placeholder.com/300x300?text=No+Image',
+          varieties: product.varieties || [],
+        }
+
+        if (productIndex === -1) {
+          products.value = [normalizedProduct, ...products.value]
+          return
+        }
+
+        products.value[productIndex] = {
+          ...products.value[productIndex],
+          ...normalizedProduct,
+        }
+      },
+    )
+    .subscribe()
 }
 
 // Fetch products
@@ -59,10 +109,15 @@ const fetchProducts = async () => {
 
   if (!shop) {
     showSnackbar('No shop found for your account', 'error')
+    shopId.value = null
+    cleanupProductsSubscription()
     products.value = [];
     loading.value = false;
     return
   }
+
+  shopId.value = shop.id
+  setupProductsSubscription(shop.id)
 
   const { data, error } = await supabase
     .from('products')
@@ -183,6 +238,11 @@ const editProduct = (id: string) => {
 onMounted(() => {
   fetchProducts()
   window.addEventListener('resize', updateMobileState)
+})
+
+onUnmounted(() => {
+  cleanupProductsSubscription()
+  window.removeEventListener('resize', updateMobileState)
 })
 </script>
 
