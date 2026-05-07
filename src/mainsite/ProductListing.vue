@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
 const router = useRouter()
+const route = useRoute()
 const goBack = () => router.back()
 
 type Product = {
@@ -24,6 +25,7 @@ const deleting = ref(false)
 const isMobile = ref(window.innerWidth < 768)
 const shopId = ref<string | null>(null)
 const productsSubscription = ref<ReturnType<typeof supabase.channel> | null>(null)
+const exactStockOverrides = ref<Record<string, number>>({})
 
 const confirmDialog = ref(false)
 const productToDelete = ref<Product | null>(null)
@@ -71,8 +73,10 @@ const setupProductsSubscription = (targetShopId: string) => {
 
         const product = payload.new as Product
         const productIndex = products.value.findIndex((item) => item.id === product.id)
+        const exactStock = exactStockOverrides.value[product.id]
         const normalizedProduct = {
           ...product,
+          stock: exactStock ?? product.stock,
           image: product.main_img_urls?.[0] || 'https://via.placeholder.com/300x300?text=No+Image',
           varieties: product.varieties || [],
         }
@@ -129,6 +133,11 @@ const fetchProducts = async () => {
       ...p,
       image: p.main_img_urls?.[0] || 'https://via.placeholder.com/300x300?text=No+Image',
       varieties: p.varieties || []
+    }))
+
+    products.value = products.value.map((product) => ({
+      ...product,
+      stock: exactStockOverrides.value[product.id] ?? product.stock,
     }))
   } else if (error) {
     showSnackbar('Error loading products', 'error')
@@ -236,7 +245,24 @@ const editProduct = (id: string) => {
 
 // Add window resize listener
 onMounted(() => {
+  if (route.query.updated === '1') {
+    const updatedProductId = route.query.productId ? String(route.query.productId) : ''
+    const updatedStock = Number(route.query.stock)
+
+    if (updatedProductId && Number.isFinite(updatedStock)) {
+      exactStockOverrides.value = {
+        ...exactStockOverrides.value,
+        [updatedProductId]: updatedStock,
+      }
+    }
+  }
+
   fetchProducts()
+  if (route.query.updated === '1') {
+    const savedStock = route.query.stock ? ` Stock is now ${route.query.stock} pcs.` : ''
+    showSnackbar(`Product update saved successfully.${savedStock}`, 'success')
+    router.replace({ name: 'productlist' })
+  }
   window.addEventListener('resize', updateMobileState)
 })
 
