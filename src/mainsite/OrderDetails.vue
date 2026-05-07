@@ -2,7 +2,6 @@
 import { ref, onMounted, computed, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
-import { createNotificationRecordIfEnabled } from '@/utils/notificationPreferences'
 import {
   notifyAssignedRiderOrderStatus,
   notifyCustomerOrderStatus,
@@ -25,12 +24,6 @@ import {
   calculateOrderTotalAmount,
   resolveOrderDeliveryFee,
 } from '@/utils/deliveryPricing.js'
-import {
-  ORDER_CANCEL_REQUESTED_STATUS,
-  ORDER_CANCEL_REQUESTED_STATUSES,
-  isOrderCancellationRequestedStatus,
-  normalizeOrderStatus,
-} from '@/utils/orderStatus'
 
 const route = useRoute()
 const router = useRouter()
@@ -60,64 +53,13 @@ const showImageDialog = ref(false)
 const selectedImage = ref<string | null>(null)
 const selectedImageTitle = ref('')
 const customerDecisionLoading = ref<'completed' | 'not_received' | null>(null)
-const cancellationActionLoading = ref<'cancel' | 'request' | 'approve' | 'decline' | null>(null)
+
+// Timer state
+const CANCEL_WINDOW_SECONDS = 5 * 60
+const timeRemaining = ref<number>(CANCEL_WINDOW_SECONDS)
+const canCancel = ref<boolean>(true)
+let timerInterval: ReturnType<typeof setInterval> | null = null
 let statusSubscription: any = null
-let timerInterval: any = null // Add timer interval variable
-
-// Add expiry check functions
-const checkForExpiredOrders = async () => {
-  try {
-    const { data: expiredOrders, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        payment_status: 'cancelled',
-        cancelled_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq('status', 'pending_approval')
-      .lt('created_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-      .select('id')
-
-    if (error) {
-      console.error('Error checking expired orders:', error)
-      return
-    }
-
-    if (expiredOrders && expiredOrders.length > 0) {
-      console.log(`Cancelled ${expiredOrders.length} expired orders`)
-      
-      // Refresh current order if it was expired
-      if (expiredOrders.some((o: any) => o.id === orderId)) {
-        await fetchOrderDetails()
-      }
-    }
-  } catch (err) {
-    console.error('Error in expiry check:', err)
-  }
-}
-
-const startExpiryCheck = () => {
-  // Clear existing interval if any
-  if (timerInterval) {
-    clearInterval(timerInterval)
-  }
-  
-  // Run initial check
-  checkForExpiredOrders()
-  
-  // Set up interval to check every hour
-  timerInterval = setInterval(() => {
-    checkForExpiredOrders()
-  }, 60 * 60 * 1000) // Check every hour
-}
-
-const cleanupExpiryCheck = () => {
-  if (timerInterval) {
-    clearInterval(timerInterval)
-    timerInterval = null
-  }
-}
 
 const fetchCurrentRiderProfile = async (profileId: string) => {
   try {
@@ -208,6 +150,183 @@ const fetchRiderDetails = async () => {
     }
   } catch (err) {
     console.error('Error fetching rider details:', err)
+  }
+}
+
+// Calculate time remaining for cancellation
+const calculateTimeRemaining = () => {
+  if (!order.value || !order.value.created_at) return CANCEL_WINDOW_SECONDS
+  if (order.value.status !== 'pending_approval') return 0
+
+  const orderCreatedAt = getAppTimestampValue(order.value.created_at)
+  if (!orderCreatedAt) return CANCEL_WINDOW_SECONDS
+  const currentTime = Date.now()
+  const timeElapsed = (currentTime - orderCreatedAt) / 1000
+  const maxCancelTime = 5 * 60
+
+  return Math.max(0, maxCancelTime - timeElapsed)
+}
+
+const formatTimeRemaining = () => {
+  const remaining = Math.max(0, Math.ceil(timeRemaining.value))
+  if (remaining <= 0) return '00:00'
+  const minutes = Math.floor(remaining / 60)
+  const seconds = remaining % 60
+  return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`
+}
+
+const startCancelTimer = () => {
+  if (timerInterval) clearInterval(timerInterval)
+
+  const initialRemaining = calculateTimeRemaining()
+  timeRemaining.value = initialRemaining
+  canCancel.value = initialRemaining > 0 && order.value?.status === 'pending_approval'
+
+  if (initialRemaining > 0 && order.value?.status === 'pending_approval') {
+    timerInterval = setInterval(() => {
+      const newRemaining = calculateTimeRemaining()
+      timeRemaining.value = newRemaining
+      canCancel.value = newRemaining > 0 && order.value?.status === 'pending_approval'
+      if (newRemaining <= 0 && timerInterval) {
+        clearInterval(timerInterval)
+        timerInterval = null
+        canCancel.value = false
+      }
+    }, 1000)
+  }
+}
+
+// Function to update order status after cancellation window and update product stock/sold
+const confirmOrderAndUpdateStock = async () => {
+  try {
+    // Get all pending_approval orders that are older than 5 minutes
+    const cutoffTime = new Date(Date.now() - CANCEL_WINDOW_SECONDS * 1000).toISOString()
+
+    const { data: pendingOrders, error: fetchError } = await supabase
+      .from('orders')
+      .select('id')
+      .eq('status', 'pending_approval')
+      .lt('created_at', cutoffTime)
+
+    if (fetchError) throw fetchError
+
+    if (pendingOrders && pendingOrders.length > 0) {
+      const orderIds = pendingOrders.map((o: any) => o.id)
+
+      // 📦 Fetch all order items for these orders to update product stock
+      const { data: orderItemsData, error: itemsError } = await supabase
+        .from('order_items')
+        .select('product_id, quantity, selected_variety')
+        .in('order_id', orderIds)
+
+      if (itemsError) throw itemsError
+
+      // 📊 Update product stock and sold counts
+      if (orderItemsData && orderItemsData.length > 0) {
+        // Group items by product_id to handle multiple items of same product
+        const productUpdates: { [key: string]: { quantity: number; variety: string | null } } = {}
+
+        orderItemsData.forEach((item: any) => {
+          const productId = item.product_id
+          if (!productUpdates[productId]) {
+            productUpdates[productId] = { quantity: 0, variety: item.selected_variety }
+          }
+          productUpdates[productId].quantity += item.quantity
+        })
+
+        // Update each product's stock (decrease) and sold (increase)
+        for (const [productId, { quantity }] of Object.entries(productUpdates)) {
+          try {
+            // Get current product data
+            const { data: productData, error: fetchProdError } = await supabase
+              .from('products')
+              .select('stock, sold, varieties')
+              .eq('id', productId)
+              .single()
+
+            if (fetchProdError) {
+              console.error(`Error fetching product ${productId}:`, fetchProdError)
+              continue
+            }
+
+            // Calculate new stock and sold values
+            const newStock = Math.max(0, (productData.stock || 0) - quantity)
+            const newSold = (productData.sold || 0) + quantity
+
+            // Update the product
+            const { error: updateProdError } = await supabase
+              .from('products')
+              .update({
+                stock: newStock,
+                sold: newSold,
+              })
+              .eq('id', productId)
+
+            if (updateProdError) {
+              console.error(`Error updating product ${productId}:`, updateProdError)
+            } else {
+              console.log(`✅ Updated product ${productId}: sold +${quantity}, stock ${newStock}`)
+            }
+          } catch (err) {
+            console.error(`Error processing product ${productId}:`, err)
+          }
+        }
+      }
+
+      // Update all expired pending orders to waiting_for_rider
+      const { error: updateError } = await supabase
+        .from('orders')
+        .update({
+          status: 'waiting_for_rider',
+          approved_at: new Date().toISOString(),
+        })
+        .in('id', orderIds)
+        .eq('status', 'pending_approval')
+
+      if (updateError) throw updateError
+      console.log(
+        `✅ Updated ${pendingOrders.length} orders from pending_approval to waiting_for_rider`,
+      )
+    }
+  } catch (err) {
+    console.error('❌ Error confirming expired orders:', err)
+  }
+}
+const cancelOrder = async () => {
+  const remaining = calculateTimeRemaining()
+  if (remaining <= 0 || isCancelDisabled.value) {
+    alert('Cancellation window has expired.')
+    return
+  }
+
+  if (!confirm(`Cancel this order? You have ${formatTimeRemaining()} left.`)) return
+
+  try {
+    // First, get the order items to calculate stock restoration
+    const { data: orderItemsData, error: itemsError } = await supabase
+      .from('order_items')
+      .select('product_id, quantity')
+      .eq('order_id', orderId)
+
+    if (itemsError) throw itemsError
+
+    // Update order status to cancelled
+    const { error } = await supabase
+      .from('orders')
+      .update({
+        status: 'cancelled',
+        cancelled_at: new Date().toISOString(),
+      })
+      .eq('id', orderId)
+
+    if (error) throw error
+
+    if (timerInterval) clearInterval(timerInterval)
+    await fetchOrderDetails()
+    alert('Order cancelled successfully.')
+  } catch (err) {
+    console.error('Error cancelling order:', err)
+    alert('Failed to cancel order.')
   }
 }
 
@@ -304,6 +423,12 @@ const fetchOrderDetails = async () => {
       return
     }
 
+    if (order.value?.status === 'pending_approval') startCancelTimer()
+    else {
+      canCancel.value = false
+      timeRemaining.value = 0
+    }
+
     subscribeToOrderUpdates()
   } catch (err: any) {
     console.error('Error:', err)
@@ -313,17 +438,17 @@ const fetchOrderDetails = async () => {
   }
 }
 
-// onMounted
+// Update onMounted
 onMounted(async () => {
   await fetchOrderDetails()
-  startExpiryCheck() // Now this function exists
+  startExpiryCheck() // Start periodic check for expired orders
 })
 
-// onUnmounted
+// Update onUnmounted
 onUnmounted(() => {
   if (timerInterval) clearInterval(timerInterval)
   if (statusSubscription) supabase.removeChannel(statusSubscription)
-  cleanupExpiryCheck() // Now this function exists
+  cleanupExpiryCheck() // Clean up expiry check interval
 })
 
 // Fetch shop details
@@ -429,16 +554,6 @@ const buyerDisplayName = computed(() => {
   )
 })
 
-const deliveryContactNumber = computed(() => {
-  const preferredNumber = [
-    order.value?.contact_number,
-    shippingAddress.value?.phone,
-    buyer.value?.phone,
-  ].find((value) => typeof value === 'string' && value.trim())
-
-  return preferredNumber?.trim() || ''
-})
-
 const riderDisplayName = computed(() => {
   if (!riderDetails.value) return 'Assigned rider'
   return getProfileDisplayName(riderDetails.value) || 'Assigned rider'
@@ -498,11 +613,10 @@ const statusColor = computed(() => {
   if (hasDeliveryIssue.value) return 'warning'
   if (isAwaitingCustomerConfirmation.value) return 'success'
 
-  const status = normalizeOrderStatus(order.value?.status)
+  const status = order.value?.status
   const colors: Record<string, string> = {
     pending_approval: 'warning',
     waiting_for_rider: 'info',
-    cancel_requested: 'warning',
     accepted_by_rider: 'primary',
     picked_up: 'purple',
     completed: 'success',
@@ -516,11 +630,10 @@ const statusIcon = computed(() => {
   if (hasDeliveryIssue.value) return 'mdi-alert-circle'
   if (isAwaitingCustomerConfirmation.value) return 'mdi-check-circle'
 
-  const status = normalizeOrderStatus(order.value?.status)
+  const status = order.value?.status
   const icons: Record<string, string> = {
     pending_approval: 'mdi-clock-outline',
     waiting_for_rider: 'mdi-bike-fast',
-    cancel_requested: 'mdi-timer-sand',
     accepted_by_rider: 'mdi-check-circle',
     picked_up: 'mdi-truck-delivery',
     completed: 'mdi-check-decagram',
@@ -534,11 +647,10 @@ const statusDisplayText = computed(() => {
   if (hasDeliveryIssue.value) return 'Delivery Issue Reported'
   if (isAwaitingCustomerConfirmation.value) return 'Delivered'
 
-  const status = normalizeOrderStatus(order.value?.status)
+  const status = order.value?.status
   const texts: Record<string, string> = {
     pending_approval: 'Pending Approval',
     waiting_for_rider: 'Waiting for Rider',
-    cancel_requested: 'Cancellation Requested',
     accepted_by_rider: 'Rider Accepted',
     picked_up: 'Picked Up',
     completed: 'Completed',
@@ -550,84 +662,6 @@ const statusDisplayText = computed(() => {
 const isBuyer = computed(() => userRole.value === 'buyer')
 const isSeller = computed(() => userRole.value === 'seller')
 const isRider = computed(() => userRole.value === 'rider')
-const showReviewOrderButton = computed(() => isBuyer.value && isOrderCompleted.value)
-const canBuyerCancelDirectly = computed(
-  () => isBuyer.value && order.value?.status === 'pending_approval',
-)
-const canBuyerRequestCancellation = computed(
-  () =>
-    isBuyer.value && order.value?.status === 'waiting_for_rider' && !order.value?.rider_id,
-)
-const isCancellationRequestedOrder = computed(() =>
-  isOrderCancellationRequestedStatus(order.value?.status),
-)
-const hasPendingCancellationRequest = computed(
-  () => isBuyer.value && isCancellationRequestedOrder.value,
-)
-const isBuyerCancellationLocked = computed(
-  () => isBuyer.value && ['accepted_by_rider', 'picked_up'].includes(order.value?.status || ''),
-)
-const showBuyerCancelButton = computed(
-  () =>
-    canBuyerCancelDirectly.value ||
-    canBuyerRequestCancellation.value ||
-    hasPendingCancellationRequest.value ||
-    isBuyerCancellationLocked.value,
-)
-const isBuyerCancelButtonDisabled = computed(
-  () => hasPendingCancellationRequest.value || isBuyerCancellationLocked.value,
-)
-const buyerCancelButtonText = computed(() => {
-  if (canBuyerCancelDirectly.value) return 'Cancel Order'
-  if (canBuyerRequestCancellation.value) return 'Request Cancellation'
-  if (hasPendingCancellationRequest.value) return 'Cancellation Requested'
-  if (isBuyerCancellationLocked.value) return 'Cancellation Unavailable'
-  return 'Cancel Order'
-})
-const buyerCancellationNotice = computed(() => {
-  if (!isBuyer.value || !order.value) return null
-
-  if (canBuyerCancelDirectly.value) {
-    return {
-      type: 'info',
-      icon: 'mdi-close-circle-outline',
-      title: 'You can cancel this order right away',
-      message:
-        'The seller has not approved the order yet, so cancelling now will immediately stop it.',
-    }
-  }
-
-  if (canBuyerRequestCancellation.value) {
-    return {
-      type: 'warning',
-      icon: 'mdi-store-check-outline',
-      title: 'Seller approval is required to cancel now',
-      message:
-        'This order was already approved by the seller. You can still request cancellation while no rider has accepted it.',
-    }
-  }
-
-  if (hasPendingCancellationRequest.value) {
-    return {
-      type: 'info',
-      icon: 'mdi-timer-sand',
-      title: 'Cancellation request sent',
-      message:
-        'The seller still needs to approve this cancellation request before the order is cancelled.',
-    }
-  }
-
-  if (isBuyerCancellationLocked.value) {
-    return {
-      type: 'error',
-      icon: 'mdi-lock-outline',
-      title: 'Cancellation unavailable',
-      message: 'Order can no longer be cancelled because it is already assigned to a rider',
-    }
-  }
-
-  return null
-})
 const trackingViewerMode = computed<TrackingViewerMode>(() => {
   if (isSeller.value) return 'seller'
   if (isRider.value) return 'rider'
@@ -648,9 +682,7 @@ const persistedRiderTrackingLocation = computed<TrackingLocation | null>(() => {
     ...persisted,
     name: riderDisplayName.value,
     address:
-      persisted.address ||
-      riderDetails.value?.phone ||
-      `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
+      riderDetails.value?.phone || `${persisted.lat.toFixed(5)}, ${persisted.lng.toFixed(5)}`,
   }
 })
 const trackingMapTitle = computed(() => {
@@ -658,9 +690,6 @@ const trackingMapTitle = computed(() => {
   if (isOrderCompleted.value) return 'Customer confirmed the delivery'
   if (isAwaitingCustomerConfirmation.value) {
     return 'Delivery completed and waiting for customer confirmation'
-  }
-  if (isCancellationRequestedOrder.value) {
-    return 'Cancellation request pending seller approval'
   }
   if (order.value?.status === 'picked_up') return 'Order is on the way to the customer'
   if (order.value?.status === 'accepted_by_rider') return 'Rider is heading to the pickup point'
@@ -674,15 +703,6 @@ const trackingMapSubtitle = computed(() => {
   if (isAwaitingCustomerConfirmation.value) {
     return 'The proof of delivery has been uploaded and the order is waiting for customer confirmation.'
   }
-  if (isCancellationRequestedOrder.value) {
-    if (isBuyer.value) {
-      return 'Your cancellation request is on hold until the seller decides whether to approve it.'
-    }
-    if (isSeller.value) {
-      return 'The customer requested cancellation before rider assignment. Review the request below.'
-    }
-    return 'This order is waiting for the seller to respond to a cancellation request.'
-  }
   if (order.value?.status === 'pending_approval') {
     return 'The map is ready, and live rider tracking will appear after approval and assignment.'
   }
@@ -692,15 +712,11 @@ const trackingMapSubtitle = computed(() => {
   if (!order.value?.rider_id) {
     return 'Pickup and delivery addresses are available now. Live rider sharing starts once the order is assigned.'
   }
-  if (order.value?.status === 'accepted_by_rider') {
-    return 'The assigned rider can already be tracked on the map before pickup, and the route will keep updating automatically.'
-  }
-  if (order.value?.status === 'picked_up') {
-    return 'The rider location updates live while the order is on the way to the customer.'
-  }
   return ''
 })
 
+const showCancelButton = computed(() => isBuyer.value && order.value?.status === 'pending_approval')
+const isCancelDisabled = computed(() => !canCancel.value || timeRemaining.value <= 0)
 const isAssignedRider = computed(
   () => !!currentRiderId.value && order.value?.rider_id === currentRiderId.value,
 )
@@ -756,11 +772,15 @@ const deliveryConfirmationMessage = computed(() => {
 
   return 'The latest delivery proof is attached to this order for reference.'
 })
+const getCancelButtonText = computed(() => {
+  if (timeRemaining.value <= 0) return 'Cancellation Unavailable'
+  return `Cancel Order (${formatTimeRemaining()})`
+})
+
 const getTimelineStatus = () => {
   if (isOrderCompleted.value) return 'delivered'
   if (hasDeliveryIssue.value) return 'delivery_issue'
   if (isAwaitingCustomerConfirmation.value) return 'delivered'
-  if (isCancellationRequestedOrder.value) return 'waiting_for_rider'
   return order.value?.status
 }
 
@@ -905,182 +925,7 @@ const timelineProgress = computed(() => {
   return ((currentIndex + 1) / statusOrder.length) * 100
 })
 
-// Action functions based on role
-const getOrderNotificationData = () => ({
-  ...order.value,
-  address: shippingAddress.value,
-  buyer: buyer.value,
-  shop: shop.value,
-  shop_owner_id: shop.value?.owner_id,
-  shop_name: shop.value?.business_name,
-  transaction_number: order.value?.transaction_number,
-  customer_name: buyerDisplayName.value,
-})
-
-const createSellerCancellationRequestFallbackNotification = async (createdAt: string) => {
-  const sellerUserId = shop.value?.owner_id
-  if (!sellerUserId || sellerUserId === currentUser.value?.id) {
-    return { created: false, reason: 'missing-seller-or-actor-is-recipient' }
-  }
-
-  const orderLabel = order.value?.transaction_number
-    ? `order ${order.value.transaction_number}`
-    : 'the order'
-  const customerLabel = buyerDisplayName.value ? ` for ${buyerDisplayName.value}` : ''
-
-  const notificationResult = await createNotificationRecordIfEnabled({
-    userId: sellerUserId,
-    type: 'shipping_update',
-    title: 'Cancellation Requested',
-    message: `Customer requested cancellation approval for ${orderLabel}${customerLabel}.`,
-    relatedId: orderId,
-    relatedType: 'order',
-    isRead: false,
-    createdAt,
-  })
-
-  if (!notificationResult.created && notificationResult.reason !== 'disabled-by-user-preference') {
-    throw notificationResult
-  }
-
-  return { created: true, reason: 'fallback-created' }
-}
-
-const cancelOrder = async () => {
-  if (!isBuyer.value || !currentUser.value?.id) return
-
-  if (isBuyerCancellationLocked.value) {
-    alert('Order can no longer be cancelled because it is already assigned to a rider')
-    return
-  }
-
-  if (hasPendingCancellationRequest.value) {
-    alert('Cancellation request already sent. Please wait for the seller to respond.')
-    return
-  }
-
-  if (canBuyerCancelDirectly.value) {
-    if (!confirm('Cancel this order now? This will immediately mark it as cancelled.')) return
-
-    const cancelledAt = new Date().toISOString()
-    cancellationActionLoading.value = 'cancel'
-
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .update({
-          status: 'cancelled',
-          payment_status: 'cancelled',
-          cancelled_at: cancelledAt,
-          updated_at: cancelledAt,
-        })
-        .eq('id', orderId)
-        .eq('user_id', currentUser.value.id)
-        .eq('status', 'pending_approval')
-        .select('id')
-
-      if (error) throw error
-
-      if (!data || data.length === 0) {
-        await fetchOrderDetails()
-        alert('This order was already updated and can no longer be cancelled directly.')
-        return
-      }
-
-      await fetchOrderDetails()
-      alert('Order cancelled successfully.')
-      return
-    } catch (err) {
-      console.error('Error cancelling order:', err)
-      alert('Failed to cancel order.')
-      return
-    } finally {
-      cancellationActionLoading.value = null
-    }
-  }
-
-  if (canBuyerRequestCancellation.value) {
-    if (!confirm('Request cancellation for this approved order? The seller must approve it first.')) {
-      return
-    }
-
-    const requestedAt = new Date().toISOString()
-    cancellationActionLoading.value = 'request'
-
-    try {
-      const { data, error } = await supabase
-        .from('orders')
-        .update({
-          status: ORDER_CANCEL_REQUESTED_STATUS,
-          updated_at: requestedAt,
-        })
-        .eq('id', orderId)
-        .eq('user_id', currentUser.value.id)
-        .eq('status', 'waiting_for_rider')
-        .is('rider_id', null)
-        .select('id')
-
-      if (error) throw error
-
-      if (!data || data.length === 0) {
-        await fetchOrderDetails()
-        alert('Order can no longer be cancelled because it is already assigned to a rider')
-        return
-      }
-
-      try {
-        const notificationResult = await notifySellerOrderStatus({
-          orderId,
-          status: ORDER_CANCEL_REQUESTED_STATUS,
-          createdAt: requestedAt,
-          actorUserId: currentUser.value.id,
-          orderData: getOrderNotificationData(),
-        })
-
-        if (!notificationResult?.created) {
-          console.warn(
-            'Seller cancellation request notification was not created:',
-            notificationResult?.reason || 'unknown',
-          )
-
-          if (notificationResult?.reason === 'missing-context') {
-            await createSellerCancellationRequestFallbackNotification(requestedAt)
-          }
-        }
-      } catch (notificationError) {
-        console.warn('Could not notify seller about the cancellation request:', notificationError)
-
-        try {
-          await createSellerCancellationRequestFallbackNotification(requestedAt)
-        } catch (fallbackNotificationError) {
-          console.warn(
-            'Fallback seller cancellation request notification also failed:',
-            fallbackNotificationError,
-          )
-        }
-      }
-
-      await fetchOrderDetails()
-      alert('Cancellation request sent. Please wait for the seller to approve it.')
-    } catch (err) {
-      console.error('Error requesting cancellation:', err)
-      if (
-        err?.code === '23514' &&
-        typeof err?.message === 'string' &&
-        err.message.includes('orders_status_check')
-      ) {
-        alert(
-          'Cancellation requests are not enabled in the database yet. Run the latest orders status constraint migration, then try again.',
-        )
-      } else {
-        alert('Failed to send the cancellation request.')
-      }
-    } finally {
-      cancellationActionLoading.value = null
-    }
-  }
-}
-
+// Modified approveOrder function
 const approveOrder = async () => {
   if (!isSeller.value) return
   if (!confirm('Approve this order? It will be made available for riders.')) return
@@ -1104,103 +949,26 @@ const approveOrder = async () => {
   }
 }
 
-const approveCancellationRequest = async () => {
-  if (!isSeller.value || !isCancellationRequestedOrder.value) return
-  if (!confirm('Approve this cancellation request and cancel the order?')) return
+// Add a function to check and process expired orders periodically
+let expiryCheckInterval: ReturnType<typeof setInterval> | null = null
 
-  const cancelledAt = new Date().toISOString()
-  cancellationActionLoading.value = 'approve'
+// Add this to your onMounted
+const startExpiryCheck = () => {
+  if (expiryCheckInterval) clearInterval(expiryCheckInterval)
 
-  try {
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'cancelled',
-        payment_status: 'cancelled',
-        cancelled_at: cancelledAt,
-        updated_at: cancelledAt,
-      })
-      .eq('id', orderId)
-      .in('status', ORDER_CANCEL_REQUESTED_STATUSES)
-      .is('rider_id', null)
-      .select('id')
-
-    if (error) throw error
-
-    if (!data || data.length === 0) {
-      await fetchOrderDetails()
-      alert('This cancellation request is no longer available to approve.')
-      return
+  // Check for expired orders every minute
+  expiryCheckInterval = setInterval(() => {
+    if (userRole.value === 'seller' || userRole.value === 'buyer') {
+      confirmOrderAndUpdateStock()
     }
-
-    try {
-      await notifyCustomerOrderStatus({
-        orderId,
-        status: 'cancelled',
-        createdAt: cancelledAt,
-        orderData: getOrderNotificationData(),
-      })
-    } catch (notificationError) {
-      console.warn('Could not notify customer about the approved cancellation:', notificationError)
-    }
-
-    alert('Cancellation approved. Order marked as cancelled.')
-    await fetchOrderDetails()
-  } catch (err) {
-    console.error('Error approving cancellation request:', err)
-    alert('Failed to approve the cancellation request.')
-  } finally {
-    cancellationActionLoading.value = null
-  }
+  }, 60000) // Check every minute
 }
 
-const declineCancellationRequest = async () => {
-  if (!isSeller.value || !isCancellationRequestedOrder.value) return
-  if (!confirm('Decline this cancellation request and return the order to waiting for rider?')) {
-    return
-  }
-
-  const respondedAt = new Date().toISOString()
-  cancellationActionLoading.value = 'decline'
-
-  try {
-    const { data, error } = await supabase
-      .from('orders')
-      .update({
-        status: 'waiting_for_rider',
-        updated_at: respondedAt,
-      })
-      .eq('id', orderId)
-      .in('status', ORDER_CANCEL_REQUESTED_STATUSES)
-      .is('rider_id', null)
-      .select('id')
-
-    if (error) throw error
-
-    if (!data || data.length === 0) {
-      await fetchOrderDetails()
-      alert('This cancellation request is no longer available to decline.')
-      return
-    }
-
-    try {
-      await notifyCustomerOrderStatus({
-        orderId,
-        status: 'cancellation_request_declined',
-        createdAt: respondedAt,
-        orderData: getOrderNotificationData(),
-      })
-    } catch (notificationError) {
-      console.warn('Could not notify customer about the declined cancellation request:', notificationError)
-    }
-
-    alert('Cancellation request declined. Order returned to waiting for rider.')
-    await fetchOrderDetails()
-  } catch (err) {
-    console.error('Error declining cancellation request:', err)
-    alert('Failed to decline the cancellation request.')
-  } finally {
-    cancellationActionLoading.value = null
+// Add to your onUnmounted
+const cleanupExpiryCheck = () => {
+  if (expiryCheckInterval) {
+    clearInterval(expiryCheckInterval)
+    expiryCheckInterval = null
   }
 }
 
@@ -1553,6 +1321,7 @@ const confirmOrderReceived = async () => {
     const { data, error } = await supabase
       .from('orders')
       .update({
+        status: 'delivered',
         completed_at: completedAt,
         updated_at: completedAt,
       })
@@ -1688,7 +1457,6 @@ const buildFullAddress = computed(() => {
 
 const goBack = () => router.back()
 const goToFullscreenMap = () => router.push({ name: 'LocationToDeliver', params: { orderId } })
-const goToRateOrder = () => router.push({ name: 'rateview', params: { orderId } })
 const viewProduct = (productId: string) =>
   router.push({ name: 'product-detail', params: { id: productId } })
 const contactSeller = () =>
@@ -1700,6 +1468,7 @@ const contactRider = () =>
 
 // Cleanup
 onUnmounted(() => {
+  if (timerInterval) clearInterval(timerInterval)
   if (statusSubscription) supabase.removeChannel(statusSubscription)
 })
 
@@ -1753,8 +1522,7 @@ onMounted(async () => {
               <h2>{{ trackingMapTitle }}</h2>
               <p>
                 <span v-if="isOrderCompleted"
-                  >The customer confirmed receipt and the order is completed. If the items still
-                  need a review, you can submit it anytime from here.</span
+                  >The customer confirmed receipt and the order is fully completed.</span
                 >
                 <span v-else-if="hasDeliveryIssue">{{ deliveryIssueRoleMessage }}</span>
                 <span v-else-if="isAwaitingCustomerConfirmation"
@@ -1770,9 +1538,6 @@ onMounted(async () => {
                 <span v-else-if="order.status === 'waiting_for_rider'"
                   >The seller approved the order and it is waiting for a rider.</span
                 >
-                <span v-else-if="isCancellationRequestedOrder"
-                  >A buyer cancellation request is waiting for seller approval.</span
-                >
                 <span v-else-if="order.status === 'pending_approval'"
                   >The seller still needs to approve the order.</span
                 >
@@ -1780,16 +1545,6 @@ onMounted(async () => {
                   >This order was cancelled before completion.</span
                 >
               </p>
-              <v-btn
-                v-if="showReviewOrderButton"
-                color="secondary"
-                variant="tonal"
-                class="hero-review-cta"
-                @click="goToRateOrder"
-              >
-                <v-icon start>mdi-star-outline</v-icon>
-                Review items
-              </v-btn>
             </div>
           </div>
 
@@ -1842,17 +1597,17 @@ onMounted(async () => {
           <v-window-item value="details">
             <div class="details-content">
               <v-alert
-                v-if="buyerCancellationNotice"
-                :type="buyerCancellationNotice.type"
+                v-if="showCancelButton"
+                :type="timeRemaining > 0 ? 'warning' : 'error'"
                 variant="tonal"
                 class="mb-4"
               >
-                <div class="delivery-confirmation-copy">
-                  <div class="inline-alert">
-                    <v-icon>{{ buyerCancellationNotice.icon }}</v-icon>
-                    <strong>{{ buyerCancellationNotice.title }}</strong>
-                  </div>
-                  <span>{{ buyerCancellationNotice.message }}</span>
+                <div class="inline-alert">
+                  <v-icon>{{ timeRemaining > 0 ? 'mdi-timer-sand' : 'mdi-timer-off' }}</v-icon>
+                  <strong v-if="timeRemaining > 0"
+                    >Cancel within {{ formatTimeRemaining() }}</strong
+                  >
+                  <strong v-else>Cancellation window expired</strong>
                 </div>
               </v-alert>
 
@@ -2120,7 +1875,7 @@ onMounted(async () => {
                   <v-card-text>
                     <div class="address-content">
                       <strong>{{ buyerDisplayName }}</strong>
-                      <span v-if="deliveryContactNumber"> - {{ deliveryContactNumber }}</span>
+                      <span v-if="shippingAddress.phone"> - {{ shippingAddress.phone }}</span>
                       <div class="address-details">{{ buildFullAddress }}</div>
                     </div>
                   </v-card-text>
@@ -2213,17 +1968,13 @@ onMounted(async () => {
       <div class="action-buttons">
         <template v-if="isBuyer">
           <v-btn
-            v-if="showBuyerCancelButton"
-            :color="canBuyerRequestCancellation ? 'warning' : isBuyerCancelButtonDisabled ? 'grey' : 'error'"
-            :variant="isBuyerCancelButtonDisabled ? 'outlined' : undefined"
-            :disabled="isBuyerCancelButtonDisabled"
-            :loading="
-              cancellationActionLoading === 'cancel' || cancellationActionLoading === 'request'
-            "
+            v-if="showCancelButton"
+            :color="isCancelDisabled ? 'grey' : 'error'"
+            :disabled="isCancelDisabled"
             @click="cancelOrder"
           >
             <v-icon start>mdi-close-circle</v-icon>
-            {{ buyerCancelButtonText }}
+            {{ getCancelButtonText }}
           </v-btn>
           <v-btn
             v-if="showCustomerDeliveryActions"
@@ -2261,25 +2012,6 @@ onMounted(async () => {
           >
             <v-icon start>mdi-close-circle</v-icon>
             Reject order
-          </v-btn>
-          <v-btn
-            v-if="isCancellationRequestedOrder"
-            color="error"
-            :loading="cancellationActionLoading === 'approve'"
-            @click="approveCancellationRequest"
-          >
-            <v-icon start>mdi-check-circle</v-icon>
-            Approve cancellation
-          </v-btn>
-          <v-btn
-            v-if="isCancellationRequestedOrder"
-            color="warning"
-            variant="outlined"
-            :loading="cancellationActionLoading === 'decline'"
-            @click="declineCancellationRequest"
-          >
-            <v-icon start>mdi-arrow-u-left-top</v-icon>
-            Keep order active
           </v-btn>
         </template>
 
@@ -2482,10 +2214,6 @@ onMounted(async () => {
   max-width: 640px;
   line-height: 1.5;
   color: #52667d;
-}
-
-.hero-review-cta {
-  margin-top: 14px;
 }
 
 .hero-card__meta {
