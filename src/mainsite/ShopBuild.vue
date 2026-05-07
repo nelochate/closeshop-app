@@ -111,7 +111,6 @@ const avatarUrl = ref<string | null>(null)
 const physicalUrl = ref<string | null>(null)
 const deliveryOptions = ref<string[]>([])
 const paymentOptions = ref<string[]>([])
-const meetUpDetails = ref('')
 const fullAddress = ref('')
 const validIdFrontUrl = ref<string | null>(null)
 const validIdBackUrl = ref<string | null>(null)
@@ -1120,7 +1119,6 @@ const loadShopData = async () => {
 
     validIdFrontUrl.value = data.valid_id_front || null
     validIdBackUrl.value = data.valid_id_back || null
-    meetUpDetails.value = data.meetup_details || ''
 
     // Load GCash config if exists
     if (data.paymongo_config) {
@@ -1385,7 +1383,6 @@ const saveShop = async () => {
       region: address.region.value,
       delivery_options: deliveryOptions.value,
       payment_options: paymentOptions.value,
-      meetup_details: meetUpDetails.value || null,
       detected_address:
         fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,
       address_source: addressSource,

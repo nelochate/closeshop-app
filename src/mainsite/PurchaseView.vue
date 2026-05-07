@@ -103,49 +103,81 @@ const goToAddressSelection = () => {
   })
 }
 
-// 🎫 GENERATE TRANSACTION NUMBER (BASE FUNCTION)
+// 🎫 GENERATE SHORT UNIQUE TRANSACTION NUMBER (8 characters - mix of letters & numbers)
 const generateTransactionNumber = () => {
-  const timestamp = Date.now().toString(36)
-  const random1 = Math.floor(Math.random() * 1e6)
-    .toString(36)
-    .padStart(5, '0')
-  const random2 = Math.floor(Math.random() * 1e6)
-    .toString(36)
-    .padStart(5, '0')
-  return `TX-${timestamp}-${random1}-${random2}`.toUpperCase()
+  const now = new Date()
+  // 5 chars from timestamp + 3 random chars = 8 chars total
+  const timePart = now.getTime().toString(36).slice(-5).toUpperCase()
+  const randomPart = Math.random().toString(36).substring(2, 5).toUpperCase()
+  return `${timePart}${randomPart}`
 }
 
-// 🎫 GENERATE UNIQUE TRANSACTION NUMBER
-const generateUniqueTransactionNumber = async (): Promise<string> => {
+// 🎫 GENERATE UNIQUE TRANSACTION NUMBER WITH DATABASE CHECK
+const generateUniqueTransactionNumber = async (maxRetries = 3): Promise<string> => {
   let attempts = 0
-  const maxAttempts = 5
-
-  while (attempts < maxAttempts) {
+  const usedNumbers = new Set<string>()
+  
+  while (attempts < maxRetries) {
     const candidate = generateTransactionNumber()
-
-    // Check if this transaction number already exists
-    const { data: existingOrder, error } = await supabase
-      .from('orders')
-      .select('transaction_number')
-      .eq('transaction_number', candidate)
-      .maybeSingle()
-
-    if (error) {
-      console.warn('⚠️ Error checking transaction number:', error)
-      return candidate
+    
+    if (usedNumbers.has(candidate)) {
+      attempts++
+      continue
     }
+    
+    usedNumbers.add(candidate)
+    
+    try {
+      const { data: existingOrder, error } = await supabase
+        .from('orders')
+        .select('transaction_number')
+        .eq('transaction_number', candidate)
+        .maybeSingle()
 
-    if (!existingOrder) {
-      return candidate
+      if (error) {
+        console.warn(`⚠️ Error checking transaction number:`, error)
+        const fallback = `${candidate}${Date.now().toString(36).slice(-2)}`.toUpperCase()
+        return fallback
+      }
+
+      if (!existingOrder) {
+        console.log(`✅ Transaction number generated: ${candidate}`)
+        return candidate
+      }
+
+      console.log(`🔄 Collision (${attempts + 1}/${maxRetries})`)
+      attempts++
+      
+      if (attempts < maxRetries) {
+        await new Promise(resolve => setTimeout(resolve, 50))
+      }
+      
+    } catch (err) {
+      console.error(`❌ Error:`, err)
+      attempts++
     }
-
-    attempts++
-    console.log(`🔄 Transaction number ${candidate} exists, generating new one...`)
   }
 
-  return generateTransactionNumber() + '-' + Math.random().toString(36).substring(2, 4)
+  // Ultimate fallback
+  const finalNumber = `${generateTransactionNumber()}${Date.now().toString(36).slice(-2)}`.toUpperCase()
+  console.log(`⚠️ Using fallback: ${finalNumber}`)
+  return finalNumber
 }
 
+// 📋 FORMAT TRANSACTION NUMBER FOR DISPLAY (adds hyphen for readability)
+const formattedTransactionNumber = computed(() => {
+  if (!transactionNumber.value || transactionNumber.value === 'GENERATING...') {
+    return 'Generating...'
+  }
+  
+  const number = transactionNumber.value
+  // Add hyphen in the middle for better readability (e.g., A3F9K2M7 -> A3F9-K2M7)
+  if (number.length === 8) {
+    return `${number.slice(0, 4)}-${number.slice(4)}`
+  }
+  
+  return number
+})
 const getSupabaseErrorText = (error: any) => {
   const message = String(error?.message || '')
   const details = String(error?.details || '')
@@ -170,30 +202,63 @@ const isMissingSchemaColumnError = (error: any, columnName: string) => {
 const createOrderWithSchemaFallback = async (payload: Record<string, any>) => {
   const requiredColumns = new Set(['user_id', 'address_id', 'total_amount', 'status'])
   const currentPayload: Record<string, any> = { ...payload }
+  
+  let retryCount = 0
+  const maxRetries = 3
 
-  while (true) {
-    const response = await supabase.from('orders').insert(currentPayload).select().single()
+  while (retryCount <= maxRetries) {
+    try {
+      const response = await supabase.from('orders').insert(currentPayload).select().single()
 
-    if (!response.error) {
+      if (!response.error) {
+        return response
+      }
+
+      // Handle unique constraint violation for transaction_number (PostgreSQL error code 23505)
+      if (response.error.code === '23505' && response.error.message?.includes('transaction_number')) {
+        console.warn(`⚠️ Transaction number conflict (${response.error.message}), generating new one (retry ${retryCount + 1}/${maxRetries})`)
+        
+        if (retryCount < maxRetries) {
+          // Generate a completely new transaction number
+          currentPayload.transaction_number = await generateUniqueTransactionNumber(maxRetries - retryCount)
+          retryCount++
+          continue
+        } else {
+          // Last resort: add timestamp to the existing transaction number
+          currentPayload.transaction_number = `${currentPayload.transaction_number}-${Date.now()}`
+          console.log(`🔄 Using timestamp suffix as last resort: ${currentPayload.transaction_number}`)
+          retryCount++
+          continue
+        }
+      }
+
+      // Handle missing column errors
+      const missingColumn = Object.keys(currentPayload).find(
+        (columnName) =>
+          !requiredColumns.has(columnName) &&
+          isMissingSchemaColumnError(response.error, columnName),
+      )
+
+      if (missingColumn) {
+        console.warn(`orders.${missingColumn} not available, removing column and retrying.`)
+        delete currentPayload[missingColumn]
+        continue
+      }
+
+      // For other errors, return the error
       return response
+      
+    } catch (err) {
+      console.error('Unexpected error in createOrderWithSchemaFallback:', err)
+      if (retryCount >= maxRetries) {
+        return { data: null, error: err }
+      }
+      retryCount++
+      await new Promise(resolve => setTimeout(resolve, 100 * retryCount))
     }
-
-    const missingColumn = Object.keys(currentPayload).find(
-      (columnName) =>
-        !requiredColumns.has(columnName) &&
-        isMissingSchemaColumnError(response.error, columnName),
-    )
-
-    if (!missingColumn) {
-      return response
-    }
-
-    console.warn(
-      `orders.${missingColumn} is not available in this Supabase project yet. Retrying order creation without that column.`,
-    )
-
-    delete currentPayload[missingColumn]
   }
+
+  return { data: null, error: new Error('Failed to create order after multiple retries') }
 }
 
 const createPaymentRecordWithSchemaFallback = async ({
@@ -242,13 +307,22 @@ const createPaymentRecordWithSchemaFallback = async ({
   return { error: lastError }
 }
 
-// 🔄 INITIALIZE PAGE
 const initializePage = async () => {
   console.log('🚀 Initializing purchase page...')
 
-  // Generate unique transaction number
+  // Generate unique transaction number with retry logic
   if (!transactionNumber.value) {
-    transactionNumber.value = await generateUniqueTransactionNumber()
+    try {
+      // Show loading indicator for transaction number generation
+      transactionNumber.value = 'GENERATING...'
+      
+      transactionNumber.value = await generateUniqueTransactionNumber()
+      console.log('✅ Transaction number generated:', transactionNumber.value)
+    } catch (err) {
+      console.error('❌ Failed to generate transaction number:', err)
+      // Ultimate fallback that's guaranteed to be unique
+      transactionNumber.value = `TX-${Date.now()}-${Math.random().toString(36).substring(2, 15)}`.toUpperCase()
+    }
   }
 
   // Load items first to get shop_id
@@ -271,7 +345,6 @@ const initializePage = async () => {
     shopSchedule: shopSchedule.value,
   })
 }
-
 // 🏪 LOAD SHOP DATA FROM SUPABASE - UPDATED TO INCLUDE PAYMENT OPTIONS
 const loadShopData = async () => {
   try {
@@ -1576,17 +1649,7 @@ const copyToClipboard = async () => {
     document.body.removeChild(textArea)
   }
 }
-// 📋 FORMAT TRANSACTION NUMBER FOR DISPLAY
-const formattedTransactionNumber = computed(() => {
-  if (!transactionNumber.value) return 'Loading...'
 
-  // Format as: TX-ABCDEF-12345-67890
-  const parts = transactionNumber.value.split('-')
-  if (parts.length >= 4) {
-    return `${parts[0]}-${parts[1]?.toUpperCase()}-${parts[2]?.toUpperCase()}-${parts[3]?.toUpperCase()}`
-  }
-  return transactionNumber.value.toUpperCase()
-})
 // 📅 FORMATTED DATE DISPLAY
 const formattedDate = computed(() => {
   if (!deliveryDate.value) return 'Not set'
