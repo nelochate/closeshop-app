@@ -25,7 +25,7 @@ const transactionNumber = ref('')
 const buyer = ref<any>(null)
 const address = ref<any>(null)
 const addresses = ref<any[]>([])
-const deliveryOption = ref('meetup')
+const deliveryOption = ref('')
 const paymentMethod = ref('')
 const note = ref('')
 const checkoutStore = useCheckoutStore()
@@ -50,8 +50,8 @@ const shopSchedule = ref({
   openDays: [1, 2, 3, 4, 5, 6], // Default: Monday to Saturday
   openHour: 9, // Default opening hour
   closeHour: 19, // Default closing hour
-  meetupDetails: 'Main Entrance',
   manualStatus: 'auto',
+  deliveryOptions: ['courier', 'pickup'] as string[], // Default delivery options
   paymentOptions: ['cod'] as string[], // Default payment options
 })
 
@@ -359,10 +359,11 @@ const loadShopData = async () => {
         openDays: [0, 1, 2, 3, 4, 5, 6], // Include Sunday (0)
         openHour: 9,
         closeHour: 19,
-        meetupDetails: 'Main Entrance',
         manualStatus: 'auto',
+        deliveryOptions: ['courier', 'pickup'],
         paymentOptions: ['cod'],
       }
+      deliveryOption.value = 'courier'
       return
     }
 
@@ -371,7 +372,7 @@ const loadShopData = async () => {
     const { data: shop, error } = await supabase
       .from('shops')
       .select(
-        'id, business_name, latitude, longitude, open_time, close_time, open_days, manual_status, physical_store, meetup_details, payment_options',
+        'id, business_name, latitude, longitude, open_time, close_time, open_days, manual_status, physical_store, delivery_options, payment_options',
       )
       .eq('id', shopId)
       .single()
@@ -384,10 +385,11 @@ const loadShopData = async () => {
         openDays: [0, 1, 2, 3, 4, 5, 6],
         openHour: 9,
         closeHour: 19,
-        meetupDetails: 'Main Entrance',
         manualStatus: 'auto',
+        deliveryOptions: ['courier', 'pickup'],
         paymentOptions: ['cod'],
       }
+      deliveryOption.value = 'courier'
       return
     }
 
@@ -422,6 +424,24 @@ const loadShopData = async () => {
     const openHour = parseTimeToHour(shop.open_time)
     const closeHour = parseTimeToHour(shop.close_time)
 
+    // Parse delivery options
+    let deliveryOptions = ['courier', 'pickup']
+
+    if (
+      shop.delivery_options &&
+      Array.isArray(shop.delivery_options) &&
+      shop.delivery_options.length > 0
+    ) {
+      deliveryOptions = shop.delivery_options
+      console.log('✅ Using shop delivery options:', deliveryOptions)
+    } else {
+      console.log('ℹ️ Using default delivery options (Deliver and Pickup)')
+    }
+
+    deliveryOption.value = deliveryOptions.includes(deliveryOption.value)
+      ? deliveryOption.value
+      : deliveryOptions[0] || ''
+
     // Parse payment options
     let paymentOptions = ['cod'] // Default to COD only
 
@@ -442,13 +462,14 @@ const loadShopData = async () => {
       openDays,
       openHour,
       closeHour,
-      meetupDetails: shop.meetup_details || shop.physical_store || 'Main Entrance',
       manualStatus: shop.manual_status || 'auto',
+      deliveryOptions,
       paymentOptions,
     }
 
     console.log('✅ Final shop schedule:', shopSchedule.value)
     console.log('🔍 Open days include Sunday (0):', shopSchedule.value.openDays.includes(0))
+    console.log('🚚 Available delivery options:', shopSchedule.value.deliveryOptions)
     console.log('💰 Available payment options:', shopSchedule.value.paymentOptions)
   } catch (err) {
     console.error('❌ Error loading shop data:', err)
@@ -458,10 +479,11 @@ const loadShopData = async () => {
       openDays: [0, 1, 2, 3, 4, 5, 6],
       openHour: 9,
       closeHour: 19,
-      meetupDetails: 'Main Entrance',
       manualStatus: 'auto',
+      deliveryOptions: ['courier', 'pickup'],
       paymentOptions: ['cod'],
     }
+    deliveryOption.value = 'courier'
     paymentMethod.value = 'cod'
   }
 }
@@ -1823,18 +1845,16 @@ const decreaseQty = (item: any) => {
 }
 
 // 📋 DELIVERY OPTIONS
-const deliveryOptions = [
-  { label: 'Meet Up', value: 'meetup' },
-  { label: 'Pickup', value: 'pickup' },
-  { label: 'Call a Rider', value: 'rider' },
-]
+const deliveryOptionLabels: Record<string, string> = {
+  courier: 'Deliver',
+  pickup: 'Pickup',
+}
 
 const deliveryOptionsDisplay = computed(() =>
-  deliveryOptions.map((opt) =>
-    opt.value === 'meetup'
-      ? { ...opt, label: `Meet Up (${shopSchedule.value.meetupDetails})` }
-      : opt,
-  ),
+  shopSchedule.value.deliveryOptions.map((option) => ({
+    label: deliveryOptionLabels[option] || option,
+    value: option,
+  })),
 )
 
 // 💳 PAYMENT OPTIONS - UPDATED TO USE SHOP'S PAYMENT OPTIONS
