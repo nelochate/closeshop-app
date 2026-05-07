@@ -13,7 +13,7 @@ const successMessage = ref('')
 const isLoading = ref(false)
 const isDetectingLocation = ref(false)
 const showLocationOptions = ref(false)
-
+const goBack = () => router.back()
 const isCheckoutSelectionMode = computed(() => route.query.mode === 'checkout')
 const checkoutReturnTarget = computed(() => {
   const returnTo = typeof route.query.returnTo === 'string' ? route.query.returnTo.trim() : ''
@@ -308,9 +308,12 @@ onMounted(loadAddresses)
 
 <template>
   <v-app>
-    <v-app-bar flat color="#3f83c7" class="top-nav">
-      <v-btn icon @click="handleBackNavigation"><v-icon>mdi-arrow-left</v-icon></v-btn>
-      <v-toolbar-title>My Addresses</v-toolbar-title>
+    <!-- Top App Bar -->
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
+      <v-btn icon @click="goBack">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title><strong>My Addresses</strong></v-toolbar-title>
     </v-app-bar>
 
     <v-main>
@@ -324,7 +327,7 @@ onMounted(loadAddresses)
       <v-container>
         <!-- Saved Addresses List -->
         <div v-if="addresses.length > 0">
-          <div class="text-h6 font-weight-bold mb-3">Your Saved Addresses</div>
+          <div class="text-h7 font-weight-bold mb-3 pt-8">Your Saved Addresses</div>
 
           <v-row>
             <v-col cols="12" v-for="addr in addresses" :key="addr.id">
@@ -446,7 +449,7 @@ onMounted(loadAddresses)
             size="large"
           >
             <v-icon class="me-2">mdi-crosshairs-gps</v-icon>
-            {{ hasCurrentLocation() ? 'Update My Current Location' : 'Detect My Current Location' }}
+            {{ hasCurrentLocation() ? 'Update Location' : 'Detect Location' }}
           </v-btn>
         </v-col>
 
@@ -460,7 +463,7 @@ onMounted(loadAddresses)
             size="large"
           >
             <v-icon class="me-2">mdi-plus</v-icon>
-            Add New Address Manually
+            Add New Address
           </v-btn>
         </v-col>
       </v-container>
@@ -508,52 +511,49 @@ onMounted(loadAddresses)
 </template>
 
 <style scoped>
-/* CSS Variables for safe area insets */
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
 :root {
-  --sat: env(safe-area-inset-top);
-  --sar: env(safe-area-inset-right);
-  --sab: env(safe-area-inset-bottom);
-  --sal: env(safe-area-inset-left);
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
 
-/* Top Navigation Bar - Fixed for notches */
-.top-nav {
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
   padding-top: env(safe-area-inset-top);
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
-/* For iOS devices with dynamic island */
-@supports (padding-top: env(safe-area-inset-top)) {
-  .top-nav {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top)) !important;
-  }
-}
-
-/* For older iOS devices */
-@supports (padding-top: constant(safe-area-inset-top)) {
-  .top-nav {
-    padding-top: constant(safe-area-inset-top);
-    height: calc(56px + constant(safe-area-inset-top)) !important;
-  }
-}
-
-/* Ensure toolbar content is properly aligned */
-.top-nav :deep(.v-toolbar__content) {
-  height: 56px !important;
-  padding-top: 0 !important;
-}
-
-.top-nav :deep(.v-toolbar-title) {
+.app-bar :deep(.v-toolbar-title) {
   font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
 
-.top-nav :deep(.v-btn) {
+.app-bar :deep(.v-btn) {
   color: white !important;
 }
+
+
 .border-primary {
   border: 2px solid rgb(63, 131, 199) !important;
 }

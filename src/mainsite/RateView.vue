@@ -641,7 +641,7 @@ onUnmounted(() => {
 
 <template>
   <v-app>
-    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn variant="text" icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -649,7 +649,7 @@ onUnmounted(() => {
       <v-spacer />
     </v-app-bar>
 
-    <v-main class="rate-page">
+    <v-main class="rate-page pt-6">
       <v-container max-width="1200" class="rate-container">
         <v-card class="mb-6 intro-card" elevation="0" rounded="xl">
           <v-card-text class="pa-5 pa-sm-6">
@@ -1122,51 +1122,52 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
 :root {
-  --rate-safe-top: env(safe-area-inset-top, 0px);
-  --rate-safe-right: env(safe-area-inset-right, 0px);
-  --rate-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --rate-safe-left: env(safe-area-inset-left, 0px);
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
+
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
+
 
 .rate-page {
   background: linear-gradient(180deg, #f8fafc 0%, #eef5ff 38%, #f8fafc 100%);
   min-height: 100dvh;
-}
-
-.top-nav {
-  padding-top: var(--rate-safe-top);
-  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
-  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.12) !important;
-}
-
-.top-nav :deep(.v-toolbar__content) {
-  min-height: 56px !important;
-  height: 56px !important;
-  padding: 0 max(8px, var(--rate-safe-right)) 0 max(8px, var(--rate-safe-left)) !important;
-}
-
-.top-nav :deep(.v-toolbar-title) {
-  font-size: 1.05rem;
-  letter-spacing: 0.2px;
-}
-
-.top-nav :deep(.v-btn),
-.top-nav :deep(.v-toolbar-title) {
-  color: white !important;
-}
-
-@supports (padding-top: env(safe-area-inset-top)) {
-  .top-nav {
-    height: calc(56px + env(safe-area-inset-top)) !important;
-  }
-}
-
-@supports (padding-top: constant(safe-area-inset-top)) {
-  .top-nav {
-    padding-top: constant(safe-area-inset-top);
-    height: calc(56px + constant(safe-area-inset-top)) !important;
-  }
 }
 
 .rate-container {

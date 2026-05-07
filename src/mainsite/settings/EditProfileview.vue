@@ -1,7 +1,9 @@
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { Capacitor } from '@capacitor/core'
+import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
@@ -15,11 +17,16 @@ import {
 
 const router = useRouter()
 const authStore = useAuthUserStore()
+const isNativePlatform = Capacitor.isNativePlatform()
+const { smAndDown } = useDisplay()
 
 const showPicker = ref(false)
+const showCameraDialog = ref(false)
+const cameraFacingMode = ref('user')
 const isLoadingProfile = ref(true)
 const isSaving = ref(false)
 const uploading = ref(false)
+const isCameraStarting = ref(false)
 const showSuccess = ref(false)
 const successMessage = ref('')
 const snackbarColor = ref('success')
@@ -31,8 +38,11 @@ const addressSummary = ref('No saved address yet. Add one to manage delivery con
 const avatarPublicUrl = ref('')
 const avatarVersion = ref(Date.now())
 const isDeletingAccount = ref(false)
+const cameraVideo = ref(null)
 const PROFILE_SELECT = '*'
 const DELETE_ACCOUNT_CONFIRMATION_TEXT = 'DELETE'
+let cameraStream = null
+let cameraSessionId = 0
 
 const formData = ref({
   fullName: '',
@@ -49,6 +59,64 @@ const hideSuccessMessageLater = (timeout = 3000) => {
   window.setTimeout(() => {
     showSuccess.value = false
   }, timeout)
+}
+
+const stopStreamTracks = (stream) => {
+  stream?.getTracks?.().forEach((track) => track.stop())
+}
+
+const cleanupCameraStream = () => {
+  cameraSessionId += 1
+  stopStreamTracks(cameraStream)
+  cameraStream = null
+
+  if (cameraVideo.value) {
+    cameraVideo.value.pause?.()
+    cameraVideo.value.srcObject = null
+  }
+
+  isCameraStarting.value = false
+}
+
+const closeCameraDialog = () => {
+  cleanupCameraStream()
+  cameraFacingMode.value = 'user'
+  showCameraDialog.value = false
+}
+
+const requestCameraStream = async (preferredFacingMode) => {
+  const constraintsList = [
+    {
+      video: {
+        facingMode: {
+          ideal: preferredFacingMode,
+        },
+      },
+      audio: false,
+    },
+    {
+      video: {
+        facingMode: preferredFacingMode,
+      },
+      audio: false,
+    },
+    {
+      video: true,
+      audio: false,
+    },
+  ]
+
+  let lastError = null
+
+  for (const constraints of constraintsList) {
+    try {
+      return await navigator.mediaDevices.getUserMedia(constraints)
+    } catch (error) {
+      lastError = error
+    }
+  }
+
+  throw lastError || new Error('Unable to access camera')
 }
 
 const getPrimaryAuthProvider = (user) =>
@@ -93,6 +161,10 @@ const displayInitials = computed(() => {
 
   return `${parts[0][0] || ''}${parts[parts.length - 1][0] || ''}`.toUpperCase()
 })
+
+const activeCameraLabel = computed(() =>
+  cameraFacingMode.value === 'user' ? 'Front camera' : 'Rear camera',
+)
 
 const isSaveDisabled = computed(
   () =>
@@ -399,10 +471,8 @@ async function uploadAvatar(file) {
   }
 }
 
-const pickImage = async (source) => {
+const pickImageWithSystemCamera = async (source) => {
   try {
-    showPicker.value = false
-
     const photo = await Camera.getPhoto({
       quality: 90,
       allowEditing: false,
@@ -441,6 +511,130 @@ const pickImage = async (source) => {
 
     hideSuccessMessageLater()
   }
+}
+
+const openCameraDialog = async (preferredFacingMode = cameraFacingMode.value) => {
+  showPicker.value = false
+
+  if (!navigator.mediaDevices?.getUserMedia) {
+    showSuccessMessage('Camera is not supported on this device. Please try another browser.', 'warning')
+    hideSuccessMessageLater()
+    return
+  }
+
+  showCameraDialog.value = true
+  cameraFacingMode.value = preferredFacingMode
+  cleanupCameraStream()
+  const sessionId = ++cameraSessionId
+
+  try {
+    isCameraStarting.value = true
+
+    const stream = await requestCameraStream(preferredFacingMode)
+
+    if (cameraSessionId !== sessionId) {
+      stopStreamTracks(stream)
+      return
+    }
+
+    cameraStream = stream
+    showCameraDialog.value = true
+
+    await nextTick()
+
+    if (cameraSessionId !== sessionId || !cameraVideo.value) {
+      stopStreamTracks(stream)
+      return
+    }
+
+    cameraVideo.value.srcObject = stream
+    await cameraVideo.value.play()
+  } catch (error) {
+    if (cameraSessionId === sessionId) {
+      const message = String(error?.message || '')
+
+      if (error?.name === 'NotAllowedError' || message.includes('Permission')) {
+        showSuccessMessage('Camera permission is required to change your profile photo.', 'warning')
+      } else if (error?.name === 'NotFoundError') {
+        showSuccessMessage('No camera was found on this device.', 'warning')
+      } else {
+        console.error('Error opening profile camera:', error)
+        showSuccessMessage('Failed to open the camera. Please try again.', 'error')
+      }
+
+      showCameraDialog.value = false
+      cameraFacingMode.value = 'user'
+      hideSuccessMessageLater()
+    }
+  } finally {
+    if (cameraSessionId === sessionId) {
+      isCameraStarting.value = false
+    }
+  }
+}
+
+const toggleCameraFacingMode = async () => {
+  if (isCameraStarting.value || uploading.value) {
+    return
+  }
+
+  const nextFacingMode = cameraFacingMode.value === 'user' ? 'environment' : 'user'
+  await openCameraDialog(nextFacingMode)
+}
+
+const captureCameraPhoto = async () => {
+  if (!cameraVideo.value?.videoWidth || !cameraVideo.value?.videoHeight) {
+    showSuccessMessage('Camera is still loading. Please try again in a moment.', 'warning')
+    hideSuccessMessageLater()
+    return
+  }
+
+  const canvas = document.createElement('canvas')
+  canvas.width = cameraVideo.value.videoWidth
+  canvas.height = cameraVideo.value.videoHeight
+
+  const context = canvas.getContext('2d')
+  if (!context) {
+    showSuccessMessage('Unable to capture a photo right now. Please try again.', 'error')
+    hideSuccessMessageLater()
+    return
+  }
+
+  if (cameraFacingMode.value === 'user') {
+    context.translate(canvas.width, 0)
+    context.scale(-1, 1)
+  }
+
+  context.drawImage(cameraVideo.value, 0, 0, canvas.width, canvas.height)
+
+  const blob = await new Promise((resolve) => {
+    canvas.toBlob(resolve, 'image/jpeg', 0.9)
+  })
+
+  if (!blob) {
+    showSuccessMessage('Unable to capture a photo right now. Please try again.', 'error')
+    hideSuccessMessageLater()
+    return
+  }
+
+  const file = new File([blob], `avatar-${Date.now()}.jpg`, {
+    type: 'image/jpeg',
+    lastModified: Date.now(),
+  })
+
+  closeCameraDialog()
+  await uploadAvatar(file)
+}
+
+const pickImage = async (source) => {
+  showPicker.value = false
+
+  if (source === 'camera' && !isNativePlatform) {
+    await openCameraDialog()
+    return
+  }
+
+  await pickImageWithSystemCamera(source)
 }
 
 const saveProfile = async () => {
@@ -647,11 +841,30 @@ const deleteAccount = async () => {
 }
 
 const goBack = () => {
+  closeCameraDialog()
+  showPicker.value = false
+
   router.replace({
     name: 'profileview',
     query: { refreshed: Date.now() },
   })
 }
+
+watch(showCameraDialog, (isOpen) => {
+  if (!isOpen) {
+    cleanupCameraStream()
+  }
+})
+
+onBeforeRouteLeave(() => {
+  closeCameraDialog()
+  showPicker.value = false
+})
+
+onBeforeUnmount(() => {
+  closeCameraDialog()
+  showPicker.value = false
+})
 
 onMounted(() => {
   loadProfileEditor()
@@ -660,7 +873,7 @@ onMounted(() => {
 
 <template>
   <v-app>
-    <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn
         variant="text"
         icon
@@ -687,7 +900,7 @@ onMounted(() => {
         </template>
       </v-snackbar>
 
-      <v-container class="profile-container">
+      <v-container class="profile-container pt-12">
         <v-row justify="center">
           <v-col cols="12" md="8" lg="6">
             <v-card class="avatar-card" flat>
@@ -872,6 +1085,92 @@ onMounted(() => {
       </v-card>
     </v-bottom-sheet>
 
+    <v-dialog
+      v-model="showCameraDialog"
+      max-width="520"
+      :fullscreen="smAndDown"
+      scrim="#02060d"
+      transition="dialog-bottom-transition"
+    >
+      <div class="camera-shell" :class="{ 'camera-shell--mobile': smAndDown }">
+        <div class="camera-stage">
+          <video
+            ref="cameraVideo"
+            class="camera-preview"
+            :class="{ 'camera-preview--mirrored': cameraFacingMode === 'user' }"
+            autoplay
+            muted
+            playsinline
+          ></video>
+
+          <div class="camera-stage-gradient camera-stage-gradient--top"></div>
+          <div class="camera-stage-gradient camera-stage-gradient--bottom"></div>
+
+          <div class="camera-header">
+            <v-btn
+              icon
+              variant="text"
+              class="camera-icon-btn"
+              @click="closeCameraDialog"
+              :disabled="uploading"
+            >
+              <v-icon>mdi-arrow-left</v-icon>
+            </v-btn>
+
+            <div class="camera-header-copy">
+              <div class="camera-mode-title">Portrait</div>
+              <div class="camera-mode-subtitle">Center your face in the frame</div>
+            </div>
+
+            <v-btn
+              icon
+              variant="text"
+              class="camera-icon-btn"
+              @click="toggleCameraFacingMode"
+              :disabled="isCameraStarting || uploading"
+            >
+              <v-icon>mdi-camera-flip-outline</v-icon>
+            </v-btn>
+          </div>
+
+          <div class="camera-status-pill">
+            <v-icon size="16">mdi-circle-medium</v-icon>
+            {{ activeCameraLabel }}
+          </div>
+
+          <div class="camera-viewfinder">
+            <span class="camera-corner camera-corner--top-left"></span>
+            <span class="camera-corner camera-corner--top-right"></span>
+            <span class="camera-corner camera-corner--bottom-left"></span>
+            <span class="camera-corner camera-corner--bottom-right"></span>
+          </div>
+
+          <div class="camera-footer">
+            <div class="camera-footer-spacer"></div>
+
+            <button
+              type="button"
+              class="camera-shutter"
+              @click="captureCameraPhoto"
+              :disabled="isCameraStarting || uploading"
+            >
+              <span class="camera-shutter-ring"></span>
+              <span class="camera-shutter-core"></span>
+            </button>
+
+            <div class="camera-footer-hint">
+              <span>Tap to capture</span>
+            </div>
+          </div>
+
+          <div v-if="isCameraStarting" class="camera-loading-state">
+            <v-progress-circular indeterminate color="white" size="40" width="4" />
+            <span>Starting camera...</span>
+          </div>
+        </div>
+      </div>
+    </v-dialog>
+
     <v-dialog v-model="showDeleteAccountDialog" max-width="480" persistent>
       <v-card class="delete-dialog-card">
         <v-card-title class="delete-dialog-title">Delete Account</v-card-title>
@@ -914,42 +1213,45 @@ onMounted(() => {
 </template>
 
 <style scoped>
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
 :root {
-  --sat: env(safe-area-inset-top);
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
 
-.top-nav {
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
   padding-top: env(safe-area-inset-top);
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
-@supports (padding-top: env(safe-area-inset-top)) {
-  .top-nav {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top)) !important;
-  }
-}
-
-@supports (padding-top: constant(safe-area-inset-top)) {
-  .top-nav {
-    padding-top: constant(safe-area-inset-top);
-    height: calc(56px + constant(safe-area-inset-top)) !important;
-  }
-}
-
-.top-nav :deep(.v-toolbar__content) {
-  height: 56px !important;
-  padding-top: 0 !important;
-}
-
-.top-nav :deep(.v-toolbar-title) {
+.app-bar :deep(.v-toolbar-title) {
   font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
 
-.top-nav :deep(.v-btn) {
+.app-bar :deep(.v-btn) {
   color: white !important;
 }
 
@@ -1086,6 +1388,237 @@ onMounted(() => {
   border-radius: 22px 22px 0 0 !important;
 }
 
+.camera-shell {
+  width: min(100%, 520px);
+  margin: 0 auto;
+  border-radius: 30px;
+  overflow: hidden;
+  background: #030712;
+  box-shadow: 0 24px 60px rgba(2, 6, 23, 0.55);
+}
+
+.camera-stage {
+  position: relative;
+  min-height: 78dvh;
+  background:
+    radial-gradient(circle at top, rgba(30, 64, 175, 0.22), transparent 32%),
+    linear-gradient(180deg, #020817 0%, #020617 100%);
+}
+
+.camera-preview {
+  width: 100%;
+  height: 78dvh;
+  object-fit: cover;
+  display: block;
+}
+
+.camera-preview--mirrored {
+  transform: scaleX(-1);
+}
+
+.camera-stage-gradient {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 1;
+  pointer-events: none;
+}
+
+.camera-stage-gradient--top {
+  top: 0;
+  height: 22%;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0.78), rgba(2, 6, 23, 0));
+}
+
+.camera-stage-gradient--bottom {
+  bottom: 0;
+  height: 32%;
+  background: linear-gradient(180deg, rgba(2, 6, 23, 0), rgba(2, 6, 23, 0.92));
+}
+
+.camera-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 48px 1fr 48px;
+  align-items: center;
+  gap: 12px;
+  padding: calc(18px + env(safe-area-inset-top)) 20px 0;
+}
+
+.camera-icon-btn {
+  color: white !important;
+  background: rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(10px);
+}
+
+.camera-header-copy {
+  text-align: center;
+  color: white;
+}
+
+.camera-mode-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.camera-mode-subtitle {
+  font-size: 0.82rem;
+  color: rgba(226, 232, 240, 0.92);
+}
+
+.camera-status-pill {
+  position: absolute;
+  top: calc(86px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 3;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: 999px;
+  color: white;
+  background: rgba(15, 23, 42, 0.34);
+  backdrop-filter: blur(10px);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.camera-viewfinder {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 2;
+  width: min(72vw, 320px);
+  height: min(88vw, 420px);
+  transform: translate(-50%, -50%);
+  border-radius: 32px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+  pointer-events: none;
+}
+
+.camera-corner {
+  position: absolute;
+  width: 34px;
+  height: 34px;
+  border-color: rgba(255, 255, 255, 0.95);
+  border-style: solid;
+  border-width: 0;
+}
+
+.camera-corner--top-left {
+  top: 16px;
+  left: 16px;
+  border-top-width: 4px;
+  border-left-width: 4px;
+  border-top-left-radius: 14px;
+}
+
+.camera-corner--top-right {
+  top: 16px;
+  right: 16px;
+  border-top-width: 4px;
+  border-right-width: 4px;
+  border-top-right-radius: 14px;
+}
+
+.camera-corner--bottom-left {
+  bottom: 16px;
+  left: 16px;
+  border-bottom-width: 4px;
+  border-left-width: 4px;
+  border-bottom-left-radius: 14px;
+}
+
+.camera-corner--bottom-right {
+  right: 16px;
+  bottom: 16px;
+  border-right-width: 4px;
+  border-bottom-width: 4px;
+  border-bottom-right-radius: 14px;
+}
+
+.camera-footer {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  padding: 0 24px calc(28px + env(safe-area-inset-bottom));
+}
+
+.camera-footer-spacer,
+.camera-footer-hint {
+  min-width: 72px;
+}
+
+.camera-footer-hint {
+  justify-self: end;
+  color: rgba(226, 232, 240, 0.94);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.camera-shutter {
+  position: relative;
+  width: 88px;
+  height: 88px;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  cursor: pointer;
+}
+
+.camera-shutter:disabled {
+  cursor: not-allowed;
+  opacity: 0.7;
+}
+
+.camera-shutter-ring,
+.camera-shutter-core {
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+}
+
+.camera-shutter-ring {
+  border: 4px solid rgba(255, 255, 255, 0.95);
+  box-shadow:
+    0 0 0 10px rgba(255, 255, 255, 0.14),
+    0 12px 24px rgba(2, 6, 23, 0.28);
+}
+
+.camera-shutter-core {
+  inset: 12px;
+  background: linear-gradient(180deg, #ffffff 0%, #f1f5f9 100%);
+}
+
+.camera-loading-state {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  color: white;
+  background: rgba(2, 6, 23, 0.42);
+  backdrop-filter: blur(6px);
+}
+
 .list-item-action {
   cursor: pointer;
   transition: background-color 0.2s ease;
@@ -1124,6 +1657,61 @@ onMounted(() => {
 @media (max-width: 600px) {
   .profile-container {
     padding-top: 16px;
+  }
+
+  .camera-shell {
+    width: 100%;
+    height: 100dvh;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .camera-shell--mobile {
+    min-height: 100dvh;
+  }
+
+  .camera-stage {
+    min-height: 100dvh;
+  }
+
+  .camera-preview {
+    width: 100%;
+    height: 100dvh;
+  }
+
+  .camera-header {
+    padding: calc(16px + env(safe-area-inset-top)) 16px 0;
+  }
+
+  .camera-mode-title {
+    font-size: 1rem;
+  }
+
+  .camera-mode-subtitle {
+    font-size: 0.76rem;
+  }
+
+  .camera-status-pill {
+    top: calc(78px + env(safe-area-inset-top));
+  }
+
+  .camera-viewfinder {
+    width: calc(100vw - 64px);
+    max-width: 360px;
+    height: min(104vw, 440px);
+  }
+
+  .camera-footer {
+    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .camera-footer-hint {
+    font-size: 0.76rem;
+  }
+
+  .camera-shutter {
+    width: 82px;
+    height: 82px;
   }
 
   .section-title {

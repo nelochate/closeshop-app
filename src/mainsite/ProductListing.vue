@@ -248,7 +248,7 @@ onUnmounted(() => {
 
 <template>
   <v-app>
-    <v-app-bar class="top-bar" flat color="#3f83c7" dark elevation="0" :height="isMobile ? '56' : '64'">
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
       <v-btn icon @click="goBack" size="small" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
@@ -264,7 +264,7 @@ onUnmounted(() => {
     <v-main class="background-gradient">
       <v-container :class="isMobile ? 'px-3 py-3' : 'pa-6'" fluid>
         <!-- Stats Header -->
-        <div class="stats-header mb-4">
+        <div class="stats-header mb-4 pt-8">
           <div class="d-flex align-center justify-space-between">
             <div>
               <h1 :class="isMobile ? 'text-h6 font-weight-bold' : 'text-h4 font-weight-bold'" class="text-primary mb-1">
@@ -437,6 +437,47 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
+:root {
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
+}
+
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: env(safe-area-inset-top);
+  padding-bottom: env(safe-area-inset-bottom);
+  padding-left: max(0px, env(safe-area-inset-left));
+  padding-right: max(0px, env(safe-area-inset-right));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
+  padding-top: env(safe-area-inset-top);
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
 * {
   margin: 0;
   padding: 0;
