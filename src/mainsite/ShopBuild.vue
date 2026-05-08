@@ -229,7 +229,7 @@ const locationLoadingMessage = computed(() => {
   }
 })
 
-const withSuppressedLocationWatchEffects = async <T>(task: () => Promise<T> | T): Promise<T> => {
+const withSuppressedLocationWatchEffects = async <T,>(task: () => Promise<T> | T): Promise<T> => {
   suppressLocationWatchEffects.value = true
 
   try {
@@ -586,7 +586,15 @@ const buildManualAddressQueries = () => {
       parts.postal,
       'Philippines',
     ],
-    [parts.building, parts.street, parts.barangay, parts.city, parts.province, parts.region, 'Philippines'],
+    [
+      parts.building,
+      parts.street,
+      parts.barangay,
+      parts.city,
+      parts.province,
+      parts.region,
+      'Philippines',
+    ],
     [parts.barangay, parts.city, parts.province, parts.region, 'Philippines'],
     [parts.city, parts.province, parts.region, 'Philippines'],
   ]
@@ -898,7 +906,8 @@ const saveCoordinates = async (lat: number, lng: number) => {
       .update({
         latitude: lat,
         longitude: lng,
-        detected_address: fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,
+        detected_address:
+          fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,
         barangay: address.barangay.value || null,
         building: address.building.value || null,
         street: address.street.value || null,
@@ -1282,7 +1291,13 @@ watch(
       shouldSkipLocationWatchEffects()
     )
       return
-    if (!selectedBarangay.value || !selectedCity.value || !selectedProvince.value || !selectedRegion.value) return
+    if (
+      !selectedBarangay.value ||
+      !selectedCity.value ||
+      !selectedProvince.value ||
+      !selectedRegion.value
+    )
+      return
 
     if (manualLocationSyncTimer) {
       clearTimeout(manualLocationSyncTimer)
@@ -1465,14 +1480,22 @@ const saveShop = async () => {
 
     setTimeout(() => {
       localStorage.setItem('lastCreatedShopId', savedShopId)
-      router.replace({
-        path: '/statusshopcreation',
-        query: {
-          shopId: savedShopId,
-          from: 'shop-build',
-          returnTo: 'usershop',
-        },
-      })
+      if (currentShopId.value) {
+        // If in editing mode, go back to usershop
+        router.replace({
+          path: '/usershop',
+        })
+      } else {
+        // If creating a new shop, go to status shop creation
+        router.replace({
+          path: '/statusshopcreation',
+          query: {
+            shopId: savedShopId,
+            from: 'shop-build',
+            returnTo: 'usershop',
+          },
+        })
+      }
     }, 1500)
   } catch (err) {
     console.error('Save shop error:', err)
@@ -1493,7 +1516,6 @@ onMounted(async () => {
 
 const isMobile = ref(window.innerWidth < 768)
 
-
 // Add resize handler if needed
 const updateMobileState = () => {
   isMobile.value = window.innerWidth < 768
@@ -1511,7 +1533,6 @@ onUnmounted(() => {
     manualLocationSyncTimer = null
   }
 })
-
 </script>
 
 <template>
@@ -1714,7 +1735,6 @@ onUnmounted(() => {
           <v-card-text>
             <v-checkbox v-model="deliveryOptions" label="Deliver" value="courier" />
             <v-checkbox v-model="deliveryOptions" label="Pickup" value="pickup" />
-          
           </v-card-text>
           <v-card-actions class="step-actions">
             <v-btn variant="outlined" @click="prevStep" class="prev-btn">
@@ -2042,7 +2062,12 @@ onUnmounted(() => {
             </v-chip>
           </v-card-title>
           <v-card-text>
-            <v-radio-group v-model="addressOption" inline class="mb-4" :disabled="detectingLocation">
+            <v-radio-group
+              v-model="addressOption"
+              inline
+              class="mb-4"
+              :disabled="detectingLocation"
+            >
               <v-radio label="Enter address manually" value="manual" />
               <v-radio label="Use current location (Detect Address)" value="map" />
             </v-radio-group>
@@ -2195,7 +2220,13 @@ onUnmounted(() => {
           </div>
 
           <div v-if="addressOption === 'map'" class="pa-4">
-            <v-alert v-if="detectingLocation" type="info" variant="tonal" class="mb-3" border="start">
+            <v-alert
+              v-if="detectingLocation"
+              type="info"
+              variant="tonal"
+              class="mb-3"
+              border="start"
+            >
               <template #title>
                 <strong>Detecting your location</strong>
               </template>
