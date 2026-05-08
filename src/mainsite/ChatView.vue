@@ -126,7 +126,10 @@ const chatViewportStyle = computed(() => ({
 
 const updateViewportHeight = () => {
   if (typeof window === 'undefined') return
-  viewportHeight.value = window.visualViewport?.height || window.innerHeight
+  const viewport = window.visualViewport
+  viewportHeight.value = viewport
+    ? Math.min(window.innerHeight, Math.round(viewport.height + viewport.offsetTop))
+    : window.innerHeight
 }
 
 const setupViewportListeners = () => {
@@ -1579,7 +1582,7 @@ const getCachedImage = (url) => {
     </v-app-bar>
 
     <v-main class="chat-main">
-      <section class="chat-shell">
+      <section class="chat-shell pb-2">
         <div ref="chatScrollEl" class="chat-container">
           <div v-if="loading" class="loading-state">
             <v-progress-circular indeterminate color="primary" />
@@ -1844,9 +1847,16 @@ const getCachedImage = (url) => {
     linear-gradient(180deg, #eef4f9 0%, #f8fafc 100%);
   --chat-safe-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   --chat-safe-right: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
-  --chat-safe-bottom: var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  --chat-safe-bottom: max(
+    var(
+      --app-bottom-safe-space-active,
+      var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    ),
+    var(--app-bottom-nav-lift-active, 0px)
+  );
   --chat-safe-left: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
   --chat-header-height: calc(64px + var(--chat-safe-top));
+  --chat-footer-bottom-padding: max(10px, var(--chat-safe-bottom));
 }
 
 .chat-page :deep(.v-application__wrap) {
@@ -1915,10 +1925,12 @@ const getCachedImage = (url) => {
   height: calc(var(--chat-viewport-height, 100dvh) - var(--chat-header-height));
   display: flex;
   flex-direction: column;
+  min-height: 0;
 }
 
 .chat-container {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
   padding:
     18px
@@ -2169,7 +2181,7 @@ const getCachedImage = (url) => {
   padding:
     12px
     max(16px, var(--chat-safe-right))
-    max(12px, var(--chat-safe-bottom))
+    var(--chat-footer-bottom-padding)
     max(16px, var(--chat-safe-left));
   background: rgba(255, 255, 255, 0.96);
   backdrop-filter: blur(18px);
@@ -2364,6 +2376,7 @@ const getCachedImage = (url) => {
 @media (max-width: 600px) {
   .chat-page {
     --chat-header-height: calc(56px + var(--chat-safe-top));
+    --chat-footer-bottom-padding: max(8px, var(--chat-safe-bottom));
   }
 
   .chat-app-bar :deep(.v-toolbar__content) {
@@ -2411,7 +2424,7 @@ const getCachedImage = (url) => {
     padding:
       10px
       max(12px, var(--chat-safe-right))
-      max(10px, var(--chat-safe-bottom))
+      var(--chat-footer-bottom-padding)
       max(12px, var(--chat-safe-left));
   }
 
@@ -2430,6 +2443,7 @@ const getCachedImage = (url) => {
   .chat-page {
     --chat-safe-top: 0px;
     --chat-header-height: 56px;
+    --chat-footer-bottom-padding: max(8px, var(--chat-safe-bottom));
   }
 
   .chat-app-bar {
@@ -2446,7 +2460,7 @@ const getCachedImage = (url) => {
 
   .chat-footer {
     padding-top: 8px;
-    padding-bottom: 8px;
+    padding-bottom: var(--chat-footer-bottom-padding);
   }
 
   .send-btn {

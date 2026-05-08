@@ -319,7 +319,10 @@ onUnmounted(() => {
   left: 0;
   right: 0;
   bottom: 0;
-  height: var(--app-navigation-backdrop-height, var(--app-android-nav-bar-height, 0px));
+  height: var(
+    --app-navigation-backdrop-height-active,
+    var(--app-navigation-backdrop-height, var(--app-android-nav-bar-height, 0px))
+  );
   background: #000;
   z-index: 900;
   pointer-events: none;
@@ -387,10 +390,16 @@ onUnmounted(() => {
   --app-android-nav-extra-space: 0px;
   --app-bottom-nav-lift: 0px;
   --app-navigation-backdrop-height: 0px;
+  --app-keyboard-inset-bottom: 0px;
+  --app-keyboard-open: 0;
   --app-bottom-safe-space: max(
     var(--app-safe-area-bottom),
     var(--app-safe-area-bottom-runtime),
     var(--app-android-bottom-clearance)
   );
+  --app-bottom-safe-space-active: var(--app-bottom-safe-space);
+  --app-bottom-nav-lift-active: var(--app-bottom-nav-lift);
+  --app-android-nav-extra-space-active: var(--app-android-nav-extra-space);
+  --app-navigation-backdrop-height-active: var(--app-navigation-backdrop-height);
 }
 </style>

@@ -420,6 +420,11 @@ const loadOrderDetails = async () => {
   }
 }
 
+// Navigation functions
+const goBack = () => {
+  router.back()
+}
+
 onMounted(() => {
   loadOrderDetails()
 })
@@ -427,19 +432,16 @@ onMounted(() => {
 
 <template>
   <v-app>
-      <!-- Top App Bar -->
-      <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
-        <v-btn variant="text" icon @click="router.push('/')" class="back-btn">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-        <v-toolbar-title>
-          <strong>Order Summary</strong>
-        </v-toolbar-title>
-        <v-spacer />
-      </v-app-bar>
+    <!-- Top App Bar -->
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
+      <v-btn icon @click="goBack">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title><strong>Order Summary</strong></v-toolbar-title>
+    </v-app-bar>
 
-    <v-main class="success-page">
-      <div class="page-shell">
+    <v-main class="success-page mt-6">
+      <div class="page-shell pt-12">
         <div v-if="loading" class="state-card">
           <v-progress-circular indeterminate color="primary" size="56" />
           <p class="state-title">Loading your order details...</p>
@@ -653,60 +655,49 @@ onMounted(() => {
 </template>
 
 <style scoped>
-/* CSS Variables for safe area insets */
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
 :root {
-  --sat: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
-  --sar: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
-  --sab: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
-  --sal: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
 }
 
-/* Top Navigation Bar - Fixed for notches */
-.top-nav {
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  padding-left: max(0px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
   padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
-/* For iOS devices with dynamic island */
-@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
-  .top-nav {
-    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
-    height: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
-  }
-}
-
-/* For older iOS devices */
-@supports (padding-top: constant(safe-area-inset-top)) {
-  .top-nav {
-    padding-top: constant(safe-area-inset-top);
-    height: calc(56px + constant(safe-area-inset-top)) !important;
-  }
-}
-
-/* Ensure toolbar content is properly aligned */
-.top-nav :deep(.v-toolbar__content) {
-  height: 56px !important;
-  padding-top: 0 !important;
-}
-
-.top-nav :deep(.v-toolbar-title) {
+.app-bar :deep(.v-toolbar-title) {
   font-size: 1.05rem;
   font-weight: 700;
   letter-spacing: 0.2px;
 }
 
-.top-nav :deep(.v-btn) {
+.app-bar :deep(.v-btn) {
   color: white !important;
 }
 
-/* Landscape mode adjustment */
-@media (orientation: landscape) and (max-height: 500px) {
-  .top-nav {
-    height: 56px !important;
-    padding-top: 0 !important;
-  }
-}
+
 
 .success-page {
   min-height: 100vh;

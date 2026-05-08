@@ -4,6 +4,7 @@ export const ANDROID_SYSTEM_INSETS_EVENT = 'closeshop:android-system-insets'
 
 const KEYBOARD_INSET_THRESHOLD_PX = 120
 const MAX_SAFE_INSET_PX = 160
+const MAX_KEYBOARD_INSET_PX = 420
 const GESTURE_NAV_MAX_INSET_PX = 20
 const TWO_BUTTON_NAV_MAX_INSET_PX = 32
 const MIN_THREE_BUTTON_NAV_VISUAL_GAP_PX = 4
@@ -43,6 +44,10 @@ function clampInset(value) {
   return Math.max(0, Math.min(MAX_SAFE_INSET_PX, Math.round(Number(value) || 0)))
 }
 
+function clampKeyboardInset(value) {
+  return Math.max(0, Math.min(MAX_KEYBOARD_INSET_PX, Math.round(Number(value) || 0)))
+}
+
 function parsePxValue(value) {
   const parsed = Number.parseFloat(String(value || '').trim())
   return Number.isFinite(parsed) ? clampInset(parsed) : 0
@@ -70,21 +75,30 @@ function readInjectedSafeAreaInsets() {
   }
 }
 
-function getViewportBottomInset() {
+function getRawViewportBottomInset() {
   const viewport = window.visualViewport
   if (!viewport) {
     return 0
   }
 
   const layoutHeight = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0)
-  const rawInset = Math.max(layoutHeight - (viewport.height + viewport.offsetTop), 0)
+  return clampKeyboardInset(Math.max(layoutHeight - (viewport.height + viewport.offsetTop), 0))
+}
 
-  // Ignore keyboard-sized viewport reductions so fixed controls do not jump while typing.
-  if (rawInset >= KEYBOARD_INSET_THRESHOLD_PX) {
-    return 0
+function getViewportInsets() {
+  const rawBottomInset = getRawViewportBottomInset()
+
+  if (rawBottomInset >= KEYBOARD_INSET_THRESHOLD_PX) {
+    return {
+      keyboardInset: rawBottomInset,
+      safeBottomInset: 0,
+    }
   }
 
-  return clampInset(rawInset)
+  return {
+    keyboardInset: 0,
+    safeBottomInset: clampInset(rawBottomInset),
+  }
 }
 
 function getResolvedAndroidInsets() {
@@ -143,7 +157,8 @@ function applySafeAreaVariables() {
 
   const isAndroidNative = isAndroidNativeApp()
   const resolvedInsets = getResolvedAndroidInsets()
-  const viewportBottomInset = getViewportBottomInset()
+  const { keyboardInset, safeBottomInset: viewportBottomInset } = getViewportInsets()
+  const isKeyboardOpen = keyboardInset > 0
   const bottomSystemInset = Math.max(resolvedInsets.bottom, viewportBottomInset)
   const navigationMode = isAndroidNative
     ? getAndroidNavigationMode(bottomSystemInset)
@@ -162,15 +177,21 @@ function applySafeAreaVariables() {
     ? Math.max(androidNavBarHeight - androidNavExtraSpace, 0)
     : 0
   const navigationBackdropHeight = androidNavBarHeight
+  const activeBottomSafeSpace = isKeyboardOpen ? 0 : bottomSafeSpace
+  const activeBottomNavLift = isKeyboardOpen ? 0 : bottomNavLift
+  const activeAndroidNavExtraSpace = isKeyboardOpen ? 0 : androidNavExtraSpace
+  const activeNavigationBackdropHeight = isKeyboardOpen ? 0 : navigationBackdropHeight
 
   root.classList.toggle('app-android-native', isAndroidNative)
   root.classList.toggle('app-android-gesture-nav', isAndroidNative && isGestureNavigation)
   root.classList.toggle('app-android-two-button-nav', isAndroidNative && isTwoButtonNavigation)
   root.classList.toggle('app-android-three-button-nav', hasThreeButtonNavigation)
+  root.classList.toggle('app-keyboard-open', isKeyboardOpen)
   body.classList.toggle('app-android-native', isAndroidNative)
   body.classList.toggle('app-android-gesture-nav', isAndroidNative && isGestureNavigation)
   body.classList.toggle('app-android-two-button-nav', isAndroidNative && isTwoButtonNavigation)
   body.classList.toggle('app-android-three-button-nav', hasThreeButtonNavigation)
+  body.classList.toggle('app-keyboard-open', isKeyboardOpen)
 
   if (isAndroidNative) {
     root.style.setProperty('--app-safe-area-top', `${resolvedInsets.top}px`)
@@ -182,6 +203,15 @@ function applySafeAreaVariables() {
     root.style.setProperty('--app-android-nav-extra-space', `${androidNavExtraSpace}px`)
     root.style.setProperty('--app-bottom-nav-lift', `${bottomNavLift}px`)
     root.style.setProperty('--app-navigation-backdrop-height', `${navigationBackdropHeight}px`)
+    root.style.setProperty('--app-bottom-safe-space-active', `${activeBottomSafeSpace}px`)
+    root.style.setProperty('--app-bottom-nav-lift-active', `${activeBottomNavLift}px`)
+    root.style.setProperty('--app-android-nav-extra-space-active', `${activeAndroidNavExtraSpace}px`)
+    root.style.setProperty(
+      '--app-navigation-backdrop-height-active',
+      `${activeNavigationBackdropHeight}px`,
+    )
+    root.style.setProperty('--app-keyboard-inset-bottom', `${keyboardInset}px`)
+    root.style.setProperty('--app-keyboard-open', isKeyboardOpen ? '1' : '0')
   } else {
     root.style.removeProperty('--app-safe-area-top')
     root.style.removeProperty('--app-safe-area-right')
@@ -192,6 +222,12 @@ function applySafeAreaVariables() {
     root.style.removeProperty('--app-android-nav-extra-space')
     root.style.removeProperty('--app-bottom-nav-lift')
     root.style.removeProperty('--app-navigation-backdrop-height')
+    root.style.removeProperty('--app-bottom-safe-space-active')
+    root.style.removeProperty('--app-bottom-nav-lift-active')
+    root.style.removeProperty('--app-android-nav-extra-space-active')
+    root.style.removeProperty('--app-navigation-backdrop-height-active')
+    root.style.removeProperty('--app-keyboard-inset-bottom')
+    root.style.removeProperty('--app-keyboard-open')
   }
 
   root.style.setProperty('--app-safe-area-bottom-runtime', `${viewportBottomInset}px`)

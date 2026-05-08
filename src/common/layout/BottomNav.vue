@@ -221,7 +221,10 @@ const bottomNavInlineStyle = computed(() => ({
 <style scoped>
 /* Base responsive container */
 .nav-wrapper {
-  --bottom-nav-bottom-gap: var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px));
+  --bottom-nav-bottom-gap: var(
+    --app-bottom-safe-space-active,
+    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
+  );
 
   position: fixed;
   bottom: 0;
@@ -243,14 +246,20 @@ const bottomNavInlineStyle = computed(() => ({
 
 /* Mobile styles */
 .nav-wrapper.mobile {
-  --bottom-nav-bottom-gap: var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px));
+  --bottom-nav-bottom-gap: var(
+    --app-bottom-safe-space-active,
+    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
+  );
 
   padding-top: 6px;
 }
 
 :global(.app-android-three-button-nav) .nav-wrapper {
-  bottom: var(--app-bottom-nav-lift, 0px);
-  --bottom-nav-bottom-gap: var(--app-android-nav-extra-space, 0px);
+  bottom: var(--app-bottom-nav-lift-active, var(--app-bottom-nav-lift, 0px));
+  --bottom-nav-bottom-gap: var(
+    --app-android-nav-extra-space-active,
+    var(--app-android-nav-extra-space, 0px)
+  );
 }
 
 /* Bottom Navigation Container */

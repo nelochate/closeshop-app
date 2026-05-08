@@ -1334,6 +1334,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .profile-main {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  --profile-content-bottom-padding: calc(112px + var(--app-bottom-safe-space, 0px));
 }
 
 /* Action Buttons Container - Top Left */
@@ -1699,8 +1700,9 @@ onBeforeRouteUpdate((to, from, next) => {
 
 /* Enhanced Content Section */
 .content-section {
-  padding: 24px 16px;
+  padding: 24px 16px var(--profile-content-bottom-padding);
   min-height: 400px;
+  scroll-padding-bottom: var(--profile-content-bottom-padding);
 }
 
 .section-loading {
@@ -1723,6 +1725,8 @@ onBeforeRouteUpdate((to, from, next) => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding-bottom: 8px;
+  scroll-margin-bottom: var(--profile-content-bottom-padding);
 }
 
 .order-card {
@@ -1892,6 +1896,7 @@ onBeforeRouteUpdate((to, from, next) => {
   justify-content: center;
   padding: 80px 20px;
   text-align: center;
+  scroll-margin-bottom: var(--profile-content-bottom-padding);
 }
 
 .empty-icon {
@@ -2170,7 +2175,7 @@ onBeforeRouteUpdate((to, from, next) => {
   }
 
   .content-section {
-    padding: 20px 12px;
+    padding: 20px 12px var(--profile-content-bottom-padding);
   }
 
   .order-header {
