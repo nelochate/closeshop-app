@@ -7,7 +7,8 @@ import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 // Initialize Mapbox with your token
-mapboxgl.accessToken = 'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
+mapboxgl.accessToken =
+  'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
 
 // route + router
 const route = useRoute()
@@ -26,27 +27,30 @@ const loading = ref(true)
 const errorMsg = ref('')
 const mapInitialized = ref(false)
 
+const searchQuery = ref('')
+
+const filteredProducts = computed(() => {
+  if (!searchQuery.value) return products.value
+  const query = searchQuery.value.toLowerCase()
+  return products.value.filter((p) => p.title.toLowerCase().includes(query))
+})
+
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/640/360'
 
 // fetch shop
 const fetchShop = async () => {
   try {
-    const { data, error } = await supabase
-      .from('shops')
-      .select('*')
-      .eq('id', shopId)
-      .single()
+    const { data, error } = await supabase.from('shops').select('*').eq('id', shopId).single()
 
     if (error) throw error
     shop.value = data
-    
+
     // Debug log to check coordinates
     console.log('Shop coordinates:', {
       latitude: data.latitude,
       longitude: data.longitude,
-      business_name: data.business_name
+      business_name: data.business_name,
     })
-    
   } catch (err: any) {
     errorMsg.value = err.message
     console.error('fetchShop error:', err)
@@ -93,7 +97,7 @@ function extractImage(main_img_urls: any) {
 // Convert time to 12-hour format
 const formatTime12Hour = (timeString: string) => {
   if (!timeString) return ''
-  
+
   try {
     const [hours, minutes] = timeString.split(':')
     const hour = parseInt(hours)
@@ -109,50 +113,50 @@ const formatTime12Hour = (timeString: string) => {
 // Check if shop is currently open
 const isShopOpen = computed(() => {
   if (!shop.value) return false
-  
+
   // Check manual status first
   if (shop.value.manual_status && shop.value.manual_status !== 'auto') {
     return shop.value.manual_status === 'open'
   }
-  
+
   // Auto status - check business hours
   const now = new Date()
   const currentDay = now.getDay() // 0 = Sunday, 1 = Monday, etc.
   const currentTime = now.getHours() * 100 + now.getMinutes() // HHMM format
-  
+
   // Check if shop is open today
   const openDays = shop.value.open_days || [1, 2, 3, 4, 5, 6] // Default to Mon-Sat
   if (!openDays.includes(currentDay)) {
     return false
   }
-  
+
   // Check if within business hours
   if (shop.value.open_time && shop.value.close_time) {
     try {
       const [openHour, openMinute] = shop.value.open_time.split(':')
       const [closeHour, closeMinute] = shop.value.close_time.split(':')
-      
+
       const openTime = parseInt(openHour) * 100 + parseInt(openMinute)
       const closeTime = parseInt(closeHour) * 100 + parseInt(closeMinute)
-      
+
       return currentTime >= openTime && currentTime <= closeTime
     } catch (error) {
       console.error('Error parsing business hours:', error)
       return true // Default to open if there's an error
     }
   }
-  
+
   return true // Default to open if no hours specified
 })
 
 // Get shop status display
 const shopStatus = computed(() => {
   if (!shop.value) return ''
-  
+
   if (shop.value.manual_status && shop.value.manual_status !== 'auto') {
     return shop.value.manual_status === 'open' ? 'Open' : 'Closed'
   }
-  
+
   return isShopOpen.value ? 'Open' : 'Closed'
 })
 
@@ -171,23 +175,23 @@ const openDaysDisplay = computed(() => {
   if (!shop.value?.open_days || shop.value.open_days.length === 0) {
     return 'Mon-Sat'
   }
-  
+
   const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const openDayNames = shop.value.open_days.map((day: number) => dayNames[day])
-  
+
   // If all days are open, show "Everyday"
   if (openDayNames.length === 7) return 'Everyday'
-  
+
   // If consecutive days from Mon-Sat, show "Mon-Sat"
-  if (JSON.stringify(shop.value.open_days) === JSON.stringify([1,2,3,4,5,6])) {
+  if (JSON.stringify(shop.value.open_days) === JSON.stringify([1, 2, 3, 4, 5, 6])) {
     return 'Mon-Sat'
   }
-  
+
   // If consecutive days from Mon-Fri, show "Weekdays"
-  if (JSON.stringify(shop.value.open_days) === JSON.stringify([1,2,3,4,5])) {
+  if (JSON.stringify(shop.value.open_days) === JSON.stringify([1, 2, 3, 4, 5])) {
     return 'Weekdays'
   }
-  
+
   return openDayNames.join(', ')
 })
 
@@ -222,7 +226,7 @@ const initMap = () => {
   if (!shop.value?.latitude || !shop.value?.longitude) {
     console.warn('Shop coordinates not available:', {
       latitude: shop.value?.latitude,
-      longitude: shop.value?.longitude
+      longitude: shop.value?.longitude,
     })
     return
   }
@@ -230,7 +234,7 @@ const initMap = () => {
   // Validate coordinates
   const lat = Number(shop.value.latitude)
   const lng = Number(shop.value.longitude)
-  
+
   if (isNaN(lat) || isNaN(lng)) {
     console.error('Invalid coordinates:', { lat, lng })
     return
@@ -251,7 +255,7 @@ const initMap = () => {
         style: 'mapbox://styles/mapbox/streets-v11',
         center: [lng, lat],
         zoom: 15,
-        attributionControl: true
+        attributionControl: true,
       })
 
       // Add navigation controls
@@ -266,8 +270,7 @@ const initMap = () => {
       `
 
       // Create a popup
-      const popup = new mapboxgl.Popup({ offset: 25 })
-        .setHTML(popupContent)
+      const popup = new mapboxgl.Popup({ offset: 25 }).setHTML(popupContent)
 
       // Create custom marker element
       const markerEl = document.createElement('div')
@@ -293,7 +296,7 @@ const initMap = () => {
       // Add marker with popup
       marker = new mapboxgl.Marker({
         element: markerEl,
-        anchor: 'bottom'
+        anchor: 'bottom',
       })
         .setLngLat([lng, lat])
         .setPopup(popup)
@@ -314,7 +317,6 @@ const initMap = () => {
       map.on('error', (e) => {
         console.error('Mapbox error:', e)
       })
-
     } catch (error) {
       console.error('Error initializing Mapbox:', error)
     }
@@ -322,15 +324,19 @@ const initMap = () => {
 }
 
 // Watch for shop data changes and initialize map when coordinates are available
-watch(() => shop.value, (newShop) => {
-  if (newShop?.latitude && newShop?.longitude && !mapInitialized.value) {
-    console.log('Shop data loaded with coordinates, initializing map...')
-    // Small delay to ensure DOM is fully rendered
-    setTimeout(() => {
-      initMap()
-    }, 500)
-  }
-}, { deep: true })
+watch(
+  () => shop.value,
+  (newShop) => {
+    if (newShop?.latitude && newShop?.longitude && !mapInitialized.value) {
+      console.log('Shop data loaded with coordinates, initializing map...')
+      // Small delay to ensure DOM is fully rendered
+      setTimeout(() => {
+        initMap()
+      }, 500)
+    }
+  },
+  { deep: true },
+)
 
 // Load all data
 const initializeAfterDataLoad = async () => {
@@ -386,13 +392,11 @@ const isOwner = computed(() => {
 // Check if shop has valid coordinates
 const hasValidCoordinates = computed(() => {
   if (!shop.value?.latitude || !shop.value?.longitude) return false
-  
+
   const lat = Number(shop.value.latitude)
   const lng = Number(shop.value.longitude)
-  
-  return !isNaN(lat) && !isNaN(lng) && 
-         lat >= -90 && lat <= 90 && 
-         lng >= -180 && lng <= 180
+
+  return !isNaN(lat) && !isNaN(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180
 })
 </script>
 
@@ -403,7 +407,7 @@ const hasValidCoordinates = computed(() => {
       <v-btn icon @click="router.back()">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-        <v-toolbar-title><strong>Shop Details</strong></v-toolbar-title>
+      <v-toolbar-title><strong>Shop Details</strong></v-toolbar-title>
       <v-spacer />
       <v-btn
         icon
@@ -459,7 +463,7 @@ const hasValidCoordinates = computed(() => {
 
           <div class="mt-2 text-body-2">
             <p>
-              <v-icon small start>mdi-clock</v-icon> 
+              <v-icon small start>mdi-clock</v-icon>
               <span v-if="shop?.open_time && shop?.close_time">
                 {{ formatTime12Hour(shop.open_time) }} – {{ formatTime12Hour(shop.close_time) }}
               </span>
@@ -490,7 +494,8 @@ const hasValidCoordinates = computed(() => {
           <h3 class="text-h6 mb-2">Location</h3>
           <div id="shop-map"></div>
           <div class="text-caption text-medium-emphasis mt-1 text-center">
-            Coordinates: {{ Number(shop.latitude).toFixed(6) }}, {{ Number(shop.longitude).toFixed(6) }}
+            Coordinates: {{ Number(shop.latitude).toFixed(6) }},
+            {{ Number(shop.longitude).toFixed(6) }}
           </div>
         </v-container>
 
@@ -508,7 +513,20 @@ const hasValidCoordinates = computed(() => {
         <!-- Products -->
         <v-divider></v-divider>
         <v-container>
-          <h3 class="text-h6 mb-2">Products</h3>
+          <div class="d-flex align-center justify-space-between mb-4">
+            <h3 class="text-h6 mb-0">Products</h3>
+            <v-text-field
+              v-model="searchQuery"
+              prepend-inner-icon="mdi-magnify"
+              placeholder="Search products..."
+              variant="outlined"
+              density="compact"
+              hide-details
+              clearable
+              flat
+              style="max-width: 200px"
+            />
+          </div>
 
           <template v-if="loading">
             <v-skeleton-loader v-for="i in 4" :key="i" type="image, text" class="mb-4" />
@@ -521,10 +539,17 @@ const hasValidCoordinates = computed(() => {
             </div>
           </template>
 
+          <template v-else-if="filteredProducts.length === 0">
+            <div class="empty-card">
+              <div class="empty-title">No results found</div>
+              <div class="empty-sub">Try searching for a different item.</div>
+            </div>
+          </template>
+
           <template v-else>
             <div class="product-grid">
               <div
-                v-for="item in products"
+                v-for="item in filteredProducts"
                 :key="item.id"
                 class="product-card"
                 @click="router.push(`/product/${item.id}`)"
@@ -740,12 +765,12 @@ v-main,
     grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
     gap: 20px;
   }
-  
+
   .product-title {
     font-size: 15px;
     height: 40px;
   }
-  
+
   .product-price {
     font-size: 17px;
   }
@@ -756,20 +781,20 @@ v-main,
   .product-grid {
     gap: 12px;
   }
-  
+
   .product-info {
     padding: 10px;
   }
-  
+
   .product-title {
     font-size: 13px;
     height: 34px;
   }
-  
+
   .product-price {
     font-size: 15px;
   }
-  
+
   .product-sold {
     font-size: 11px;
   }
@@ -781,25 +806,25 @@ v-main,
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
   }
-  
+
   .product-info {
     padding: 8px;
   }
-  
+
   .product-title {
     font-size: 12px;
     height: 32px;
     -webkit-line-clamp: 2;
   }
-  
+
   .product-price {
     font-size: 14px;
   }
-  
+
   .product-sold {
     font-size: 10px;
   }
-  
+
   .text-h6 {
     font-size: 16px;
     margin-bottom: 12px;
@@ -811,20 +836,20 @@ v-main,
   .product-grid {
     gap: 8px;
   }
-  
+
   .product-info {
     padding: 6px;
   }
-  
+
   .product-title {
     font-size: 11px;
     height: 28px;
   }
-  
+
   .product-price {
     font-size: 13px;
   }
-  
+
   .product-sold {
     font-size: 9px;
   }
@@ -835,7 +860,7 @@ v-main,
   .product-grid {
     grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
   }
-  
+
   .product-card :deep(.v-img) {
     aspect-ratio: 16 / 9; /* Wider aspect ratio for landscape */
   }
@@ -868,7 +893,7 @@ v-main,
 /* Mapbox controls styling */
 :deep(.mapboxgl-ctrl-group) {
   border-radius: 8px !important;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1) !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
 }
 
 :deep(.mapboxgl-ctrl-group button) {
@@ -891,7 +916,7 @@ v-main,
 :deep(.mapboxgl-popup-content) {
   border-radius: 8px !important;
   padding: 0 !important;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.15) !important;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15) !important;
 }
 
 :deep(.mapboxgl-popup-close-button) {
