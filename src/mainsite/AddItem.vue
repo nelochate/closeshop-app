@@ -520,7 +520,6 @@ const removeOldImages = async (urls: string[]) => {
   }
 }
 
-// ------------------ Submit form ------------------
 const submitForm = async () => {
   if (isSubmitting.value) return
   isSubmitting.value = true
@@ -616,7 +615,8 @@ const submitForm = async () => {
 
       showSnackbar('Product update saved successfully!', 'success')
       alert('Product update saved successfully!')
-      router.push({
+      // Use replace instead of push to avoid back button loop
+      router.replace({
         name: 'productlist',
         query: {
           updated: '1',
@@ -640,7 +640,8 @@ const submitForm = async () => {
 
       showSnackbar('Product added successfully!', 'success')
       alert('Product added successfully!')
-      resetForm()
+      // Use replace instead of push to avoid back button loop
+      router.replace({ name: 'productlist' })
     }
   } catch (err: any) {
     console.error('Error saving product:', err)
@@ -651,7 +652,6 @@ const submitForm = async () => {
     isSubmitting.value = false
   }
 }
-
 // ------------------ Reset form ------------------
 const resetForm = () => {
   productName.value = ''

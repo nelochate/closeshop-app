@@ -7,12 +7,7 @@ const router = useRouter()
 const route = useRoute()
 
 const goBack = () => {
-  // Check if previous route was usershop
-  if (route.query.from === 'usershop' || document.referrer.includes('usershop')) {
-    router.push({ name: 'usershop' })
-  } else {
-    router.back()
-  }
+  router.back()
 }
 
 type Product = {
