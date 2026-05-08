@@ -574,14 +574,14 @@ const submitForm = async () => {
         .single()
       if (fetchError) throw fetchError
 
-      // ✅ SINGLE UPDATE with stock included
+      // SINGLE UPDATE with stock included
       const { data: updatedProduct, error: updateError } = await supabase
         .from('products')
         .update({
           prod_name: productName.value,
           prod_description: description.value,
           price: price.value,
-          stock: stockValue,  // ✅ Stock updated here, not separately
+          stock: stockValue,
           main_img_urls: finalImageUrls,
           sizes: hasSizes.value ? selectedSizes.value : [],
           varieties: hasVarieties.value ? varietyData : [],
@@ -597,7 +597,6 @@ const submitForm = async () => {
       
       if (savedStockValue !== stockValue) {
         console.warn(`Stock mismatch: expected ${stockValue}, got ${savedStockValue}`)
-        // Don't throw error, just show warning - the stock was saved but something modified it
         showSnackbar(`Product updated, but stock changed from ${stockValue} to ${savedStockValue}. Please verify.`, 'error')
       } else {
         showSnackbar('Product update saved successfully!', 'success')
@@ -617,8 +616,8 @@ const submitForm = async () => {
         }
       }
 
-      // Navigate back
-      router.push({
+      // ✅ CHANGED: Use replace instead of push to avoid history issues
+      router.replace({
         name: 'productlist',
         query: {
           updated: '1',

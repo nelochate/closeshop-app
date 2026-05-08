@@ -5,7 +5,11 @@ import { supabase } from '@/utils/supabase'
 
 const router = useRouter()
 const route = useRoute()
-const goBack = () => router.back()
+
+// ✅ CHANGED: Go to dashboard instead of back
+const goToDashboard = () => {
+  router.push({  name: 'usershop', }) // Change 'dashboard' to your actual dashboard route name
+}
 
 type Product = {
   id: string
@@ -244,7 +248,7 @@ const editProduct = (id: string) => {
 }
 
 // Add window resize listener
-onMounted(() => {
+onMounted(async () => {
   if (route.query.updated === '1') {
     const updatedProductId = route.query.productId ? String(route.query.productId) : ''
     const updatedStock = Number(route.query.stock)
@@ -257,12 +261,16 @@ onMounted(() => {
     }
   }
 
-  fetchProducts()
+  await fetchProducts()
+  
+  // ✅ CHANGED: Show success message and clean up query params
   if (route.query.updated === '1') {
     const savedStock = route.query.stock ? ` Stock is now ${route.query.stock} pcs.` : ''
     showSnackbar(`Product update saved successfully.${savedStock}`, 'success')
-    router.replace({ name: 'productlist' })
+    // Clean up the URL without affecting navigation history
+    router.replace({ name: 'productlist', query: {} })
   }
+  
   window.addEventListener('resize', updateMobileState)
 })
 
@@ -275,7 +283,8 @@ onUnmounted(() => {
 <template>
   <v-app>
     <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
-      <v-btn icon @click="goBack" size="small" class="back-btn">
+      <!-- ✅ CHANGED: Back button now goes to dashboard -->
+      <v-btn icon @click="goToDashboard" size="small" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
       <v-toolbar-title class="text-subtitle-1 font-weight-bold">
