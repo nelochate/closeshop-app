@@ -96,7 +96,7 @@ const boundaryLoading = ref(false)
 const hasValidLocation = ref(false)
 const selectedShopId = ref<string | null>(null)
 const showBoundary = ref(true)
-const heroPaddingTop = ref('env(safe-area-inset-top)')
+const heroPaddingTop = ref('var(--app-safe-area-top, env(safe-area-inset-top, 0px))')
 const boundaryQueryCache = new Map<string, any[]>()
 const reverseGeocodeCache = new Map<string, ResolvedLocationResult>()
 const PRIMARY_SERVICE_AREA = {
@@ -3611,10 +3611,10 @@ onUnmounted(() => {
 
 /* Hero section - UPDATED for Android spacing */
 :root {
-  --sat: env(safe-area-inset-top);
-  --sar: env(safe-area-inset-right);
-  --sab: env(safe-area-inset-bottom);
-  --sal: env(safe-area-inset-left);
+  --sat: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  --sar: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
+  --sab: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  --sal: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
 }
 
 .hero {
@@ -3987,8 +3987,8 @@ onUnmounted(() => {
 /* Mobile Optimizations - UPDATED for better Android spacing */
 @media (max-width: 768px) {
   .hero {
-    padding: calc(20px + env(safe-area-inset-top)) 12px 16px 12px; /* Increased top padding */
-    min-height: calc(90px + env(safe-area-inset-top)); /* Taller on mobile */
+    padding: calc(20px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 12px 16px 12px; /* Increased top padding */
+    min-height: calc(90px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))); /* Taller on mobile */
   }
 
   .hero-row {
@@ -3998,7 +3998,7 @@ onUnmounted(() => {
 
   .main-content {
     height: calc(
-      100vh - 150px - env(safe-area-inset-top)
+      100vh - 150px - var(--app-safe-area-top, env(safe-area-inset-top, 0px))
     ) !important; /* Adjusted for taller header */
   }
 
@@ -4014,7 +4014,7 @@ onUnmounted(() => {
   }
 
   .route-selection-panel.bottom-panel {
-    bottom: calc(80px + env(safe-area-inset-bottom)); /* Account for safe area */
+    bottom: calc(80px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))); /* Account for safe area */
     width: 95%;
     max-width: 380px;
   }
@@ -4031,14 +4031,14 @@ onUnmounted(() => {
 
   /* Re-open Route Panel Button adjustments for mobile */
   .reopen-route-btn {
-    bottom: calc(80px + env(safe-area-inset-bottom));
+    bottom: calc(80px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
     width: 52px !important;
     height: 52px !important;
   }
 
   .map-controls-container {
     bottom: 140px; /* Adjusted for mobile */
-    right: max(12px, env(safe-area-inset-right));
+    right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   /* When route panel is open, move controls higher */
@@ -4076,8 +4076,8 @@ onUnmounted(() => {
 /* Extra small devices */
 @media (max-width: 480px) {
   .hero {
-    padding: calc(18px + env(safe-area-inset-top)) 10px 14px 10px;
-    min-height: calc(85px + env(safe-area-inset-top));
+    padding: calc(18px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 10px 14px 10px;
+    min-height: calc(85px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 
   .hero-row {
@@ -4103,7 +4103,7 @@ onUnmounted(() => {
   }
 
   .route-selection-panel.bottom-panel {
-    bottom: calc(70px + env(safe-area-inset-bottom));
+    bottom: calc(70px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
     max-width: 340px;
   }
 
@@ -4114,7 +4114,7 @@ onUnmounted(() => {
 
   /* Re-open Route Panel Button adjustments for extra small */
   .reopen-route-btn {
-    bottom: calc(75px + env(safe-area-inset-bottom));
+    bottom: calc(75px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
     width: 48px !important;
     height: 48px !important;
   }
@@ -4134,8 +4134,8 @@ onUnmounted(() => {
 /* Landscape orientation adjustments */
 @media (max-height: 600px) and (orientation: landscape) {
   .hero {
-    padding: calc(12px + env(safe-area-inset-top)) 12px 8px 12px;
-    min-height: calc(65px + env(safe-area-inset-top));
+    padding: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 12px 8px 12px;
+    min-height: calc(65px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 
   .hero-row {
@@ -4143,7 +4143,7 @@ onUnmounted(() => {
   }
 
   .main-content {
-    height: calc(100vh - 110px - env(safe-area-inset-top)) !important;
+    height: calc(100vh - 110px - var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 
   .route-selection-panel.bottom-panel {
@@ -4182,20 +4182,20 @@ onUnmounted(() => {
 @supports (-webkit-touch-callout: none) {
   .hero {
     padding-top: calc(20px + constant(safe-area-inset-top)) !important;
-    padding-top: calc(20px + env(safe-area-inset-top)) !important;
+    padding-top: calc(20px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
     min-height: calc(80px + constant(safe-area-inset-top)) !important;
-    min-height: calc(80px + env(safe-area-inset-top)) !important;
+    min-height: calc(80px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 
   .reopen-route-btn {
     bottom: calc(100px + constant(safe-area-inset-bottom)) !important;
-    bottom: calc(100px + env(safe-area-inset-bottom)) !important;
+    bottom: calc(100px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
   }
 }
 
 /* Restored MapSearch overrides */
 .main-content {
-  --map-floating-offset: calc(88px + env(safe-area-inset-bottom));
+  --map-floating-offset: calc(88px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
   --map-controls-height: 112px;
   --map-controls-max-width: 390px;
 }
@@ -4205,7 +4205,7 @@ onUnmounted(() => {
   top: 12px;
   left: 0;
   right: 0;
-  padding: 0 max(12px, env(safe-area-inset-right)) 0 max(12px, env(safe-area-inset-left));
+  padding: 0 max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0 max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   z-index: 1900;
   pointer-events: none;
 }
@@ -4314,7 +4314,7 @@ onUnmounted(() => {
 
 .reopen-route-btn {
   left: auto;
-  right: max(16px, env(safe-area-inset-right));
+  right: max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   transform: none;
   bottom: calc(var(--map-floating-offset) + var(--map-controls-height) + 12px);
 }
@@ -4470,8 +4470,8 @@ onUnmounted(() => {
 }
 
 .shop-drawer-header {
-  padding: 14px calc(16px + env(safe-area-inset-right)) 16px
-    calc(16px + env(safe-area-inset-left));
+  padding: 14px calc(16px + var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 16px
+    calc(16px + var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   background: linear-gradient(180deg, rgba(214, 231, 255, 0.98) 0%, rgba(255, 255, 255, 0.99) 100%);
   border-bottom: 1px solid rgba(191, 219, 254, 0.72);
   position: relative;
@@ -4622,8 +4622,8 @@ onUnmounted(() => {
 }
 
 .shop-drawer-footer {
-  padding: 12px calc(16px + env(safe-area-inset-right)) calc(12px + env(safe-area-inset-bottom))
-    calc(16px + env(safe-area-inset-left));
+  padding: 12px calc(16px + var(--app-safe-area-right, env(safe-area-inset-right, 0px))) calc(12px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))))
+    calc(16px + var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   background: rgba(248, 250, 252, 0.94);
   border-top: 1px solid rgba(226, 232, 240, 0.9);
 }
@@ -4635,7 +4635,7 @@ onUnmounted(() => {
 
   .service-area-banner-wrap {
     top: 10px;
-    padding: 0 max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left));
+    padding: 0 max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0 max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
 
   .service-area-banner {
@@ -4651,14 +4651,14 @@ onUnmounted(() => {
   }
 
   .reopen-route-btn {
-    right: max(12px, env(safe-area-inset-right));
+    right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
     bottom: calc(var(--map-floating-offset) + var(--map-controls-height) + 10px);
     width: 52px !important;
     height: 52px !important;
   }
 
   .map-controls-container {
-    bottom: calc(82px + env(safe-area-inset-bottom));
+    bottom: calc(82px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
     width: min(calc(100% - 16px), 392px);
   }
 
@@ -4693,14 +4693,14 @@ onUnmounted(() => {
   }
 
   .shop-drawer-header {
-    padding: 12px calc(14px + env(safe-area-inset-right)) 14px
-      calc(14px + env(safe-area-inset-left));
+    padding: 12px calc(14px + var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 14px
+      calc(14px + var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
 }
 
 @media (max-width: 480px) {
   .service-area-banner-wrap {
-    padding: 0 max(8px, env(safe-area-inset-right)) 0 max(8px, env(safe-area-inset-left));
+    padding: 0 max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0 max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
 
   .service-area-banner-title {
@@ -4714,7 +4714,7 @@ onUnmounted(() => {
 
 @media (max-height: 600px) and (orientation: landscape) {
   .map-controls-container {
-    bottom: calc(72px + env(safe-area-inset-bottom));
+    bottom: calc(72px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
     width: min(calc(100% - 16px), 360px);
   }
 
@@ -4734,8 +4734,8 @@ onUnmounted(() => {
   }
 
   .shop-drawer-header {
-    padding: 8px calc(12px + env(safe-area-inset-right)) 10px
-      calc(12px + env(safe-area-inset-left));
+    padding: 8px calc(12px + var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 10px
+      calc(12px + var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
 }
 </style>

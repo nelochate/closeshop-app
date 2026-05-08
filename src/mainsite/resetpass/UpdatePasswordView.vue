@@ -344,7 +344,7 @@ onMounted(async () => {
             timeout="3000"
             location="top"
             variant="flat"
-            :style="{ marginTop: 'max(20px, env(safe-area-inset-top))' }"
+            :style="{ marginTop: 'max(20px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)))' }"
           >
             <v-icon start>mdi-check-circle</v-icon>
             {{ successMessage }}
@@ -356,7 +356,7 @@ onMounted(async () => {
             timeout="5000"
             location="top"
             variant="flat"
-            :style="{ marginTop: 'max(20px, env(safe-area-inset-top))' }"
+            :style="{ marginTop: 'max(20px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)))' }"
           >
             <v-icon start>mdi-alert-circle</v-icon>
             {{ errorMessage }}
@@ -503,10 +503,10 @@ onMounted(async () => {
 
 @supports (padding: max(0px)) {
   .v-container {
-    padding-top: max(12px, env(safe-area-inset-top));
-    padding-bottom: max(12px, env(safe-area-inset-bottom));
-    padding-left: max(16px, env(safe-area-inset-left));
-    padding-right: max(16px, env(safe-area-inset-right));
+    padding-top: max(12px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    padding-bottom: max(12px, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+    padding-left: max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    padding-right: max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 }
 </style>

@@ -1689,9 +1689,9 @@ onMounted(() => {
   position: relative;
   padding:
     0
-    max(12px, env(safe-area-inset-right, 0px))
-    calc(28px + env(safe-area-inset-bottom, 0px))
-    max(12px, env(safe-area-inset-left, 0px)) !important;
+    max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
+    calc(28px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) !important;
   background:
     radial-gradient(circle at top, rgba(102, 126, 234, 0.14), transparent 32%),
     linear-gradient(180deg, #f4f7fb 0%, #edf3f9 100%);
@@ -1703,7 +1703,7 @@ onMounted(() => {
   top: 0;
   left: 0;
   right: 0;
-  height: calc(env(safe-area-inset-top, 0px) + 28px);
+  height: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 28px);
   background: linear-gradient(135deg, #2c5f8c 0%, #5c6fd6 100%);
   z-index: 0;
 }
@@ -1720,7 +1720,7 @@ onMounted(() => {
 
 .admin-header-content {
   padding:
-    calc(clamp(18px, 3vw, 28px) + env(safe-area-inset-top, 0px))
+    calc(clamp(18px, 3vw, 28px) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)))
     clamp(18px, 3vw, 28px)
     clamp(18px, 3vw, 28px)
     clamp(18px, 3vw, 28px) !important;
@@ -1942,14 +1942,14 @@ onMounted(() => {
   .admin-dashboard-container {
     padding:
       0
-      max(10px, env(safe-area-inset-right, 0px))
-      calc(22px + env(safe-area-inset-bottom, 0px))
-      max(10px, env(safe-area-inset-left, 0px)) !important;
+      max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
+      calc(22px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+      max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) !important;
   }
 
   .admin-header-content {
     padding:
-      calc(16px + env(safe-area-inset-top, 0px))
+      calc(16px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)))
       16px
       16px
       16px !important;

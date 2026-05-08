@@ -43,10 +43,10 @@
 .email-confirmed-shell {
   min-height: 100vh;
   padding:
-    max(24px, env(safe-area-inset-top, 0px))
-    max(16px, env(safe-area-inset-right, 0px))
-    max(24px, env(safe-area-inset-bottom, 0px))
-    max(16px, env(safe-area-inset-left, 0px));
+    max(24px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)))
+    max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
+    max(24px, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
 }
 
 .email-confirmed-card {

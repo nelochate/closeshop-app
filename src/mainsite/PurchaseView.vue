@@ -2416,7 +2416,7 @@ watch(
 </script>
 
 <template>
-  <v-app>
+  <v-app class="purchase-view">
       <!-- Top App Bar -->
       <v-app-bar flat elevation="0" class="top-nav" color="#3f83c7">
         <v-btn variant="text" icon @click="$router.back()" class="back-btn">
@@ -2885,39 +2885,9 @@ watch(
             ></v-textarea>
           </v-card-text>
         </v-card>
-      </v-container>
 
-      <!-- Bottom Action Bar -->
-      <div class="bottom-action-bar">
-        <v-container class="px-3">
-          <div class="d-flex align-center justify-space-between bottom-action-content">
-            <div class="order-summary">
-              <div class="text-caption">Total Amount</div>
-              <div class="text-h5 font-weight-bold text-white">
-                {{ formatCurrency(totalPrice) }}
-              </div>
-              <div class="text-caption text-white">
-                {{ `Includes ${formatCurrency(deliveryFee)} delivery fee` }}
-              </div>
-            </div>
-            <v-btn
-              color="white"
-              size="large"
-              @click="handleCheckout"
-              :disabled="!items.length || !buyer || !address || !hasValidSelectedAddressContactNumber || isProcessing"
-              :loading="isProcessing"
-              class="checkout-btn"
-              rounded="lg"
-              elevation="2"
-            >
-              <template #prepend>
-                <v-icon>mdi-lock-check</v-icon>
-              </template>
-              {{ isProcessing ? 'Processing...' : 'Complete Order' }}
-            </v-btn>
-          </div>
-        </v-container>
-      </div>
+        <div class="purchase-bottom-spacer" aria-hidden="true"></div>
+      </v-container>
 
       <!-- Toast Notification for Copy Success -->
       <v-snackbar
@@ -3085,31 +3055,76 @@ watch(
       </v-dialog>
 
     </v-main>
+
+    <div class="purchase-bottom-system-backdrop" aria-hidden="true"></div>
+
+    <!-- Bottom Action Bar -->
+    <div class="purchase-bottom-action-shell">
+      <div class="bottom-action-bar">
+        <v-container>
+          <div class="d-flex align-center justify-space-between bottom-action-content">
+            <div class="order-summary">
+              <div class="text-caption">Total Amount</div>
+              <div class="text-h5 font-weight-bold text-white">
+                {{ formatCurrency(totalPrice) }}
+              </div>
+              <div class="text-caption text-white">
+                {{ `Includes ${formatCurrency(deliveryFee)} delivery fee` }}
+              </div>
+            </div>
+            <v-btn
+              color="white"
+              size="large"
+              @click="handleCheckout"
+              :disabled="!items.length || !buyer || !address || !hasValidSelectedAddressContactNumber || isProcessing"
+              :loading="isProcessing"
+              class="checkout-btn"
+              rounded="lg"
+              elevation="2"
+            >
+              <template #prepend>
+                <v-icon>mdi-lock-check</v-icon>
+              </template>
+              {{ isProcessing ? 'Processing...' : 'Complete Order' }}
+            </v-btn>
+          </div>
+        </v-container>
+      </div>
+    </div>
   </v-app>
 </template>
 <style scoped>
-:root {
-  --purchase-safe-top: env(safe-area-inset-top, 0px);
-  --purchase-safe-right: env(safe-area-inset-right, 0px);
-  --purchase-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --purchase-safe-left: env(safe-area-inset-left, 0px);
+.purchase-view {
+  --purchase-safe-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  --purchase-safe-right: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
+  --purchase-safe-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  --purchase-safe-left: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
+  --purchase-bottom-system-space: var(
+    --app-bottom-safe-space-active,
+    var(--app-bottom-safe-space, var(--purchase-safe-bottom))
+  );
+  --purchase-bottom-shell-gap: var(--purchase-bottom-system-space);
+  --purchase-bottom-action-height: 112px;
+  --purchase-bottom-content-padding: calc(
+    var(--purchase-bottom-action-height) + var(--purchase-bottom-system-space) + 24px
+  );
   --purchase-header-height: 56px;
   --purchase-header-offset: calc(var(--purchase-header-height) + var(--purchase-safe-top));
 }
 
 /* Top Navigation Bar - Fixed for notches */
 .top-nav {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
   z-index: 20 !important;
 }
 
 /* For iOS devices with dynamic island */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top)) !important;
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+    height: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 }
 
@@ -3138,9 +3153,9 @@ watch(
 }
 
 /* iOS support for margin-top */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   }
 }
 
@@ -3165,15 +3180,15 @@ watch(
   max-width: 800px;
   margin: 0 auto;
   padding-top: 16px !important;
-  padding-bottom: calc(132px + var(--purchase-safe-bottom)) !important;
+  padding-bottom: 24px !important;
   padding-left: max(12px, var(--purchase-safe-left)) !important;
   padding-right: max(12px, var(--purchase-safe-right)) !important;
 }
 
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .main-app {
-    margin-top: calc(56px + env(safe-area-inset-top));
-    min-height: calc(100dvh - 56px - env(safe-area-inset-top));
+    margin-top: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    min-height: calc(100dvh - 56px - var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 }
 
@@ -3202,7 +3217,7 @@ watch(
 .note-card2 {
   border: 1px solid #e5e7eb;
   transition: all 0.3s ease;
-  margin-bottom: 170px !important;
+  margin-bottom: 0 !important;
 }
 
 .delivery-card:hover,
@@ -3397,17 +3412,56 @@ watch(
 }
 
 /* Bottom Action Bar */
-.bottom-action-bar {
+.purchase-bottom-spacer {
+  height: var(--purchase-bottom-content-padding);
+  pointer-events: none;
+}
+
+.purchase-bottom-system-backdrop {
   position: fixed;
-  bottom: 0;
   left: 0;
   right: 0;
-  background: linear-gradient(135deg, #4a92db 0%, #5290cf 100%);
-  padding: 12px max(12px, var(--purchase-safe-right)) calc(12px + var(--purchase-safe-bottom))
-    max(12px, var(--purchase-safe-left));
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
+  bottom: 0;
+  height: 0;
+  background: transparent;
+  z-index: 950;
+  pointer-events: none;
+}
+
+:global(.app-android-native) .purchase-bottom-system-backdrop {
+  height: var(
+    --app-navigation-backdrop-height-active,
+    var(--app-navigation-backdrop-height, var(--purchase-bottom-system-space))
+  );
+  background: #000;
+}
+
+.purchase-bottom-action-shell {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
   z-index: 1000;
+  padding-bottom: var(--purchase-bottom-shell-gap);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+:global(.app-android-three-button-nav) .purchase-bottom-action-shell {
+  bottom: var(--app-bottom-nav-lift-active, var(--app-bottom-nav-lift, 0px));
+  --purchase-bottom-shell-gap: var(
+    --app-android-nav-extra-space-active,
+    var(--app-android-nav-extra-space, 0px)
+  );
+}
+
+.bottom-action-bar {
+  background: linear-gradient(135deg, #4a92db 0%, #5290cf 100%);
+  padding: 12px max(12px, var(--purchase-safe-right)) 12px max(12px, var(--purchase-safe-left));
+  min-height: var(--purchase-bottom-action-height);
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.15);
   backdrop-filter: blur(16px);
+  pointer-events: auto;
 }
 
 .bottom-action-bar :deep(.v-container) {
@@ -3591,9 +3645,16 @@ watch(
 
 /* Responsive Design */
 @media (max-width: 600px) {
+  .purchase-view {
+    --purchase-bottom-action-height: 136px;
+    --purchase-bottom-content-padding: calc(
+      var(--purchase-bottom-action-height) + var(--purchase-bottom-system-space) + 20px
+    );
+  }
+
   .main-container {
     padding-top: 12px !important;
-    padding-bottom: calc(148px + var(--purchase-safe-bottom)) !important;
+    padding-bottom: 20px !important;
   }
 
   .options-grid {

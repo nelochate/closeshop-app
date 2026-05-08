@@ -144,10 +144,10 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding:
-    max(16px, env(safe-area-inset-top))
-    max(16px, env(safe-area-inset-right))
-    max(16px, env(safe-area-inset-bottom))
-    max(16px, env(safe-area-inset-left));
+    max(16px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)))
+    max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
+    max(16px, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
 }
 
 /* CARD */

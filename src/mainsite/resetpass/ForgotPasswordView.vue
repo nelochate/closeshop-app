@@ -197,7 +197,7 @@ const goToLogin = () => {
         timeout="5000"
         location="top"
         variant="flat"
-        :style="{ marginTop: 'max(20px, env(safe-area-inset-top))' }"
+        :style="{ marginTop: 'max(20px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)))' }"
       >
         <v-icon start>mdi-check-circle</v-icon>
         {{ successMessage }}
@@ -209,7 +209,7 @@ const goToLogin = () => {
         timeout="5000"
         location="top"
         variant="flat"
-        :style="{ marginTop: 'max(20px, env(safe-area-inset-top))' }"
+        :style="{ marginTop: 'max(20px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)))' }"
       >
         <v-icon start>mdi-alert-circle</v-icon>
         {{ errorMessage }}
@@ -273,7 +273,7 @@ const goToLogin = () => {
   top: 0;
   left: 0;
   right: 0;
-  padding: env(safe-area-inset-top) 12px 0 12px;
+  padding: var(--app-safe-area-top, env(safe-area-inset-top, 0px)) 12px 0 12px;
   z-index: 100;
   pointer-events: none;
 }
@@ -283,7 +283,7 @@ const goToLogin = () => {
   background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
   transition: all 0.3s ease;
-  margin-top: max(12px, env(safe-area-inset-top));
+  margin-top: max(12px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
 }
 
 .back-to-login-btn:hover {
@@ -352,14 +352,14 @@ const goToLogin = () => {
     font-size: 14px;
   }
   .back-to-login-btn {
-    margin-top: max(8px, env(safe-area-inset-top));
+    margin-top: max(8px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 }
 
 @supports (padding: max(0px)) {
   .back-button-container {
-    padding-left: max(12px, env(safe-area-inset-left));
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    padding-right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 }
 </style> 

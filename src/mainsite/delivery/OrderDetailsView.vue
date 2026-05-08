@@ -1380,7 +1380,7 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 100;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: rgba(11, 37, 69, 0.92);
   color: white;
   box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
@@ -1389,8 +1389,8 @@ onUnmounted(() => {
 .header-section__inner {
   max-width: 1180px;
   margin: 0 auto;
-  padding: 12px max(16px, env(safe-area-inset-left, 0px)) 12px
-    max(16px, env(safe-area-inset-right, 0px));
+  padding: 12px max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 12px
+    max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
 }
 
 .header-section__lead {
@@ -1410,7 +1410,7 @@ onUnmounted(() => {
 }
 
 .order-details-container {
-  padding-bottom: calc(180px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(180px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .order-status-section {
@@ -1650,8 +1650,8 @@ onUnmounted(() => {
   right: 0;
   bottom: 0;
   z-index: 120;
-  padding: 12px max(16px, env(safe-area-inset-left, 0px))
-    calc(12px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-right, 0px));
+  padding: 12px max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)))
+    calc(12px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))) max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: linear-gradient(180deg, rgba(245, 247, 250, 0), rgba(245, 247, 250, 0.88) 28%);
   pointer-events: none;
 }
@@ -1754,8 +1754,8 @@ onUnmounted(() => {
 
 @media (max-width: 600px) {
   .header-section__inner {
-    padding: 10px max(12px, env(safe-area-inset-left, 0px)) 10px
-      max(12px, env(safe-area-inset-right, 0px));
+    padding: 10px max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 10px
+      max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .page-title {
@@ -1789,12 +1789,12 @@ onUnmounted(() => {
   }
 
   .order-details-container {
-    padding-bottom: calc(220px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(220px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
   }
 
   .delivery-action-bar {
-    padding: 10px max(12px, env(safe-area-inset-left, 0px))
-      calc(10px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-right, 0px));
+    padding: 10px max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)))
+      calc(10px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))) max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .delivery-action-bar__inner {

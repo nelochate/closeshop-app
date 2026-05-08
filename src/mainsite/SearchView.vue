@@ -168,7 +168,7 @@ const showEmptyState = computed(() =>
   <v-app>
     <v-main class="page">
       <!-- 🔍 Header -->
-      <v-sheet class="hero">
+      <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
         <div class="hero-row">
           <v-btn icon @click="goBack" class="back-btn" aria-label="Go Back">
             <v-icon>mdi-arrow-left</v-icon>
@@ -299,27 +299,48 @@ const showEmptyState = computed(() =>
   min-height: 100vh;
 }
 
-/* 🔵 HERO HEADER */
+/* Hero Section with Safe Area Support - COMPLETELY REWRITTEN */
 .hero {
   background: #3f83c7;
-  padding: calc(env(safe-area-inset-top) + 14px) 16px 14px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+  border-radius: 0;
+  margin: 0;
+  width: 100%;
   position: sticky;
   top: 0;
-  z-index: 20;
-  padding-top: 35px;
+  z-index: 100;
+  box-sizing: border-box;
+  /* Dynamic padding - will be overridden by inline style */
+  padding: 12px 16px 16px 16px;
+  /* Fallback padding */
+  padding-top: 12px;
+  /* Add a subtle shadow for depth */
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+}
+
+/* For devices with notches/cutouts - CSS only fallback */
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
+  .hero {
+    padding-top: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+  }
+}
+
+/* For iOS devices with dynamic island */
+@supports (padding-top: constant(safe-area-inset-top)) {
+  .hero {
+    padding-top: calc(12px + constant(safe-area-inset-top));
+  }
 }
 
 .hero-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   width: 100%;
   max-width: 720px;
+  margin: 0 auto;
 }
+
+
 
 .back-btn {
   background: #fff !important;
@@ -536,15 +557,42 @@ const showEmptyState = computed(() =>
   color: #6b7280;
 }
 
-@media (min-width: 768px) {
+/* Responsive Design - Mobile First */
+@media (max-width: 768px) {
+  .hero {
+    padding: 12px 12px 14px 12px;
+  }
+
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
+    .hero {
+      padding-top: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    }
+  }
+
+  .hero-row {
+    gap: 10px;
+  }
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 16px;
   }
 }
 
-/* 📱 MOBILE OPTIMIZATION */
+/* Extra Small Devices (phones, 480px and down) */
 @media (max-width: 480px) {
+  .hero {
+    padding: 10px 10px 12px 10px;
+  }
+
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
+    .hero {
+      padding-top: calc(10px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    }
+  }
+
+  .hero-row {
+    gap: 8px;
+  }
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;
@@ -581,8 +629,73 @@ const showEmptyState = computed(() =>
     font-size: 13px;
   }
 }
+/* Landscape Mode */
+@media (max-height: 600px) and (orientation: landscape) {
+  .hero {
+    padding: 8px 12px 10px 12px;
+  }
 
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
+    .hero {
+      padding-top: calc(8px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    }
+  }
+
+  .hero-row {
+    gap: 10px;
+  }
+}
+
+/* Tablet Devices (768px to 1024px) */
+@media (min-width: 769px) and (max-width: 1024px) {
+  .hero {
+    padding: 14px 20px 18px 20px;
+  }
+
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
+    .hero {
+      padding-top: calc(14px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    }
+  }
+
+  .hero-row {
+    max-width: 800px;
+    gap: 14px;
+  }
+}
+/* iOS-specific adjustments for notch */
+@supports (-webkit-touch-callout: none) {
+  .hero {
+    padding-top: calc(12px + constant(safe-area-inset-top)) !important;
+    padding-top: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
+  }
+
+  @media (max-width: 480px) {
+    .hero {
+      padding-top: calc(10px + constant(safe-area-inset-top)) !important;
+      padding-top: calc(10px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
+    }
+  }
+}
+
+/* Android specific adjustments */
+@media (display-notch) {
+  .hero {
+    padding-top: calc(12px + 24px);
+  }
+
+  @media (max-width: 480px) {
+    .hero {
+      padding-top: calc(10px + 24px);
+    }
+  }
+}
+
+/* Ensure the search field doesn't overflow on very small screens */
 @media (max-width: 360px) {
+  .hero-row {
+    gap: 6px;
+  }
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;

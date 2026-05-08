@@ -449,7 +449,7 @@ onUnmounted(() => {
   justify-content: center;
   align-items: flex-start;
   height: 64px;
-  padding-top: calc(env(safe-area-inset-top, 0px) + 8px);
+  padding-top: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 8px);
   background: transparent;
   transition: transform 0.18s ease, opacity 0.18s ease;
   pointer-events: none;

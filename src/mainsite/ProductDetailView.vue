@@ -931,7 +931,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <v-app>
+  <v-app class="product-detail-view">
     <!-- Snackbar for notifications -->
     <v-snackbar v-model="snackbar" :color="snackbarColor" :timeout="3000" location="top">
       {{ snackbarMessage }}
@@ -1646,46 +1646,44 @@ onUnmounted(() => {
           </div>
         </section>
 
+        <div class="product-bottom-spacer" aria-hidden="true"></div>
+
       </v-sheet>
     </v-main>
 
-        <!-- Bottom Nav -->
-    <v-bottom-navigation class="bottom-nav" fixed>
-      <v-row class="w-full pa-0 ma-0" no-gutters>
-        <template v-if="isOwner">
-          <v-col cols="12" class="pa-0">
+    <div class="product-bottom-system-backdrop" aria-hidden="true"></div>
+
+    <!-- Bottom Actions -->
+    <div class="product-bottom-action-shell">
+      <div class="product-bottom-action-bar">
+        <div
+          class="product-bottom-action-grid"
+          :class="{ 'product-bottom-action-grid--single': isOwner }"
+        >
+          <template v-if="isOwner">
             <v-btn block color="primary" class="bottom-btn" @click="goToShop(product.shop.id)">
               <v-icon left size="20">mdi-storefront-outline</v-icon>
               Visit Shop
             </v-btn>
-          </v-col>
-        </template>
+          </template>
 
-        <template v-else>
-          <!-- Chat Now -->
-          <v-col cols="4" class="pa-0">
+          <template v-else>
             <v-btn block class="bottom-btn chat-now-btn" color="#4caf50" @click="goToChat()">
               <v-icon left size="20">mdi-chat-outline</v-icon>
               Chat Now
             </v-btn>
-          </v-col>
 
-          <!-- Add to Cart - Opens Dialog -->
-          <v-col cols="4" class="pa-0">
             <v-btn
               block
               class="bottom-btn cart-btn"
-              color="#4caf50"
+              color="#fb8c00"
               @click="openAddToCartDialog()"
               :disabled="displayStock === 0"
             >
               <v-icon left size="20">mdi-cart-outline</v-icon>
               {{ displayStock === 0 ? 'Out of Stock' : 'Add to Cart' }}
             </v-btn>
-          </v-col>
 
-          <!-- Buy Now - Opens Dialog -->
-          <v-col cols="4" class="pa-0">
             <v-btn
               block
               class="bottom-btn buy-now-btn"
@@ -1695,10 +1693,10 @@ onUnmounted(() => {
             >
               Buy Now
             </v-btn>
-          </v-col>
-        </template>
-      </v-row>
-    </v-bottom-navigation>
+          </template>
+        </div>
+      </div>
+    </div>
   </v-app>
 </template>
 
@@ -1710,10 +1708,22 @@ onUnmounted(() => {
   background: #f6f8fb;
 }
 
+.product-detail-view {
+  --product-detail-bottom-bar-height: 72px;
+  --product-detail-bottom-system-space: var(
+    --app-bottom-safe-space-active,
+    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
+  );
+  --product-detail-bottom-shell-gap: var(--product-detail-bottom-system-space);
+  --product-detail-content-bottom-padding: calc(
+    var(--product-detail-bottom-bar-height) + var(--product-detail-bottom-system-space) + 44px
+  );
+  background: #f6f8fb;
+}
+
 .product-page {
   background: #f6f8fb;
   min-height: 100vh;
-  padding-bottom: 90px;
 }
 
 .product-sheet {
@@ -1736,10 +1746,10 @@ onUnmounted(() => {
 
 v-main,
 .v-main {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: max(0px, env(safe-area-inset-left));
-  padding-right: max(0px, env(safe-area-inset-right));
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-bottom: max(24px, var(--product-detail-bottom-system-space));
+  padding-left: max(0px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: #f5f7fb;
   min-height: 100vh;
   margin-top: 30px;
@@ -1749,7 +1759,7 @@ v-main,
    APP BAR
 ========================================= */
 .app-bar {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
@@ -1903,6 +1913,7 @@ v-main,
   border-radius: 20px;
   padding: 24px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+  scroll-margin-bottom: var(--product-detail-content-bottom-padding);
 }
 
 .reviews-section__header {
@@ -2220,14 +2231,73 @@ v-main,
 /* ===============================
    BOTTOM NAV
 ================================= */
-.bottom-nav {
-  border-top: 1px solid #e5e7eb;
-  background: rgba(255,255,255,0.96) !important;
-  backdrop-filter: blur(12px);
+.product-bottom-spacer {
+  height: var(--product-detail-content-bottom-padding);
+  pointer-events: none;
+}
+
+.product-bottom-system-backdrop {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 0;
+  background: transparent;
+  z-index: 950;
+  pointer-events: none;
+}
+
+:global(.app-android-native) .product-bottom-system-backdrop {
+  height: max(
+    var(--product-detail-bottom-system-space),
+    var(
+      --app-navigation-backdrop-height-active,
+      var(--app-navigation-backdrop-height, 0px)
+    )
+  );
+  background: #000000;
+}
+
+.product-bottom-action-shell {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 1000;
+  padding-bottom: var(--product-detail-bottom-shell-gap);
+  box-sizing: border-box;
+  pointer-events: none;
+}
+
+:global(.app-android-three-button-nav) .product-bottom-action-shell {
+  bottom: var(--app-bottom-nav-lift-active, var(--app-bottom-nav-lift, 0px));
+  --product-detail-bottom-shell-gap: var(
+    --app-android-nav-extra-space-active,
+    var(--app-android-nav-extra-space, 0px)
+  );
+}
+
+.product-bottom-action-bar {
+  padding: 6px max(0px, var(--app-safe-area-left, 0px)) 0
+    max(0px, var(--app-safe-area-right, 0px));
+ 
+  pointer-events: auto;
+}
+
+.product-bottom-action-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  min-height: var(--product-detail-bottom-bar-height);
+  width: 100%;
+}
+
+.product-bottom-action-grid--single {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .bottom-btn {
-  height: 64px !important;
+  height: 100% !important;
+  min-height: var(--product-detail-bottom-bar-height) !important;
   font-weight: 700;
   text-transform: none !important;
   border-radius: 0 !important;
@@ -2278,6 +2348,13 @@ v-main,
    MOBILE
 ================================= */
 @media (max-width: 768px) {
+  .product-detail-view {
+    --product-detail-bottom-bar-height: 68px;
+    --product-detail-content-bottom-padding: calc(
+      var(--product-detail-bottom-bar-height) + var(--product-detail-bottom-system-space) + 36px
+    );
+  }
+
   .product-sheet {
     padding: 12px;
   }
@@ -2333,7 +2410,6 @@ v-main,
   }
 
   .bottom-btn {
-    height: 58px !important;
     font-size: 11px;
   }
 }

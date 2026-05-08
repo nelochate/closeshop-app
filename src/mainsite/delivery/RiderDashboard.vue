@@ -1289,14 +1289,14 @@ onUnmounted(() => {
 .rider-dashboard-main {
   background: linear-gradient(135deg, #f5f7fa 0%, #ffffff 100%);
   min-height: 100dvh;
-  padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(80px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .header-section {
   position: sticky;
   top: 0;
   z-index: 100;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: rgba(11, 37, 69, 0.92);
   color: white;
   box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
@@ -1305,8 +1305,8 @@ onUnmounted(() => {
 .header-section__inner {
   max-width: 1280px;
   margin: 0 auto;
-  padding: 12px max(16px, env(safe-area-inset-left, 0px)) 12px
-    max(16px, env(safe-area-inset-right, 0px));
+  padding: 12px max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 12px
+    max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1863,8 +1863,8 @@ onUnmounted(() => {
 
 @media (max-width: 600px) {
   .header-section__inner {
-    padding: 10px max(12px, env(safe-area-inset-left, 0px)) 10px
-      max(12px, env(safe-area-inset-right, 0px));
+    padding: 10px max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 10px
+      max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
     align-items: flex-start;
   }
 

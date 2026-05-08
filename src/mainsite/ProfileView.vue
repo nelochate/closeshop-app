@@ -1334,6 +1334,7 @@ onBeforeRouteUpdate((to, from, next) => {
 
 .profile-main {
   background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+  --profile-content-bottom-padding: calc(112px + var(--app-bottom-safe-space, 0px));
 }
 
 /* Action Buttons Container - Top Left */
@@ -1377,13 +1378,13 @@ onBeforeRouteUpdate((to, from, next) => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: max(16px, env(safe-area-inset-top)) 16px 0 0; /* Changed: removed left padding */
+  padding: max(16px, var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 16px 0 0; /* Changed: removed left padding */
   width: 100%;
   background: transparent;
 
   /* For devices with notches, add extra padding */
-  padding-top: max(20px, env(safe-area-inset-top));
-  padding-right: max(16px, env(safe-area-inset-right));
+  padding-top: max(20px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+  padding-right: max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   padding-left: 0; /* Added: no left padding */
 }
 
@@ -1699,8 +1700,9 @@ onBeforeRouteUpdate((to, from, next) => {
 
 /* Enhanced Content Section */
 .content-section {
-  padding: 24px 16px;
+  padding: 24px 16px var(--profile-content-bottom-padding);
   min-height: 400px;
+  scroll-padding-bottom: var(--profile-content-bottom-padding);
 }
 
 .section-loading {
@@ -1723,6 +1725,8 @@ onBeforeRouteUpdate((to, from, next) => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+  padding-bottom: 8px;
+  scroll-margin-bottom: var(--profile-content-bottom-padding);
 }
 
 .order-card {
@@ -1892,6 +1896,7 @@ onBeforeRouteUpdate((to, from, next) => {
   justify-content: center;
   padding: 80px 20px;
   text-align: center;
+  scroll-margin-bottom: var(--profile-content-bottom-padding);
 }
 
 .empty-icon {
@@ -1993,9 +1998,9 @@ onBeforeRouteUpdate((to, from, next) => {
     gap: 16px;
   }
   .top-actions-container {
-    padding-top: max(16px, env(safe-area-inset-top));
+    padding-top: max(16px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     padding-left: 0; /* Added: no left padding on mobile */
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding-right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .shop-btn {
@@ -2086,9 +2091,9 @@ onBeforeRouteUpdate((to, from, next) => {
     gap: 14px;
   }
   .top-actions-container {
-    padding-top: max(12px, env(safe-area-inset-top));
+    padding-top: max(12px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     padding-left: 0; /* Added: no left padding */
-    padding-right: max(12px, env(safe-area-inset-right));
+    padding-right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .shop-btn {
@@ -2170,7 +2175,7 @@ onBeforeRouteUpdate((to, from, next) => {
   }
 
   .content-section {
-    padding: 20px 12px;
+    padding: 20px 12px var(--profile-content-bottom-padding);
   }
 
   .order-header {
@@ -2204,9 +2209,9 @@ onBeforeRouteUpdate((to, from, next) => {
     gap: 12px;
   }
   .top-actions-container {
-    padding-top: max(10px, env(safe-area-inset-top));
+    padding-top: max(10px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     padding-left: 0; /* Added: no left padding */
-    padding-right: max(10px, env(safe-area-inset-right));
+    padding-right: max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .shop-btn {

@@ -1125,7 +1125,7 @@ onUnmounted(async () => {
   background: rgba(255, 255, 255, 0.94);
   backdrop-filter: blur(18px);
   border-left: 1px solid rgba(53, 77, 124, 0.08);
-  padding-bottom: calc(22px + env(safe-area-inset-bottom, 0px));
+  padding-bottom: calc(22px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .tracking-card--panel-collapsed .tracking-stage {
@@ -1615,7 +1615,7 @@ onUnmounted(async () => {
 
   .tracking-card--fullscreen:not(.tracking-card--panel-collapsed) .tracking-panel {
     max-height: min(52dvh, 500px);
-    padding: 16px 16px calc(18px + env(safe-area-inset-bottom, 0px));
+    padding: 16px 16px calc(18px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
   }
 
   :deep(.tracking-marker__bubble) {
