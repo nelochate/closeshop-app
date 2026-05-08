@@ -37,7 +37,7 @@ const PRIMARY_SERVICE_AREA = {
   cityName: 'Butuan City',
   provinceName: 'Agusan del Norte',
 }
-const heroPaddingTop = ref('env(safe-area-inset-top)')
+const heroPaddingTop = ref('var(--app-safe-area-top, env(safe-area-inset-top, 0px))')
 let homepageInitialized = false
 let networkStatusListener = null
 let surveyBubbleTimeout = null
@@ -60,7 +60,7 @@ const handleRefresh = async () => {
 
 const updateSafeAreaInsets = () => {
   const computedStyle = getComputedStyle(document.documentElement)
-  const topInset = computedStyle.getPropertyValue('env(safe-area-inset-top)')
+  const topInset = computedStyle.getPropertyValue('--app-safe-area-top')
 
   if (topInset && topInset !== '0px') {
     heroPaddingTop.value = `calc(12px + ${topInset})`
@@ -1027,7 +1027,7 @@ const hotPicks = computed(() => {
 <style scoped>
 .page {
   background: #f5f7fa;
-  padding-bottom: 96px;
+  padding-bottom: calc(104px + var(--app-bottom-safe-space, 0px));
   min-height: 100vh;
 }
 
@@ -1066,9 +1066,9 @@ const hotPicks = computed(() => {
 }
 
 /* For devices with notches/cutouts - CSS only fallback */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .hero {
-    padding-top: calc(12px + env(safe-area-inset-top));
+    padding-top: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 }
 
@@ -1197,9 +1197,9 @@ const hotPicks = computed(() => {
     padding: 12px 12px 14px 12px;
   }
 
-  @supports (padding-top: env(safe-area-inset-top)) {
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
     .hero {
-      padding-top: calc(12px + env(safe-area-inset-top));
+      padding-top: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     }
   }
 
@@ -1245,9 +1245,9 @@ const hotPicks = computed(() => {
     padding: 10px 10px 12px 10px;
   }
 
-  @supports (padding-top: env(safe-area-inset-top)) {
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
     .hero {
-      padding-top: calc(10px + env(safe-area-inset-top));
+      padding-top: calc(10px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     }
   }
 
@@ -1301,9 +1301,9 @@ const hotPicks = computed(() => {
     padding: 8px 12px 10px 12px;
   }
 
-  @supports (padding-top: env(safe-area-inset-top)) {
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
     .hero {
-      padding-top: calc(8px + env(safe-area-inset-top));
+      padding-top: calc(8px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     }
   }
 
@@ -1332,9 +1332,9 @@ const hotPicks = computed(() => {
     padding: 14px 20px 18px 20px;
   }
 
-  @supports (padding-top: env(safe-area-inset-top)) {
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
     .hero {
-      padding-top: calc(14px + env(safe-area-inset-top));
+      padding-top: calc(14px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     }
   }
 
@@ -1364,9 +1364,9 @@ const hotPicks = computed(() => {
     padding: 16px 24px 20px 24px;
   }
 
-  @supports (padding-top: env(safe-area-inset-top)) {
+  @supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
     .hero {
-      padding-top: calc(16px + env(safe-area-inset-top));
+      padding-top: calc(16px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
     }
   }
 
@@ -1395,13 +1395,13 @@ const hotPicks = computed(() => {
 @supports (-webkit-touch-callout: none) {
   .hero {
     padding-top: calc(12px + constant(safe-area-inset-top)) !important;
-    padding-top: calc(12px + env(safe-area-inset-top)) !important;
+    padding-top: calc(12px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 
   @media (max-width: 480px) {
     .hero {
       padding-top: calc(10px + constant(safe-area-inset-top)) !important;
-      padding-top: calc(10px + env(safe-area-inset-top)) !important;
+      padding-top: calc(10px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
     }
   }
 }
@@ -1437,7 +1437,7 @@ const hotPicks = computed(() => {
 /* Survey Bubble Styles */
 .survey-bubble-wrapper {
   position: fixed;
-  bottom: 100px;
+  bottom: calc(100px + var(--app-bottom-safe-space, 0px));
   right: 80px;
   z-index: 1000;
   animation: floatBubble 3s ease-in-out infinite;
@@ -1819,7 +1819,7 @@ const hotPicks = computed(() => {
 
 .floating-survey-wrapper {
   position: fixed;
-  bottom: 96px;
+  bottom: calc(96px + var(--app-bottom-safe-space, 0px));
   right: 20px;
   z-index: 999;
 }
@@ -1862,14 +1862,14 @@ const hotPicks = computed(() => {
 
 .survey-toolbar {
   flex: 0 0 auto;
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
 }
 
 .iframe-container {
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding-bottom: env(safe-area-inset-bottom);
+  padding-bottom: var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .survey-iframe {
@@ -1902,7 +1902,7 @@ const hotPicks = computed(() => {
   }
 
   .survey-bubble-wrapper {
-    bottom: 150px;
+    bottom: calc(150px + var(--app-bottom-safe-space, 0px));
     right: 60px;
   }
 

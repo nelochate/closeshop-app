@@ -473,24 +473,24 @@ const debugCart = () => {
 <style scoped>
 /* CSS Variables for safe area insets */
 :root {
-  --sat: env(safe-area-inset-top);
-  --sar: env(safe-area-inset-right);
-  --sab: env(safe-area-inset-bottom);
-  --sal: env(safe-area-inset-left);
+  --sat: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  --sar: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
+  --sab: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  --sal: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
 }
 
 /* Top Navigation Bar - Fixed for notches */
 .top-nav {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
 /* For iOS devices with dynamic island */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top)) !important;
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+    height: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 }
 
@@ -522,17 +522,17 @@ const debugCart = () => {
 .messages-view {
   margin-top: calc(56px + var(--sat, 0px));
   min-height: calc(100vh - 56px - var(--sat, 0px));
-  padding-bottom: 80px;
+  padding-bottom: calc(96px + var(--app-bottom-safe-space, 0px));
 }
 
 /* iOS support for margin-top */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   }
 
   .messages-view {
-    margin-top: calc(56px + env(safe-area-inset-top));
+    margin-top: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 }
 
@@ -584,20 +584,14 @@ const debugCart = () => {
 
 .checkout-bar {
   position: fixed;
-  bottom: 64px;
+  bottom: calc(72px + var(--app-bottom-safe-space, 0px));
   left: 0;
   right: 0;
   background: #fff;
   z-index: 1100;
   border-top: 1px solid #e0e0e0;
   box-shadow: 0 -2px 10px rgba(0, 0, 0, 0.08);
-}
-
-/* Safe area for notched phones */
-@supports (padding-bottom: env(safe-area-inset-bottom)) {
-  .checkout-bar {
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
+  padding-bottom: max(12px, var(--app-android-nav-extra-space, 0px));
 }
 
 /* Responsive adjustments */

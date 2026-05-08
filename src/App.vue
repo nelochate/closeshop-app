@@ -6,14 +6,12 @@ import { App as CapacitorApp } from '@capacitor/app'
 import { Capacitor } from '@capacitor/core'
 import { useRoute, useRouter } from 'vue-router'
 import { subscribeToAppRuntime } from '@/utils/appRuntime'
+import { initializeSafeAreaController, queueSafeAreaSync } from '@/utils/safeAreaController'
 import { syncGlobalStatusBar } from '@/utils/statusBar'
 
 const EXIT_CONFIRM_WINDOW_MS = 2000
 const RESUME_RECOVERY_DEBOUNCE_MS = 1200
 const RESUME_ROUTE_REMOUNT_THRESHOLD_MS = 2500
-const MAX_VIEWPORT_SAFE_INSET_PX = 48
-const KEYBOARD_INSET_THRESHOLD_PX = 120
-const DEFAULT_ANDROID_BOTTOM_CLEARANCE_PX = 16
 const ROOT_EXIT_ROUTE_NAMES = new Set(['homepage', 'login', 'admin-dashboard'])
 const STATUS_BAR_DARK_BACKDROP_EXCLUDED_ROUTE_NAMES = new Set([
   'homepage',
@@ -22,6 +20,7 @@ const STATUS_BAR_DARK_BACKDROP_EXCLUDED_ROUTE_NAMES = new Set([
   'messageview',
   'profileview',
   'login',
+  'search',
 ])
 const ROUTE_REMOUNT_ELIGIBLE_NAMES = new Set([
   'homepage',
@@ -54,6 +53,7 @@ const resumeRouteNonce = ref(0)
 const currentRouteName = computed(() => String(route.name || ''))
 const isExitRootRoute = computed(() => ROOT_EXIT_ROUTE_NAMES.has(currentRouteName.value))
 const isAndroidNative = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+const showAndroidNavigationBackdrop = computed(() => isAndroidNative)
 const showDarkStatusBarBackdrop = computed(
   () =>
     isAndroidNative &&
@@ -73,56 +73,7 @@ let lastResumeRecoveryAt = 0
 let exitResetTimeoutId = null
 let resumeRecoveryReleaseTimeoutId = null
 let resumeRecoveryInFlight = false
-let safeAreaSyncFrameId = 0
-
-const clampInset = (value) =>
-  Math.max(0, Math.min(MAX_VIEWPORT_SAFE_INSET_PX, Math.round(Number(value) || 0)))
-
-const getViewportBottomInset = () => {
-  const viewport = window.visualViewport
-  if (!viewport) {
-    return 0
-  }
-
-  const layoutHeight = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0)
-  const rawInset = Math.max(layoutHeight - (viewport.height + viewport.offsetTop), 0)
-
-  // Ignore keyboard-sized viewport reductions so the bottom nav does not jump while typing.
-  if (rawInset >= KEYBOARD_INSET_THRESHOLD_PX) {
-    return 0
-  }
-
-  return clampInset(rawInset)
-}
-
-const applySafeAreaVariables = () => {
-  const root = document.documentElement
-  const body = document.body
-  if (!root || !body) {
-    return
-  }
-
-  const viewportBottomInset = getViewportBottomInset()
-  const androidBottomClearance = isAndroidNative
-    ? Math.max(viewportBottomInset, DEFAULT_ANDROID_BOTTOM_CLEARANCE_PX)
-    : 0
-
-  root.classList.toggle('app-android-native', isAndroidNative)
-  body.classList.toggle('app-android-native', isAndroidNative)
-  root.style.setProperty('--app-safe-area-bottom-runtime', `${viewportBottomInset}px`)
-  root.style.setProperty('--app-android-bottom-clearance', `${androidBottomClearance}px`)
-}
-
-const queueSafeAreaSync = () => {
-  if (safeAreaSyncFrameId) {
-    return
-  }
-
-  safeAreaSyncFrameId = window.requestAnimationFrame(() => {
-    safeAreaSyncFrameId = 0
-    applySafeAreaVariables()
-  })
-}
+let detachSafeAreaController = null
 
 const syncRouteStatusBar = (options) => syncGlobalStatusBar(route, options)
 
@@ -309,11 +260,8 @@ watch(
 onMounted(async () => {
   cart.init()
   void syncRouteStatusBar()
+  detachSafeAreaController = initializeSafeAreaController()
   queueSafeAreaSync()
-  window.addEventListener('resize', queueSafeAreaSync, { passive: true })
-  window.addEventListener('orientationchange', queueSafeAreaSync, { passive: true })
-  window.visualViewport?.addEventListener('resize', queueSafeAreaSync)
-  window.visualViewport?.addEventListener('scroll', queueSafeAreaSync)
 
   if (!isAndroidNative) {
     return
@@ -329,14 +277,8 @@ onMounted(async () => {
 onUnmounted(() => {
   clearExitPrompt()
   clearResumeRecoveryTimer()
-  if (safeAreaSyncFrameId) {
-    window.cancelAnimationFrame(safeAreaSyncFrameId)
-    safeAreaSyncFrameId = 0
-  }
-  window.removeEventListener('resize', queueSafeAreaSync)
-  window.removeEventListener('orientationchange', queueSafeAreaSync)
-  window.visualViewport?.removeEventListener('resize', queueSafeAreaSync)
-  window.visualViewport?.removeEventListener('scroll', queueSafeAreaSync)
+  detachSafeAreaController?.()
+  detachSafeAreaController = null
 
   if (unsubscribeAppRuntime) {
     unsubscribeAppRuntime()
@@ -352,6 +294,12 @@ onUnmounted(() => {
 
   <Teleport to="body">
     <div
+      v-if="showAndroidNavigationBackdrop"
+      class="navigation-bar-backdrop"
+      aria-hidden="true"
+    ></div>
+
+    <div
       v-if="showDarkStatusBarBackdrop"
       class="status-bar-backdrop"
       aria-hidden="true"
@@ -366,6 +314,17 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.navigation-bar-backdrop {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--app-navigation-backdrop-height, var(--app-android-nav-bar-height, 0px));
+  background: #000;
+  z-index: 900;
+  pointer-events: none;
+}
+
 .status-bar-backdrop {
   position: fixed;
   top: 0;
@@ -418,12 +377,16 @@ onUnmounted(() => {
 
 <style>
 :root {
-  --app-safe-area-top: env(safe-area-inset-top, 0px);
-  --app-safe-area-right: env(safe-area-inset-right, 0px);
-  --app-safe-area-bottom: env(safe-area-inset-bottom, 0px);
-  --app-safe-area-left: env(safe-area-inset-left, 0px);
+  --app-safe-area-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --app-safe-area-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px));
+  --app-safe-area-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+  --app-safe-area-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px));
   --app-safe-area-bottom-runtime: 0px;
   --app-android-bottom-clearance: 0px;
+  --app-android-nav-bar-height: 0px;
+  --app-android-nav-extra-space: 0px;
+  --app-bottom-nav-lift: 0px;
+  --app-navigation-backdrop-height: 0px;
   --app-bottom-safe-space: max(
     var(--app-safe-area-bottom),
     var(--app-safe-area-bottom-runtime),

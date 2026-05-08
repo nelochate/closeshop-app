@@ -905,10 +905,10 @@ const addVariety = () => {
 
 v-main,
 .v-main {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: max(0px, env(safe-area-inset-left));
-  padding-right: max(0px, env(safe-area-inset-right));
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  padding-left: max(0px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: #f5f7fb;
   min-height: 100vh;
   margin-top: 20px;
@@ -918,7 +918,7 @@ v-main,
    APP BAR
 ========================================= */
 .app-bar {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;

@@ -1842,10 +1842,10 @@ const getCachedImage = (url) => {
   background:
     radial-gradient(circle at top, rgba(63, 131, 199, 0.14), transparent 38%),
     linear-gradient(180deg, #eef4f9 0%, #f8fafc 100%);
-  --chat-safe-top: env(safe-area-inset-top, 0px);
-  --chat-safe-right: env(safe-area-inset-right, 0px);
-  --chat-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --chat-safe-left: env(safe-area-inset-left, 0px);
+  --chat-safe-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  --chat-safe-right: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
+  --chat-safe-bottom: var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  --chat-safe-left: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
   --chat-header-height: calc(64px + var(--chat-safe-top));
 }
 

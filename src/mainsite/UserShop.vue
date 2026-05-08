@@ -1878,9 +1878,9 @@ const getOrderDeliveryDisplay = (order: any): string => {
 
 /* Top Bar */
 .top-bar {
-  padding-top: env(safe-area-inset-top, 0px);
-  padding-left: env(safe-area-inset-left, 0px);
-  padding-right: env(safe-area-inset-right, 0px);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-left: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
+  padding-right: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
 }
 
 /* Cover Section */
@@ -2047,11 +2047,11 @@ const getOrderDeliveryDisplay = (order: any): string => {
   }
 
   .top-bar {
-    padding-top: max(env(safe-area-inset-top), 0px);
+    padding-top: max(var(--app-safe-area-top, env(safe-area-inset-top, 0px)), 0px);
   }
 
   .v-main {
-    padding-bottom: max(env(safe-area-inset-bottom), 0px);
+    padding-bottom: max(var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)), 0px);
   }
 
   .action-buttons-wrapper {

@@ -1226,10 +1226,10 @@ onMounted(() => {
 
 v-main,
 .v-main {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: max(0px, env(safe-area-inset-left));
-  padding-right: max(0px, env(safe-area-inset-right));
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  padding-left: max(0px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: #f5f7fb;
   min-height: 100vh;
   margin-top: 20px;
@@ -1239,7 +1239,7 @@ v-main,
    APP BAR
 ========================================= */
 .app-bar {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
@@ -1446,7 +1446,7 @@ v-main,
   grid-template-columns: 48px 1fr 48px;
   align-items: center;
   gap: 12px;
-  padding: calc(18px + env(safe-area-inset-top)) 20px 0;
+  padding: calc(18px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 20px 0;
 }
 
 .camera-icon-btn {
@@ -1473,7 +1473,7 @@ v-main,
 
 .camera-status-pill {
   position: absolute;
-  top: calc(86px + env(safe-area-inset-top));
+  top: calc(86px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   left: 50%;
   z-index: 3;
   transform: translateX(-50%);
@@ -1555,7 +1555,7 @@ v-main,
   display: grid;
   grid-template-columns: 1fr auto 1fr;
   align-items: center;
-  padding: 0 24px calc(28px + env(safe-area-inset-bottom));
+  padding: 0 24px calc(28px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .camera-footer-spacer,
@@ -1680,7 +1680,7 @@ v-main,
   }
 
   .camera-header {
-    padding: calc(16px + env(safe-area-inset-top)) 16px 0;
+    padding: calc(16px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 16px 0;
   }
 
   .camera-mode-title {
@@ -1692,7 +1692,7 @@ v-main,
   }
 
   .camera-status-pill {
-    top: calc(78px + env(safe-area-inset-top));
+    top: calc(78px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 
   .camera-viewfinder {
@@ -1702,7 +1702,7 @@ v-main,
   }
 
   .camera-footer {
-    padding: 0 16px calc(24px + env(safe-area-inset-bottom));
+    padding: 0 16px calc(24px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
   }
 
   .camera-footer-hint {

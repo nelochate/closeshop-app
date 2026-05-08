@@ -302,7 +302,7 @@ const showEmptyState = computed(() =>
 /* 🔵 HERO HEADER */
 .hero {
   background: #3f83c7;
-  padding: calc(env(safe-area-inset-top) + 14px) 16px 14px;
+  padding: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 14px) 16px 14px;
   display: flex;
   align-items: center;
   justify-content: center;

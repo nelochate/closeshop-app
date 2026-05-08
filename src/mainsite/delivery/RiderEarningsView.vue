@@ -442,7 +442,7 @@ onUnmounted(() => {
   position: sticky;
   top: 0;
   z-index: 100;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: rgba(11, 37, 69, 0.92);
   color: white;
   box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
@@ -451,8 +451,8 @@ onUnmounted(() => {
 .header-section__inner {
   max-width: 960px;
   margin: 0 auto;
-  padding: 12px max(16px, env(safe-area-inset-left, 0px)) 12px
-    max(16px, env(safe-area-inset-right, 0px));
+  padding: 12px max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 12px
+    max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -491,7 +491,7 @@ onUnmounted(() => {
 .page-shell {
   max-width: 960px;
   margin: 0 auto;
-  padding: 18px 16px calc(32px + env(safe-area-inset-bottom, 0px));
+  padding: 18px 16px calc(32px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
 }
 
 .filter-row {
@@ -677,8 +677,8 @@ onUnmounted(() => {
 
 @media (max-width: 600px) {
   .header-section__inner {
-    padding: 10px max(12px, env(safe-area-inset-left, 0px)) 10px
-      max(12px, env(safe-area-inset-right, 0px));
+    padding: 10px max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 10px
+      max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .page-title {

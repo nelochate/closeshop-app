@@ -433,7 +433,7 @@ onUnmounted(() => {
   top: 0;
   z-index: 20;
   flex-shrink: 0;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: rgba(11, 37, 69, 0.92);
   backdrop-filter: blur(16px);
   box-shadow: 0 12px 28px rgba(10, 22, 40, 0.12);
@@ -441,8 +441,8 @@ onUnmounted(() => {
 
 .location-header__inner {
   width: 100%;
-  padding: 14px max(18px, env(safe-area-inset-left, 0px)) 16px
-    max(18px, env(safe-area-inset-right, 0px));
+  padding: 14px max(18px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 16px
+    max(18px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -509,7 +509,7 @@ onUnmounted(() => {
   justify-content: center;
   gap: 14px;
   text-align: center;
-  padding: 32px 20px calc(32px + env(safe-area-inset-bottom, 0px));
+  padding: 32px 20px calc(32px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
   color: #12304f;
 }
 
@@ -539,8 +539,8 @@ onUnmounted(() => {
 
 @media (max-width: 600px) {
   .location-header__inner {
-    padding: 12px max(14px, env(safe-area-inset-left, 0px)) 14px
-      max(14px, env(safe-area-inset-right, 0px));
+    padding: 12px max(14px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 14px
+      max(14px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .location-header h1 {

@@ -1650,7 +1650,7 @@ onUnmounted(() => {
     </v-main>
 
         <!-- Bottom Nav -->
-    <v-bottom-navigation class="bottom-nav" fixed>
+    <v-bottom-navigation class="bottom-nav" fixed height="64">
       <v-row class="w-full pa-0 ma-0" no-gutters>
         <template v-if="isOwner">
           <v-col cols="12" class="pa-0">
@@ -1711,9 +1711,12 @@ onUnmounted(() => {
 }
 
 .product-page {
+  --product-detail-bottom-bar-height: 64px;
+  --product-detail-content-bottom-padding: calc(
+    var(--product-detail-bottom-bar-height) + var(--app-bottom-safe-space, 0px) + 32px
+  );
   background: #f6f8fb;
   min-height: 100vh;
-  padding-bottom: 90px;
 }
 
 .product-sheet {
@@ -1736,10 +1739,13 @@ onUnmounted(() => {
 
 v-main,
 .v-main {
-  padding-top: env(safe-area-inset-top);
-  padding-bottom: env(safe-area-inset-bottom);
-  padding-left: max(0px, env(safe-area-inset-left));
-  padding-right: max(0px, env(safe-area-inset-right));
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(
+    --product-detail-content-bottom-padding,
+    var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))
+  );
+  padding-left: max(0px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: #f5f7fb;
   min-height: 100vh;
   margin-top: 30px;
@@ -1749,7 +1755,7 @@ v-main,
    APP BAR
 ========================================= */
 .app-bar {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
@@ -1903,6 +1909,7 @@ v-main,
   border-radius: 20px;
   padding: 24px;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.05);
+  scroll-margin-bottom: var(--product-detail-content-bottom-padding);
 }
 
 .reviews-section__header {
@@ -2221,9 +2228,18 @@ v-main,
    BOTTOM NAV
 ================================= */
 .bottom-nav {
-  border-top: 1px solid #e5e7eb;
-  background: rgba(255,255,255,0.96) !important;
-  backdrop-filter: blur(12px);
+  border-top: 1px solid rgba(255, 255, 255, 0.12);
+  background: #000 !important;
+  backdrop-filter: none;
+  height: calc(64px + var(--app-bottom-safe-space, 0px)) !important;
+  padding-bottom: var(--app-bottom-safe-space, 0px);
+}
+
+.bottom-nav :deep(.v-bottom-navigation__content) {
+  width: 100%;
+  box-sizing: border-box;
+  padding-left: max(0px, var(--app-safe-area-left, 0px));
+  padding-right: max(0px, var(--app-safe-area-right, 0px));
 }
 
 .bottom-btn {
@@ -2278,6 +2294,13 @@ v-main,
    MOBILE
 ================================= */
 @media (max-width: 768px) {
+  .product-page {
+    --product-detail-bottom-bar-height: 58px;
+    --product-detail-content-bottom-padding: calc(
+      var(--product-detail-bottom-bar-height) + var(--app-bottom-safe-space, 0px) + 28px
+    );
+  }
+
   .product-sheet {
     padding: 12px;
   }

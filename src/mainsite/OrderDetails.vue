@@ -2358,7 +2358,7 @@ onMounted(async () => {
 
 <style scoped>
 .order-page {
-  --order-header-offset: calc(env(safe-area-inset-top, 0px) + 60px);
+  --order-header-offset: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 60px);
   min-height: 100dvh;
   background: linear-gradient(180deg, #f6f9fc 0%, #eef4fa 100%);
 }
@@ -2367,7 +2367,7 @@ onMounted(async () => {
   position: sticky;
   top: 0;
   z-index: 20;
-  padding-top: env(safe-area-inset-top, 0px);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: rgba(11, 37, 69, 0.92);
   box-shadow: 0 12px 28px rgba(20, 44, 73, 0.16);
 }
@@ -2375,8 +2375,8 @@ onMounted(async () => {
 .order-header__inner {
   max-width: 960px;
   margin: 0 auto;
-  padding: 10px max(16px, env(safe-area-inset-left, 0px)) 12px
-    max(16px, env(safe-area-inset-right, 0px));
+  padding: 10px max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 12px
+    max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   display: flex;
   align-items: center;
 }
@@ -2419,7 +2419,7 @@ onMounted(async () => {
 .order-shell {
   max-width: 960px;
   margin: 0 auto;
-  padding: 18px 16px calc(120px + env(safe-area-inset-bottom, 0px));
+  padding: 18px 16px calc(120px + var(--app-bottom-safe-space, 0px));
 }
 
 .hero-card {
@@ -2980,9 +2980,17 @@ onMounted(async () => {
 }
 
 .action-footer {
-  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  --order-details-footer-bottom-inset: var(--app-bottom-safe-space, 0px);
+  padding: 12px 16px calc(12px + var(--order-details-footer-bottom-inset));
   border-top: 1px solid rgba(18, 48, 79, 0.08);
-  background: rgba(255, 255, 255, 0.96) !important;
+  background:
+    linear-gradient(
+      to bottom,
+      rgba(255, 255, 255, 0.96) 0,
+      rgba(255, 255, 255, 0.96) calc(100% - var(--order-details-footer-bottom-inset)),
+      #000 calc(100% - var(--order-details-footer-bottom-inset)),
+      #000 100%
+    ) !important;
   backdrop-filter: blur(18px);
 }
 
@@ -3027,12 +3035,12 @@ onMounted(async () => {
 
 @media (max-width: 720px) {
   .order-page {
-    --order-header-offset: calc(env(safe-area-inset-top, 0px) + 56px);
+    --order-header-offset: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 56px);
   }
 
   .order-header__inner {
-    padding: 8px max(12px, env(safe-area-inset-left, 0px)) 10px
-      max(12px, env(safe-area-inset-right, 0px));
+    padding: 8px max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) 10px
+      max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 
   .order-header h1 {
@@ -3040,7 +3048,7 @@ onMounted(async () => {
   }
 
   .order-shell {
-    padding: 14px 12px calc(124px + env(safe-area-inset-bottom, 0px));
+    padding: 14px 12px calc(124px + var(--app-bottom-safe-space, 0px));
   }
 
   .hero-card {

@@ -75,6 +75,14 @@ async function go(key) {
 
 const hasUnreadMessages = computed(() => messageBadgeStore.hasUnreadMessages)
 const unreadCount = computed(() => messageBadgeStore.unreadCount)
+const bottomNavInlineStyle = computed(() => ({
+  position: 'relative',
+  left: 'auto',
+  right: 'auto',
+  bottom: 'auto',
+  width: '100%',
+  maxWidth: '100%',
+}))
 </script>
 
 <template>
@@ -84,6 +92,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
       class="bot-nav"
       :height="isMobile ? '68' : '72'"
       :model-value="value"
+      :style="bottomNavInlineStyle"
       @update:modelValue="go"
       mode="horizontal"
       :grow="isMobile"
@@ -212,12 +221,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 <style scoped>
 /* Base responsive container */
 .nav-wrapper {
-  --bottom-nav-side-gap: max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
-  --bottom-nav-right-gap: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
-  --bottom-nav-bottom-gap: max(
-    18px,
-    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
-  );
+  --bottom-nav-bottom-gap: var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px));
 
   position: fixed;
   bottom: 0;
@@ -225,8 +229,7 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   right: 0;
   z-index: 1000;
   width: 100%;
-  padding: 8px var(--bottom-nav-right-gap) var(--bottom-nav-bottom-gap)
-    var(--bottom-nav-side-gap);
+  padding: 8px 0 var(--bottom-nav-bottom-gap);
   background: transparent;
   box-sizing: border-box;
   pointer-events: none;
@@ -240,18 +243,14 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 
 /* Mobile styles */
 .nav-wrapper.mobile {
-  --bottom-nav-side-gap: max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
-  --bottom-nav-right-gap: max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
-  --bottom-nav-bottom-gap: max(
-    20px,
-    var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px))
-  );
+  --bottom-nav-bottom-gap: var(--app-bottom-safe-space, env(safe-area-inset-bottom, 0px));
 
   padding-top: 6px;
 }
 
-:global(.app-android-native) .nav-wrapper.mobile {
-  --bottom-nav-bottom-gap: max(28px, var(--app-bottom-safe-space, 0px));
+:global(.app-android-three-button-nav) .nav-wrapper {
+  bottom: var(--app-bottom-nav-lift, 0px);
+  --bottom-nav-bottom-gap: var(--app-android-nav-extra-space, 0px);
 }
 
 /* Bottom Navigation Container */
@@ -264,6 +263,14 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
   border: 1px solid rgba(255, 255, 255, 0.1);
   overflow: hidden;
   pointer-events: auto;
+  align-self: stretch;
+}
+
+.bot-nav :deep(.v-bottom-navigation__content) {
+  width: 100%;
+  box-sizing: border-box;
+  padding-left: max(0px, var(--app-safe-area-left, 0px));
+  padding-right: max(0px, var(--app-safe-area-right, 0px));
 }
 
 /* Message icon wrapper for positioning */
@@ -312,9 +319,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 /* Responsive adjustments for mobile */
 @media (max-width: 380px) {
   .nav-wrapper.mobile {
-    --bottom-nav-side-gap: max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
-    --bottom-nav-right-gap: max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
-
     padding-top: 4px;
   }
 
@@ -334,9 +338,6 @@ const unreadCount = computed(() => messageBadgeStore.unreadCount)
 
 @media (max-width: 350px) {
   .nav-wrapper.mobile {
-    --bottom-nav-side-gap: max(6px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
-    --bottom-nav-right-gap: max(6px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
-
     padding-top: 3px;
   }
 

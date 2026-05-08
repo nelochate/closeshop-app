@@ -3089,27 +3089,27 @@ watch(
 </template>
 <style scoped>
 :root {
-  --purchase-safe-top: env(safe-area-inset-top, 0px);
-  --purchase-safe-right: env(safe-area-inset-right, 0px);
-  --purchase-safe-bottom: env(safe-area-inset-bottom, 0px);
-  --purchase-safe-left: env(safe-area-inset-left, 0px);
+  --purchase-safe-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  --purchase-safe-right: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
+  --purchase-safe-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  --purchase-safe-left: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
   --purchase-header-height: 56px;
   --purchase-header-offset: calc(var(--purchase-header-height) + var(--purchase-safe-top));
 }
 
 /* Top Navigation Bar - Fixed for notches */
 .top-nav {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
   z-index: 20 !important;
 }
 
 /* For iOS devices with dynamic island */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top)) !important;
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+    height: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 }
 
@@ -3138,9 +3138,9 @@ watch(
 }
 
 /* iOS support for margin-top */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   }
 }
 
@@ -3170,10 +3170,10 @@ watch(
   padding-right: max(12px, var(--purchase-safe-right)) !important;
 }
 
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .main-app {
-    margin-top: calc(56px + env(safe-area-inset-top));
-    min-height: calc(100dvh - 56px - env(safe-area-inset-top));
+    margin-top: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
+    min-height: calc(100dvh - 56px - var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
   }
 }
 

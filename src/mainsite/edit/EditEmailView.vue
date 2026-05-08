@@ -89,24 +89,24 @@ const saveEmail = async () => {
 <style scoped>
 /* CSS Variables for safe area insets */
 :root {
-  --sat: env(safe-area-inset-top);
-  --sar: env(safe-area-inset-right);
-  --sab: env(safe-area-inset-bottom);
-  --sal: env(safe-area-inset-left);
+  --sat: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  --sar: var(--app-safe-area-right, env(safe-area-inset-right, 0px));
+  --sab: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  --sal: var(--app-safe-area-left, env(safe-area-inset-left, 0px));
 }
 
 /* Top Navigation Bar - Fixed for notches */
 .top-nav {
-  padding-top: env(safe-area-inset-top);
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
 /* For iOS devices with dynamic island */
-@supports (padding-top: env(safe-area-inset-top)) {
+@supports (padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px))) {
   .top-nav {
-    padding-top: env(safe-area-inset-top);
-    height: calc(56px + env(safe-area-inset-top)) !important;
+    padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+    height: calc(56px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
   }
 }
 
