@@ -566,7 +566,6 @@ const submitForm = async () => {
     }
 
     if (isEditMode.value && productId.value) {
-      // Get old product data for image cleanup
       const { data: oldProduct, error: fetchError } = await supabase
         .from('products')
         .select('main_img_urls, varieties')
@@ -574,35 +573,34 @@ const submitForm = async () => {
         .single()
       if (fetchError) throw fetchError
 
-      // SINGLE UPDATE with stock included
-      const { data: updatedProduct, error: updateError } = await supabase
+      const { error: updateError } = await supabase
         .from('products')
         .update({
           prod_name: productName.value,
           prod_description: description.value,
           price: price.value,
-          stock: stockValue,
           main_img_urls: finalImageUrls,
           sizes: hasSizes.value ? selectedSizes.value : [],
           varieties: hasVarieties.value ? varietyData : [],
         })
         .eq('id', productId.value)
+      if (updateError) throw updateError
+
+      const { data: stockProduct, error: stockUpdateError } = await supabase
+        .from('products')
+        .update({ stock: stockValue })
+        .eq('id', productId.value)
         .select('id, stock')
         .single()
 
-      if (updateError) throw updateError
+      if (stockUpdateError) throw stockUpdateError
 
-      // Verify the saved stock matches what we sent
-      const savedStockValue = normalizeStockAmount(updatedProduct?.stock ?? 0)
-      
+      const savedStockValue = normalizeStockAmount(stockProduct?.stock ?? 0)
+
       if (savedStockValue !== stockValue) {
-        console.warn(`Stock mismatch: expected ${stockValue}, got ${savedStockValue}`)
-        showSnackbar(`Product updated, but stock changed from ${stockValue} to ${savedStockValue}. Please verify.`, 'error')
-      } else {
-        showSnackbar('Product update saved successfully!', 'success')
+        throw new Error(`Stock saved as ${savedStockValue}, expected ${stockValue}. Please try again.`)
       }
 
-      // Clean up old images
       if (newImageUrls.length && oldProduct?.main_img_urls) {
         await removeOldImages(oldProduct.main_img_urls)
       }
@@ -616,8 +614,9 @@ const submitForm = async () => {
         }
       }
 
-      // ✅ CHANGED: Use replace instead of push to avoid history issues
-      router.replace({
+      showSnackbar('Product update saved successfully!', 'success')
+      alert('Product update saved successfully!')
+      router.push({
         name: 'productlist',
         query: {
           updated: '1',
@@ -626,7 +625,6 @@ const submitForm = async () => {
         },
       })
     } else {
-      // Create new product
       const { error: insertError } = await supabase.from('products').insert([{
         shop_id: shopId,
         prod_name: productName.value,
@@ -653,6 +651,7 @@ const submitForm = async () => {
     isSubmitting.value = false
   }
 }
+
 // ------------------ Reset form ------------------
 const resetForm = () => {
   productName.value = ''
