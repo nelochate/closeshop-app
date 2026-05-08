@@ -1,10 +1,14 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
 const router = useRouter()
-const goBack = () => router.back()
+const route = useRoute()
+
+const goBack = () => {
+  router.back()
+}
 
 type Product = {
   id: string
@@ -24,6 +28,7 @@ const deleting = ref(false)
 const isMobile = ref(window.innerWidth < 768)
 const shopId = ref<string | null>(null)
 const productsSubscription = ref<ReturnType<typeof supabase.channel> | null>(null)
+const exactStockOverrides = ref<Record<string, number>>({})
 
 const confirmDialog = ref(false)
 const productToDelete = ref<Product | null>(null)
@@ -71,8 +76,10 @@ const setupProductsSubscription = (targetShopId: string) => {
 
         const product = payload.new as Product
         const productIndex = products.value.findIndex((item) => item.id === product.id)
+        const exactStock = exactStockOverrides.value[product.id]
         const normalizedProduct = {
           ...product,
+          stock: exactStock ?? product.stock,
           image: product.main_img_urls?.[0] || 'https://via.placeholder.com/300x300?text=No+Image',
           varieties: product.varieties || [],
         }
@@ -94,10 +101,12 @@ const setupProductsSubscription = (targetShopId: string) => {
 // Fetch products
 const fetchProducts = async () => {
   loading.value = true
-  const { data: { user } } = await supabase.auth.getUser()
+  const {
+    data: { user },
+  } = await supabase.auth.getUser()
   if (!user) {
     showSnackbar('Please log in to manage products', 'error')
-    loading.value = false;
+    loading.value = false
     return
   }
 
@@ -111,8 +120,8 @@ const fetchProducts = async () => {
     showSnackbar('No shop found for your account', 'error')
     shopId.value = null
     cleanupProductsSubscription()
-    products.value = [];
-    loading.value = false;
+    products.value = []
+    loading.value = false
     return
   }
 
@@ -128,7 +137,12 @@ const fetchProducts = async () => {
     products.value = data.map((p: any) => ({
       ...p,
       image: p.main_img_urls?.[0] || 'https://via.placeholder.com/300x300?text=No+Image',
-      varieties: p.varieties || []
+      varieties: p.varieties || [],
+    }))
+
+    products.value = products.value.map((product) => ({
+      ...product,
+      stock: exactStockOverrides.value[product.id] ?? product.stock,
     }))
   } else if (error) {
     showSnackbar('Error loading products', 'error')
@@ -138,7 +152,13 @@ const fetchProducts = async () => {
 
 // Stock status helper
 const getStockStatus = (stock: number) => {
-  if (stock <= 0) return { text: 'Out of Stock', color: 'error', icon: 'mdi-package-variant-closed', bg: '#ef4444' }
+  if (stock <= 0)
+    return {
+      text: 'Out of Stock',
+      color: 'error',
+      icon: 'mdi-package-variant-closed',
+      bg: '#ef4444',
+    }
   if (stock < 10) return { text: 'Low Stock', color: 'warning', icon: 'mdi-alert', bg: '#f59e0b' }
   return { text: 'In Stock', color: 'success', icon: 'mdi-check-circle', bg: '#10b981' }
 }
@@ -148,7 +168,7 @@ const formatPrice = (price: number) => {
   return new Intl.NumberFormat('en-PH', {
     style: 'currency',
     currency: 'PHP',
-    minimumFractionDigits: 2
+    minimumFractionDigits: 2,
   }).format(price)
 }
 
@@ -164,7 +184,9 @@ const deleteProductConfirmed = async () => {
   deleting.value = true
 
   try {
-    const { data: { user } } = await supabase.auth.getUser()
+    const {
+      data: { user },
+    } = await supabase.auth.getUser()
     if (!user) throw new Error('Not authenticated')
 
     const { data: userShop } = await supabase
@@ -188,7 +210,7 @@ const deleteProductConfirmed = async () => {
     const referenceTables = [
       { name: 'cart_items', column: 'product_id' },
       { name: 'order_items', column: 'product_id' },
-      { name: 'reviews', column: 'product_id' }
+      { name: 'reviews', column: 'product_id' },
     ]
 
     for (const table of referenceTables) {
@@ -202,10 +224,7 @@ const deleteProductConfirmed = async () => {
       }
     }
 
-    const { error: deleteError } = await supabase
-      .from('products')
-      .delete()
-      .eq('id', productId)
+    const { error: deleteError } = await supabase.from('products').delete().eq('id', productId)
 
     if (deleteError) {
       if (deleteError.code === '42501') {
@@ -217,9 +236,8 @@ const deleteProductConfirmed = async () => {
       }
     }
 
-    products.value = products.value.filter(p => p.id !== productId)
+    products.value = products.value.filter((p) => p.id !== productId)
     showSnackbar('Product deleted successfully', 'success')
-
   } catch (err: any) {
     console.error('Delete failed:', err)
     showSnackbar(err.message, 'error')
@@ -235,8 +253,29 @@ const editProduct = (id: string) => {
 }
 
 // Add window resize listener
-onMounted(() => {
-  fetchProducts()
+onMounted(async () => {
+  if (route.query.updated === '1') {
+    const updatedProductId = route.query.productId ? String(route.query.productId) : ''
+    const updatedStock = Number(route.query.stock)
+
+    if (updatedProductId && Number.isFinite(updatedStock)) {
+      exactStockOverrides.value = {
+        ...exactStockOverrides.value,
+        [updatedProductId]: updatedStock,
+      }
+    }
+  }
+
+  await fetchProducts()
+
+  // ✅ CHANGED: Show success message and clean up query params
+  if (route.query.updated === '1') {
+    const savedStock = route.query.stock ? ` Stock is now ${route.query.stock} pcs.` : ''
+    showSnackbar(`Product update saved successfully.${savedStock}`, 'success')
+    // Clean up the URL without affecting navigation history
+    router.replace({ name: 'productlist', query: {} })
+  }
+
   window.addEventListener('resize', updateMobileState)
 })
 
@@ -249,14 +288,20 @@ onUnmounted(() => {
 <template>
   <v-app>
     <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
+      <!-- ✅ CHANGED: Back button now goes to dashboard -->
       <v-btn icon @click="goBack" size="small" class="back-btn">
         <v-icon>mdi-arrow-left</v-icon>
       </v-btn>
-      <v-toolbar-title class="text-subtitle-1 font-weight-bold">
-        Products
-      </v-toolbar-title>
+      <v-toolbar-title class="text-subtitle-1 font-weight-bold"> Products </v-toolbar-title>
       <v-spacer></v-spacer>
-      <v-btn color="white" variant="text" @click="fetchProducts" :loading="loading" size="small" class="refresh-btn">
+      <v-btn
+        color="white"
+        variant="text"
+        @click="fetchProducts"
+        :loading="loading"
+        size="small"
+        class="refresh-btn"
+      >
         <v-icon>mdi-refresh</v-icon>
       </v-btn>
     </v-app-bar>
@@ -267,7 +312,10 @@ onUnmounted(() => {
         <div class="stats-header mb-4 pt-8">
           <div class="d-flex align-center justify-space-between">
             <div>
-              <h1 :class="isMobile ? 'text-h6 font-weight-bold' : 'text-h4 font-weight-bold'" class="text-primary mb-1">
+              <h1
+                :class="isMobile ? 'text-h6 font-weight-bold' : 'text-h4 font-weight-bold'"
+                class="text-primary mb-1"
+              >
                 My Products
               </h1>
               <div class="d-flex align-center gap-2">
@@ -275,9 +323,14 @@ onUnmounted(() => {
                   <v-icon start size="12">mdi-package-variant</v-icon>
                   {{ products.length }} {{ products.length === 1 ? 'item' : 'items' }}
                 </v-chip>
-                <v-chip v-if="products.filter(p => p.stock < 10 && p.stock > 0).length > 0" size="x-small" color="warning" variant="flat">
+                <v-chip
+                  v-if="products.filter((p) => p.stock < 10 && p.stock > 0).length > 0"
+                  size="x-small"
+                  color="warning"
+                  variant="flat"
+                >
                   <v-icon start size="12">mdi-alert</v-icon>
-                  {{ products.filter(p => p.stock < 10 && p.stock > 0).length }} low stock
+                  {{ products.filter((p) => p.stock < 10 && p.stock > 0).length }} low stock
                 </v-chip>
               </div>
             </div>
@@ -289,8 +342,18 @@ onUnmounted(() => {
               :class="{ 'mobile-btn': isMobile }"
             >
               <div class="btn-content">
-                <svg class="plus-icon" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path d="M12 5V19M5 12H19" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                <svg
+                  class="plus-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M12 5V19M5 12H19"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                  />
                 </svg>
                 <span class="btn-text">Add Product</span>
               </div>
@@ -308,14 +371,28 @@ onUnmounted(() => {
         </div>
 
         <!-- No Products State -->
-        <v-card v-else-if="products.length === 0" class="empty-state-card" :rounded="isMobile ? 'lg' : 'xl'" elevation="0">
+        <v-card
+          v-else-if="products.length === 0"
+          class="empty-state-card"
+          :rounded="isMobile ? 'lg' : 'xl'"
+          elevation="0"
+        >
           <v-card-text class="text-center py-8">
             <div class="empty-state-icon">
               <v-icon :size="isMobile ? 56 : 80" color="#cbd5e1">mdi-package-variant-closed</v-icon>
             </div>
-            <h3 :class="isMobile ? 'text-subtitle-1' : 'text-h5'" class="font-weight-bold mb-2">No products yet</h3>
+            <h3 :class="isMobile ? 'text-subtitle-1' : 'text-h5'" class="font-weight-bold mb-2">
+              No products yet
+            </h3>
             <p class="text-caption text-grey mb-4">Start selling by adding your first product</p>
-            <v-btn color="#3f83c7" prepend-icon="mdi-plus" @click="router.push('/additem')" size="default" rounded="lg" class="px-6">
+            <v-btn
+              color="#3f83c7"
+              prepend-icon="mdi-plus"
+              @click="router.push('/additem')"
+              size="default"
+              rounded="lg"
+              class="px-6"
+            >
               Add Product
             </v-btn>
           </v-card-text>
@@ -352,7 +429,11 @@ onUnmounted(() => {
                 <!-- Stock Badge -->
                 <div class="stock-badge" :style="{ background: getStockStatus(product.stock).bg }">
                   <v-icon size="10" class="mr-1">{{ getStockStatus(product.stock).icon }}</v-icon>
-                  <span>{{ isMobile ? getStockStatus(product.stock).text.charAt(0) : getStockStatus(product.stock).text }}</span>
+                  <span>{{
+                    isMobile
+                      ? getStockStatus(product.stock).text.charAt(0)
+                      : getStockStatus(product.stock).text
+                  }}</span>
                 </div>
 
                 <!-- Edit Overlay (Desktop only) -->
@@ -372,7 +453,10 @@ onUnmounted(() => {
                   {{ formatPrice(product.price) }}
                 </div>
 
-                <p v-if="!isMobile && product.prod_description" class="product-description line-clamp-2">
+                <p
+                  v-if="!isMobile && product.prod_description"
+                  class="product-description line-clamp-2"
+                >
                   {{ product.prod_description }}
                 </p>
 
@@ -389,7 +473,11 @@ onUnmounted(() => {
                   <v-icon :size="isMobile ? 16 : 18">mdi-pencil</v-icon>
                   <span v-if="!isMobile">Edit</span>
                 </button>
-                <button class="action-btn delete-btn" @click="requestDelete(product)" :disabled="deleting && productToDelete?.id === product.id">
+                <button
+                  class="action-btn delete-btn"
+                  @click="requestDelete(product)"
+                  :disabled="deleting && productToDelete?.id === product.id"
+                >
                   <v-icon :size="isMobile ? 16 : 18" class="mr-0">mdi-delete</v-icon>
                   <span v-if="!isMobile">Delete</span>
                 </button>
@@ -408,13 +496,22 @@ onUnmounted(() => {
             </div>
             <v-card-title class="dialog-title">Delete Product?</v-card-title>
             <v-card-text class="dialog-text">
-              "<strong>{{ productToDelete?.prod_name }}</strong>" will be permanently removed.
+              "<strong>{{ productToDelete?.prod_name }}</strong
+              >" will be permanently removed.
             </v-card-text>
             <v-card-actions class="dialog-actions">
-              <button class="dialog-btn cancel-btn" @click="confirmDialog = false" :disabled="deleting">
+              <button
+                class="dialog-btn cancel-btn"
+                @click="confirmDialog = false"
+                :disabled="deleting"
+              >
                 Cancel
               </button>
-              <button class="dialog-btn confirm-delete-btn" @click="deleteProductConfirmed" :disabled="deleting">
+              <button
+                class="dialog-btn confirm-delete-btn"
+                @click="deleteProductConfirmed"
+                :disabled="deleting"
+              >
                 <v-icon v-if="deleting" size="16" class="mr-1">mdi-loading mdi-spin</v-icon>
                 Delete
               </button>
@@ -423,7 +520,14 @@ onUnmounted(() => {
         </v-dialog>
 
         <!-- Snackbar -->
-        <v-snackbar v-model="snackbar" :color="snackbarColor" timeout="3000" location="bottom" variant="flat" rounded="lg">
+        <v-snackbar
+          v-model="snackbar"
+          :color="snackbarColor"
+          timeout="3000"
+          location="bottom"
+          variant="flat"
+          rounded="lg"
+        >
           <div class="d-flex align-center">
             <v-icon start size="18" class="mr-2">
               {{ snackbarColor === 'success' ? 'mdi-check-circle' : 'mdi-alert-circle' }}
@@ -606,7 +710,9 @@ v-main,
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.3);
   transform: translate(-50%, -50%);
-  transition: width 0.4s ease, height 0.4s ease;
+  transition:
+    width 0.4s ease,
+    height 0.4s ease;
 }
 
 .add-product-btn:active::after {
@@ -670,7 +776,9 @@ v-main,
 }
 
 @keyframes spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .loading-text {

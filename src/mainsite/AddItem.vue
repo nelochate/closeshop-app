@@ -58,6 +58,13 @@ const showSnackbar = (message: string, type: 'success' | 'error') => {
   snackbar.value = true
 }
 
+const normalizeStockAmount = (value: number | string | null) => {
+  const numericValue = Number(value ?? 0)
+  if (!Number.isFinite(numericValue)) return 0
+
+  return Math.max(Math.trunc(numericValue), 0)
+}
+
 // Helper to hide app bar and status bar
 const hideAppBar = async () => {
   isCameraActive.value = true
@@ -513,7 +520,6 @@ const removeOldImages = async (urls: string[]) => {
   }
 }
 
-// ------------------ Submit form ------------------
 const submitForm = async () => {
   if (isSubmitting.value) return
   isSubmitting.value = true
@@ -538,6 +544,7 @@ const submitForm = async () => {
     const finalImageUrls = newImageUrls.length ? newImageUrls : mainImagePreviews.value
 
     const varietyData: { name: string; price: number; images: string[] }[] = []
+    const stockValue = normalizeStockAmount(stock.value)
 
     for (const v of varieties.value) {
       let urls: string[] = []
@@ -571,13 +578,27 @@ const submitForm = async () => {
           prod_name: productName.value,
           prod_description: description.value,
           price: price.value,
-          stock: stock.value,
           main_img_urls: finalImageUrls,
           sizes: hasSizes.value ? selectedSizes.value : [],
           varieties: hasVarieties.value ? varietyData : [],
         })
         .eq('id', productId.value)
       if (updateError) throw updateError
+
+      const { data: stockProduct, error: stockUpdateError } = await supabase
+        .from('products')
+        .update({ stock: stockValue })
+        .eq('id', productId.value)
+        .select('id, stock')
+        .single()
+
+      if (stockUpdateError) throw stockUpdateError
+
+      const savedStockValue = normalizeStockAmount(stockProduct?.stock ?? 0)
+
+      if (savedStockValue !== stockValue) {
+        throw new Error(`Stock saved as ${savedStockValue}, expected ${stockValue}. Please try again.`)
+      }
 
       if (newImageUrls.length && oldProduct?.main_img_urls) {
         await removeOldImages(oldProduct.main_img_urls)
@@ -592,14 +613,24 @@ const submitForm = async () => {
         }
       }
 
-      showSnackbar('✅ Product updated successfully!', 'success')
+      showSnackbar('Product update saved successfully!', 'success')
+      alert('Product update saved successfully!')
+      // Use replace instead of push to avoid back button loop
+      router.replace({
+        name: 'productlist',
+        query: {
+          updated: '1',
+          productId: productId.value,
+          stock: String(stockValue),
+        },
+      })
     } else {
       const { error: insertError } = await supabase.from('products').insert([{
         shop_id: shopId,
         prod_name: productName.value,
         prod_description: description.value,
         price: price.value,
-        stock: stock.value,
+        stock: stockValue,
         main_img_urls: finalImageUrls,
         sizes: hasSizes.value ? selectedSizes.value : [],
         varieties: hasVarieties.value ? varietyData : [],
@@ -607,17 +638,20 @@ const submitForm = async () => {
 
       if (insertError) throw insertError
 
-      showSnackbar('✅ Product added successfully!', 'success')
-      resetForm()
+      showSnackbar('Product added successfully!', 'success')
+      alert('Product added successfully!')
+      // Use replace instead of push to avoid back button loop
+      router.replace({ name: 'productlist' })
     }
   } catch (err: any) {
-    console.error('❌ Error saving product:', err)
-    showSnackbar(`❌ ${err.message || 'Something went wrong'}`, 'error')
+    console.error('Error saving product:', err)
+    const errorMessage = err.message || 'Something went wrong'
+    showSnackbar(errorMessage, 'error')
+    alert(`Failed to save product: ${errorMessage}`)
   } finally {
     isSubmitting.value = false
   }
 }
-
 // ------------------ Reset form ------------------
 const resetForm = () => {
   productName.value = ''
@@ -751,6 +785,7 @@ const addVariety = () => {
             v-model="stock"
             label="Stock / Quantity"
             type="number"
+            min="0"
             variant="outlined"
           />
 

@@ -33,6 +33,7 @@ const hasAnsweredSurvey = ref(false)
 const showSurveyBubble = ref(false)
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
+const HOT_PICK_SOLD_THRESHOLD = 100
 const PRIMARY_SERVICE_AREA = {
   cityName: 'Butuan City',
   provinceName: 'Agusan del Norte',
@@ -42,6 +43,16 @@ let homepageInitialized = false
 let networkStatusListener = null
 let surveyBubbleTimeout = null
 let surveyBubbleHideTimeout = null
+
+const normalizeCount = (value) => {
+  const count = Number(value ?? 0)
+  if (!Number.isFinite(count)) return 0
+
+  return Math.max(Math.trunc(count), 0)
+}
+
+const isTrendingProduct = (product) =>
+  normalizeCount(product?.sold) >= HOT_PICK_SOLD_THRESHOLD
 
 // Refresh handler function
 const handleRefresh = async () => {
@@ -374,7 +385,7 @@ async function fetchProducts() {
         shops!inner (status)
       `,
       )
-      .eq('shops.status', 'approved') // ✅ Only shops approved
+      .ilike('shops.status', 'approved') // Only approved shops
 
     if (error) throw error
 
@@ -383,8 +394,8 @@ async function fetchProducts() {
       title: p.prod_name,
       price: p.price,
       img: extractImage(p.main_img_urls),
-      sold: p.sold || 0,
-      stock: p.stock || 0,
+      sold: normalizeCount(p.sold),
+      stock: normalizeCount(p.stock),
     }))
   } catch (err) {
     console.error('fetchProducts error:', err)
@@ -556,14 +567,14 @@ async function setupProductsSubscription() {
         const productIndex = products.value.findIndex((p) => p.id === updatedProduct.id)
 
         if (productIndex !== -1) {
-          const oldSold = products.value[productIndex].sold
-          const newSold = updatedProduct.sold || 0
+          const oldSold = normalizeCount(products.value[productIndex].sold)
+          const newSold = normalizeCount(updatedProduct.sold)
 
           // Update product with sold and stock
           products.value[productIndex] = {
             ...products.value[productIndex],
             sold: newSold,
-            stock: updatedProduct.stock || 0,
+            stock: normalizeCount(updatedProduct.stock),
           }
 
           // Log the update
@@ -734,28 +745,24 @@ function markSurveyAnswered() {
 const formattedProducts = computed(() => {
   return products.value.map((product) => ({
     ...product,
-    formattedSold: product.sold.toLocaleString(),
+    sold: normalizeCount(product.sold),
+    stock: normalizeCount(product.stock),
+    formattedSold: normalizeCount(product.sold).toLocaleString(),
     formattedPrice: `₱${Number(product.price).toFixed(2)}`,
   }))
 })
 
 // Replace the existing hotPicks computed property with this:
 const hotPicks = computed(() => {
-  // Filter products that have the "hot" badge criteria:
-  // 1. Stock > 0 (in stock)
-  // 2. Sold >= 50 (meets hot threshold)
-  const hotProducts = products.value.filter(product =>
-    product.stock > 0 && product.sold >= 50
-  )
+  const sorted = products.value
+    .filter(isTrendingProduct)
+    .sort((a, b) => normalizeCount(b.sold) - normalizeCount(a.sold))
+    .slice(0, 10)
 
-  // Sort by sold count (highest first) and add rank numbers
-  const sorted = [...hotProducts]
-    .sort((a, b) => (b.sold || 0) - (a.sold || 0))
-    .slice(0, 10) // Show top 10 hot products
-
-  // Add rank numbers
   return sorted.map((product, index) => ({
     ...product,
+    sold: normalizeCount(product.sold),
+    stock: normalizeCount(product.stock),
     rank: index + 1
   }))
 })
@@ -879,6 +886,10 @@ const hotPicks = computed(() => {
                   <span class="rank-number">#{{ item.rank }}</span>
                   <v-icon class="rank-fire" size="14" color="#ff4757">mdi-fire</v-icon>
                 </div>
+                <div v-if="item.stock === 0" class="hot-pick-oos-badge">
+                  <v-icon size="12">mdi-package-variant-closed</v-icon>
+                  <span>Out of Stock</span>
+                </div>
                 <v-img :src="item.img" cover class="hot-pick-img" />
                 <div class="hot-pick-info">
                   <div class="hot-pick-title">{{ item.title }}</div>
@@ -920,13 +931,17 @@ const hotPicks = computed(() => {
                 :key="item.id"
                 class="product-card"
                 :class="{
-                  'product-card--hot': item.sold >= 50 && item.stock > 0,
+                  'product-card--hot': isTrendingProduct(item),
                   'product-card--out-of-stock': item.stock === 0
                 }"
                 @click="goToProduct(item.id)"
               >
-                <!-- Hot Badge (only show if in stock) -->
-                <div v-if="item.sold >= 50 && item.stock > 0" class="product-badge-hot">
+                <!-- Hot Badge -->
+                <div
+                  v-if="isTrendingProduct(item) || item.stock === 0"
+                  class="product-badge-row"
+                >
+                <div v-if="isTrendingProduct(item)" class="product-badge-hot">
                   <span class="badge-fire">🔥</span>
                   <span class="badge-text">HOT</span>
                 </div>
@@ -935,6 +950,8 @@ const hotPicks = computed(() => {
                 <div v-if="item.stock === 0" class="product-badge-oos">
                   <v-icon size="12" class="mr-1">mdi-package-variant-closed</v-icon>
                   Out of Stock
+                </div>
+
                 </div>
 
                 <!-- Low Stock Badge (only show if in stock and low) -->
@@ -1660,6 +1677,24 @@ const hotPicks = computed(() => {
   box-shadow: 0 6px 20px rgba(255, 107, 107, 0.25);
 }
 
+.product-badge-row {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.product-badge-row .product-badge-hot,
+.product-badge-row .product-badge-oos {
+  position: static;
+  max-width: none;
+}
+
 /* Hot Badge */
 .product-badge-hot {
   position: absolute;
@@ -1669,15 +1704,14 @@ const hotPicks = computed(() => {
   display: flex;
   align-items: center;
   gap: 4px;
-  background: linear-gradient(135deg, #ff6b6b, #ff4757);
+  background: linear-gradient(135deg, #ff4757, #ff6b6b);
   color: white;
-  padding: 5px 10px;
+  padding: 4px 8px;
   border-radius: 20px;
   font-size: 11px;
   font-weight: 700;
   box-shadow: 0 2px 8px rgba(255, 107, 107, 0.3);
   z-index: 10;
-  animation: hotPulse 2s infinite;
 }
 
 .product-card--hot .product-badge-low {
@@ -1685,7 +1719,7 @@ const hotPicks = computed(() => {
 }
 
 .badge-fire {
-  font-size: 12px;
+  font-size: 11px;
 }
 
 .badge-text {
@@ -1696,24 +1730,32 @@ const hotPicks = computed(() => {
 .product-badge-oos {
   position: absolute;
   top: 8px;
-  left: 8px;
+  left: 58px;
   right: auto;
   bottom: auto;
-  background: linear-gradient(135deg, #6c757d, #495057);
+  max-width: calc(100% - 66px);
+  min-height: 24px;
+  background: rgba(17, 24, 39, 0.9);
   color: white;
-  padding: 6px 12px;
+  padding: 4px 7px;
   border-radius: 20px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.5px;
-  text-transform: uppercase;
   z-index: 10;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
-  backdrop-filter: blur(2px);
-  animation: fadeInOut 0.5s ease-in-out;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.28);
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 3px;
+  white-space: nowrap;
+}
+
+.product-badge-oos .mr-1 {
+  margin-right: 0 !important;
+}
+
+.product-card:not(.product-card--hot) .product-badge-oos {
+  left: 8px;
+  max-width: calc(100% - 16px);
 }
 
 /* Low Stock Badge - Enhanced */
@@ -1725,9 +1767,9 @@ const hotPicks = computed(() => {
   bottom: auto;
   background: linear-gradient(135deg, #ff9800, #f57c00);
   color: white;
-  padding: 6px 12px;
+  padding: 4px 7px;
   border-radius: 20px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.5px;
   text-transform: uppercase;
@@ -1913,8 +1955,18 @@ const hotPicks = computed(() => {
   .product-badge-oos,
   .product-badge-low,
   .product-badge-hot {
-    padding: 4px 8px;
+    padding: 3px 6px;
     font-size: 9px;
+  }
+
+  .product-badge-row {
+    gap: 6px;
+  }
+
+  .product-card--hot .product-badge-oos {
+    left: 50px;
+    max-width: calc(100% - 58px);
+    min-height: 22px;
   }
 }
 
@@ -1978,6 +2030,26 @@ const hotPicks = computed(() => {
   align-items: center;
   gap: 4px;
   box-shadow: 0 2px 8px rgba(255, 71, 87, 0.3);
+}
+
+.hot-pick-oos-badge {
+  position: absolute;
+  top: 8px;
+  left: 76px;
+  max-width: calc(100% - 84px);
+  min-height: 24px;
+  background: rgba(17, 24, 39, 0.9);
+  color: white;
+  padding: 4px 7px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  box-shadow: 0 2px 8px rgba(17, 24, 39, 0.28);
+  white-space: nowrap;
 }
 
 .rank-number {
@@ -2046,6 +2118,15 @@ const hotPicks = computed(() => {
   }
 
   .hot-pick-rank {
+    padding: 3px 6px;
+    font-size: 9px;
+  }
+
+  .hot-pick-oos-badge {
+    top: 8px;
+    left: 66px;
+    max-width: calc(100% - 74px);
+    min-height: 22px;
     padding: 3px 6px;
     font-size: 9px;
   }
