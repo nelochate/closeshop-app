@@ -2,12 +2,24 @@
 import { ref, watch, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
+import { locationNamesMatch } from '@/utils/location'
 
 const route = useRoute()
 const router = useRouter()
+const PRIMARY_SERVICE_AREA = {
+  cityName: 'Butuan City',
+  provinceName: 'Agusan del Norte',
+}
 
 const normalizeQueryValue = (value) => (typeof value === 'string' ? value : '')
 const getTrimmedQuery = (value = query.value) => normalizeQueryValue(value).trim()
+const isButuanCityShop = (shop) => {
+  if (!locationNamesMatch(shop?.city, PRIMARY_SERVICE_AREA.cityName)) return false
+  if (shop?.province && !locationNamesMatch(shop.province, PRIMARY_SERVICE_AREA.provinceName)) {
+    return false
+  }
+  return true
+}
 
 const query = ref(normalizeQueryValue(route.query.q))
 const queryModel = computed({
@@ -70,40 +82,58 @@ async function fetchSearchResults() {
     // Fetch products
     const { data: products, error: productsError } = await supabase
       .from('products')
-      .select('id, prod_name, price, main_img_urls, sold, shop_id')
+      .select(`
+        id,
+        prod_name,
+        price,
+        main_img_urls,
+        sold,
+        shop_id,
+        shops!inner (
+          id,
+          status,
+          city,
+          province
+        )
+      `)
       .ilike('prod_name', `%${searchText}%`)
+      .eq('shops.status', 'approved')
 
     if (productsError) throw productsError
 
     // Fetch shops
     const { data: shops, error: shopsError } = await supabase
       .from('shops')
-      .select('id, business_name, logo_url, status, description')
+      .select('id, business_name, logo_url, status, description, city, province')
       .ilike('business_name', `%${searchText}%`)
       .eq('status', 'approved') // Only show approved shops
 
     if (shopsError) throw shopsError
 
     // Process products
-    productResults.value = (products || []).map((p) => ({
-      id: p.id,
-      title: p.prod_name,
-      price: p.price,
-      img: Array.isArray(p.main_img_urls)
-        ? p.main_img_urls[0]
-        : JSON.parse(p.main_img_urls || '[]')[0],
-      sold: p.sold || 0,
-      type: 'product'
-    }))
+    productResults.value = (products || [])
+      .filter((product) => isButuanCityShop(Array.isArray(product.shops) ? product.shops[0] : product.shops))
+      .map((p) => ({
+        id: p.id,
+        title: p.prod_name,
+        price: p.price,
+        img: Array.isArray(p.main_img_urls)
+          ? p.main_img_urls[0]
+          : JSON.parse(p.main_img_urls || '[]')[0],
+        sold: p.sold || 0,
+        type: 'product'
+      }))
 
     // Process shops
-    shopResults.value = (shops || []).map((s) => ({
-      id: s.id,
-      title: s.business_name,
-      description: s.description || 'No description available',
-      img: s.logo_url || null,
-      type: 'shop'
-    }))
+    shopResults.value = (shops || [])
+      .filter((shop) => isButuanCityShop(shop))
+      .map((s) => ({
+        id: s.id,
+        title: s.business_name,
+        description: s.description || 'No description available',
+        img: s.logo_url || null,
+        type: 'shop'
+      }))
 
   } catch (err) {
     console.error('Search error:', err)
@@ -153,13 +183,13 @@ onUnmounted(() => {
 })
 
 // Computed properties
-const hasResults = computed(() => 
+const hasResults = computed(() =>
   productResults.value.length > 0 || shopResults.value.length > 0
 )
 
-const showEmptyState = computed(() => 
-  !loading.value && 
-  getTrimmedQuery().length >= 2 && 
+const showEmptyState = computed(() =>
+  !loading.value &&
+  getTrimmedQuery().length >= 2 &&
   !hasResults.value
 )
 </script>
@@ -181,7 +211,7 @@ const showEmptyState = computed(() =>
             hide-details
             clearable
             density="comfortable"
-            placeholder="Search products & shops..."
+            placeholder="Search products & shops within Butuan City"
             prepend-inner-icon="mdi-magnify"
             class="search-field"
             autofocus
@@ -194,7 +224,7 @@ const showEmptyState = computed(() =>
         <!-- Results Header -->
         <div class="results-header" v-if="query && hasResults">
           <h2 class="page-title">Results for "{{ query }}"</h2>
-          
+
           <!-- Tabs -->
           <div class="results-tabs">
             <v-btn

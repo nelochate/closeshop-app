@@ -382,21 +382,50 @@ async function fetchProducts() {
         sold,
         stock,
         shop_id,
-        shops!inner (status)
+        shops!inner (
+          id,
+          status,
+          city,
+          province,
+          barangay,
+          latitude,
+          longitude
+        )
       `,
       )
       .ilike('shops.status', 'approved') // Only approved shops
 
     if (error) throw error
 
-    products.value = (data || []).map((p) => ({
-      id: p.id,
-      title: p.prod_name,
-      price: p.price,
-      img: extractImage(p.main_img_urls),
-      sold: normalizeCount(p.sold),
-      stock: normalizeCount(p.stock),
-    }))
+    const normalizedShopCache = new Map()
+
+    products.value = await Promise.all(
+      (data || []).map(async (product) => {
+        const shop = Array.isArray(product.shops) ? product.shops[0] : product.shops
+        let normalizedShop = null
+
+        if (shop) {
+          const shopKey = shop.id ?? product.shop_id
+
+          if (!normalizedShopCache.has(shopKey)) {
+            normalizedShopCache.set(shopKey, normalizeFetchedShopLocation(shop))
+          }
+
+          normalizedShop = await normalizedShopCache.get(shopKey)
+        }
+
+        return {
+          id: product.id,
+          title: product.prod_name,
+          price: product.price,
+          img: extractImage(product.main_img_urls),
+          sold: normalizeCount(product.sold),
+          stock: normalizeCount(product.stock),
+          shopCity: normalizedShop?.city ?? null,
+          shopProvince: normalizedShop?.province ?? null,
+        }
+      }),
+    )
   } catch (err) {
     console.error('fetchProducts error:', err)
     errorMsg.value = err.message
@@ -752,6 +781,22 @@ const formattedProducts = computed(() => {
   }))
 })
 
+const butuanProducts = computed(() =>
+  products.value.filter((product) =>
+    isPrimaryServiceAreaLocation(product.shopCity, product.shopProvince),
+  ),
+)
+
+const formattedButuanProducts = computed(() => {
+  return butuanProducts.value.map((product) => ({
+    ...product,
+    sold: normalizeCount(product.sold),
+    stock: normalizeCount(product.stock),
+    formattedSold: normalizeCount(product.sold).toLocaleString(),
+    formattedPrice: `â‚±${Number(product.price).toFixed(2)}`,
+  }))
+})
+
 // Replace the existing hotPicks computed property with this:
 const hotPicks = computed(() => {
   const sorted = products.value
@@ -905,7 +950,7 @@ const hotPicks = computed(() => {
 
           <!-- ========== SECTION 3: BROWSE PRODUCTS ========== -->
           <div class="section-header mt-6">
-            <h3 class="section-title">Browse Products</h3>
+            <h3 class="section-title">Browse Products Within Butuan</h3>
           </div>
 
           <template v-if="loading">
@@ -918,16 +963,16 @@ const hotPicks = computed(() => {
               />
             </div>
           </template>
-          <template v-else-if="products.length === 0">
+          <template v-else-if="butuanProducts.length === 0">
             <div class="empty-card">
               <div class="empty-title">No products yet</div>
-              <div class="empty-sub">Products will appear here.</div>
+              <div class="empty-sub">Products from Butuan City shops will appear here.</div>
             </div>
           </template>
           <template v-else>
             <div class="product-grid">
               <div
-                v-for="item in formattedProducts"
+                v-for="item in butuanProducts"
                 :key="item.id"
                 class="product-card"
                 :class="{
