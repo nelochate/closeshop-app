@@ -2546,6 +2546,9 @@ const smartSearch = async () => {
   errorMsg.value = null
   isSearchMode.value = true
 
+  // Clear any active routes and hide the route panel when a search is initiated
+  clearAllRoutes()
+
   try {
     const localResults = getLocalSearchShops(query)
     const outsideResults = getOutsideSearchShops(query)
@@ -2560,7 +2563,23 @@ const smartSearch = async () => {
       plotShops(localResults)
 
       if (localResults.length === 1) {
-        await focusOnShopMarker(localResults[0].id)
+        const shop = localResults[0]
+        const lat = Number(shop.latitude)
+        const lng = Number(shop.longitude)
+
+        // Fly to the single result and open its popup without triggering route calculation
+        // This prevents the route panel from covering the map search result
+        map.value.flyTo({
+          center: [lng, lat],
+          zoom: 16,
+          essential: true,
+          duration: 1000,
+        })
+
+        const marker = shopMarkers.find((m: any) => m.shopId === shop.id)
+        if (marker && marker.getPopup()) {
+          marker.togglePopup()
+        }
       }
       return
     }
@@ -2841,13 +2860,7 @@ onUnmounted(() => {
             @click:clear="clearSearch"
             @click:append-inner="smartSearch"
           />
-          <v-btn
-            class="search-btn"
-            @click="smartSearch"
-           
-            :disabled="!search.trim()"
-            elevation="2"
-          >
+          <v-btn class="search-btn" @click="smartSearch" :disabled="!search.trim()" elevation="2">
             <v-icon size="20">mdi-magnify</v-icon>
           </v-btn>
         </div>
@@ -3107,12 +3120,15 @@ onUnmounted(() => {
                   <div class="w-100">
                     <!-- Title Row -->
                     <div class="d-flex align-center justify-space-between">
-                      <div class="text-subtitle-1 font-weight-bold">
-                        Display Options
-                      </div>
+                      <div class="text-subtitle-1 font-weight-bold">Display Options</div>
 
-                      <v-btn icon @click="showDisplayOptionsMenu = false" variant="text" size="small"
-                        aria-label="Close shop menu">
+                      <v-btn
+                        icon
+                        @click="showDisplayOptionsMenu = false"
+                        variant="text"
+                        size="small"
+                        aria-label="Close shop menu"
+                      >
                         <v-icon>mdi-close</v-icon>
                       </v-btn>
                     </div>
@@ -3123,7 +3139,7 @@ onUnmounted(() => {
                     </div>
                   </div>
                 </v-card-title>
-                
+
                 <v-card-text class="pt-0">
                   <div class="display-options-section">
                     <div class="display-options-section-title">Shop Coverage</div>
@@ -3154,7 +3170,9 @@ onUnmounted(() => {
                   <div class="display-options-section">
                     <div class="display-options-section-title">Browse Another Area</div>
                     <div class="display-options-helper">
-                      Currently, the primary area of this app is within Butuan City. Select the province 'Agusan del Norte' city/municipality to 'City of Butuan' to view all registered shops.
+                      Currently, the primary area of this app is within Butuan City. Select the
+                      province 'Agusan del Norte' city/municipality to 'City of Butuan' to view all
+                      registered shops.
                     </div>
 
                     <v-autocomplete
@@ -3776,7 +3794,7 @@ onUnmounted(() => {
   border-radius: 20px;
   padding: 10px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0)!important;
+  border: 1px solid rgba(255, 255, 255, 0) !important;
   pointer-events: auto;
 }
 
@@ -3988,7 +4006,9 @@ onUnmounted(() => {
 @media (max-width: 768px) {
   .hero {
     padding: calc(20px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 12px 16px 12px; /* Increased top padding */
-    min-height: calc(90px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))); /* Taller on mobile */
+    min-height: calc(
+      90px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))
+    ); /* Taller on mobile */
   }
 
   .hero-row {
@@ -4014,7 +4034,10 @@ onUnmounted(() => {
   }
 
   .route-selection-panel.bottom-panel {
-    bottom: calc(80px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))); /* Account for safe area */
+    bottom: calc(
+      80px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    ); /* Account for safe area */
     width: 95%;
     max-width: 380px;
   }
@@ -4031,7 +4054,10 @@ onUnmounted(() => {
 
   /* Re-open Route Panel Button adjustments for mobile */
   .reopen-route-btn {
-    bottom: calc(80px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
+    bottom: calc(
+      80px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    );
     width: 52px !important;
     height: 52px !important;
   }
@@ -4103,7 +4129,10 @@ onUnmounted(() => {
   }
 
   .route-selection-panel.bottom-panel {
-    bottom: calc(70px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
+    bottom: calc(
+      70px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    );
     max-width: 340px;
   }
 
@@ -4114,7 +4143,10 @@ onUnmounted(() => {
 
   /* Re-open Route Panel Button adjustments for extra small */
   .reopen-route-btn {
-    bottom: calc(75px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
+    bottom: calc(
+      75px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    );
     width: 48px !important;
     height: 48px !important;
   }
@@ -4143,7 +4175,9 @@ onUnmounted(() => {
   }
 
   .main-content {
-    height: calc(100vh - 110px - var(--app-safe-area-top, env(safe-area-inset-top, 0px))) !important;
+    height: calc(
+      100vh - 110px - var(--app-safe-area-top, env(safe-area-inset-top, 0px))
+    ) !important;
   }
 
   .route-selection-panel.bottom-panel {
@@ -4189,13 +4223,19 @@ onUnmounted(() => {
 
   .reopen-route-btn {
     bottom: calc(100px + constant(safe-area-inset-bottom)) !important;
-    bottom: calc(100px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))) !important;
+    bottom: calc(
+      100px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    ) !important;
   }
 }
 
 /* Restored MapSearch overrides */
 .main-content {
-  --map-floating-offset: calc(88px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
+  --map-floating-offset: calc(
+    88px +
+      var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+  );
   --map-controls-height: 112px;
   --map-controls-max-width: 390px;
 }
@@ -4205,7 +4245,8 @@ onUnmounted(() => {
   top: 12px;
   left: 0;
   right: 0;
-  padding: 0 max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0 max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding: 0 max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0
+    max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   z-index: 1900;
   pointer-events: none;
 }
@@ -4622,7 +4663,11 @@ onUnmounted(() => {
 }
 
 .shop-drawer-footer {
-  padding: 12px calc(16px + var(--app-safe-area-right, env(safe-area-inset-right, 0px))) calc(12px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))))
+  padding: 12px calc(16px + var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
+    calc(
+      12px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    )
     calc(16px + var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   background: rgba(248, 250, 252, 0.94);
   border-top: 1px solid rgba(226, 232, 240, 0.9);
@@ -4635,7 +4680,8 @@ onUnmounted(() => {
 
   .service-area-banner-wrap {
     top: 10px;
-    padding: 0 max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0 max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    padding: 0 max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0
+      max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
 
   .service-area-banner {
@@ -4658,7 +4704,10 @@ onUnmounted(() => {
   }
 
   .map-controls-container {
-    bottom: calc(82px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
+    bottom: calc(
+      82px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    );
     width: min(calc(100% - 16px), 392px);
   }
 
@@ -4700,7 +4749,8 @@ onUnmounted(() => {
 
 @media (max-width: 480px) {
   .service-area-banner-wrap {
-    padding: 0 max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0 max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    padding: 0 max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 0
+      max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
 
   .service-area-banner-title {
@@ -4714,7 +4764,10 @@ onUnmounted(() => {
 
 @media (max-height: 600px) and (orientation: landscape) {
   .map-controls-container {
-    bottom: calc(72px + var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))));
+    bottom: calc(
+      72px +
+        var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
+    );
     width: min(calc(100% - 16px), 360px);
   }
 
