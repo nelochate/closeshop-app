@@ -186,8 +186,10 @@ const outsideSearchSectionTitle = computed(
   () => `Available Outside ${searchLocationLabelTitleCase.value}`,
 )
 
+// Updated shopDrawerResultSections with consistent layout
 const shopDrawerResultSections = computed(() => {
   if (!isSearchMode.value) {
+    // Browse mode - show all shops in current area
     return filteredShops.value.length
       ? [
           {
@@ -201,35 +203,35 @@ const shopDrawerResultSections = computed(() => {
       : []
   }
 
-  // During search, only display the bucket matching the current toggle mode (Left/Right)
-  if (shopDisplayMode.value === 'within' && hasLocalSearchResults.value) {
-    return [
-      {
-        key: 'local-results',
-        title:
-          searchLocationLabel.value === 'your area'
-            ? 'Results In Your Area'
-            : `Results In ${searchLocationLabel.value}`,
-        subtitle: `${filteredShops.value.length} matching shops or products nearby`,
-        shops: filteredShops.value,
-        tone: 'local',
-      },
-    ]
-  } else if (shopDisplayMode.value === 'outside' && hasOutsideSearchResults.value) {
-    return [
-      {
-        key: 'outside-results',
-        title: outsideSearchSectionTitle.value,
-        subtitle: `${outsideSearchResults.value.length} matching shops or products found elsewhere`,
-        shops: outsideSearchResults.value,
-        tone: 'outside',
-      },
-    ]
+  // Search mode - only show sections that have results
+  const sections = []
+
+  if (hasLocalSearchResults.value) {
+    sections.push({
+      key: 'local-results',
+      title:
+        searchLocationLabel.value === 'your area'
+          ? 'Results In Your Area'
+          : `Results In ${searchLocationLabel.value}`,
+      subtitle: `${filteredShops.value.length} matching ${filteredShops.value.length === 1 ? 'shop or product' : 'shops or products'} nearby`,
+      shops: filteredShops.value,
+      tone: 'local',
+    })
   }
 
-  return []
-})
+  if (hasOutsideSearchResults.value) {
+    sections.push({
+      key: 'outside-results',
+      title: outsideSearchSectionTitle.value,
+      subtitle: `${outsideSearchResults.value.length} matching ${outsideSearchResults.value.length === 1 ? 'shop or product' : 'shops or products'} found elsewhere`,
+      shops: outsideSearchResults.value,
+      tone: 'outside',
+    })
+  }
 
+  // If no sections have results, return empty array to show "no results" state
+  return sections
+})
 const activeAreaScopeLabel = computed(() => {
   if (activeAreaScope.value === 'province') return 'Province'
   if (activeAreaScope.value === 'municipality') return 'Municipality'
@@ -2143,13 +2145,25 @@ const fetchShops = () => {
 /* -------------------- APPLY SHOP FILTERS -------------------- */
 const applyShopFilters = () => {
   if (isSearchMode.value) {
-    // Sync map markers with the current "Left/Right" toggle selection during search
-    const resultsToPlot =
-      shopDisplayMode.value === 'within' ? filteredShops.value : outsideSearchResults.value
-    plotShops(resultsToPlot)
+    // During search mode, only plot the results based on current toggle
+    let resultsToPlot = []
+
+    if (shopDisplayMode.value === 'within') {
+      resultsToPlot = filteredShops.value
+    } else {
+      resultsToPlot = outsideSearchResults.value
+    }
+
+    // Clear markers if no results
+    if (resultsToPlot.length === 0) {
+      clearShopMarkers()
+    } else {
+      plotShops(resultsToPlot)
+    }
     return
   }
 
+  // Normal browse mode
   if (shopDisplayMode.value === 'within') {
     filteredShops.value = shops.value.filter(
       (shop) => shop.withinBoundary || isShopWithinBoundary(shop),
@@ -2162,7 +2176,6 @@ const applyShopFilters = () => {
 
   plotShops(filteredShops.value)
 }
-
 const toggleDisplayMode = (mode: 'within' | 'outside') => {
   shopDisplayMode.value = mode
   applyShopFilters()
@@ -2564,46 +2577,56 @@ const smartSearch = async () => {
     outsideSearchResults.value = outsideResults
     showShopMenu.value = true
 
+    // Only show shop menu if there are actual results
+    const totalMatches = [...localResults, ...outsideResults]
+
+    if (totalMatches.length === 0) {
+      // No results found - show empty state
+      filteredShops.value = []
+      outsideSearchResults.value = []
+      errorMsg.value = `No shops or products found for "${query}"`
+      plotShops([]) // Clear map markers
+      shopDisplayMode.value = 'within' // Default
+      return
+    }
+
     // Default to 'within' if local matches exist, otherwise auto-switch to 'outside' results
     shopDisplayMode.value = localResults.length > 0 ? 'within' : 'outside'
     applyShopFilters()
 
-    const totalMatches = [...localResults, ...outsideResults]
-    if (totalMatches.length > 0) {
-      // Set dynamic messaging based on where results were found
-      if (localResults.length > 0 && outsideResults.length > 0) {
-        errorMsg.value = `Found ${localResults.length} nearby and ${outsideResults.length} outside ${searchLocationLabel.value}`
-      } else if (localResults.length > 0) {
-        errorMsg.value = `Found ${localResults.length} results in ${searchLocationLabel.value}`
-      } else {
-        errorMsg.value = `No results in ${searchLocationLabel.value}. Showing ${outsideResults.length} elsewhere.`
-      }
-
-      // Automatically focus if there is exactly one total match across both buckets
-      if (totalMatches.length === 1) {
-        const shop = totalMatches[0]
-        const lat = Number(shop.latitude)
-        const lng = Number(shop.longitude)
-
-        map.value.flyTo({
-          center: [lng, lat],
-          zoom: 16,
-          essential: true,
-          duration: 1000,
-        })
-
-        const marker = shopMarkers.find((m: any) => m.shopId === shop.id)
-        if (marker && marker.getPopup()) {
-          marker.togglePopup()
-        }
-      }
+    // Set dynamic messaging based on where results were found
+    if (localResults.length > 0 && outsideResults.length > 0) {
+      errorMsg.value = `Found ${localResults.length} nearby and ${outsideResults.length} outside ${searchLocationLabel.value}`
+    } else if (localResults.length > 0) {
+      errorMsg.value = `Found ${localResults.length} results in ${searchLocationLabel.value}`
     } else {
-      errorMsg.value = `No shops or products found for "${query}"`
-      plotShops([])
+      errorMsg.value = `No results in ${searchLocationLabel.value}. Showing ${outsideResults.length} elsewhere.`
+    }
+
+    // Automatically focus if there is exactly one total match across both buckets
+    if (totalMatches.length === 1) {
+      const shop = totalMatches[0]
+      const lat = Number(shop.latitude)
+      const lng = Number(shop.longitude)
+
+      map.value.flyTo({
+        center: [lng, lat],
+        zoom: 16,
+        essential: true,
+        duration: 1000,
+      })
+
+      const marker = shopMarkers.find((m: any) => m.shopId === shop.id)
+      if (marker && marker.getPopup()) {
+        marker.togglePopup()
+      }
     }
   } catch (error) {
     console.error('Search failed:', error)
     errorMsg.value = 'Search failed. Please try again.'
+    filteredShops.value = []
+    outsideSearchResults.value = []
+    plotShops([])
   } finally {
     loading.value = false
   }
@@ -2851,7 +2874,6 @@ onUnmounted(() => {
   }
 })
 </script>
-
 <template>
   <v-app>
     <PullToRefreshWrapper
@@ -2960,9 +2982,8 @@ onUnmounted(() => {
           <span>Calculating routes...</span>
         </div>
 
-        <!-- Route Selection Toggle UI (Replaces Main Controls in Routing Mode) -->
+        <!-- Route Selection Toggle UI -->
         <div class="map-controls-container" v-if="!showShopMenu && showRoutePanel">
-          <!-- Display Route Details Chip -->
           <v-chip
             v-if="routeOptions.find((r) => r.type === selectedRouteType)"
             color="primary"
@@ -3032,7 +3053,7 @@ onUnmounted(() => {
           </div>
         </div>
 
-        <!-- Re-open Route Panel Button (Integrated into Controls) -->
+        <!-- Re-open Route Panel Button -->
         <div v-if="routeOptions.length > 0 && !showRoutePanel" class="route-toggle-wrapper">
           <v-btn
             class="route-toggle-btn"
@@ -3051,7 +3072,6 @@ onUnmounted(() => {
 
         <!-- Map Controls Container -->
         <div class="map-controls-container" v-if="!showShopMenu && !showRoutePanel">
-          <!-- Display Mode Chip -->
           <v-chip
             v-if="activeLocationLabel"
             :color="shopDisplayMode === 'within' ? 'green' : 'orange'"
@@ -3065,7 +3085,6 @@ onUnmounted(() => {
           </v-chip>
 
           <div class="map-controls-group">
-            <!-- Shop Menu Toggle -->
             <v-btn
               @click="toggleShopMenu"
               class="control-btn"
@@ -3080,7 +3099,6 @@ onUnmounted(() => {
               </span>
             </v-btn>
 
-            <!-- Display Mode Menu -->
             <v-menu
               v-model="showDisplayOptionsMenu"
               :close-on-content-click="false"
@@ -3107,10 +3125,8 @@ onUnmounted(() => {
               <v-card class="display-options-card" rounded="xl">
                 <v-card-title class="display-options-title">
                   <div class="w-100">
-                    <!-- Title Row -->
                     <div class="d-flex align-center justify-space-between">
                       <div class="text-subtitle-1 font-weight-bold">Display Options</div>
-
                       <v-btn
                         icon
                         @click="showDisplayOptionsMenu = false"
@@ -3121,8 +3137,6 @@ onUnmounted(() => {
                         <v-icon>mdi-close</v-icon>
                       </v-btn>
                     </div>
-
-                    <!-- Subtitle -->
                     <div class="text-caption text-medium-emphasis">
                       Browse other provinces and/or city/municipality
                     </div>
@@ -3232,7 +3246,6 @@ onUnmounted(() => {
               </span>
             </v-btn>
 
-            <!-- Fit Map Button -->
             <v-btn
               @click="fitMapToActiveArea"
               :disabled="!activeLocationCenter && !hasValidLocation && !lastKnown"
@@ -3313,28 +3326,40 @@ onUnmounted(() => {
           </div>
 
           <div class="shop-drawer-scroll">
-            <div v-if="isSearchMode && search" class="shop-drawer-search-meta">
-              <div class="shop-drawer-search-meta-row">
-                <span class="shop-drawer-search-result-text">
-                  <template v-if="hasLocalSearchResults">
-                    Found {{ filteredShops.length }} results in {{ searchLocationLabel }} for "{{
-                      search
-                    }}"
-                  </template>
-                  <template v-else-if="hasOutsideSearchResults">
-                    No local results for "{{ search }}". {{ outsideSearchResults.length }} available
-                    outside {{ searchLocationLabel }}.
-                  </template>
-                  <template v-else> No results found for "{{ search }}" </template>
-                </span>
-                <v-btn size="x-small" variant="text" @click="clearSearch" class="text-caption">
-                  Clear
-                </v-btn>
+            <!-- Search Mode Toggle -->
+            <div v-if="isSearchMode" class="shop-drawer-section">
+              <div class="shop-drawer-toggle-card">
+                <div class="shop-drawer-toggle-title">Filter Results</div>
+                <v-btn-group variant="outlined" class="shop-drawer-toggle-group">
+                  <v-btn
+                    :color="shopDisplayMode === 'within' ? 'primary' : undefined"
+                    @click="toggleDisplayMode('within')"
+                    size="small"
+                    :disabled="!hasLocalSearchResults"
+                  >
+                    <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
+                    Within Area ({{ filteredShops.length }})
+                  </v-btn>
+                  <v-btn
+                    :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
+                    @click="toggleDisplayMode('outside')"
+                    size="small"
+                    :disabled="!hasOutsideSearchResults"
+                  >
+                    <v-icon start size="small">mdi-arrow-expand</v-icon>
+                    Outside Area ({{ outsideSearchResults.length }})
+                  </v-btn>
+                </v-btn-group>
+                <div class="display-options-helper mt-2">
+                  Showing {{ shopDisplayMode === 'within' ? 'local' : 'outside' }} results for "{{
+                    search
+                  }}"
+                </div>
               </div>
             </div>
 
-            <!-- Shop Coverage Toggle (Left/Right Sections) -->
-            <div v-if="activeLocationLabel" class="shop-drawer-section">
+            <!-- Regular browse mode toggle -->
+            <div v-if="!isSearchMode && activeLocationLabel" class="shop-drawer-section">
               <div class="shop-drawer-toggle-card">
                 <div class="shop-drawer-toggle-title">Shop Coverage</div>
                 <v-btn-group variant="outlined" class="shop-drawer-toggle-group">
@@ -3344,7 +3369,7 @@ onUnmounted(() => {
                     size="small"
                   >
                     <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
-                    Within ({{ isSearchMode ? filteredShops.length : 'Area' }})
+                    Within {{ activeLocationShortLabel }}
                   </v-btn>
                   <v-btn
                     :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
@@ -3352,18 +3377,20 @@ onUnmounted(() => {
                     size="small"
                   >
                     <v-icon start size="small">mdi-arrow-expand</v-icon>
-                    Outside ({{ isSearchMode ? outsideSearchResults.length : 'Area' }})
+                    Outside {{ activeLocationShortLabel }}
                   </v-btn>
                 </v-btn-group>
               </div>
             </div>
 
+            <!-- Loading State -->
             <div v-if="loading" class="shop-drawer-state">
               <v-progress-circular indeterminate color="primary"></v-progress-circular>
               <div class="shop-drawer-state-title">Loading shops...</div>
               <div class="shop-drawer-state-copy">Updating available shops and products.</div>
             </div>
 
+            <!-- No Results States -->
             <div
               v-if="!loading && !isSearchMode && filteredShops.length === 0"
               class="shop-drawer-state"
@@ -3380,45 +3407,290 @@ onUnmounted(() => {
               <v-icon size="64" color="grey-lighten-1">mdi-magnify-close</v-icon>
               <div class="shop-drawer-state-title">No search results</div>
               <div class="shop-drawer-state-copy">
-                Try a different product, shop, or location keyword.
+                No shops or products match "{{ search }}". Try different keywords.
               </div>
+              <v-btn variant="text" color="primary" class="mt-3" @click="clearSearch">
+                Clear Search
+              </v-btn>
             </div>
 
-            <!-- Empty Bucket Message -->
+            <!-- SEARCH MODE - WITHIN RESULTS SECTION -->
             <div
-              v-if="!loading && isSearchMode && shopDrawerResultSections.length === 0"
-              class="shop-drawer-state"
+              v-if="
+                !loading && isSearchMode && shopDisplayMode === 'within' && hasLocalSearchResults
+              "
+              class="shop-drawer-section"
             >
-              <v-icon size="48" color="grey-lighten-2">mdi-filter-variant-remove</v-icon>
-              <div class="text-caption text-medium-emphasis mt-2">
-                No matches in this section. Try checking the
-                {{ shopDisplayMode === 'within' ? 'Outside' : 'Within' }} tab.
+              <div class="shop-drawer-results-header">
+                <div class="shop-drawer-results-title">
+                  Results In {{ searchLocationLabelTitleCase }}
+                </div>
+                <div class="shop-drawer-results-subtitle">
+                  {{ filteredShops.length }} matching
+                  {{ filteredShops.length === 1 ? 'shop or product' : 'shops or products' }} nearby
+                </div>
               </div>
+
+              <v-list density="comfortable" class="pa-0">
+                <v-list-item
+                  v-for="(shop, index) in filteredShops"
+                  :key="shop.id"
+                  @click="handleShopClick(shop.id, index)"
+                  class="mb-2 shop-list-item"
+                  :class="{ 'selected-shop': selectedShopId === shop.id }"
+                >
+                  <template #prepend>
+                    <div class="position-relative">
+                      <v-avatar size="56" rounded class="elevation-1">
+                        <v-img
+                          :src="
+                            shop.logo_url ||
+                            shop.physical_store ||
+                            'https://placehold.co/80x80?text=Shop'
+                          "
+                          :alt="shop.business_name"
+                          cover
+                        />
+                      </v-avatar>
+                      <div
+                        class="status-badge"
+                        :class="isShopCurrentlyOpen(shop) ? 'bg-green' : 'bg-red'"
+                      >
+                        <v-icon size="12" color="white">
+                          {{ isShopCurrentlyOpen(shop) ? 'mdi-check' : 'mdi-close' }}
+                        </v-icon>
+                      </div>
+                    </div>
+                  </template>
+
+                  <v-list-item-title class="d-flex align-center mb-1">
+                    <span class="font-weight-medium text-body-1">{{ shop.business_name }}</span>
+                    <v-chip
+                      :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
+                      size="x-small"
+                      class="ml-2"
+                      density="compact"
+                    >
+                      {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
+                    </v-chip>
+                    <v-spacer></v-spacer>
+                 
+                  </v-list-item-title>
+
+                  <v-list-item-subtitle class="text-caption">
+                    <div class="d-flex align-center mb-1">
+                      <v-icon size="14" class="mr-1">mdi-map-marker</v-icon>
+                      <span>{{ getFullAddress(shop) }}</span>
+                    </div>
+
+                    <div class="d-flex align-center mb-1">
+                      <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
+                      <span
+                        >{{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km
+                        away</span
+                      >
+                    </div>
+
+                    <div v-if="shop.open_time && shop.close_time" class="d-flex align-center mt-1">
+                      <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+                      <span class="text-caption">
+                        {{ formatTime12Hour(shop.open_time) }} -
+                        {{ formatTime12Hour(shop.close_time) }}
+                      </span>
+                    </div>
+
+                    <div
+                      v-if="getMatchingProducts(shop).length > 0 && !isShopMatch(shop, search)"
+                      class="d-flex align-center mt-1"
+                    >
+                      <v-icon size="14" color="primary" class="mr-1">mdi-package-variant</v-icon>
+                      <span class="text-caption font-weight-bold text-primary">
+                        {{ getMatchingProducts(shop).length }}
+                        {{ getMatchingProducts(shop).length === 1 ? 'product' : 'products' }} match
+                      </span>
+                    </div>
+                  </v-list-item-subtitle>
+
+                  <template #append>
+                    <div class="d-flex flex-column align-center gap-1">
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        @click.stop="openShopDetails(shop.id)"
+                        title="View shop details"
+                        color="primary"
+                      >
+                        <v-icon>mdi-information</v-icon>
+                      </v-btn>
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        @click.stop="focusOnShopFromList(shop.id)"
+                        title="Show on map"
+                        color="green"
+                      >
+                        <v-icon>mdi-map-marker</v-icon>
+                      </v-btn>
+                    </div>
+                  </template>
+                </v-list-item>
+              </v-list>
             </div>
 
-            <div v-if="!loading && shopDrawerResultSections.length > 0">
+            <!-- SEARCH MODE - OUTSIDE RESULTS SECTION -->
+            <div
+              v-if="
+                !loading && isSearchMode && shopDisplayMode === 'outside' && hasOutsideSearchResults
+              "
+              class="shop-drawer-section"
+            >
+              <div class="shop-drawer-results-header">
+                <div class="shop-drawer-results-title">
+                  Results Outside {{ searchLocationLabelTitleCase }}
+                </div>
+                <div class="shop-drawer-results-subtitle">
+                  {{ outsideSearchResults.length }} matching
+                  {{
+                    outsideSearchResults.length === 1 ? 'shop or product' : 'shops or products'
+                  }}
+                  found elsewhere
+                </div>
+              </div>
+
+              <v-list density="comfortable" class="pa-0">
+                <v-list-item
+                  v-for="(shop, index) in outsideSearchResults"
+                  :key="shop.id"
+                  @click="handleShopClick(shop.id, index)"
+                  class="mb-2 shop-list-item"
+                  :class="{ 'selected-shop': selectedShopId === shop.id }"
+                >
+                  <template #prepend>
+                    <div class="position-relative">
+                      <v-avatar size="56" rounded class="elevation-1">
+                        <v-img
+                          :src="
+                            shop.logo_url ||
+                            shop.physical_store ||
+                            'https://placehold.co/80x80?text=Shop'
+                          "
+                          :alt="shop.business_name"
+                          cover
+                        />
+                      </v-avatar>
+                      <div
+                        class="status-badge"
+                        :class="isShopCurrentlyOpen(shop) ? 'bg-green' : 'bg-red'"
+                      >
+                        <v-icon size="12" color="white">
+                          {{ isShopCurrentlyOpen(shop) ? 'mdi-check' : 'mdi-close' }}
+                        </v-icon>
+                      </div>
+                    </div>
+                  </template>
+
+                  <v-list-item-title class="d-flex align-center mb-1">
+                    <span class="font-weight-medium text-body-1">{{ shop.business_name }}</span>
+                    <v-chip
+                      :color="isShopCurrentlyOpen(shop) ? 'green' : 'red'"
+                      size="x-small"
+                      class="ml-2"
+                      density="compact"
+                    >
+                      {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
+                    </v-chip>
+                    <v-spacer></v-spacer>
+                
+                  </v-list-item-title>
+
+                  <v-list-item-subtitle class="text-caption">
+                    <!-- Location badge for outside results (subtle difference to indicate outside area) -->
+                    <div class="d-flex align-center mb-1">
+                      <v-icon size="14" class="mr-1" color="orange-darken-2">mdi-earth</v-icon>
+                      <span class="font-weight-medium">{{ getShopLocationSummary(shop) }}</span>
+                    </div>
+
+                    <!-- Full address (same as within) -->
+                    <div class="d-flex align-center mb-1">
+                      <v-icon size="14" class="mr-1">mdi-map-marker</v-icon>
+                      <span>{{ getFullAddress(shop) }}</span>
+                    </div>
+
+                    <!-- Distance (same as within) -->
+                    <div class="d-flex align-center mb-1">
+                      <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
+                      <span
+                        >{{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km
+                        away</span
+                      >
+                    </div>
+
+                    <!-- Hours (same as within) -->
+                    <div v-if="shop.open_time && shop.close_time" class="d-flex align-center mt-1">
+                      <v-icon size="14" class="mr-1">mdi-clock-outline</v-icon>
+                      <span class="text-caption">
+                        {{ formatTime12Hour(shop.open_time) }} -
+                        {{ formatTime12Hour(shop.close_time) }}
+                      </span>
+                    </div>
+
+                    <!-- Product matches (same as within) -->
+                    <div
+                      v-if="getMatchingProducts(shop).length > 0 && !isShopMatch(shop, search)"
+                      class="d-flex align-center mt-1"
+                    >
+                      <v-icon size="14" color="primary" class="mr-1">mdi-package-variant</v-icon>
+                      <span class="text-caption font-weight-bold text-primary">
+                        {{ getMatchingProducts(shop).length }}
+                        {{ getMatchingProducts(shop).length === 1 ? 'product' : 'products' }} match
+                      </span>
+                    </div>
+                  </v-list-item-subtitle>
+
+                  <template #append>
+                    <div class="d-flex flex-column align-center gap-1">
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        @click.stop="openShopDetails(shop.id)"
+                        title="View shop details"
+                        color="primary"
+                      >
+                        <v-icon>mdi-information</v-icon>
+                      </v-btn>
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="small"
+                        @click.stop="focusOnShopFromList(shop.id)"
+                        title="Show on map"
+                        color="green"
+                      >
+                        <v-icon>mdi-map-marker</v-icon>
+                      </v-btn>
+                    </div>
+                  </template>
+                </v-list-item>
+              </v-list>
+            </div>
+
+            <!-- BROWSE MODE RESULTS (non-search) -->
+            <div v-if="!loading && !isSearchMode && shopDrawerResultSections.length > 0">
               <div
                 v-for="section in shopDrawerResultSections"
                 :key="section.key"
                 class="shop-drawer-section"
               >
-                <div v-if="section.title" class="shop-drawer-results-header">
-                  <div class="shop-drawer-results-title">{{ section.title }}</div>
-                  <div v-if="section.subtitle" class="shop-drawer-results-subtitle">
-                    {{ section.subtitle }}
-                  </div>
-                </div>
-
                 <v-list density="comfortable" class="pa-0">
                   <v-list-item
                     v-for="(shop, index) in section.shops"
                     :key="shop.id"
                     @click="handleShopClick(shop.id, index)"
                     class="mb-2 shop-list-item"
-                    :class="{
-                      'bg-blue-lighten-5': isSearchMode && hasSearchMatch(shop),
-                      'selected-shop': selectedShopId === shop.id,
-                    }"
+                    :class="{ 'selected-shop': selectedShopId === shop.id }"
                   >
                     <template #prepend>
                       <div class="position-relative">
@@ -3454,26 +3726,9 @@ onUnmounted(() => {
                       >
                         {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
                       </v-chip>
-                      <v-spacer></v-spacer>
-                      <v-icon
-                        v-if="isSearchMode && hasSearchMatch(shop)"
-                        size="16"
-                        color="primary"
-                        title="Search match"
-                      >
-                        mdi-magnify
-                      </v-icon>
                     </v-list-item-title>
 
                     <v-list-item-subtitle class="text-caption">
-                      <div
-                        v-if="isSearchMode && isOutsideSearchResult(shop)"
-                        class="shop-search-location-pill"
-                      >
-                        <v-icon size="13" color="orange-darken-2">mdi-earth</v-icon>
-                        <span>{{ getShopLocationSummary(shop) }}</span>
-                      </div>
-
                       <div class="d-flex align-center mb-1">
                         <v-icon size="14" class="mr-1">mdi-map-marker</v-icon>
                         <span>{{ getFullAddress(shop) }}</span>
@@ -3481,10 +3736,10 @@ onUnmounted(() => {
 
                       <div class="d-flex align-center mb-1">
                         <v-icon size="14" class="mr-1">mdi-navigation</v-icon>
-                        <span>
-                          {{ (shop.searchDistance || shop.distanceKm || 0).toFixed(1) }} km
-                          {{ distanceDisplayLabel }}
-                        </span>
+                        <span
+                          >{{ (shop.distanceKm || 0).toFixed(1) }} km
+                          {{ distanceDisplayLabel }}</span
+                        >
                       </div>
 
                       <div
@@ -3495,25 +3750,6 @@ onUnmounted(() => {
                         <span class="text-caption">
                           {{ formatTime12Hour(shop.open_time) }} -
                           {{ formatTime12Hour(shop.close_time) }}
-                        </span>
-                      </div>
-
-                      <!-- Product match count indicator: Shown only if shop name/address didn't match -->
-                      <div
-                        v-if="
-                          isSearchMode &&
-                          getMatchingProducts(shop).length > 0 &&
-                          !isShopMatch(shop, search)
-                        "
-                        class="d-flex align-center mt-1"
-                      >
-                        <v-icon size="14" color="primary" class="mr-1">mdi-package-variant</v-icon>
-                        <span class="text-caption font-weight-bold text-primary">
-                          {{ getMatchingProducts(shop).length }}
-                          {{
-                            getMatchingProducts(shop).length === 1 ? 'product' : 'products'
-                          }}
-                          match
                         </span>
                       </div>
                     </v-list-item-subtitle>
@@ -3548,7 +3784,10 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <v-card-actions v-if="shopDrawerResultSections.length > 0" class="shop-drawer-footer">
+          <v-card-actions
+            v-if="!isSearchMode && filteredShops.length > 0"
+            class="shop-drawer-footer"
+          >
             <v-btn
               variant="text"
               block
@@ -3565,7 +3804,6 @@ onUnmounted(() => {
     </PullToRefreshWrapper>
   </v-app>
 </template>
-
 <style scoped>
 /* Main layout */
 .v-application {
@@ -4748,5 +4986,14 @@ onUnmounted(() => {
     padding: 8px calc(12px + var(--app-safe-area-right, env(safe-area-inset-right, 0px))) 10px
       calc(12px + var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
   }
+}
+
+/* Subtle distinction for outside results (optional) */
+.shop-list-item.outside-result {
+  border-left: 3px solid #f97316;
+}
+
+.shop-list-item.outside-result:hover {
+  background-color: #fff7ed;
 }
 </style>
