@@ -380,14 +380,19 @@ async function fetchProducts() {
         sold,
         stock,
         shop_id,
-        shops!inner (status)
+        shops!inner (status, city, province)
       `,
       )
-      .ilike('shops.status', 'approved') // Only approved shops
+      .eq('shops.status', 'approved') // Only approved shops
 
     if (error) throw error
 
-    products.value = (data || []).map((p) => ({
+    // Filter products whose shops are in the Primary Service Area (Butuan)
+    const butuanProducts = (data || []).filter((p) =>
+      isPrimaryServiceAreaLocation(p.shops.city, p.shops.province),
+    )
+
+    products.value = butuanProducts.map((p) => ({
       id: p.id,
       title: p.prod_name,
       price: p.price,
