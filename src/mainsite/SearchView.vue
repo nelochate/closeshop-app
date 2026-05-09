@@ -220,7 +220,7 @@ const showEmptyState = computed(() =>
       </v-sheet>
 
       <!-- 🛍️ Results -->
-      <v-container class="py-6" style="max-width: 720px;">
+      <v-container class="py-6" style="max-width: 720px">
         <!-- Results Header -->
         <div class="results-header" v-if="query && hasResults">
           <h2 class="page-title">Results for "{{ query }}"</h2>
@@ -251,12 +251,7 @@ const showEmptyState = computed(() =>
         <!-- Loading Skeleton -->
         <template v-if="loading">
           <div class="product-grid">
-            <v-skeleton-loader
-              v-for="i in 6"
-              :key="i"
-              type="image"
-              class="product-card"
-            />
+            <v-skeleton-loader v-for="i in 6" :key="i" type="image" class="product-card" />
           </div>
         </template>
 
@@ -287,11 +282,20 @@ const showEmptyState = computed(() =>
         <!-- Shop Results Grid -->
         <template v-else-if="!loading && activeTab === 'shops' && shopResults.length > 0">
           <div class="shop-grid">
-            <div v-for="shop in shopResults" :key="shop.id" class="shop-card" @click="goToShop(shop.id)">
+            <div
+              v-for="shop in shopResults"
+              :key="shop.id"
+              class="shop-card"
+              @click="goToShop(shop.id)"
+            >
               <div class="shop-avatar-container">
                 <v-avatar size="64" class="shop-avatar" color="blue-lighten-4">
-                  <v-img v-if="shop.img && shop.img !== '/shop-placeholder.png'" :src="shop.img" class="shop-logo"
-                    cover />
+                  <v-img
+                    v-if="shop.img && shop.img !== '/shop-placeholder.png'"
+                    :src="shop.img"
+                    class="shop-logo"
+                    cover
+                  />
                   <div v-else class="default-shop-logo">
                     <v-icon size="32" color="#3f83c7">mdi-storefront</v-icon>
                   </div>
@@ -303,7 +307,11 @@ const showEmptyState = computed(() =>
               <div class="shop-info">
                 <h3 class="shop-name">{{ shop.title }}</h3>
                 <p class="shop-description" v-if="shop.description">
-                  {{ shop.description.length > 80 ? shop.description.substring(0, 80) + '...' : shop.description }}
+                  {{
+                    shop.description.length > 80
+                      ? shop.description.substring(0, 80) + '...'
+                      : shop.description
+                  }}
                 </p>
               </div>
             </div>
@@ -369,8 +377,6 @@ const showEmptyState = computed(() =>
   max-width: 720px;
   margin: 0 auto;
 }
-
-
 
 .back-btn {
   background: #fff !important;
@@ -443,7 +449,9 @@ const showEmptyState = computed(() =>
   border-radius: 12px;
   overflow: hidden;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.06);
-  transition: transform 0.15s ease, box-shadow 0.2s ease;
+  transition:
+    transform 0.15s ease,
+    box-shadow 0.2s ease;
   cursor: pointer;
 }
 .product-card:hover {
