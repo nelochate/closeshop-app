@@ -2943,122 +2943,94 @@ onUnmounted(() => {
           <span>Calculating routes...</span>
         </div>
 
-        <!-- Route Selection Panel -->
-        <v-card
-          v-if="showRoutePanel"
-          :class="['route-selection-panel', 'bottom-panel', { minimized: routePanelMinimized }]"
-          elevation="4"
-        >
-          <v-card-title class="d-flex align-center justify-space-between py-2">
-            <div class="d-flex align-center">
-              <v-icon color="primary" class="mr-2">mdi-routes</v-icon>
-              <span class="text-subtitle-1 font-weight-bold">Route Options</span>
-            </div>
-            <div class="d-flex align-center gap-1">
-              <!-- Minimize Button -->
-              <v-btn
-                icon
-                size="small"
-                @click="toggleRoutePanelMinimize"
-                variant="text"
-                :title="routePanelMinimized ? 'Expand panel' : 'Minimize panel'"
-              >
-                <v-icon>{{ routePanelMinimized ? 'mdi-chevron-up' : 'mdi-chevron-down' }}</v-icon>
-              </v-btn>
-              <!-- Close Button -->
-              <v-btn
-                icon
-                size="small"
-                @click="clearAllRoutes"
-                variant="text"
-                title="Close route panel"
-              >
-                <v-icon>mdi-close</v-icon>
-              </v-btn>
-            </div>
-          </v-card-title>
+        <!-- Route Selection Toggle UI (Replaces Main Controls in Routing Mode) -->
+        <div class="map-controls-container" v-if="!showShopMenu && showRoutePanel">
+          <!-- Display Route Details Chip -->
+          <v-chip
+            v-if="routeOptions.find((r) => r.type === selectedRouteType)"
+            color="primary"
+            size="small"
+            variant="elevated"
+            class="mode-chip mb-2"
+            elevation="4"
+          >
+            <v-icon start size="16" color="white">mdi-navigation-variant</v-icon>
+            <span class="font-weight-black mr-1 text-white">
+              {{
+                Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)
+              }}m
+            </span>
+            <v-divider vertical class="mx-2 border-opacity-50"></v-divider>
+            <span class="text-caption text-white">
+              {{
+                (routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(
+                  1,
+                )
+              }}km
+            </span>
+          </v-chip>
 
-          <v-card-text v-if="!routePanelMinimized" class="py-3">
-            <div class="route-buttons-grid">
-              <v-btn
-                v-for="type in ['driving', 'walking', 'cycling'] as RouteType[]"
-                :key="type"
-                :color="
-                  selectedRouteType === type
-                    ? routeConfig[type].activeColor
-                    : routeConfig[type].color
-                "
-                variant="flat"
-                class="route-type-btn"
-                @click="selectRouteType(type)"
-                :disabled="!routeOptions.find((r) => r.type === type)"
-              >
-                <v-icon start>{{ routeConfig[type].icon }}</v-icon>
-                {{ routeConfig[type].label }}
-                <template v-if="routeOptions.find((r) => r.type === type)">
-                  <v-spacer></v-spacer>
-                  <span class="ml-2 text-caption">
-                    {{ Math.round(routeOptions.find((r) => r.type === type)!.duration / 60) }} min
-                  </span>
-                </template>
-              </v-btn>
-            </div>
-
-            <!-- Route Info -->
-            <div
-              v-if="routeOptions.find((r) => r.type === selectedRouteType)"
-              class="route-info mt-3"
+          <div class="map-controls-group routing-controls-bar">
+            <v-btn-toggle
+              v-model="selectedRouteType"
+              mandatory
+              variant="text"
+              color="primary"
+              class="route-segmented-toggle"
+              @update:model-value="selectRouteType"
             >
-              <v-divider class="my-2"></v-divider>
-              <div class="d-flex justify-space-between align-center">
-                <div>
-                  <div class="text-caption text-medium-emphasis">Distance</div>
-                  <div class="text-body-1 font-weight-medium">
-                    {{
-                      (
-                        routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000
-                      ).toFixed(1)
-                    }}
-                    km
-                  </div>
-                </div>
-                <div>
-                  <div class="text-caption text-medium-emphasis">Duration</div>
-                  <div class="text-body-1 font-weight-medium">
-                    {{
-                      Math.round(
-                        routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60,
-                      )
-                    }}
-                    minutes
-                  </div>
-                </div>
-              </div>
-            </div>
-          </v-card-text>
+              <v-btn
+                value="driving"
+                :disabled="!routeOptions.find((r) => r.type === 'driving')"
+                title="Driving"
+              >
+                <v-icon :color="routeConfig.driving.color">mdi-car</v-icon>
+              </v-btn>
+              <v-btn
+                value="walking"
+                :disabled="!routeOptions.find((r) => r.type === 'walking')"
+                title="Walking"
+              >
+                <v-icon :color="routeConfig.walking.color">mdi-walk</v-icon>
+              </v-btn>
+              <v-btn
+                value="cycling"
+                :disabled="!routeOptions.find((r) => r.type === 'cycling')"
+                title="Cycling"
+              >
+                <v-icon :color="routeConfig.cycling.color">mdi-bike</v-icon>
+              </v-btn>
+            </v-btn-toggle>
 
-          <!-- Minimized Panel Content -->
-          <v-card-text v-else class="py-2 px-3">
-            <div class="d-flex align-center justify-space-between">
-              <div class="d-flex align-center">
-                <v-icon color="primary" size="small" class="mr-2">mdi-routes</v-icon>
-                <span class="text-caption text-medium-emphasis">Route calculated</span>
-              </div>
-              <div class="d-flex align-center">
-                <span class="text-caption font-weight-medium mr-2">
-                  {{
-                    routeOptions.find((r) => r.type === selectedRouteType)
-                      ? `${(routeOptions.find((r) => r.type === selectedRouteType)!.distance / 1000).toFixed(1)} km • ${Math.round(routeOptions.find((r) => r.type === selectedRouteType)!.duration / 60)} min`
-                      : ''
-                  }}
-                </span>
-                <v-icon size="small" :color="routeConfig[selectedRouteType].color">
-                  {{ routeConfig[selectedRouteType].icon }}
-                </v-icon>
-              </div>
-            </div>
-          </v-card-text>
-        </v-card>
+            <v-btn
+              icon
+              @click="clearAllRoutes"
+              variant="text"
+              color="error"
+              title="Exit Routing"
+              class="exit-routing-btn"
+            >
+              <v-icon>mdi-close-circle-outline</v-icon>
+            </v-btn>
+          </div>
+        </div>
+
+        <!-- Re-open Route Panel Button (Integrated into Controls) -->
+        <div v-if="routeOptions.length > 0 && !showRoutePanel" class="route-toggle-wrapper">
+          <v-btn
+            class="route-toggle-btn"
+            @click="showRouteSelectionPanel"
+            variant="elevated"
+            color="white"
+            rounded="pill"
+            elevation="3"
+          >
+            <v-badge dot color="green" offset-x="-2" offset-y="-2">
+              <v-icon color="primary" start>mdi-routes</v-icon>
+            </v-badge>
+            <span class="text-caption font-weight-bold ml-1">View Route</span>
+          </v-btn>
+        </div>
 
         <!-- Map Controls Container -->
         <div class="map-controls-container" v-if="!showShopMenu && !showRoutePanel">
@@ -3267,21 +3239,6 @@ onUnmounted(() => {
             </v-btn>
           </div>
         </div>
-
-        <!-- Re-open Route Panel Button -->
-        <v-btn
-          v-if="routeOptions.length > 0 && !showRoutePanel"
-          class="reopen-route-btn"
-          @click="showRouteSelectionPanel"
-          icon
-          size="large"
-          elevation="3"
-          title="Show route options"
-        >
-          <v-badge dot color="green" offset-x="-8" offset-y="2">
-            <v-icon color="primary">mdi-routes</v-icon>
-          </v-badge>
-        </v-btn>
 
         <!-- Error Message Alert -->
         <v-alert
@@ -3685,24 +3642,7 @@ onUnmounted(() => {
 
 /* Route Selection Panel - Bottom Position */
 .route-selection-panel.bottom-panel {
-  position: absolute;
-  bottom: 90px; /* Position above bottom nav */
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 2000;
-  width: 90%;
-  max-width: 400px;
-  background: white;
-  border-radius: 12px;
-  box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.15);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  animation: slideUp 0.3s ease-out;
-}
-
-.route-selection-panel.bottom-panel.minimized {
-  max-height: 60px;
-  overflow: hidden;
+  display: none; /* Replaced by compact toggle UI in map-controls-container */
 }
 
 /* Animation for bottom panel */
@@ -3741,34 +3681,47 @@ onUnmounted(() => {
   padding: 12px;
 }
 
-/* Re-open Route Panel Button */
-.reopen-route-btn {
+/* Integrated Route Toggle Button */
+.route-toggle-wrapper {
   position: absolute;
-  bottom: 100px; /* Position above bottom navigation */
+  bottom: calc(var(--map-floating-offset) + 85px);
   left: 50%;
   transform: translateX(-50%);
   z-index: 2000;
-  background: white !important;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.25) !important;
-  border-radius: 50% !important;
-  width: 56px !important;
-  height: 56px !important;
-  border: 2px solid #3b82f6 !important;
-  transition: all 0.3s ease !important;
+  pointer-events: auto;
 }
 
-.reopen-route-btn:hover {
-  transform: translateX(-50%) scale(1.1);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3) !important;
-  background: #f8fafc !important;
+.route-toggle-btn {
+  text-transform: none !important;
+  padding: 0 20px !important;
+  height: 40px !important;
+  border: 1px solid #e2e8f0 !important;
 }
 
-.reopen-route-btn .v-badge {
+.route-toggle-btn:hover {
+  transform: translateY(-2px);
+  background-color: #f8fbff !important;
+}
+
+/* Compact Routing Mode UI Overrides */
+.routing-controls-bar {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  padding: 4px !important;
+  min-height: 56px !important;
+}
+
+.route-segmented-toggle {
+  grid-column: span 3;
   width: 100%;
-  height: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  display: flex !important;
+  border-right: 1px solid #e2e8f0;
+}
+
+.route-segmented-toggle :deep(.v-btn) {
+  flex: 1;
+  height: 48px !important;
+  min-width: 0 !important;
+  border-radius: 12px !important;
 }
 
 /* Map Controls */
