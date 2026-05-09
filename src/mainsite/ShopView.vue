@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, nextTick, watch, onUnmounted } from 'vue'
+import { ref, onMounted, computed, nextTick, watch, onUnmounted, onActivated } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
 import mapboxgl from 'mapbox-gl'
@@ -13,6 +14,7 @@ mapboxgl.accessToken =
 // route + router
 const route = useRoute()
 const router = useRouter()
+const { smAndDown } = useDisplay()
 const shopId = route.params.id as string
 const activeTab = ref(null)
 
@@ -36,6 +38,23 @@ const filteredProducts = computed(() => {
 })
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/640/360'
+const showCoverPreview = ref(false)
+
+const coverPhotoUrl = computed(() => shop.value?.physical_store || PLACEHOLDER_IMG)
+const hasCoverPhoto = computed(() => Boolean(shop.value?.physical_store))
+const coverPhotoAlt = computed(() => {
+  const businessName = shop.value?.business_name || 'Shop'
+  return `${businessName} cover photo`
+})
+
+const openCoverPreview = () => {
+  if (!hasCoverPhoto.value) return
+  showCoverPreview.value = true
+}
+
+const closeCoverPreview = () => {
+  showCoverPreview.value = false
+}
 
 // fetch shop
 const fetchShop = async () => {
@@ -352,7 +371,6 @@ onMounted(() => {
 })
 
 // Reinitialize map when component is activated (for Vue Router)
-import { onActivated } from 'vue'
 onActivated(() => {
   if (map && shop.value?.latitude && shop.value?.longitude) {
     setTimeout(() => {
@@ -426,14 +444,27 @@ const hasValidCoordinates = computed(() => {
       <v-container class="py-0 px-0">
         <!-- Cover -->
         <v-img
-          :src="shop?.physical_store || PLACEHOLDER_IMG"
+          :src="coverPhotoUrl"
+          :alt="coverPhotoAlt"
           height="200"
           cover
           class="cover-photo"
+          :class="{ 'cover-photo--interactive': hasCoverPhoto }"
+          :tabindex="hasCoverPhoto ? 0 : -1"
+          :role="hasCoverPhoto ? 'button' : undefined"
+          :aria-label="hasCoverPhoto ? `Preview ${coverPhotoAlt}` : coverPhotoAlt"
+          @click="openCoverPreview"
+          @keydown.enter.prevent="openCoverPreview"
+          @keydown.space.prevent="openCoverPreview"
         >
           <template #placeholder>
             <v-skeleton-loader type="image" height="200" />
           </template>
+          <div v-if="hasCoverPhoto" class="cover-photo__hint">
+            <div class="cover-photo__badge">
+              <v-icon size="18" color="white">mdi-magnify-plus-outline</v-icon>
+            </div>
+          </div>
         </v-img>
 
         <!-- Avatar + Info -->
@@ -513,7 +544,7 @@ const hasValidCoordinates = computed(() => {
         <!-- Products -->
         <v-divider></v-divider>
         <v-container>
-          <div class="d-flex align-center justify-space-between mb-4">
+          <div class="d-flex align-center justify-space-between mb-4 pb-4">
             <h3 class="text-h6 mb-0">Products</h3>
             <v-text-field
               v-model="searchQuery"
@@ -571,6 +602,44 @@ const hasValidCoordinates = computed(() => {
       </v-container>
     </v-main>
 
+    <v-dialog
+      v-model="showCoverPreview"
+      :fullscreen="smAndDown"
+      :max-width="smAndDown ? undefined : 1080"
+      scrim="#02060d"
+      transition="dialog-bottom-transition"
+      @click:outside="closeCoverPreview"
+    >
+      <div class="cover-preview-shell" :class="{ 'cover-preview-shell--mobile': smAndDown }">
+        <div class="cover-preview-toolbar">
+          <div class="cover-preview-meta">
+            <span class="cover-preview-label">Shop physical store photo</span>
+            <strong class="cover-preview-title">{{ shop?.business_name || 'Shop' }}</strong>
+          </div>
+          <v-btn
+            icon
+            variant="text"
+            color="white"
+            class="cover-preview-close"
+            aria-label="Close cover photo preview"
+            @click="closeCoverPreview"
+          >
+            <v-icon>mdi-close</v-icon>
+          </v-btn>
+        </div>
+
+        <div class="cover-preview-stage">
+          <v-img :src="coverPhotoUrl" :alt="coverPhotoAlt" contain class="cover-preview-image">
+            <template #placeholder>
+              <div class="cover-preview-loading">
+                <v-progress-circular indeterminate color="white" size="42" width="4" />
+              </div>
+            </template>
+          </v-img>
+        </div>
+      </div>
+    </v-dialog>
+
     <!-- Bottom Navigation -->
     <BottomNav v-model="activeTab" />
   </v-app>
@@ -621,7 +690,140 @@ v-main,
 .cover-photo {
   border-bottom-left-radius: 12px;
   border-bottom-right-radius: 12px;
+  overflow: hidden;
 }
+
+.cover-photo--interactive {
+  cursor: zoom-in;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cover-photo--interactive :deep(img) {
+  transition: transform 0.3s ease;
+}
+
+.cover-photo--interactive:hover :deep(img),
+.cover-photo--interactive:focus-visible :deep(img) {
+  transform: scale(1.03);
+}
+
+.cover-photo--interactive:focus-visible {
+  outline: 3px solid rgba(63, 131, 199, 0.45);
+  outline-offset: 2px;
+}
+
+.cover-photo__hint {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  padding: 16px;
+  background: linear-gradient(180deg, rgba(2, 6, 13, 0.04) 0%, rgba(2, 6, 13, 0.55) 100%);
+  pointer-events: none;
+}
+
+.cover-photo__badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(9, 15, 25, 0.56);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+  backdrop-filter: blur(10px);
+}
+
+.cover-preview-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: min(88vh, 920px);
+  background:
+    radial-gradient(circle at top, rgba(63, 131, 199, 0.16), transparent 34%),
+    linear-gradient(180deg, #08111d 0%, #04070d 100%);
+  color: #fff;
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+}
+
+.cover-preview-shell--mobile {
+  min-height: 100vh;
+  border-radius: 0;
+}
+
+.cover-preview-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: calc(14px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 18px 14px;
+}
+
+.cover-preview-meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.cover-preview-label {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.cover-preview-title {
+  font-size: 16px;
+  line-height: 1.25;
+  color: #fff;
+}
+
+.cover-preview-close {
+  flex-shrink: 0;
+}
+
+.cover-preview-stage {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  padding: 0 18px 18px;
+}
+
+.cover-preview-image {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  max-height: calc(100vh - 108px - var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.cover-preview-shell--mobile .cover-preview-stage {
+  padding-bottom: calc(18px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+}
+
+.cover-preview-shell--mobile .cover-preview-image {
+  border-radius: 20px;
+  max-height: calc(100vh - 120px - var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+}
+
+.cover-preview-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
 .avatar-wrapper {
   display: flex;
   justify-content: center;
@@ -778,6 +980,24 @@ v-main,
 
 /* Mobile Devices */
 @media (max-width: 768px) {
+  .cover-photo__hint {
+    padding: 12px;
+  }
+
+  .cover-photo__badge {
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+
+  .cover-preview-toolbar {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .cover-preview-title {
+    font-size: 15px;
+  }
+
   .product-grid {
     gap: 12px;
   }
@@ -802,6 +1022,20 @@ v-main,
 
 /* Small Mobile Devices (iPhone SE, etc.) */
 @media (max-width: 480px) {
+  .cover-photo {
+    border-bottom-left-radius: 10px;
+    border-bottom-right-radius: 10px;
+  }
+
+  .cover-preview-stage {
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .cover-preview-image {
+    min-height: 260px;
+  }
+
   .product-grid {
     grid-template-columns: repeat(2, 1fr);
     gap: 10px;

@@ -1,6 +1,7 @@
 <script setup>
 import { ref, onMounted, computed, onUnmounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import { useCartStore } from '@/stores/cart'
 import {
@@ -11,6 +12,7 @@ import {
 
 const route = useRoute()
 const router = useRouter()
+const { smAndDown } = useDisplay()
 const productId = computed(() => route.params.id)
 const cart = useCartStore()
 
@@ -26,12 +28,16 @@ const addingToCart = ref(false)
 const showAddToCartDialog = ref(false)
 const showBuyNowDialog = ref(false)
 const showVarieties = ref(false)
+const openImageDialog = ref(false)
+const openReviewImageDialog = ref(false)
 const selectedSize = ref(null)
 const selectedVariety = ref(null)
 
 // DOM refs
 const productImgRef = ref(null)
 const cartIconRef = ref(null)
+const previewIndex = ref(0)
+const currentImage = ref('')
 
 // Dialog selections
 const dialogSelectedSize = ref(null)
@@ -139,6 +145,72 @@ const productImageList = computed(() => {
   const images = normalizeImageList(product.value?.main_img_urls)
   return images.length ? images : ['/placeholder.png']
 })
+
+const hasMultipleProductImages = computed(() => productImageList.value.length > 1)
+
+const selectedPreviewImage = computed(
+  () => productImageList.value[previewIndex.value] || productImageList.value[0] || '/placeholder.png',
+)
+
+const previewCounterLabel = computed(() => {
+  const total = productImageList.value.length
+  if (!total) return ''
+
+  return `${previewIndex.value + 1} / ${total}`
+})
+
+const clampPreviewIndex = (index = 0) => {
+  const total = productImageList.value.length
+  if (!total) return 0
+
+  const normalizedIndex = Number(index)
+  if (!Number.isFinite(normalizedIndex)) return 0
+
+  return Math.min(Math.max(Math.trunc(normalizedIndex), 0), total - 1)
+}
+
+const getProductImageAlt = (index = 0) => {
+  const productName = product.value?.prod_name || 'Product'
+  return `${productName} photo ${index + 1}`
+}
+
+const openProductImagePreview = (index = 0) => {
+  previewIndex.value = clampPreviewIndex(index)
+  openImageDialog.value = true
+}
+
+const closeProductImagePreview = () => {
+  openImageDialog.value = false
+}
+
+const setPreviewIndex = (index = 0) => {
+  previewIndex.value = clampPreviewIndex(index)
+}
+
+const showPreviousProductImage = () => {
+  if (!productImageList.value.length) return
+
+  previewIndex.value =
+    (previewIndex.value - 1 + productImageList.value.length) % productImageList.value.length
+}
+
+const showNextProductImage = () => {
+  if (!productImageList.value.length) return
+
+  previewIndex.value = (previewIndex.value + 1) % productImageList.value.length
+}
+
+const openReviewImagePreview = (image) => {
+  if (!image) return
+
+  currentImage.value = image
+  openReviewImageDialog.value = true
+}
+
+const closeReviewImagePreview = () => {
+  openReviewImageDialog.value = false
+  currentImage.value = ''
+}
 
 // Show snackbar notification
 const showSnackbar = (message, color = 'success') => {
@@ -883,6 +955,21 @@ const shareProduct = async () => {
   }
 }
 
+watch(
+  () => productImageList.value.length,
+  (imageCount) => {
+    if (!imageCount) {
+      previewIndex.value = 0
+      closeProductImagePreview()
+      return
+    }
+
+    if (previewIndex.value > imageCount - 1) {
+      previewIndex.value = imageCount - 1
+    }
+  },
+)
+
 const loadProductPage = async () => {
   await Promise.all([fetchProduct(), fetchProductReviews()])
   subscribeToProductReviews()
@@ -919,12 +1006,17 @@ watch(
     dialogQuantity.value = 1
     buyNowQuantity.value = 1
     reviewError.value = ''
+    previewIndex.value = 0
+    closeProductImagePreview()
+    closeReviewImagePreview()
 
     await loadProductPage()
   },
 )
 
 onUnmounted(() => {
+  closeProductImagePreview()
+  closeReviewImagePreview()
   cleanupReviewsSubscription()
   cleanupProductRealtimeSubscription()
 })
@@ -978,61 +1070,166 @@ onUnmounted(() => {
         {{ error }}
       </v-alert>
 
-      <!-- Product Details -->
-      <v-sheet v-else class="product-sheet pa-4">
-        <!-- Product Images -->
-        <div class="product-images mb-4">
-          <v-carousel
-            v-if="product.main_img_urls && product.main_img_urls.length > 1"
-            hide-delimiter-background
-            height="300"
+        <!-- Product Details -->
+        <v-sheet v-else class="product-sheet pa-4">
+          <!-- Product Images -->
+          <div class="product-images mb-4">
+            <v-carousel
+              v-if="hasMultipleProductImages"
+              ref="productImgRef"
+              class="product-gallery"
+              hide-delimiter-background
+              height="300"
+            >
+              <v-carousel-item v-for="(img, index) in productImageList" :key="`${img}-${index}`">
+                <v-img
+                  :src="img"
+                  :alt="getProductImageAlt(index)"
+                  height="300"
+                  class="product-gallery__image rounded-lg"
+                  @click="openProductImagePreview(index)"
+                >
+                  <div class="product-image-preview-badge">
+                    <v-icon size="18" color="white">mdi-magnify-plus-outline</v-icon>
+                    
+                  </div>
+                </v-img>
+              </v-carousel-item>
+            </v-carousel>
+
+            <!-- Fallback: Single Image -->
+            <v-img
+              v-else
+              ref="productImgRef"
+              :src="selectedPreviewImage"
+              :alt="getProductImageAlt(0)"
+              class="product-img mb-4"
+              contain
+              @click="openProductImagePreview(0)"
+            >
+              <div class="product-image-preview-badge">
+                <v-icon size="18" color="white">mdi-magnify-plus-outline</v-icon>
+              
+              </div>
+            </v-img>
+          </div>
+
+          <!-- Image Preview Viewer -->
+          <v-dialog
+            v-model="openImageDialog"
+            :fullscreen="smAndDown"
+            :max-width="smAndDown ? undefined : 1120"
+            scrim="#02060d"
+            transition="dialog-bottom-transition"
+            @click:outside="closeProductImagePreview"
           >
-            <v-carousel-item v-for="(img, index) in product.main_img_urls" :key="index">
-              <v-img
-                :src="img"
-                height="300"
-                class="rounded-lg"
-                style="cursor: zoom-in"
-                @click="previewIndex = index; openImageDialog = true"
-              />
-            </v-carousel-item>
-          </v-carousel>
+            <div class="product-image-viewer" :class="{ 'product-image-viewer--mobile': smAndDown }">
+              <div class="product-image-viewer__toolbar">
+                <div class="product-image-viewer__meta">
+                  <span class="product-image-viewer__eyebrow">Product Photos</span>
+                  <strong class="product-image-viewer__title">
+                    {{ product?.prod_name || 'Product' }}
+                  </strong>
+                </div>
 
-          <!-- Fallback: Single Image -->
-          <v-img
-            v-else
-            ref="productImgRef"
-            :src="mainImage(product.main_img_urls)"
-            class="product-img mb-4"
-            contain
-            style="cursor: zoom-in"
-            @click="openImageDialog = true"
-          />
-        </div>
+                <div class="product-image-viewer__actions">
+                  <span v-if="productImageList.length" class="product-image-viewer__count">
+                    {{ previewCounterLabel }}
+                  </span>
+                  <v-btn
+                    icon
+                    variant="text"
+                    color="white"
+                    class="product-image-viewer__close"
+                    aria-label="Close product image preview"
+                    @click="closeProductImagePreview"
+                  >
+                    <v-icon>mdi-close</v-icon>
+                  </v-btn>
+                </div>
+              </div>
 
-        <!-- Image Preview Modal -->
-        <v-dialog v-model="openImageDialog" max-width="800px">
-          <v-card>
-            <v-card-actions class="d-flex justify-end pa-2">
-              <v-btn icon @click="openImageDialog = false">
-                <v-icon>mdi-close</v-icon>
-              </v-btn>
-            </v-card-actions>
-            <v-card-text class="text-center pa-0">
-              <v-img
-                :src="product.main_img_urls[previewIndex]"
-                max-height="600"
-                contain
-                class="rounded-b"
-              />
-            </v-card-text>
-          </v-card>
-        </v-dialog>
+              <div class="product-image-viewer__stage">
+                <v-btn
+                  v-if="hasMultipleProductImages"
+                  icon
+                  size="large"
+                  class="product-image-viewer__nav product-image-viewer__nav--prev"
+                  aria-label="Show previous product image"
+                  @click.stop="showPreviousProductImage"
+                >
+                  <v-icon>mdi-chevron-left</v-icon>
+                </v-btn>
 
-        <v-dialog
-          v-model="openReviewImageDialog"
-          max-width="800px"
-          @click:outside="closeReviewImagePreview"
+                <v-carousel
+                  v-model="previewIndex"
+                  class="product-image-viewer__carousel"
+                  :show-arrows="false"
+                  hide-delimiters
+                  height="100%"
+                >
+                  <v-carousel-item
+                    v-for="(img, index) in productImageList"
+                    :key="`preview-${img}-${index}`"
+                  >
+                    <div class="product-image-viewer__slide">
+                      <v-img
+                        :src="img"
+                        :alt="getProductImageAlt(index)"
+                        contain
+                        class="product-image-viewer__image"
+                      >
+                        <template #placeholder>
+                          <div class="product-image-viewer__loading">
+                            <v-progress-circular indeterminate color="white" size="42" width="4" />
+                          </div>
+                        </template>
+                      </v-img>
+                    </div>
+                  </v-carousel-item>
+                </v-carousel>
+
+                <v-btn
+                  v-if="hasMultipleProductImages"
+                  icon
+                  size="large"
+                  class="product-image-viewer__nav product-image-viewer__nav--next"
+                  aria-label="Show next product image"
+                  @click.stop="showNextProductImage"
+                >
+                  <v-icon>mdi-chevron-right</v-icon>
+                </v-btn>
+              </div>
+
+              <div
+                v-if="hasMultipleProductImages"
+                class="product-image-viewer__thumbs"
+                aria-label="Product image thumbnails"
+              >
+                <button
+                  v-for="(img, index) in productImageList"
+                  :key="`thumb-${img}-${index}`"
+                  type="button"
+                  class="product-image-viewer__thumb"
+                  :class="{ 'product-image-viewer__thumb--active': index === previewIndex }"
+                  :aria-label="`Preview product photo ${index + 1}`"
+                  @click="setPreviewIndex(index)"
+                >
+                  <v-img
+                    :src="img"
+                    :alt="getProductImageAlt(index)"
+                    cover
+                    class="product-image-viewer__thumb-image"
+                  />
+                </button>
+              </div>
+            </div>
+          </v-dialog>
+
+          <v-dialog
+            v-model="openReviewImageDialog"
+            max-width="800px"
+            @click:outside="closeReviewImagePreview"
         >
           <v-card>
             <v-card-actions class="d-flex justify-end pa-2">
@@ -1638,6 +1835,11 @@ onUnmounted(() => {
                   v-for="(photo, index) in review.photos"
                   :key="`${review.id}-${index}`"
                   class="review-photo-grid__item"
+                  role="button"
+                  tabindex="0"
+                  @click="openReviewImagePreview(photo)"
+                  @keydown.enter.prevent="openReviewImagePreview(photo)"
+                  @keydown.space.prevent="openReviewImagePreview(photo)"
                 >
                   <img :src="photo" alt="Review photo" />
                 </div>
@@ -1783,6 +1985,7 @@ v-main,
   display: flex;
   justify-content: center;
   margin-bottom: 24px;
+
 }
 
 .product-img,
@@ -1802,6 +2005,220 @@ v-main,
 .product-images :deep(img) {
   object-fit: contain !important;
   padding: 18px;
+}
+
+.product-img,
+.product-gallery__image {
+  cursor: zoom-in;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.product-img :deep(img),
+.product-gallery__image :deep(img) {
+  transition: transform 0.28s ease;
+}
+
+.product-img:hover :deep(img),
+.product-gallery__image:hover :deep(img) {
+  transform: scale(1.02);
+}
+
+.product-image-preview-badge {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+
+  pointer-events: none;
+}
+
+.product-image-viewer {
+  display: flex;
+  flex-direction: column;
+  min-height: min(88vh, 920px);
+  background:
+    radial-gradient(circle at top, rgba(63, 131, 199, 0.16), transparent 34%),
+    linear-gradient(180deg, #07111c 0%, #03060c 100%);
+  color: #fff;
+  border-radius: 28px;
+  overflow: hidden;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.42);
+}
+
+.product-image-viewer--mobile {
+  min-height: 100vh;
+  border-radius: 0;
+}
+
+.product-image-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: calc(14px + var(--app-safe-area-top, env(safe-area-inset-top, 0px))) 18px 14px;
+}
+
+.product-image-viewer__meta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.product-image-viewer__eyebrow {
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.66);
+}
+
+.product-image-viewer__title {
+  font-size: 16px;
+  line-height: 1.25;
+  color: #fff;
+}
+
+.product-image-viewer__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+}
+
+.product-image-viewer__count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 64px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.product-image-viewer__stage {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: 1;
+  min-height: 0;
+  padding: 0 18px 18px;
+}
+
+.product-image-viewer__carousel {
+  width: 100%;
+  height: 100%;
+}
+
+.product-image-viewer__carousel :deep(.v-window__container),
+.product-image-viewer__carousel :deep(.v-carousel-item) {
+  height: 100%;
+}
+
+.product-image-viewer__slide {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 0 56px;
+}
+
+.product-image-viewer__image {
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+  max-height: calc(100vh - 190px - var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.product-image-viewer__image :deep(img) {
+  object-fit: contain !important;
+  padding: 18px !important;
+}
+
+.product-image-viewer__loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  min-height: 320px;
+}
+
+.product-image-viewer__nav {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 2;
+  background: rgba(7, 17, 28, 0.74) !important;
+  color: #fff !important;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.24);
+}
+
+.product-image-viewer__nav--prev {
+  left: 28px;
+}
+
+.product-image-viewer__nav--next {
+  right: 28px;
+}
+
+.product-image-viewer__thumbs {
+  display: flex;
+  gap: 12px;
+  padding: 0 18px calc(18px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.product-image-viewer__thumbs::-webkit-scrollbar {
+  display: none;
+}
+
+.product-image-viewer__thumb {
+  border: 0;
+  padding: 0;
+  width: 72px;
+  min-width: 72px;
+  height: 72px;
+  border-radius: 18px;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.06);
+  opacity: 0.64;
+  cursor: pointer;
+  transition: transform 0.2s ease, opacity 0.2s ease, box-shadow 0.2s ease;
+}
+
+.product-image-viewer__thumb:hover,
+.product-image-viewer__thumb--active {
+  opacity: 1;
+  transform: translateY(-2px);
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.22);
+}
+
+.product-image-viewer__thumb--active {
+  outline: 2px solid rgba(255, 255, 255, 0.84);
+  outline-offset: 2px;
+}
+
+.product-image-viewer__thumb-image {
+  width: 100%;
+  height: 100%;
 }
 
 
@@ -2125,6 +2542,12 @@ v-main,
   border-radius: 14px;
   overflow: hidden;
   cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.review-photo-grid__item:focus-visible {
+  outline: 2px solid #3f83c7;
+  outline-offset: 3px;
 }
 
 .review-photo-grid__item img {
@@ -2377,6 +2800,65 @@ v-main,
     padding: 12px;
   }
 
+  .product-image-preview-badge {
+    right: 12px;
+    bottom: 12px;
+    padding: 8px 12px;
+    font-size: 11px;
+  }
+
+  .product-image-viewer__toolbar {
+    padding-left: 14px;
+    padding-right: 14px;
+  }
+
+  .product-image-viewer__title {
+    font-size: 15px;
+  }
+
+  .product-image-viewer__stage {
+    padding: 0 12px 14px;
+  }
+
+  .product-image-viewer__slide {
+    padding: 0 30px;
+  }
+
+  .product-image-viewer__image {
+    min-height: 260px;
+    border-radius: 20px;
+  }
+
+  .product-image-viewer__image :deep(img) {
+    padding: 12px !important;
+  }
+
+  .product-image-viewer__nav {
+    width: 42px;
+    height: 42px;
+  }
+
+  .product-image-viewer__nav--prev {
+    left: 14px;
+  }
+
+  .product-image-viewer__nav--next {
+    right: 14px;
+  }
+
+  .product-image-viewer__thumbs {
+    gap: 10px;
+    padding-left: 12px;
+    padding-right: 12px;
+  }
+
+  .product-image-viewer__thumb {
+    width: 62px;
+    min-width: 62px;
+    height: 62px;
+    border-radius: 16px;
+  }
+
   .product-title {
     font-size: 1.15rem;
   }
@@ -2423,6 +2905,27 @@ v-main,
   .product-images :deep(.v-window),
   .product-images :deep(.v-carousel-item) {
     height: 220px !important;
+  }
+
+  .product-image-viewer__count {
+    min-width: 56px;
+    padding: 7px 10px;
+    font-size: 11px;
+  }
+
+  .product-image-viewer__slide {
+    padding: 0 18px;
+  }
+
+  .product-image-viewer__image {
+    min-height: 220px;
+  }
+
+  .product-image-viewer__thumb {
+    width: 54px;
+    min-width: 54px;
+    height: 54px;
+    border-radius: 14px;
   }
 
   .product-title {

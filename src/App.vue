@@ -65,7 +65,10 @@ const canRemountCurrentRoute = computed(
     Boolean(route.meta?.localPullToRefresh) ||
     ROUTE_REMOUNT_ELIGIBLE_NAMES.has(currentRouteName.value),
 )
-const routerViewKey = computed(() => `${route.fullPath}::${resumeRouteNonce.value}`)
+const routeComponentKey = computed(() =>
+  route.meta?.stableComponentKey ? route.path : route.fullPath,
+)
+const routerViewKey = computed(() => `${routeComponentKey.value}::${resumeRouteNonce.value}`)
 
 let backButtonListenerHandle = null
 let unsubscribeAppRuntime = null
