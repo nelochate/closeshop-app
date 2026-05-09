@@ -51,8 +51,7 @@ const normalizeCount = (value) => {
   return Math.max(Math.trunc(count), 0)
 }
 
-const isTrendingProduct = (product) =>
-  normalizeCount(product?.sold) >= HOT_PICK_SOLD_THRESHOLD
+const isTrendingProduct = (product) => normalizeCount(product?.sold) >= HOT_PICK_SOLD_THRESHOLD
 
 // Refresh handler function
 const handleRefresh = async () => {
@@ -269,13 +268,13 @@ async function checkNetworkStatus() {
 
     if (!networkStatusListener) {
       networkStatusListener = await Network.addListener('networkStatusChange', (status) => {
-      console.log('🌐 Network changed:', status)
-      if (!status.connected) {
-        alert('⚠️ You are offline.')
-      } else {
-        console.log('✅ Back online.')
-      }
-    })
+        console.log('🌐 Network changed:', status)
+        if (!status.connected) {
+          alert('⚠️ You are offline.')
+        } else {
+          console.log('✅ Back online.')
+        }
+      })
     }
   } catch (err) {
     console.error('Network check error:', err)
@@ -294,7 +293,6 @@ async function fetchShops() {
       userLat = locationResult.coords.latitude
       userLon = locationResult.coords.longitude
     }
-
   } catch (locationError) {
     console.warn('📍 Could not get user location, showing all shops:', locationError)
     // Continue without location - we'll show all shops
@@ -763,32 +761,31 @@ const hotPicks = computed(() => {
     ...product,
     sold: normalizeCount(product.sold),
     stock: normalizeCount(product.stock),
-    rank: index + 1
+    rank: index + 1,
   }))
 })
-
 </script>
 
 <template>
   <v-app>
-  <PullToRefreshWrapper :on-refresh="handleRefresh">
-    <v-main class="page">
-      <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
-        <div class="hero-row">
-          <v-text-field
-            v-model="searchQuery"
-            class="search-field"
-            variant="solo"
-            rounded="pill"
-            hide-details
-            clearable
-            density="comfortable"
-            placeholder="Looking for something?"
-            prepend-inner-icon="mdi-magnify"
-            append-inner-icon="mdi-earth"
-            @focus="goToSearch"
-            @input="updateSearch"
-          />
+    <PullToRefreshWrapper :on-refresh="handleRefresh">
+      <v-main class="page">
+        <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
+          <div class="hero-row">
+            <v-text-field
+              v-model="searchQuery"
+              class="search-field"
+              variant="solo"
+              rounded="pill"
+              hide-details
+              clearable
+              density="comfortable"
+              placeholder="Looking for something?"
+              prepend-inner-icon="mdi-magnify"
+              append-inner-icon="mdi-earth"
+              @focus="goToSearch"
+              @input="updateSearch"
+            />
 
             <!-- Notification Button with Badge -->
             <div class="notification-wrapper">
@@ -809,7 +806,6 @@ const hotPicks = computed(() => {
         </v-sheet>
 
         <v-container class="py-4" style="max-width: 720px">
-
           <!-- ========== SECTION 1: STORES WITHIN BUTUAN ========== -->
           <div class="section-header mt-6">
             <h3 class="section-title">Stores Within Butuan</h3>
@@ -860,48 +856,57 @@ const hotPicks = computed(() => {
             </div>
           </div>
 
-          <div class="scroll-row hot-picks-row">
-            <template v-if="loading">
+          <template v-if="loading">
+            <div class="product-grid">
               <v-skeleton-loader
                 v-for="i in 4"
                 :key="'hot-skel-' + i"
                 type="image"
-                class="hot-pick-card"
+                class="product-card"
               />
-            </template>
-            <template v-else-if="hotPicks.length === 0">
-              <div class="empty-card">
-                <div class="empty-title">No hot picks yet</div>
-                <div class="empty-sub">Popular products will appear here.</div>
-              </div>
-            </template>
-            <template v-else>
+            </div>
+          </template>
+          <template v-else-if="hotPicks.length === 0">
+            <div class="empty-card">
+              <div class="empty-title">No hot picks yet</div>
+              <div class="empty-sub">Popular products will appear here.</div>
+            </div>
+          </template>
+          <template v-else>
+            <div class="product-grid">
               <div
                 v-for="item in hotPicks"
                 :key="item.id"
-                class="hot-pick-card"
+                class="product-card product-card--hot"
                 @click="goToProduct(item.id)"
               >
+                <!-- Ranking Badge -->
                 <div class="hot-pick-rank">
                   <span class="rank-number">#{{ item.rank }}</span>
-                  <v-icon class="rank-fire" size="14" color="#ff4757">mdi-fire</v-icon>
+                  <v-icon size="14" color="#ff4757">mdi-fire</v-icon>
                 </div>
-                <div v-if="item.stock === 0" class="hot-pick-oos-badge">
-                  <v-icon size="12">mdi-package-variant-closed</v-icon>
-                  <span>Out of Stock</span>
+
+                <!-- Out of Stock Badge -->
+                <div v-if="item.stock === 0" class="product-badge-row">
+                  <div class="product-badge-oos">
+                    <v-icon size="12" class="mr-1">mdi-package-variant-closed</v-icon>
+                    Out of Stock
+                  </div>
                 </div>
-                <v-img :src="item.img" cover class="hot-pick-img" />
-                <div class="hot-pick-info">
-                  <div class="hot-pick-title">{{ item.title }}</div>
-                  <div class="hot-pick-price">₱{{ Number(item.price).toFixed(2) }}</div>
-                  <div class="hot-pick-stats">
-                    <v-icon size="12">mdi-fire</v-icon>
-                    <span>{{ item.sold }} sold</span>
+
+                <v-img :src="item.img" cover class="product-img" />
+
+                <div class="product-info">
+                  <div class="product-title">{{ item.title }}</div>
+                  <div class="product-price">₱{{ Number(item.price).toFixed(2) }}</div>
+                  <div class="product-sold">
+                    <v-icon size="14" class="mr-1">mdi-fire</v-icon>
+                    {{ item.sold }} sold
                   </div>
                 </div>
               </div>
-            </template>
-          </div>
+            </div>
+          </template>
 
           <!-- ========== SECTION 3: BROWSE PRODUCTS ========== -->
           <div class="section-header mt-6">
@@ -932,26 +937,22 @@ const hotPicks = computed(() => {
                 class="product-card"
                 :class="{
                   'product-card--hot': isTrendingProduct(item),
-                  'product-card--out-of-stock': item.stock === 0
+                  'product-card--out-of-stock': item.stock === 0,
                 }"
                 @click="goToProduct(item.id)"
               >
                 <!-- Hot Badge -->
-                <div
-                  v-if="isTrendingProduct(item) || item.stock === 0"
-                  class="product-badge-row"
-                >
-                <div v-if="isTrendingProduct(item)" class="product-badge-hot">
-                  <span class="badge-fire">🔥</span>
-                  <span class="badge-text">HOT</span>
-                </div>
+                <div v-if="isTrendingProduct(item) || item.stock === 0" class="product-badge-row">
+                  <div v-if="isTrendingProduct(item)" class="product-badge-hot">
+                    <span class="badge-fire">🔥</span>
+                    <span class="badge-text">HOT</span>
+                  </div>
 
-                <!-- Out of Stock Badge -->
-                <div v-if="item.stock === 0" class="product-badge-oos">
-                  <v-icon size="12" class="mr-1">mdi-package-variant-closed</v-icon>
-                  Out of Stock
-                </div>
-
+                  <!-- Out of Stock Badge -->
+                  <div v-if="item.stock === 0" class="product-badge-oos">
+                    <v-icon size="12" class="mr-1">mdi-package-variant-closed</v-icon>
+                    Out of Stock
+                  </div>
                 </div>
 
                 <!-- Low Stock Badge (only show if in stock and low) -->
@@ -980,7 +981,6 @@ const hotPicks = computed(() => {
             {{ errorMsg }}
           </v-alert>
         </v-container>
-
       </v-main>
 
       <!-- Survey Bubble Message -->
@@ -1792,7 +1792,8 @@ const hotPicks = computed(() => {
 }
 
 @keyframes pulseLowStock {
-  0%, 100% {
+  0%,
+  100% {
     transform: scale(1);
     box-shadow: 0 2px 8px rgba(255, 152, 0, 0.3);
   }
@@ -1911,7 +1912,10 @@ const hotPicks = computed(() => {
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding-bottom: var(--app-bottom-safe-space, var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)));
+  padding-bottom: var(
+    --app-bottom-safe-space,
+    var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px))
+  );
 }
 
 .survey-iframe {
