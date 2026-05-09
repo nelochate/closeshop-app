@@ -201,7 +201,8 @@ const shopDrawerResultSections = computed(() => {
       : []
   }
 
-  if (hasLocalSearchResults.value) {
+  // During search, only display the bucket matching the current toggle mode (Left/Right)
+  if (shopDisplayMode.value === 'within' && hasLocalSearchResults.value) {
     return [
       {
         key: 'local-results',
@@ -214,9 +215,7 @@ const shopDrawerResultSections = computed(() => {
         tone: 'local',
       },
     ]
-  }
-
-  if (hasOutsideSearchResults.value && showOutsideSearchResults.value) {
+  } else if (shopDisplayMode.value === 'outside' && hasOutsideSearchResults.value) {
     return [
       {
         key: 'outside-results',
@@ -2143,6 +2142,14 @@ const fetchShops = () => {
 
 /* -------------------- APPLY SHOP FILTERS -------------------- */
 const applyShopFilters = () => {
+  if (isSearchMode.value) {
+    // Sync map markers with the current "Left/Right" toggle selection during search
+    const resultsToPlot =
+      shopDisplayMode.value === 'within' ? filteredShops.value : outsideSearchResults.value
+    plotShops(resultsToPlot)
+    return
+  }
+
   if (shopDisplayMode.value === 'within') {
     filteredShops.value = shops.value.filter(
       (shop) => shop.withinBoundary || isShopWithinBoundary(shop),
@@ -2555,20 +2562,29 @@ const smartSearch = async () => {
 
     filteredShops.value = localResults
     outsideSearchResults.value = outsideResults
-    showOutsideSearchResults.value = true
     showShopMenu.value = true
 
-    if (localResults.length > 0) {
-      errorMsg.value = `Found ${localResults.length} results in ${searchLocationLabel.value}`
-      plotShops(localResults)
+    // Default to 'within' if local matches exist, otherwise auto-switch to 'outside' results
+    shopDisplayMode.value = localResults.length > 0 ? 'within' : 'outside'
+    applyShopFilters()
 
-      if (localResults.length === 1) {
-        const shop = localResults[0]
+    const totalMatches = [...localResults, ...outsideResults]
+    if (totalMatches.length > 0) {
+      // Set dynamic messaging based on where results were found
+      if (localResults.length > 0 && outsideResults.length > 0) {
+        errorMsg.value = `Found ${localResults.length} nearby and ${outsideResults.length} outside ${searchLocationLabel.value}`
+      } else if (localResults.length > 0) {
+        errorMsg.value = `Found ${localResults.length} results in ${searchLocationLabel.value}`
+      } else {
+        errorMsg.value = `No results in ${searchLocationLabel.value}. Showing ${outsideResults.length} elsewhere.`
+      }
+
+      // Automatically focus if there is exactly one total match across both buckets
+      if (totalMatches.length === 1) {
+        const shop = totalMatches[0]
         const lat = Number(shop.latitude)
         const lng = Number(shop.longitude)
 
-        // Fly to the single result and open its popup without triggering route calculation
-        // This prevents the route panel from covering the map search result
         map.value.flyTo({
           center: [lng, lat],
           zoom: 16,
@@ -2581,17 +2597,10 @@ const smartSearch = async () => {
           marker.togglePopup()
         }
       }
-      return
+    } else {
+      errorMsg.value = `No shops or products found for "${query}"`
+      plotShops([])
     }
-
-    if (outsideResults.length > 0) {
-      errorMsg.value = `No results found in ${searchLocationLabel.value}`
-      plotShops(outsideResults)
-      return
-    }
-
-    errorMsg.value = `No shops or products found for "${query}"`
-    plotShops([])
   } catch (error) {
     console.error('Search failed:', error)
     errorMsg.value = 'Search failed. Please try again.'
@@ -2815,12 +2824,6 @@ watch(primaryServiceAreaReminderLocationKey, (nextKey, previousKey) => {
   if (previousKey && nextKey !== previousKey) {
     primaryServiceAreaReminderDismissed.value = false
   }
-})
-
-watch(showOutsideSearchResults, (isVisible) => {
-  if (!isSearchMode.value || hasLocalSearchResults.value || !hasOutsideSearchResults.value) return
-
-  plotShops(isVisible ? outsideSearchResults.value : [])
 })
 
 onUnmounted(() => {
@@ -3316,7 +3319,8 @@ onUnmounted(() => {
               </div>
             </div>
 
-            <div v-if="!isSearchMode && activeLocationLabel" class="shop-drawer-section">
+            <!-- Shop Coverage Toggle (Left/Right Sections) -->
+            <div v-if="activeLocationLabel" class="shop-drawer-section">
               <div class="shop-drawer-toggle-card">
                 <div class="shop-drawer-toggle-title">Shop Coverage</div>
                 <v-btn-group variant="outlined" class="shop-drawer-toggle-group">
@@ -3326,7 +3330,7 @@ onUnmounted(() => {
                     size="small"
                   >
                     <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
-                    Within {{ activeLocationShortLabel }}
+                    Within ({{ isSearchMode ? filteredShops.length : 'Area' }})
                   </v-btn>
                   <v-btn
                     :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
@@ -3334,7 +3338,7 @@ onUnmounted(() => {
                     size="small"
                   >
                     <v-icon start size="small">mdi-arrow-expand</v-icon>
-                    Outside {{ activeLocationShortLabel }}
+                    Outside ({{ isSearchMode ? outsideSearchResults.length : 'Area' }})
                   </v-btn>
                 </v-btn-group>
               </div>
@@ -3344,26 +3348,6 @@ onUnmounted(() => {
               <v-progress-circular indeterminate color="primary"></v-progress-circular>
               <div class="shop-drawer-state-title">Loading shops...</div>
               <div class="shop-drawer-state-copy">Updating available shops and products.</div>
-            </div>
-
-            <div
-              v-if="!loading && isSearchMode && !hasLocalSearchResults && hasOutsideSearchResults"
-              class="shop-drawer-search-empty"
-            >
-              <div class="shop-drawer-search-empty-title">
-                No results found in {{ searchLocationLabelTitleCase }}
-              </div>
-              <div class="shop-drawer-search-empty-copy">
-                Matching products are available in other locations. You can browse them below.
-              </div>
-              <v-switch
-                v-model="showOutsideSearchResults"
-                inset
-                hide-details
-                color="primary"
-                class="shop-drawer-outside-switch"
-                label="Show results outside my area"
-              />
             </div>
 
             <div
@@ -3383,6 +3367,18 @@ onUnmounted(() => {
               <div class="shop-drawer-state-title">No search results</div>
               <div class="shop-drawer-state-copy">
                 Try a different product, shop, or location keyword.
+              </div>
+            </div>
+
+            <!-- Empty Bucket Message -->
+            <div
+              v-if="!loading && isSearchMode && shopDrawerResultSections.length === 0"
+              class="shop-drawer-state"
+            >
+              <v-icon size="48" color="grey-lighten-2">mdi-filter-variant-remove</v-icon>
+              <div class="text-caption text-medium-emphasis mt-2">
+                No matches in this section. Try checking the
+                {{ shopDisplayMode === 'within' ? 'Outside' : 'Within' }} tab.
               </div>
             </div>
 
