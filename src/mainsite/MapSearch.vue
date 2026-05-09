@@ -2651,6 +2651,40 @@ const clearSearch = () => {
   }
 }
 
+
+const clearSearchAndExit = () => {
+  // Clear search input
+  search.value = ''
+  
+  // Exit search mode
+  isSearchMode.value = false
+  
+  // Clear search results
+  filteredShops.value = []
+  outsideSearchResults.value = []
+  
+  // Reset display mode to 'within' (shows shops in user's area)
+  shopDisplayMode.value = 'within'
+  
+  // Close the shop menu (optional - removes the drawer)
+  showShopMenu.value = false
+  
+  // Refresh the shops display to show all shops in current area
+  applyShopFilters()
+  
+  // Fit map to current area
+  if (manualLocationBrowsing.value || activeBoundaryFeature.value) {
+    fitMapToActiveArea()
+  } else {
+    const knownLocation = getKnownLocation()
+    if (knownLocation) {
+      flyToLocation(knownLocation[0], knownLocation[1], 13.5, 900)
+    }
+  }
+  
+  // Show confirmation message
+  setErrorMessage('Search cleared. Showing shops in your area.', 2000)
+}
 const getMatchingProducts = (shop: any): any[] => {
   const query = search.value.trim().toLowerCase()
   if (!query || !shop.products) return []
@@ -3327,36 +3361,50 @@ onUnmounted(() => {
 
           <div class="shop-drawer-scroll">
             <!-- Search Mode Toggle -->
-            <div v-if="isSearchMode" class="shop-drawer-section">
-              <div class="shop-drawer-toggle-card">
-                <div class="shop-drawer-toggle-title">Filter Results</div>
-                <v-btn-group variant="outlined" class="shop-drawer-toggle-group">
-                  <v-btn
-                    :color="shopDisplayMode === 'within' ? 'primary' : undefined"
-                    @click="toggleDisplayMode('within')"
-                    size="small"
-                    :disabled="!hasLocalSearchResults"
-                  >
-                    <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
-                    Within Area ({{ filteredShops.length }})
-                  </v-btn>
-                  <v-btn
-                    :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
-                    @click="toggleDisplayMode('outside')"
-                    size="small"
-                    :disabled="!hasOutsideSearchResults"
-                  >
-                    <v-icon start size="small">mdi-arrow-expand</v-icon>
-                    Outside Area ({{ outsideSearchResults.length }})
-                  </v-btn>
-                </v-btn-group>
-                <div class="display-options-helper mt-2">
-                  Showing {{ shopDisplayMode === 'within' ? 'local' : 'outside' }} results for "{{
-                    search
-                  }}"
-                </div>
-              </div>
-            </div>
+           <!-- Search Mode Toggle -->
+<div v-if="isSearchMode" class="shop-drawer-section">
+  <div class="shop-drawer-toggle-card">
+    <div class="shop-drawer-toggle-title">Filter Results</div>
+    <v-btn-group variant="outlined" class="shop-drawer-toggle-group">
+      <v-btn
+        :color="shopDisplayMode === 'within' ? 'primary' : undefined"
+        @click="toggleDisplayMode('within')"
+        size="small"
+        :disabled="!hasLocalSearchResults"
+      >
+        <v-icon start size="small">mdi-checkbox-marked-circle</v-icon>
+        Within Area ({{ filteredShops.length }})
+      </v-btn>
+      <v-btn
+        :color="shopDisplayMode === 'outside' ? 'orange' : undefined"
+        @click="toggleDisplayMode('outside')"
+        size="small"
+        :disabled="!hasOutsideSearchResults"
+      >
+        <v-icon start size="small">mdi-arrow-expand</v-icon>
+        Outside Area ({{ outsideSearchResults.length }})
+      </v-btn>
+    </v-btn-group>
+    <div class="display-options-helper mt-2">
+      Showing {{ shopDisplayMode === 'within' ? 'local' : 'outside' }} results for "{{
+        search
+      }}"
+    </div>
+    
+    <!-- ADD THIS CLEAR SEARCH BUTTON -->
+    <v-btn
+      color="primary"
+      variant="outlined"
+      size="small"
+      block
+      class="mt-3"
+      @click="clearSearchAndExit"
+      prepend-icon="mdi-close-circle"
+    >
+      Clear Search & Show All Shops
+    </v-btn>
+  </div>
+</div>
 
             <!-- Regular browse mode toggle -->
             <div v-if="!isSearchMode && activeLocationLabel" class="shop-drawer-section">
@@ -3401,7 +3449,12 @@ onUnmounted(() => {
             </div>
 
             <div
-              v-if="!loading && isSearchMode && !hasLocalSearchResults && !hasOutsideSearchResults"
+              v-if="
+                !loading &&
+                isSearchMode &&
+                filteredShops.length === 0 &&
+                outsideSearchResults.length === 0
+              "
               class="shop-drawer-state"
             >
               <v-icon size="64" color="grey-lighten-1">mdi-magnify-close</v-icon>
@@ -3417,7 +3470,11 @@ onUnmounted(() => {
             <!-- SEARCH MODE - WITHIN RESULTS SECTION -->
             <div
               v-if="
-                !loading && isSearchMode && shopDisplayMode === 'within' && hasLocalSearchResults
+                !loading &&
+                isSearchMode &&
+                shopDisplayMode === 'within' &&
+                hasLocalSearchResults &&
+                filteredShops.length > 0
               "
               class="shop-drawer-section"
             >
@@ -3474,7 +3531,6 @@ onUnmounted(() => {
                       {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
                     </v-chip>
                     <v-spacer></v-spacer>
-                 
                   </v-list-item-title>
 
                   <v-list-item-subtitle class="text-caption">
@@ -3540,9 +3596,14 @@ onUnmounted(() => {
             </div>
 
             <!-- SEARCH MODE - OUTSIDE RESULTS SECTION -->
+            <!-- SEARCH MODE - OUTSIDE RESULTS SECTION -->
             <div
               v-if="
-                !loading && isSearchMode && shopDisplayMode === 'outside' && hasOutsideSearchResults
+                !loading &&
+                isSearchMode &&
+                shopDisplayMode === 'outside' &&
+                hasOutsideSearchResults &&
+                outsideSearchResults.length > 0
               "
               class="shop-drawer-section"
             >
@@ -3552,9 +3613,7 @@ onUnmounted(() => {
                 </div>
                 <div class="shop-drawer-results-subtitle">
                   {{ outsideSearchResults.length }} matching
-                  {{
-                    outsideSearchResults.length === 1 ? 'shop or product' : 'shops or products'
-                  }}
+                  {{ outsideSearchResults.length === 1 ? 'shop or product' : 'shops or products' }}
                   found elsewhere
                 </div>
               </div>
@@ -3602,7 +3661,6 @@ onUnmounted(() => {
                       {{ isShopCurrentlyOpen(shop) ? 'OPEN' : 'CLOSED' }}
                     </v-chip>
                     <v-spacer></v-spacer>
-                
                   </v-list-item-title>
 
                   <v-list-item-subtitle class="text-caption">
