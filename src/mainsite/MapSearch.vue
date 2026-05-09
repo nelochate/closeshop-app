@@ -2647,6 +2647,20 @@ const matchesSearchQuery = (shop: any, query: string) => {
   return searchTerms.some((term) => term && term.includes(query))
 }
 
+const isShopMatch = (shop: any, query: string): boolean => {
+  const q = query.trim().toLowerCase()
+  if (!q) return false
+  const shopTerms = [
+    shop.business_name?.toLowerCase(),
+    shop.city?.toLowerCase(),
+    shop.barangay?.toLowerCase(),
+    shop.street?.toLowerCase(),
+    shop.province?.toLowerCase(),
+  ].filter(Boolean)
+
+  return shopTerms.some((term) => term.includes(q))
+}
+
 const sortSearchResults = (items: any[]) =>
   [...items]
     .map((shop) => ({
@@ -3474,30 +3488,6 @@ onUnmounted(() => {
                       </div>
 
                       <div
-                        v-if="isSearchMode && getMatchingProducts(shop).length > 0"
-                        class="matching-products mt-1"
-                      >
-                        <v-chip
-                          v-for="product in getMatchingProducts(shop).slice(0, 2)"
-                          :key="product.id"
-                          size="x-small"
-                          variant="outlined"
-                          color="primary"
-                          class="mr-1 mb-1"
-                          density="compact"
-                        >
-                          <v-icon start size="12">mdi-package-variant</v-icon>
-                          {{ product.prod_name }}
-                        </v-chip>
-                        <span
-                          v-if="getMatchingProducts(shop).length > 2"
-                          class="text-caption text-medium-emphasis"
-                        >
-                          +{{ getMatchingProducts(shop).length - 2 }} more
-                        </span>
-                      </div>
-
-                      <div
                         v-if="shop.open_time && shop.close_time"
                         class="d-flex align-center mt-1"
                       >
@@ -3505,6 +3495,25 @@ onUnmounted(() => {
                         <span class="text-caption">
                           {{ formatTime12Hour(shop.open_time) }} -
                           {{ formatTime12Hour(shop.close_time) }}
+                        </span>
+                      </div>
+
+                      <!-- Product match count indicator: Shown only if shop name/address didn't match -->
+                      <div
+                        v-if="
+                          isSearchMode &&
+                          getMatchingProducts(shop).length > 0 &&
+                          !isShopMatch(shop, search)
+                        "
+                        class="d-flex align-center mt-1"
+                      >
+                        <v-icon size="14" color="primary" class="mr-1">mdi-package-variant</v-icon>
+                        <span class="text-caption font-weight-bold text-primary">
+                          {{ getMatchingProducts(shop).length }}
+                          {{
+                            getMatchingProducts(shop).length === 1 ? 'product' : 'products'
+                          }}
+                          match
                         </span>
                       </div>
                     </v-list-item-subtitle>
