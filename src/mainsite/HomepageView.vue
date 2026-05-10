@@ -23,6 +23,8 @@ const activeTab = ref('home')
 const products = ref([])
 const nearby = ref([])
 const loading = ref(true)
+const shopsLoading = ref(true)
+const productsLoading = ref(true)
 const errorMsg = ref('')
 const searchQuery = ref('')
 const unreadNotifications = ref(0)
@@ -34,6 +36,8 @@ const showSurveyBubble = ref(false)
 
 const PLACEHOLDER_IMG = 'https://picsum.photos/seed/shop/480/360'
 const HOT_PICK_SOLD_THRESHOLD = 100
+const HOT_PICK_SKELETON_COUNT = 4
+const PRODUCT_SKELETON_COUNT = 6
 const PRIMARY_SERVICE_AREA = {
   cityName: 'Butuan City',
   provinceName: 'Agusan del Norte',
@@ -283,6 +287,8 @@ async function checkNetworkStatus() {
 
 /* 🏪 Fetch Shops with Smart Location Handling */
 async function fetchShops() {
+  shopsLoading.value = true
+
   let userLat = null
   let userLon = null
 
@@ -363,11 +369,15 @@ async function fetchShops() {
     console.error('fetchShops error:', err)
     errorMsg.value = 'Failed to load shops'
     nearby.value = []
+  } finally {
+    shopsLoading.value = false
   }
 }
 
 /* 🛍️ Fetch Products from Approved Shops */
 async function fetchProducts() {
+  productsLoading.value = true
+
   try {
     const { data, error } = await supabase
       .from('products')
@@ -428,6 +438,8 @@ async function fetchProducts() {
     console.error('fetchProducts error:', err)
     errorMsg.value = err.message
     products.value = []
+  } finally {
+    productsLoading.value = false
   }
 }
 
@@ -860,7 +872,7 @@ const hotPicks = computed(() => {
           </div>
 
           <div class="scroll-row">
-            <template v-if="loading">
+            <template v-if="shopsLoading">
               <v-skeleton-loader
                 v-for="i in 4"
                 :key="'near-skel-' + i"
@@ -901,14 +913,22 @@ const hotPicks = computed(() => {
             </div>
           </div>
 
-          <template v-if="loading">
+          <template v-if="productsLoading">
             <div class="product-grid">
-              <v-skeleton-loader
-                v-for="i in 4"
+              <div
+                v-for="i in HOT_PICK_SKELETON_COUNT"
                 :key="'hot-skel-' + i"
-                type="image"
-                class="product-card"
-              />
+                class="hot-pick-card hot-pick-card--skeleton"
+                aria-hidden="true"
+              >
+                <v-skeleton-loader type="image" class="hot-pick-skeleton-media" />
+
+                <div class="hot-pick-info hot-pick-info--skeleton">
+                  <v-skeleton-loader type="text" class="skeleton-line skeleton-line--title" />
+                  <v-skeleton-loader type="text" class="skeleton-line skeleton-line--price" />
+                  <v-skeleton-loader type="text" class="skeleton-line skeleton-line--sold" />
+                </div>
+              </div>
             </div>
           </template>
           <template v-else-if="hotPicks.length === 0">
@@ -958,14 +978,26 @@ const hotPicks = computed(() => {
             <h3 class="section-title">Browse Products Within Butuan</h3>
           </div>
 
-          <template v-if="loading">
+          <template v-if="productsLoading">
             <div class="product-grid">
-              <v-skeleton-loader
-                v-for="i in 6"
+              <div
+                v-for="i in PRODUCT_SKELETON_COUNT"
                 :key="'prod-skel-' + i"
-                type="image"
-                class="product-card"
-              />
+                class="product-card product-card--skeleton"
+                aria-hidden="true"
+              >
+                <v-skeleton-loader type="image" class="product-skeleton-media" />
+
+                <div class="product-info product-info--skeleton">
+                  <v-skeleton-loader type="text" class="skeleton-line skeleton-line--title" />
+                  <v-skeleton-loader
+                    type="text"
+                    class="skeleton-line skeleton-line--title-short"
+                  />
+                  <v-skeleton-loader type="text" class="skeleton-line skeleton-line--price" />
+                  <v-skeleton-loader type="text" class="skeleton-line skeleton-line--sold" />
+                </div>
+              </div>
             </div>
           </template>
           <template v-else-if="butuanProducts.length === 0">
@@ -1708,6 +1740,54 @@ const hotPicks = computed(() => {
   border: 1px solid transparent;
 }
 
+.product-card--skeleton,
+.hot-pick-card--skeleton {
+  cursor: default;
+  pointer-events: none;
+}
+
+.product-card--skeleton:hover,
+.hot-pick-card--skeleton:hover {
+  transform: none;
+}
+
+.product-skeleton-media :deep(.v-skeleton-loader__image) {
+  height: 160px;
+}
+
+.hot-pick-skeleton-media :deep(.v-skeleton-loader__image) {
+  height: 120px;
+}
+
+.product-info--skeleton,
+.hot-pick-info--skeleton {
+  gap: 8px;
+}
+
+.skeleton-line {
+  width: 100%;
+}
+
+.skeleton-line :deep(.v-skeleton-loader__bone) {
+  border-radius: 999px;
+}
+
+.skeleton-line--title {
+  max-width: 92%;
+}
+
+.skeleton-line--title-short {
+  max-width: 68%;
+}
+
+.skeleton-line--price {
+  max-width: 48%;
+}
+
+.skeleton-line--sold {
+  max-width: 40%;
+}
+
 .product-card:hover {
   transform: translateY(-2px);
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
@@ -2056,6 +2136,10 @@ const hotPicks = computed(() => {
   transition: all 0.3s ease;
   cursor: pointer;
   border: 1px solid rgba(255, 71, 87, 0.2);
+}
+
+.hot-pick-card--skeleton {
+  flex: 1 1 auto;
 }
 
 .hot-pick-card:hover {

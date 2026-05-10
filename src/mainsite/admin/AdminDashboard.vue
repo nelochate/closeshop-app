@@ -231,20 +231,20 @@ const fetchShopsByStatus = async (status: string) => {
       .order('created_at', { ascending: false })
 
     if (error) throw error
-    
+
     // Log the IDs to verify format
     if (data && data.length > 0) {
       console.log(`First ${status} shop ID:`, data[0].id)
       console.log(`ID type:`, typeof data[0].id)
     }
-    
+
     // Fetch owner profiles for each shop
     if (data && data.length > 0) {
       for (const shop of data) {
         await fetchOwnerProfile(shop.owner_id)
       }
     }
-    
+
     return data || []
   } catch (err: any) {
     console.error(`Error fetching ${status} shops:`, err)
@@ -479,17 +479,17 @@ const updateShopStatus = async (id: string, status: 'approved' | 'declined') => 
     }
 
     console.log('Update successful, refreshing data...')
-    
+
     // Force refresh all shops from database
     await fetchShops()
-    
+
     // Verify the update by checking the shop directly
     const { data: verifiedShop } = await supabase
       .from('shops')
       .select('id, status')
       .eq('id', id)
       .single()
-    
+
     console.log('Verified shop status after update:', verifiedShop)
 
     alert(`Shop ${status} successfully!`)
@@ -733,7 +733,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <v-container fluid class="admin-dashboard-container pa-0 ma-0">
+  <v-container>
     <!-- Header Section -->
     <v-card flat class="mb-4 admin-header" rounded="xl">
       <v-card-text class="admin-header-content">
@@ -1682,31 +1682,6 @@ onMounted(() => {
 </template>
 
 <style scoped>
-.admin-dashboard-container {
-  max-width: 100vw;
-  overflow-x: hidden;
-  min-height: 100vh;
-  position: relative;
-  padding:
-    0
-    max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
-    calc(28px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
-    max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) !important;
-  background:
-    radial-gradient(circle at top, rgba(102, 126, 234, 0.14), transparent 32%),
-    linear-gradient(180deg, #f4f7fb 0%, #edf3f9 100%);
-}
-
-.admin-dashboard-container::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 28px);
-  background: linear-gradient(135deg, #2c5f8c 0%, #5c6fd6 100%);
-  z-index: 0;
-}
 
 .admin-header {
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
