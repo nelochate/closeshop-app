@@ -9,6 +9,22 @@ import { syncCurrentViewStatusBar } from '@/utils/statusBar'
 // ------------------ Router ------------------
 const router = useRouter()
 const route = useRoute()
+
+const resolveReturnRoute = (extraQuery: Record<string, string> = {}) => {
+  const returnTo = route.query.returnTo === 'seller-products' ? 'seller-products' : 'productlist'
+  const filter =
+    route.query.returnTo === 'seller-products' && typeof route.query.filter === 'string'
+      ? route.query.filter
+      : ''
+
+  return {
+    name: returnTo,
+    query: {
+      ...(filter ? { filter } : {}),
+      ...extraQuery,
+    },
+  }
+}
 const goBack = () => router.back()
 
 // ------------------ Mode check ------------------
@@ -616,14 +632,13 @@ const submitForm = async () => {
       showSnackbar('Product update saved successfully!', 'success')
       alert('Product update saved successfully!')
       // Use replace instead of push to avoid back button loop
-      router.replace({
-        name: 'productlist',
-        query: {
+      router.replace(
+        resolveReturnRoute({
           updated: '1',
           productId: productId.value,
           stock: String(stockValue),
-        },
-      })
+        }),
+      )
     } else {
       const { error: insertError } = await supabase.from('products').insert([{
         shop_id: shopId,
@@ -641,7 +656,7 @@ const submitForm = async () => {
       showSnackbar('Product added successfully!', 'success')
       alert('Product added successfully!')
       // Use replace instead of push to avoid back button loop
-      router.replace({ name: 'productlist' })
+      router.replace(resolveReturnRoute())
     }
   } catch (err: any) {
     console.error('Error saving product:', err)
@@ -1100,36 +1115,4 @@ body.camera-active {
   font-weight: 500;
 }
 
-/* Dark mode support */
-@media (prefers-color-scheme: dark) {
-  .background-gradient {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  }
-  .image-source-options {
-    background: #1f2937;
-  }
-
-  .image-source-title {
-    color: #f3f4f6;
-    border-bottom-color: #374151;
-  }
-
-  .image-source-btn {
-    background: #1f2937;
-    color: #d1d5db;
-  }
-
-  .image-source-btn:hover {
-    background: #374151;
-  }
-
-  .gallery-btn,
-  .camera-btn {
-    border-bottom-color: #374151;
-  }
-
-  .cancel-btn {
-    border-top-color: #374151;
-  }
-}
 </style>

@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import BottomNav from '@/common/layout/BottomNav.vue'
+import { recordShopVisit } from '@/services/shopVisitTracking'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
@@ -362,6 +363,7 @@ const initializeAfterDataLoad = async () => {
   loading.value = true
   await loadUser()
   await fetchShop()
+  void recordShopVisit(shopId, 'shop_page')
   await fetchProducts()
   loading.value = false
 }

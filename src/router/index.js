@@ -14,7 +14,7 @@ import AdminDashboard from '@/mainsite/admin/AdminDashboard.vue'
 import ForgotPasswordView from '@/mainsite/resetpass/ForgotPasswordView.vue'
 import UpdatePasswordView from '@/mainsite/resetpass/UpdatePasswordView.vue'
 import { useAuthUserStore } from '@/stores/authUser'
-import UserShop from '@/mainsite/UserShop.vue'
+import UserShop from '@/mainsite/seller/UserShop.vue'
 import ProductListing from '@/mainsite/ProductListing.vue'
 import ChatView from '@/mainsite/ChatView.vue'
 import AuthCallback from '../auth/AuthCallback.vue'
@@ -108,6 +108,24 @@ const routes = [
     component: () => import('@/mainsite/ShopBuild.vue'),
   },
   { path: '/usershop', name: 'usershop', component: UserShop, meta: { requiresAuth: true } },
+  {
+    path: '/seller/orders',
+    name: 'seller-orders',
+    component: () => import('@/mainsite/seller/SellerOrdersView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/seller/products',
+    name: 'seller-products',
+    component: () => import('@/mainsite/seller/SellerProductsView.vue'),
+    meta: { requiresAuth: true },
+  },
+  {
+    path: '/seller/analytics',
+    name: 'seller-analytics',
+    component: () => import('@/mainsite/seller/SellerAnalyticsView.vue'),
+    meta: { requiresAuth: true },
+  },
   {
     path: '/productlist',
     name: 'productlist',

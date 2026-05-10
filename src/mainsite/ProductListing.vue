@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { supabase } from '@/utils/supabase'
 
@@ -36,11 +36,61 @@ const productToDelete = ref<Product | null>(null)
 const snackbar = ref(false)
 const snackbarMessage = ref('')
 const snackbarColor = ref<'success' | 'error'>('success')
+const currentListingRouteName = computed(() =>
+  route.name === 'seller-products' ? 'seller-products' : 'productlist',
+)
+const selectedFilter = computed<'all' | 'low-stock' | 'out-of-stock'>(() => {
+  const filterValue = typeof route.query.filter === 'string' ? route.query.filter : 'all'
+  return ['low-stock', 'out-of-stock'].includes(filterValue)
+    ? (filterValue as 'low-stock' | 'out-of-stock')
+    : 'all'
+})
+const filterOptions = [
+  { label: 'All Products', value: 'all' as const },
+  { label: 'Low Stock', value: 'low-stock' as const },
+  { label: 'Out of Stock', value: 'out-of-stock' as const },
+]
+const filteredProducts = computed(() => {
+  switch (selectedFilter.value) {
+    case 'low-stock':
+      return products.value.filter((product) => product.stock > 0 && product.stock < 10)
+    case 'out-of-stock':
+      return products.value.filter((product) => product.stock <= 0)
+    default:
+      return products.value
+  }
+})
 
 const showSnackbar = (msg: string, type: 'success' | 'error') => {
   snackbarMessage.value = msg
   snackbarColor.value = type
   snackbar.value = true
+}
+
+const buildListingQuery = () =>
+  selectedFilter.value === 'all' ? {} : { filter: selectedFilter.value }
+
+const buildAddItemQuery = () => {
+  if (currentListingRouteName.value !== 'seller-products') return {}
+
+  return {
+    returnTo: 'seller-products',
+    ...(selectedFilter.value === 'all' ? {} : { filter: selectedFilter.value }),
+  }
+}
+
+const openAddProduct = () => {
+  router.push({
+    name: 'AddItem',
+    query: buildAddItemQuery(),
+  })
+}
+
+const applyFilter = (filter: 'all' | 'low-stock' | 'out-of-stock') => {
+  router.replace({
+    name: currentListingRouteName.value,
+    query: filter === 'all' ? {} : { filter },
+  })
 }
 
 // Update mobile state
@@ -249,7 +299,11 @@ const deleteProductConfirmed = async () => {
 }
 
 const editProduct = (id: string) => {
-  router.push({ name: 'AddItem', params: { id } })
+  router.push({
+    name: 'AddItem',
+    params: { id },
+    query: buildAddItemQuery(),
+  })
 }
 
 // Add window resize listener
@@ -273,7 +327,7 @@ onMounted(async () => {
     const savedStock = route.query.stock ? ` Stock is now ${route.query.stock} pcs.` : ''
     showSnackbar(`Product update saved successfully.${savedStock}`, 'success')
     // Clean up the URL without affecting navigation history
-    router.replace({ name: 'productlist', query: {} })
+    router.replace({ name: currentListingRouteName.value, query: buildListingQuery() })
   }
 
   window.addEventListener('resize', updateMobileState)
@@ -337,7 +391,7 @@ onUnmounted(() => {
 
             <!-- IMPROVED ADD PRODUCT BUTTON -->
             <button
-              @click="router.push('/additem')"
+              @click="openAddProduct"
               class="add-product-btn"
               :class="{ 'mobile-btn': isMobile }"
             >
@@ -388,7 +442,7 @@ onUnmounted(() => {
             <v-btn
               color="#3f83c7"
               prepend-icon="mdi-plus"
-              @click="router.push('/additem')"
+              @click="openAddProduct"
               size="default"
               rounded="lg"
               class="px-6"
@@ -398,10 +452,46 @@ onUnmounted(() => {
           </v-card-text>
         </v-card>
 
+        <div v-else class="filter-chip-row mb-4">
+          <v-chip
+            v-for="filter in filterOptions"
+            :key="filter.value"
+            :color="selectedFilter === filter.value ? 'primary' : undefined"
+            :variant="selectedFilter === filter.value ? 'flat' : 'outlined'"
+            size="small"
+            class="filter-chip"
+            @click="applyFilter(filter.value)"
+          >
+            {{ filter.label }}
+          </v-chip>
+        </div>
+
+        <v-card
+          v-if="products.length > 0 && filteredProducts.length === 0"
+          class="empty-state-card"
+          :rounded="isMobile ? 'lg' : 'xl'"
+          elevation="0"
+        >
+          <v-card-text class="text-center py-8">
+            <div class="empty-state-icon">
+              <v-icon :size="isMobile ? 52 : 74" color="#cbd5e1">mdi-filter-off-outline</v-icon>
+            </div>
+            <h3 :class="isMobile ? 'text-subtitle-1' : 'text-h5'" class="font-weight-bold mb-2">
+              No products in this filter
+            </h3>
+            <p class="text-caption text-grey mb-4">
+              Try a different inventory filter to see more of your products.
+            </p>
+            <v-btn color="#3f83c7" variant="outlined" rounded="lg" @click="applyFilter('all')">
+              Show All Products
+            </v-btn>
+          </v-card-text>
+        </v-card>
+
         <!-- Products Grid - 2 columns on mobile -->
         <v-row v-else :dense="isMobile" class="products-grid">
           <v-col
-            v-for="product in products"
+            v-for="product in filteredProducts"
             :key="product.id"
             :cols="isMobile ? 6 : 12"
             :md="6"
@@ -615,6 +705,16 @@ v-main,
 
 .product-count-chip {
   font-weight: 500;
+}
+
+.filter-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.filter-chip {
+  cursor: pointer;
 }
 
 /* IMPROVED ADD PRODUCT BUTTON */
@@ -1150,78 +1250,6 @@ v-main,
 
   .action-btn {
     padding: 6px 8px;
-  }
-}
-
-/* Dark Mode */
-@media (prefers-color-scheme: dark) {
-  .background-gradient {
-    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
-  }
-
-  .product-card,
-  .empty-state-card {
-    background: #1e293b;
-    border-color: #334155;
-  }
-
-  .product-name {
-    color: #f1f5f9;
-  }
-
-  .stock-number {
-    background: #334155;
-    color: #94a3b8;
-  }
-
-  .product-description {
-    color: #94a3b8;
-  }
-
-  .varieties-badge {
-    background: #334155;
-    color: #94a3b8;
-  }
-
-  .product-actions {
-    background: #0f172a;
-    border-top-color: #334155;
-  }
-
-  .edit-btn {
-    background: #1e293b;
-    color: #60a5fa;
-  }
-
-  .delete-btn {
-    background: #1e293b;
-    color: #f87171;
-  }
-
-  .delete-dialog {
-    background: #1e293b;
-  }
-
-  .dialog-title {
-    color: #f1f5f9;
-  }
-
-  .dialog-text {
-    color: #94a3b8;
-  }
-
-  .cancel-btn {
-    background: #334155;
-    color: #cbd5e1;
-  }
-
-  .add-product-btn {
-    background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);
-    box-shadow: 0 4px 12px rgba(29, 78, 216, 0.3);
-  }
-
-  .add-product-btn:hover {
-    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
   }
 }
 </style>
