@@ -23,6 +23,7 @@ const router = useRouter()
 const route = useRoute()
 
 const isMobile = ref(window.innerWidth < 768)
+const sellerAppBarHeight = computed(() => (isMobile.value ? 64 : 72))
 const loading = ref(true)
 const errorMessage = ref('')
 const snapshot = ref<SellerDashboardSnapshot | null>(null)
@@ -438,16 +439,26 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <v-app>
+  <v-app
+    class="seller-analytics-app"
+    :style="{ '--seller-app-bar-height': `${sellerAppBarHeight}px` }"
+  >
     <PullToRefreshWrapper :on-refresh="handleAnalyticsRefresh">
-      <v-app-bar class="seller-analytics-bar" flat color="#3f83c7" dark density="comfortable">
+      <v-app-bar
+        class="seller-analytics-bar"
+        flat
+        color="#3f83c7"
+        dark
+        density="comfortable"
+        :height="sellerAppBarHeight"
+      >
         <v-btn icon size="small" class="mr-1" @click="router.back()">
           <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">Shop Analytics</v-toolbar-title>
       </v-app-bar>
 
-      <v-main class="seller-analytics-main pt-12">
+      <v-main class="seller-analytics-main">
         <v-container :class="isMobile ? 'px-3 py-4' : 'pa-6'" fluid>
           <section class="analytics-hero">
             <div class="analytics-focus-chips">
@@ -760,15 +771,29 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.seller-analytics-app {
+  background: #f8fafc;
+}
+
 .seller-analytics-bar {
   padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-left: max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
+.seller-analytics-bar :deep(.v-toolbar__content) {
+  min-height: var(--seller-app-bar-height) !important;
+  padding-inline: 0;
+}
+
 .seller-analytics-main {
-  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-top: calc(
+    var(--seller-app-bar-height) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 10px
+  );
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 38%),
     linear-gradient(180deg, #f8fafc 0%, #eef4fb 100%);
@@ -1093,6 +1118,32 @@ onUnmounted(() => {
 }
 
 @media (max-width: 767px) {
+  .seller-analytics-main {
+    padding-top: calc(
+      var(--seller-app-bar-height) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 8px
+    );
+  }
+
+  .analytics-focus-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+
+  .analytics-focus-chips::-webkit-scrollbar {
+    display: none;
+  }
+
+  .analytics-focus-chips :deep(.v-chip) {
+    flex-shrink: 0;
+  }
+
+  .analytics-panel__header :deep(.v-btn) {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
   .analytics-line-chart__axis {
     align-items: flex-start;
   }

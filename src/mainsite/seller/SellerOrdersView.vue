@@ -27,6 +27,7 @@ const orders = ref<SellerDashboardOrder[]>([])
 const loadingOrders = ref(false)
 const ordersError = ref('')
 const isMobile = ref(window.innerWidth < 768)
+const sellerAppBarHeight = computed(() => (isMobile.value ? 64 : 72))
 const currentTime = ref(Date.now())
 const loadingSkeletons = [1, 2, 3, 4]
 
@@ -252,16 +253,26 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <v-app>
+  <v-app
+    class="seller-orders-app"
+    :style="{ '--seller-app-bar-height': `${sellerAppBarHeight}px` }"
+  >
     <PullToRefreshWrapper :on-refresh="handleOrdersRefresh">
-      <v-app-bar class="seller-orders-bar" flat color="#3f83c7" dark density="comfortable">
+      <v-app-bar
+        class="seller-orders-bar"
+        flat
+        color="#3f83c7"
+        dark
+        density="comfortable"
+        :height="sellerAppBarHeight"
+      >
         <v-btn icon size="small" class="mr-1" @click="router.back()">
           <v-icon>mdi-arrow-left</v-icon>
         </v-btn>
         <v-toolbar-title class="text-subtitle-1 font-weight-bold">Shop Orders</v-toolbar-title>
       </v-app-bar>
 
-      <v-main class="seller-orders-main pt-9">
+      <v-main class="seller-orders-main">
         <v-container :class="isMobile ? 'px-3 py-4' : 'pa-6'" fluid>
           <template v-if="loadingOrders && !orders.length">
             <div class="orders-loading-grid">
@@ -291,7 +302,7 @@ onUnmounted(() => {
           </template>
 
           <template v-else>
-            <v-alert v-if="ordersError" type="error" rounded="lg" class="mb-4 pt-8">
+            <v-alert v-if="ordersError" type="error" rounded="lg" class="mb-4">
               {{ ordersError }}
             </v-alert>
 
@@ -352,15 +363,29 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.seller-orders-app {
+  background: #f8fafc;
+}
+
 .seller-orders-bar {
   padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-left: max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
   color: white !important;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
 }
 
+.seller-orders-bar :deep(.v-toolbar__content) {
+  min-height: var(--seller-app-bar-height) !important;
+  padding-inline: 0;
+}
+
 .seller-orders-main {
-  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-top: calc(
+    var(--seller-app-bar-height) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 10px
+  );
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(circle at top left, rgba(59, 130, 246, 0.1), transparent 36%),
     linear-gradient(180deg, #f8fafc 0%, #eef4fb 100%);
@@ -521,6 +546,12 @@ onUnmounted(() => {
 }
 
 @media (max-width: 767px) {
+  .seller-orders-main {
+    padding-top: calc(
+      var(--seller-app-bar-height) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 8px
+    );
+  }
+
   .orders-filter-chip-row {
     flex-wrap: nowrap;
     overflow-x: auto;
