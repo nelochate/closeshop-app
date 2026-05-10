@@ -785,7 +785,7 @@ const getStatusColor = (order) => {
   if (isCompletedPendingReview(order)) return 'secondary'
   if (isOrderDeliveredState(order)) return 'success'
   if (status === 'cancel_requested') return 'warning'
-  if (status === 'waiting_for_rider') return 'warning' // Orange/Yellow
+  if (status === 'waiting_for_rider') return 'info'
   if (status === 'accepted_by_rider') return 'info' // Blue
   if (status === 'picked_up') return 'warning' // Orange/Yellow
   if (order.payment_status === 'paid') return 'primary'

@@ -98,9 +98,58 @@ const routes = [
   { path: '/register-success', name: 'confirm-email', component: ConfirmEmail },
   {
     path: '/admin-dashboard',
-    name: 'admin-dashboard',
     component: AdminDashboard,
     meta: { requiresAuth: true, requiresAdmin: true },
+    children: [
+      {
+        path: '',
+        name: 'admin-dashboard',
+        component: () => import('@/mainsite/admin/AdminOverview.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          adminSection: 'dashboard',
+          adminTitle: 'Admin Dashboard',
+          adminSubtitle: 'Track platform health, moderation backlogs, and monetization readiness at a glance.',
+        },
+      },
+      {
+        path: 'shops',
+        name: 'admin-shops',
+        component: () => import('@/mainsite/admin/AdminShops.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          adminSection: 'shops',
+          adminTitle: 'Shops Management',
+          adminSubtitle: 'Review business applications, approve legitimate shops, and manage suspensions with cleaner workflows.',
+        },
+      },
+      {
+        path: 'riders',
+        name: 'admin-riders',
+        component: () => import('@/mainsite/admin/AdminRiders.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          adminSection: 'riders',
+          adminTitle: 'Riders Management',
+          adminSubtitle: 'Moderate rider applications, inspect documents, and manage rider activation from one organized queue.',
+        },
+      },
+      {
+        path: 'analytics',
+        name: 'admin-analytics',
+        component: () => import('@/mainsite/admin/AdminAnalytics.vue'),
+        meta: {
+          requiresAuth: true,
+          requiresAdmin: true,
+          adminSection: 'analytics',
+          adminTitle: 'Admin Analytics',
+          adminSubtitle: 'Review platform metrics and preview revenue channels for future admin monetization tools.',
+        },
+      },
+    ],
   },
   {
     path: '/shop-build/:id?',
@@ -386,7 +435,10 @@ router.beforeEach(async (to, from, next) => {
 
     // ✅ Redirect authenticated users away from auth pages
     if (isLoggedIn && (to.path === '/' || to.path === '/register')) {
-      return next({ path: '/homepage', replace: true })
+      return next({
+        path: authStore.isAdmin ? '/admin-dashboard' : '/homepage',
+        replace: true,
+      })
     }
 
     // ✅ Redirect unauthenticated users from protected routes

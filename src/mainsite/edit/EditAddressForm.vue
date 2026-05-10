@@ -11,6 +11,11 @@ const router = useRouter()
 const route = useRoute()
 const checkoutStore = useCheckoutStore()
 
+// Navigation functions
+const goBack = () => {
+  router.back()
+}
+
 // Set Mapbox token
 mapboxgl.accessToken =
   'pk.eyJ1IjoiY2xvc2VzaG9wIiwiYSI6ImNtaDI2emxocjEwdnVqMHExenFpam42bjcifQ.QDsWVOHM9JPhPQ---Ca4MA'
@@ -1205,16 +1210,12 @@ watch(
 <template>
   <!-- Your existing template remains exactly the same -->
   <v-app>
-    <!-- App Bar -->
-    <v-app-bar flat color="primary" elevation="1">
-      <template v-slot:prepend>
-        <v-btn icon @click="router.back()" variant="text" color="white">
-          <v-icon>mdi-arrow-left</v-icon>
-        </v-btn>
-      </template>
-      <v-toolbar-title class="text-white font-weight-bold">
-        {{ isEdit ? 'Edit Address' : 'Add New Address' }}
-      </v-toolbar-title>
+        <!-- Top App Bar -->
+    <v-app-bar class="app-bar" flat color="#3f83c7" dark density="comfortable">
+      <v-btn icon @click="goBack">
+        <v-icon>mdi-arrow-left</v-icon>
+      </v-btn>
+      <v-toolbar-title><strong>Edit Address</strong></v-toolbar-title>
     </v-app-bar>
 
     <v-main style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)">
@@ -1236,7 +1237,7 @@ watch(
         {{ snackbarMessage }}
       </v-snackbar>
 
-      <v-container class="py-8">
+      <v-container class="py-8 pt-12">
         <!-- Mode Selection Card -->
         <v-card class="mb-6" elevation="2" rounded="lg">
           <v-card-title class="d-flex align-center">
@@ -1721,6 +1722,47 @@ watch(
 </template>
 
 <style scoped>
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
+:root {
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
+}
+
+.v-application {
+  background: #f5f7fb;
+}
+
+v-main,
+.v-main {
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
+  padding-left: max(0px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(0px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+  background: #f5f7fb;
+  min-height: 100vh;
+  margin-top: 20px;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  background: linear-gradient(135deg, #3f83c7, #2f6ca9) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
 /* Your existing styles remain exactly the same */
 .map-wrapper {
   width: 100%;
