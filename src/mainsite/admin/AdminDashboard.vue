@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { RouterView, useRoute, useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import { adminNavigationItems } from './adminNavigation'
@@ -16,6 +17,7 @@ import {
 const router = useRouter()
 const route = useRoute()
 const authStore = useAuthUserStore()
+const { smAndDown } = useDisplay()
 
 const drawer = ref(false)
 const loadingAccess = ref(true)
@@ -50,6 +52,7 @@ const adminEmail = computed(() => adminProfile.value?.email || 'admin@closeshop.
 const pendingApprovalCount = computed(
   () => pendingApprovalSummary.value.shops + pendingApprovalSummary.value.riders,
 )
+const adminAppBarHeight = computed(() => (smAndDown.value ? 70 : 76))
 const pendingApprovalBadge = computed(() =>
   pendingApprovalCount.value > 99 ? '99+' : pendingApprovalCount.value,
 )
@@ -305,7 +308,10 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <v-app>
+  <v-app
+    class="admin-shell-app"
+    :style="{ '--admin-app-bar-height': `${adminAppBarHeight}px` }"
+  >
     <v-navigation-drawer
       v-model="drawer"
       temporary
@@ -343,7 +349,7 @@ onBeforeUnmount(() => {
       </v-list>
     </v-navigation-drawer>
 
-    <v-app-bar class="admin-app-bar" flat height="76">
+    <v-app-bar class="app-bar" flat :height="adminAppBarHeight">
       <template #prepend>
         <v-app-bar-nav-icon class="d-md-none" @click="drawer = true" />
       </template>
@@ -633,8 +639,46 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+/* =========================================
+   SAFE AREA + GLOBAL MOBILE FRIENDLY LAYOUT
+========================================= */
+:root {
+  font-family: 'Inter', 'Poppins', 'Roboto', sans-serif;
+}
+
+.admin-shell-app {
+  background: #f5f7fb;
+}
+
+/* =========================================
+   APP BAR
+========================================= */
+.app-bar {
+  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
+  padding-left: max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+  padding-right: max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+  background: linear-gradient(135deg, #284384 0%, #1d4ed8 55%, #2563eb 100%) !important;
+  color: white !important;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.12) !important;
+}
+
+.app-bar :deep(.v-toolbar__content) {
+  min-height: var(--admin-app-bar-height) !important;
+  padding-inline: 0;
+}
+
+.app-bar :deep(.v-toolbar-title) {
+  font-size: 1.05rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.app-bar :deep(.v-btn) {
+  color: white !important;
+}
 .admin-drawer :deep(.v-navigation-drawer__content) {
   background: linear-gradient(180deg, #f8fbff 0%, #eef4fb 100%);
+  padding-top: calc(var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 8px);
 }
 
 .admin-drawer__header {
@@ -652,15 +696,6 @@ onBeforeUnmount(() => {
 .admin-drawer__subtitle {
   color: #64748b;
   font-size: 0.85rem;
-}
-
-.admin-app-bar {
-  padding-top: var(--app-safe-area-top, env(safe-area-inset-top, 0px));
-  padding-left: max(10px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
-  padding-right: max(10px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
-  background: linear-gradient(135deg, #284384 0%, #1d4ed8 55%, #2563eb 100%) !important;
-  color: white !important;
-  box-shadow: 0 10px 28px rgba(15, 23, 42, 0.18) !important;
 }
 
 .admin-brand {
@@ -729,6 +764,9 @@ onBeforeUnmount(() => {
 }
 
 .admin-notification-menu {
+  width: min(380px, calc(100vw - 24px));
+  min-width: min(320px, calc(100vw - 24px));
+  max-width: calc(100vw - 24px);
   overflow: hidden;
   border: 1px solid rgba(148, 163, 184, 0.16);
   box-shadow: 0 20px 40px rgba(15, 23, 42, 0.16);
@@ -845,6 +883,10 @@ onBeforeUnmount(() => {
 
 .admin-shell-main {
   min-height: 100vh;
+  padding-top: calc(
+    var(--admin-app-bar-height) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 12px
+  );
+  padding-bottom: var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px));
   background:
     radial-gradient(circle at top left, rgba(96, 165, 250, 0.18), transparent 28%),
     linear-gradient(180deg, #f8fafc 0%, #eef4fb 100%);
@@ -853,7 +895,7 @@ onBeforeUnmount(() => {
 .admin-shell-container {
   max-width: 1320px;
   padding:
-    26px
+    0
     max(16px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)))
     calc(30px + var(--app-safe-area-bottom, env(safe-area-inset-bottom, 0px)))
     max(16px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) !important;
@@ -867,6 +909,7 @@ onBeforeUnmount(() => {
   justify-content: center;
   gap: 16px;
   color: #475569;
+  padding-top: 12px;
 }
 
 .admin-shell-error {
@@ -975,21 +1018,58 @@ onBeforeUnmount(() => {
     width: 100%;
     align-items: flex-start;
   }
+
+  .admin-shell-main {
+    padding-top: calc(
+      var(--admin-app-bar-height) + var(--app-safe-area-top, env(safe-area-inset-top, 0px)) + 10px
+    );
+  }
 }
 
 @media (max-width: 600px) {
+  .app-bar {
+    padding-left: max(8px, var(--app-safe-area-left, env(safe-area-inset-left, 0px)));
+    padding-right: max(8px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
+  }
+
+  .app-bar :deep(.v-toolbar__content) {
+    gap: 4px;
+  }
+
   .admin-brand__copy small,
   .admin-profile-trigger__copy {
     display: none;
   }
 
+  .admin-brand__logo {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+
+  .admin-profile-trigger {
+    padding-inline: 4px 8px;
+  }
+
+  .admin-profile-trigger__avatar {
+    margin-right: 0;
+  }
+
+  .admin-notification-menu {
+    width: calc(100vw - 16px);
+    min-width: 0;
+    max-width: calc(100vw - 16px);
+  }
+
   .admin-shell-container {
-    padding-top: 18px !important;
+    padding-left: max(12px, var(--app-safe-area-left, env(safe-area-inset-left, 0px))) !important;
+    padding-right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px))) !important;
   }
 
   .admin-shell-hero {
     gap: 14px;
-    padding: 18px;
+    margin-bottom: 16px;
+    padding: 18px 16px;
     border-radius: 24px;
   }
 
@@ -998,5 +1078,18 @@ onBeforeUnmount(() => {
     font-size: 0.94rem;
   }
 
+  .admin-shell-mobile-nav {
+    margin: 0 0 14px;
+  }
+
+  .admin-shell-mobile-nav__item {
+    min-height: 46px;
+    padding: 11px 14px;
+  }
+
+  .admin-shell-state {
+    min-height: calc(100vh - var(--admin-app-bar-height));
+    padding-top: 0;
+  }
 }
 </style>
