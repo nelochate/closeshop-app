@@ -110,7 +110,9 @@ const closeTime = ref('')
 const avatarUrl = ref<string | null>(null)
 const physicalUrl = ref<string | null>(null)
 const deliveryOptions = ref<string[]>([])
-const paymentOptions = ref<string[]>(['cod'])
+const DEFAULT_PAYMENT_OPTIONS = ['cod']
+const supportedPaymentOptions = new Set(DEFAULT_PAYMENT_OPTIONS)
+const paymentOptions = ref<string[]>([...DEFAULT_PAYMENT_OPTIONS])
 const fullAddress = ref('')
 const validIdFrontUrl = ref<string | null>(null)
 const validIdBackUrl = ref<string | null>(null)
@@ -236,8 +238,20 @@ const toggleDay = (dayId: number) => {
 }
 
 // -------------------- PAYMENT OPTIONS FUNCTIONS --------------------
+const normalizePaymentOptions = (options: unknown) => {
+  if (!Array.isArray(options)) {
+    return [...DEFAULT_PAYMENT_OPTIONS]
+  }
+
+  const availableOptions = options.filter(
+    (option): option is string => typeof option === 'string' && supportedPaymentOptions.has(option),
+  )
+
+  return availableOptions.length > 0 ? availableOptions : [...DEFAULT_PAYMENT_OPTIONS]
+}
+
 const ensureCodOnlyPayment = () => {
-  paymentOptions.value = ['cod']
+  paymentOptions.value = [...DEFAULT_PAYMENT_OPTIONS]
 }
 
 const getPaymentIcon = (option: string) => {
@@ -832,7 +846,7 @@ const loadShopData = async () => {
     closeTime.value = data.close_time || ''
 
     deliveryOptions.value = data.delivery_options || []
-    ensureCodOnlyPayment()
+    paymentOptions.value = normalizePaymentOptions(data.payment_options)
     openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
 
     validIdFrontUrl.value = data.valid_id_front || null
@@ -1099,7 +1113,7 @@ const saveShop = async () => {
       province: address.province.value,
       region: address.region.value,
       delivery_options: deliveryOptions.value,
-      payment_options: ['cod'],
+      payment_options: normalizePaymentOptions(paymentOptions.value),
       payment_enabled: true,
       detected_address:
         fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,

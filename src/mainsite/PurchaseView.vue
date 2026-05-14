@@ -26,7 +26,9 @@ const buyer = ref<any>(null)
 const address = ref<any>(null)
 const addresses = ref<any[]>([])
 const deliveryOption = ref('')
-const paymentMethod = ref('')
+const DEFAULT_PAYMENT_OPTIONS = ['cod']
+const DEFAULT_PAYMENT_METHOD = DEFAULT_PAYMENT_OPTIONS[0]
+const paymentMethod = ref(DEFAULT_PAYMENT_METHOD)
 const note = ref('')
 const checkoutStore = useCheckoutStore()
 // 📋 CLIPBOARD STATE
@@ -52,22 +54,25 @@ const shopSchedule = ref({
   closeHour: 19, // Default closing hour
   manualStatus: 'auto',
   deliveryOptions: ['courier', 'pickup'] as string[], // Default delivery options
-  paymentOptions: ['cod'] as string[], // Default payment options
+  paymentOptions: [...DEFAULT_PAYMENT_OPTIONS] as string[], // Default payment options
 })
 
-const supportedPaymentOptions = ['cod']
+const supportedPaymentOptions = new Set(DEFAULT_PAYMENT_OPTIONS)
 const normalizePaymentOptions = (options: unknown) => {
   if (!Array.isArray(options)) {
-    return ['cod']
+    return [...DEFAULT_PAYMENT_OPTIONS]
   }
 
   const availableOptions = options.filter(
     (option): option is string =>
-      typeof option === 'string' && supportedPaymentOptions.includes(option),
+      typeof option === 'string' && supportedPaymentOptions.has(option),
   )
 
-  return availableOptions.length > 0 ? availableOptions : ['cod']
+  return availableOptions.length > 0 ? availableOptions : [...DEFAULT_PAYMENT_OPTIONS]
 }
+
+const getItemShopId = (item: any) =>
+  item?.shop_id || item?.product?.shop_id || item?.product?.shop?.id || item?.shop?.id || null
 
 const normalizeContactNumber = (value: unknown) =>
   typeof value === 'string' ? value.trim() : ''
@@ -364,7 +369,7 @@ const loadShopData = async () => {
   try {
     console.log('🏪 Loading shop data for items...')
 
-    let shopId = items.value[0]?.shop_id || items.value[0]?.product?.shop_id
+    let shopId = getItemShopId(items.value[0])
 
     if (!shopId) {
       console.warn('⚠️ No shop ID found, using default schedule')
@@ -375,10 +380,10 @@ const loadShopData = async () => {
         closeHour: 19,
         manualStatus: 'auto',
         deliveryOptions: ['courier', 'pickup'],
-        paymentOptions: ['cod'],
+        paymentOptions: [...DEFAULT_PAYMENT_OPTIONS],
       }
       deliveryOption.value = 'courier'
-      paymentMethod.value = 'cod'
+      paymentMethod.value = DEFAULT_PAYMENT_METHOD
       return
     }
 
@@ -402,10 +407,10 @@ const loadShopData = async () => {
         closeHour: 19,
         manualStatus: 'auto',
         deliveryOptions: ['courier', 'pickup'],
-        paymentOptions: ['cod'],
+        paymentOptions: [...DEFAULT_PAYMENT_OPTIONS],
       }
       deliveryOption.value = 'courier'
-      paymentMethod.value = 'cod'
+      paymentMethod.value = DEFAULT_PAYMENT_METHOD
       return
     }
 
@@ -470,7 +475,7 @@ const loadShopData = async () => {
       }
     } else {
       console.log('ℹ️ Using default payment options (COD only)')
-      paymentMethod.value = 'cod'
+      paymentMethod.value = DEFAULT_PAYMENT_METHOD
     }
 
     shopSchedule.value = {
@@ -496,10 +501,10 @@ const loadShopData = async () => {
       closeHour: 19,
       manualStatus: 'auto',
       deliveryOptions: ['courier', 'pickup'],
-      paymentOptions: ['cod'],
+      paymentOptions: [...DEFAULT_PAYMENT_OPTIONS],
     }
     deliveryOption.value = 'courier'
-    paymentMethod.value = 'cod'
+    paymentMethod.value = DEFAULT_PAYMENT_METHOD
   }
 }
 
@@ -795,7 +800,7 @@ const loadItems = async () => {
         selectedVariety: item.selectedVariety || item.variety || route.query.variety || null,
         varietyData: item.varietyData || null,
         price: item.price || item.varietyPrice || 0,
-        shop_id: item.shop_id || item.product?.shop_id,
+        shop_id: getItemShopId(item),
       }))
 
       fromCart.value = false
@@ -813,7 +818,7 @@ const loadItems = async () => {
       varietyData: item.varietyData || null,
       price: item.price || item.varietyPrice || 0,
       cart_item_id: item.cart_item_id || item.id,
-      shop_id: item.shop_id || item.product?.shop_id,
+      shop_id: getItemShopId(item),
     }))
 
     fromCart.value = history.state.fromCart || true
@@ -1932,7 +1937,7 @@ const handleCheckout = async () => {
     console.log('🔄 Processing order...')
 
     // Get shop ID from the first item
-    const shopId = items.value[0]?.shop_id || items.value[0]?.product?.shop_id
+    const shopId = getItemShopId(items.value[0])
 
     if (!shopId) {
       alert('Shop information not found for items')
