@@ -55,6 +55,20 @@ const shopSchedule = ref({
   paymentOptions: ['cod'] as string[], // Default payment options
 })
 
+const supportedPaymentOptions = ['cod']
+const normalizePaymentOptions = (options: unknown) => {
+  if (!Array.isArray(options)) {
+    return ['cod']
+  }
+
+  const availableOptions = options.filter(
+    (option): option is string =>
+      typeof option === 'string' && supportedPaymentOptions.includes(option),
+  )
+
+  return availableOptions.length > 0 ? availableOptions : ['cod']
+}
+
 const normalizeContactNumber = (value: unknown) =>
   typeof value === 'string' ? value.trim() : ''
 
@@ -364,6 +378,7 @@ const loadShopData = async () => {
         paymentOptions: ['cod'],
       }
       deliveryOption.value = 'courier'
+      paymentMethod.value = 'cod'
       return
     }
 
@@ -390,6 +405,7 @@ const loadShopData = async () => {
         paymentOptions: ['cod'],
       }
       deliveryOption.value = 'courier'
+      paymentMethod.value = 'cod'
       return
     }
 
@@ -443,14 +459,13 @@ const loadShopData = async () => {
       : deliveryOptions[0] || ''
 
     // Parse payment options
-    let paymentOptions = ['cod'] // Default to COD only
+    const paymentOptions = normalizePaymentOptions(shop.payment_options)
 
     if (shop.payment_options && Array.isArray(shop.payment_options) && shop.payment_options.length > 0) {
-      paymentOptions = shop.payment_options
       console.log('✅ Using shop payment options:', paymentOptions)
 
       // Set default payment method to the first available option
-      if (!paymentMethod.value && paymentOptions.length > 0) {
+      if (!paymentOptions.includes(paymentMethod.value) && paymentOptions.length > 0) {
         paymentMethod.value = paymentOptions[0]
       }
     } else {
@@ -1870,15 +1885,6 @@ const paymentOptionsDisplay = computed(() => {
     })
   }
 
-  if (shopSchedule.value.paymentOptions.includes('gcash')) {
-    options.push({
-      label: 'GCash',
-      value: 'gcash',
-      icon: 'mdi-cellphone',
-      description: 'Pay via GCash mobile wallet'
-    })
-  }
-
   return options
 })
 
@@ -2244,7 +2250,8 @@ const sendOrderMessageToSeller = async (orderId: string, shopId: string, shopIte
       .join('\n')
 
     // Format payment method for display
-    const paymentMethodDisplay = paymentMethod.value === 'cod' ? 'Cash on Delivery' : 'GCash'
+    const paymentMethodDisplay =
+      paymentMethod.value === 'cod' ? 'Cash on Delivery' : paymentMethod.value
     const customerName = getBuyerDisplayName(buyerProfile)
     const shopTotal = totalPrice.value
 

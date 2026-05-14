@@ -110,46 +110,11 @@ const closeTime = ref('')
 const avatarUrl = ref<string | null>(null)
 const physicalUrl = ref<string | null>(null)
 const deliveryOptions = ref<string[]>([])
-const paymentOptions = ref<string[]>([])
+const paymentOptions = ref<string[]>(['cod'])
 const fullAddress = ref('')
 const validIdFrontUrl = ref<string | null>(null)
 const validIdBackUrl = ref<string | null>(null)
 const pickerTarget = ref<'logo' | 'physical' | 'valid_id_front' | 'valid_id_back' | null>(null)
-
-// -------------------- GCASH/PAYMONGO CONFIG --------------------
-const showGcashSetup = ref(false)
-const paymongoPublicKey = ref('')
-const paymongoSecretKey = ref('')
-const paymongoWebhookSecret = ref('')
-const testMode = ref(true)
-const gcashEnabled = ref(false)
-const savingGcash = ref(false)
-const testingGcash = ref(false)
-const showPublicKey = ref(false)
-const showSecretKey = ref(false)
-const showWebhookSecret = ref(false)
-const copied = ref(false)
-const gcashError = ref('')
-
-// Computed webhook URL
-const webhookUrl = computed(() => {
-  const baseUrl = import.meta.env.VITE_BASE_URL || window.location.origin
-  return `${baseUrl}/api/paymongo-webhook`
-})
-
-// Copy webhook URL
-const copyWebhookUrl = async () => {
-  try {
-    await navigator.clipboard.writeText(webhookUrl.value)
-    copied.value = true
-    setTimeout(() => {
-      copied.value = false
-    }, 2000)
-    showSnackbar('Webhook URL copied!', 'success')
-  } catch (err) {
-    console.error('Failed to copy:', err)
-  }
-}
 
 // -------------------- IMAGE UPLOAD HANDLERS --------------------
 const handlePhysicalUpload = () => {
@@ -271,272 +236,16 @@ const toggleDay = (dayId: number) => {
 }
 
 // -------------------- PAYMENT OPTIONS FUNCTIONS --------------------
-const togglePayment = (option: string) => {
-  const index = paymentOptions.value.indexOf(option)
-  if (index > -1) {
-    paymentOptions.value.splice(index, 1)
-    // If removing GCash, close setup
-    if (option === 'gcash') {
-      showGcashSetup.value = false
-      gcashError.value = '' // Clear any errors
-    }
-  } else {
-    paymentOptions.value.push(option)
-    // If adding GCash, open setup
-    if (option === 'gcash') {
-      showGcashSetup.value = true
-    }
-  }
-}
-
-const removePayment = (option: string) => {
-  const index = paymentOptions.value.indexOf(option)
-  if (index > -1) {
-    paymentOptions.value.splice(index, 1)
-    if (option === 'gcash') {
-      showGcashSetup.value = false
-      gcashEnabled.value = false
-      gcashError.value = ''
-    }
-  }
+const ensureCodOnlyPayment = () => {
+  paymentOptions.value = ['cod']
 }
 
 const getPaymentIcon = (option: string) => {
-  return option === 'gcash' ? 'mdi-cellphone' : 'mdi-cash-multiple'
+  return option === 'cod' ? 'mdi-cash-multiple' : 'mdi-cash'
 }
 
 const getPaymentLabel = (option: string) => {
-  return option === 'gcash' ? 'GCash' : 'Cash on Delivery'
-}
-
-// -------------------- GCASH SETUP FUNCTIONS - UPDATED WITH TIMEOUT PROTECTION --------------------
-const isSavingGcash = ref(false)
-
-const saveGcashConfig = async () => {
-  if (isSavingGcash.value) {
-    return
-  }
-
-  gcashError.value = ''
-
-  isSavingGcash.value = true
-  savingGcash.value = true
-
-  let timeoutId: ReturnType<typeof setTimeout> | null = null
-
-  try {
-    const {
-      data: { session },
-      error: sessionError,
-    } = await supabase.auth.getSession()
-
-    if (sessionError) {
-      throw new Error('Session error: ' + sessionError.message)
-    }
-
-    if (!session) {
-      throw new Error('You must be logged in')
-    }
-
-    const user = session.user
-
-    if (!currentShopId.value) {
-      throw new Error('No shop ID found')
-    }
-
-    if (!paymongoPublicKey.value || !paymongoSecretKey.value) {
-      throw new Error('Please enter both public and secret keys')
-    }
-
-    if (!paymongoPublicKey.value.startsWith('pk_')) {
-      throw new Error('Invalid public key format. Should start with "pk_"')
-    }
-
-    if (!paymongoSecretKey.value.startsWith('sk_')) {
-      throw new Error('Invalid secret key format. Should start with "sk_"')
-    }
-
-    const { data: shop, error: shopError } = await supabase
-      .from('shops')
-      .select('id, owner_id, paymongo_config, gcash_enabled')
-      .eq('id', currentShopId.value)
-      .maybeSingle()
-
-    if (shopError) {
-      throw new Error(`Error fetching shop: ${shopError.message}`)
-    }
-
-    if (!shop) {
-      throw new Error('Shop not found')
-    }
-
-    if (shop.owner_id !== user.id) {
-      throw new Error('You do not have permission to update this shop')
-    }
-    const paymongoConfig = {
-      public_key: paymongoPublicKey.value.trim(),
-      secret_key: paymongoSecretKey.value.trim(),
-      webhook_secret: paymongoWebhookSecret.value?.trim() || null,
-      test_mode: testMode.value,
-      connected_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    }
-
-    const currentPaymentOptions = paymentOptions.value || []
-    const updatedPaymentOptions = [...new Set([...currentPaymentOptions, 'gcash'])]
-
-    const validPaymentOptions = updatedPaymentOptions.filter(
-      (opt) => opt === 'cod' || opt === 'gcash',
-    )
-    const updatePromise = supabase
-      .from('shops')
-      .update({
-        paymongo_config: paymongoConfig,
-        gcash_enabled: true,
-        payment_options: validPaymentOptions,
-        payment_enabled: true,
-        updated_at: new Date().toISOString(),
-      })
-      .eq('id', currentShopId.value)
-      .eq('owner_id', user.id)
-      .select()
-
-    timeoutId = setTimeout(() => undefined, 15000)
-
-    const { data, error } = await updatePromise
-
-    clearTimeout(timeoutId)
-    timeoutId = null
-
-    if (error) {
-      if (error.code === '42501') {
-        throw new Error('Permission denied. Check RLS policies.')
-      } else if (error.code === '23505') {
-        throw new Error('Duplicate entry. This might be a unique constraint violation.')
-      } else if (error.code === '22P02') {
-        throw new Error('Invalid data format. Check your input.')
-      } else {
-        throw error
-      }
-    }
-
-    if (!data || data.length === 0) {
-      const { data: checkData } = await supabase
-        .from('shops')
-        .select('gcash_enabled, paymongo_config, payment_options')
-        .eq('id', currentShopId.value)
-        .single()
-
-      if (checkData?.gcash_enabled) {
-        gcashEnabled.value = true
-        paymentOptions.value = validPaymentOptions
-        showSnackbar('GCash configuration saved successfully!', 'success')
-        return
-      } else {
-        throw new Error('Update failed - no data returned and verification failed')
-      }
-    }
-    gcashEnabled.value = true
-    paymentOptions.value = validPaymentOptions
-
-    showSnackbar('GCash configuration saved successfully!', 'success')
-  } catch (error: any) {
-    if (timeoutId) clearTimeout(timeoutId)
-
-    if (error.message?.includes('timeout')) {
-      gcashError.value = 'Operation timed out. Please check your connection and try again.'
-    } else if (error.message?.includes('JWT') || error.message?.includes('token')) {
-      gcashError.value = 'Session expired. Please log in again.'
-    } else if (error.code === '42501' || error.message?.includes('permission')) {
-      gcashError.value =
-        'Permission denied. You may not own this shop or RLS policies are blocking the update.'
-    } else if (error.message?.includes('network') || error.message?.includes('fetch')) {
-      gcashError.value = 'Network error. Please check your internet connection.'
-    } else if (error.message?.includes('JSON')) {
-      gcashError.value = 'Invalid configuration format. Please check your keys.'
-    } else if (error.code === '23505') {
-      gcashError.value = 'A unique constraint was violated. This might be a duplicate entry.'
-    } else {
-      gcashError.value = error.message || 'Failed to save configuration'
-    }
-
-    showSnackbar(gcashError.value, 'error')
-  } finally {
-    savingGcash.value = false
-    isSavingGcash.value = false
-  }
-}
-
-const disconnectGcash = async () => {
-  if (!currentShopId.value) return
-  if (!confirm('Are you sure you want to disconnect GCash payments?')) return
-
-  savingGcash.value = true
-  gcashError.value = ''
-
-  try {
-    // Remove GCash from payment options
-    const updatedPaymentOptions = paymentOptions.value.filter((opt) => opt !== 'gcash')
-
-    const { data, error } = await supabase
-      .from('shops')
-      .update({
-        paymongo_config: {},
-        gcash_enabled: false,
-        payment_options: updatedPaymentOptions,
-      })
-      .eq('id', currentShopId.value)
-      .select()
-
-    if (error) throw error
-
-    // Update local state
-    paymentOptions.value = updatedPaymentOptions
-    gcashEnabled.value = false
-    paymongoPublicKey.value = ''
-    paymongoSecretKey.value = ''
-    paymongoWebhookSecret.value = ''
-    showGcashSetup.value = false
-
-    showSnackbar('GCash disconnected successfully', 'success')
-  } catch (error: any) {
-    console.error('Error disconnecting GCash:', error)
-    gcashError.value = error.message || 'Failed to disconnect GCash'
-    showSnackbar(gcashError.value, 'error')
-  } finally {
-    savingGcash.value = false
-  }
-}
-const testGcashConnection = async () => {
-  if (!currentShopId.value) return
-
-  testingGcash.value = true
-  gcashError.value = ''
-
-  try {
-    // First check if we have valid PayMongo config
-    const { data: shop, error: shopError } = await supabase
-      .from('shops')
-      .select('paymongo_config')
-      .eq('id', currentShopId.value)
-      .single()
-
-    if (shopError) throw shopError
-
-    if (!shop.paymongo_config?.public_key || !shop.paymongo_config?.secret_key) {
-      throw new Error('PayMongo configuration not found')
-    }
-
-    // Here you would typically make a test API call to PayMongo
-    // For now, we'll just simulate a success
-    showSnackbar('Test connection successful! Check your PayMongo dashboard.', 'success')
-  } catch (error: any) {
-    console.error('Test connection error:', error)
-    gcashError.value = error.message || 'Test connection failed'
-    showSnackbar(gcashError.value, 'error')
-  } finally {
-    testingGcash.value = false
-  }
+  return option === 'cod' ? 'Cash on Delivery' : option
 }
 
 // -------------------- PSGC MAPPING FUNCTIONS --------------------
@@ -1123,20 +832,11 @@ const loadShopData = async () => {
     closeTime.value = data.close_time || ''
 
     deliveryOptions.value = data.delivery_options || []
-    paymentOptions.value = data.payment_options || []
+    ensureCodOnlyPayment()
     openDays.value = data.open_days || [1, 2, 3, 4, 5, 6]
 
     validIdFrontUrl.value = data.valid_id_front || null
     validIdBackUrl.value = data.valid_id_back || null
-
-    // Load GCash config if exists
-    if (data.paymongo_config) {
-      paymongoPublicKey.value = data.paymongo_config.public_key || ''
-      paymongoSecretKey.value = data.paymongo_config.secret_key || ''
-      paymongoWebhookSecret.value = data.paymongo_config.webhook_secret || ''
-      testMode.value = data.paymongo_config.test_mode !== false
-    }
-    gcashEnabled.value = data.gcash_enabled || false
 
     await withSuppressedLocationWatchEffects(async () => {
       const hasSavedManualAddress =
@@ -1378,7 +1078,9 @@ const saveShop = async () => {
       addressSource = 'manual'
     }
 
-    // Prepare shop data with GCash config if enabled
+    ensureCodOnlyPayment()
+
+    // Prepare shop data
     const shopData: any = {
       business_name: shopName.value,
       description: description.value,
@@ -1397,7 +1099,8 @@ const saveShop = async () => {
       province: address.province.value,
       region: address.region.value,
       delivery_options: deliveryOptions.value,
-      payment_options: paymentOptions.value,
+      payment_options: ['cod'],
+      payment_enabled: true,
       detected_address:
         fullAddress.value || formatShopAddress(getAddressComponentsSnapshot()) || null,
       address_source: addressSource,
@@ -1405,22 +1108,6 @@ const saveShop = async () => {
       valid_id_back: validIdBackUrl.value,
       open_days: openDays.value,
       updated_at: new Date().toISOString(),
-    }
-
-    // Add GCash config if GCash is enabled
-    if (
-      paymentOptions.value.includes('gcash') &&
-      paymongoPublicKey.value &&
-      paymongoSecretKey.value
-    ) {
-      shopData.paymongo_config = {
-        public_key: paymongoPublicKey.value,
-        secret_key: paymongoSecretKey.value,
-        webhook_secret: paymongoWebhookSecret.value,
-        test_mode: testMode.value,
-        connected_at: new Date().toISOString(),
-      }
-      shopData.gcash_enabled = true
     }
 
     let savedShopId
@@ -1748,7 +1435,7 @@ onUnmounted(() => {
           </v-card-actions>
         </v-card>
 
-        <!-- Step 5: Payment Options (with integrated GCash setup) - UPDATED VERSION -->
+        <!-- Step 5: Payment Options -->
         <v-card v-if="currentStep === 5" class="mb-4 step-card" variant="outlined">
           <v-card-title class="section-title">
             <v-icon class="mr-2">mdi-currency-php</v-icon>
@@ -1759,82 +1446,28 @@ onUnmounted(() => {
           </v-card-title>
 
           <v-card-text>
-            <!-- Payment Options Description -->
             <v-alert type="info" variant="tonal" class="mb-4">
               <template #title>
-                <strong>Select Payment Methods</strong>
+                <strong>Cash on Delivery Only</strong>
               </template>
               <div class="text-caption">
-                Choose which payment methods you accept. Click on GCash to configure.
+                Your shop will accept cash payments when customers receive their orders.
               </div>
             </v-alert>
 
-            <!-- Error Display -->
-            <v-alert
-              v-if="gcashError"
-              type="error"
-              variant="tonal"
-              class="mb-4"
-              dismissible
-              @click:close="gcashError = ''"
-            >
-              <strong>Error:</strong> {{ gcashError }}
-            </v-alert>
-
-            <!-- Payment Method Cards -->
             <v-row>
-              <!-- COD Option -->
               <v-col cols="12" md="6">
-                <v-card
-                  variant="outlined"
-                  class="payment-card"
-                  :class="{ 'selected-payment': paymentOptions.includes('cod') }"
-                  @click="togglePayment('cod')"
-                >
+                <v-card variant="outlined" class="payment-card selected-payment">
                   <v-card-text class="text-center">
-                    <v-icon
-                      size="48"
-                      :color="paymentOptions.includes('cod') ? 'success' : 'grey'"
-                      class="mb-2"
-                    >
+                    <v-icon size="48" color="success" class="mb-2">
                       mdi-cash-multiple
                     </v-icon>
                     <div class="text-h6">Cash on Delivery</div>
                     <div class="text-caption text-grey">Pay cash when you receive the order</div>
-                    <v-checkbox-btn
-                      :model-value="paymentOptions.includes('cod')"
-                      color="success"
-                      class="mt-2"
-                      @click.stop="togglePayment('cod')"
-                    />
-                  </v-card-text>
-                </v-card>
-              </v-col>
-
-              <!-- GCash Option -->
-              <v-col cols="12" md="6">
-                <v-card
-                  variant="outlined"
-                  class="payment-card"
-                  :class="{ 'selected-payment': paymentOptions.includes('gcash') }"
-                  @click="togglePayment('gcash')"
-                >
-                  <v-card-text class="text-center">
-                    <v-icon
-                      size="48"
-                      :color="paymentOptions.includes('gcash') ? 'success' : 'grey'"
-                      class="mb-2"
-                    >
-                      mdi-cellphone
-                    </v-icon>
-                    <div class="text-h6">GCash</div>
-                    <div class="text-caption text-grey">Mobile payment via GCash</div>
-                    <v-checkbox-btn
-                      :model-value="paymentOptions.includes('gcash')"
-                      color="success"
-                      class="mt-2"
-                      @click.stop="togglePayment('gcash')"
-                    />
+                    <v-chip color="success" size="small" class="mt-3">
+                      <v-icon start size="16">mdi-check-circle</v-icon>
+                      Enabled
+                    </v-chip>
                   </v-card-text>
                 </v-card>
               </v-col>
@@ -1850,194 +1483,21 @@ onUnmounted(() => {
                   <v-chip
                     v-for="option in paymentOptions"
                     :key="option"
-                    :color="option === 'gcash' ? '#0077e5' : 'success'"
+                    color="success"
                     size="small"
                     class="mr-1 payment-chip"
-                    closable
-                    @click:close="removePayment(option)"
                   >
                     <v-icon start size="16">
                       {{ getPaymentIcon(option) }}
                     </v-icon>
                     {{ getPaymentLabel(option) }}
                   </v-chip>
-                  <span v-if="paymentOptions.length === 0" class="text-caption text-grey">
-                    No payment methods selected
-                  </span>
                 </div>
               </div>
-              <v-chip :color="paymentOptions.length > 0 ? 'success' : 'warning'" size="small">
-                {{ paymentOptions.length }} selected
+              <v-chip color="success" size="small">
+                COD 
               </v-chip>
             </div>
-
-            <!-- GCash Setup Section (expands when GCash is selected) -->
-            <v-expand-transition>
-              <div v-if="paymentOptions.includes('gcash')" class="mt-6">
-                <v-divider class="mb-4" />
-
-                <div class="d-flex align-center mb-4">
-                  <h3 class="text-subtitle-1 font-weight-bold">
-                    <v-icon color="#0077e5" class="mr-1">mdi-cellphone</v-icon>
-                    GCash / PayMongo Configuration
-                  </h3>
-                  <v-spacer />
-                  <v-chip :color="gcashEnabled ? 'success' : 'warning'" size="small">
-                    {{ gcashEnabled ? 'Connected' : 'Not Connected' }}
-                  </v-chip>
-                </div>
-
-                <!-- Connection Status Alert -->
-                <v-alert v-if="gcashEnabled" type="success" variant="tonal" class="mb-4">
-                  <div class="d-flex align-center">
-                    <v-icon left>mdi-check-circle</v-icon>
-                    <div>
-                      <strong>GCash is active!</strong> Your shop can receive GCash payments.
-                    </div>
-                  </div>
-                </v-alert>
-
-                <v-alert v-else type="info" variant="tonal" class="mb-4">
-                  <div class="d-flex align-center">
-                    <v-icon left>mdi-information</v-icon>
-                    <div>
-                      <strong>Connect your PayMongo account</strong><br />
-                      Enter your API keys to start accepting GCash payments.
-                    </div>
-                  </div>
-                </v-alert>
-
-                <!-- PayMongo Configuration Form -->
-                <v-row>
-                  <v-col cols="12">
-                    <v-text-field
-                      v-model="paymongoPublicKey"
-                      label="PayMongo Public Key"
-                      placeholder="pk_live_xxx or pk_test_xxx"
-                      outlined
-                      dense
-                      :disabled="gcashEnabled"
-                      :append-inner-icon="showPublicKey ? 'mdi-eye-off' : 'mdi-eye'"
-                      :type="showPublicKey ? 'text' : 'password'"
-                      @click:append-inner="showPublicKey = !showPublicKey"
-                      :error-messages="
-                        !paymongoPublicKey && gcashError ? 'Public key is required' : ''
-                      "
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-text-field
-                      v-model="paymongoSecretKey"
-                      label="PayMongo Secret Key"
-                      placeholder="sk_live_xxx or sk_test_xxx"
-                      outlined
-                      dense
-                      :disabled="gcashEnabled"
-                      :append-inner-icon="showSecretKey ? 'mdi-eye-off' : 'mdi-eye'"
-                      :type="showSecretKey ? 'text' : 'password'"
-                      @click:append-inner="showSecretKey = !showSecretKey"
-                      :error-messages="
-                        !paymongoSecretKey && gcashError ? 'Secret key is required' : ''
-                      "
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-text-field
-                      v-model="paymongoWebhookSecret"
-                      label="Webhook Secret (Optional)"
-                      placeholder="whsec_xxx"
-                      outlined
-                      dense
-                      :disabled="gcashEnabled"
-                      :append-inner-icon="showWebhookSecret ? 'mdi-eye-off' : 'mdi-eye'"
-                      :type="showWebhookSecret ? 'text' : 'password'"
-                      @click:append-inner="showWebhookSecret = !showWebhookSecret"
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-switch
-                      v-model="testMode"
-                      label="Use Test Mode"
-                      color="warning"
-                      :disabled="gcashEnabled"
-                      hint="Use test keys for sandbox environment"
-                      persistent-hint
-                    />
-                  </v-col>
-
-                  <v-col cols="12">
-                    <v-alert v-if="testMode" type="warning" variant="tonal" class="mb-2" dense>
-                      <v-icon start small>mdi-test-tube</v-icon>
-                      <strong>Test Mode Active</strong> - Use your PayMongo test keys
-                    </v-alert>
-                  </v-col>
-
-                  <!-- Webhook URL Display -->
-                  <v-col cols="12">
-                    <span class="text-subtitle-2">Webhook URL</span>
-                    <v-text-field
-                      :model-value="webhookUrl"
-                      label="Webhook URL"
-                      outlined
-                      readonly
-                      dense
-                      hide-details
-                      class="mt-1"
-                      :append-inner-icon="copied ? 'mdi-check' : 'mdi-content-copy'"
-                      @click:append-inner="copyWebhookUrl"
-                    />
-                    <div class="text-caption text-grey mt-1">
-                      Add this URL to your PayMongo webhook settings
-                    </div>
-                  </v-col>
-
-                  <!-- Action Buttons -->
-                  <v-col cols="12">
-                    <div class="d-flex gap-2 mt-2">
-                      <v-btn
-                        v-if="!gcashEnabled"
-                        color="primary"
-                        :loading="savingGcash"
-                        @click="saveGcashConfig"
-                        block
-                        :disabled="!paymongoPublicKey || !paymongoSecretKey"
-                      >
-                        <v-icon left>mdi-content-save</v-icon>
-                        {{ savingGcash ? 'Saving...' : 'Save & Connect' }}
-                      </v-btn>
-
-                      <v-btn
-                        v-if="gcashEnabled"
-                        color="error"
-                        variant="outlined"
-                        :loading="savingGcash"
-                        @click="disconnectGcash"
-                        block
-                      >
-                        <v-icon left>mdi-link-off</v-icon>
-                        Disconnect GCash
-                      </v-btn>
-                    </div>
-
-                    <v-btn
-                      v-if="gcashEnabled"
-                      color="info"
-                      variant="text"
-                      :loading="testingGcash"
-                      @click="testGcashConnection"
-                      block
-                      class="mt-2"
-                    >
-                      <v-icon left>mdi-test-tube</v-icon>
-                      Test Connection
-                    </v-btn>
-                  </v-col>
-                </v-row>
-              </div>
-            </v-expand-transition>
           </v-card-text>
 
           <v-card-actions class="step-actions">
