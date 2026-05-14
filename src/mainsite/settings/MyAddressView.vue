@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { supabase } from '@/utils/supabase'
 import { useCheckoutStore } from '@/stores/checkout'
 
@@ -303,6 +304,10 @@ const hasCurrentLocation = () => {
   return addresses.value.some(addr => addr.recipient_name === 'My Current Location')
 }
 
+const handleRefresh = async () => {
+  await loadAddresses()
+}
+
 onMounted(loadAddresses)
 </script>
 
@@ -317,6 +322,7 @@ onMounted(loadAddresses)
     </v-app-bar>
 
     <v-main>
+      <PullToRefreshWrapper :on-refresh="handleRefresh" :disabled="isDetectingLocation || showLocationOptions">
       <v-snackbar v-model="showSuccess" :timeout="3000" color="success" location="top">
         {{ successMessage }}
         <template #actions>
@@ -506,6 +512,7 @@ onMounted(loadAddresses)
           </v-card-text>
         </v-card>
       </v-dialog>
+      </PullToRefreshWrapper>
     </v-main>
   </v-app>
 </template>

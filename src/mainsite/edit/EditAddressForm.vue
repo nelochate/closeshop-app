@@ -6,6 +6,7 @@ import { Geolocation } from '@capacitor/geolocation'
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
 import { useCheckoutStore } from '@/stores/checkout'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -962,6 +963,23 @@ const loadAddress = async () => {
   }
 }
 
+const handleRefresh = async () => {
+  if (addressId.value) {
+    await loadAddress()
+  } else {
+    await fetchRegions()
+  }
+
+  await nextTick()
+
+  if (addressMode.value === 'manual') {
+    await refreshManualMap()
+    return
+  }
+
+  await refreshLocationMap()
+}
+
 // --- Save Address (NOW INCLUDES COORDINATES) ---
 const saveAddress = async () => {
   try {
@@ -1219,6 +1237,10 @@ watch(
     </v-app-bar>
 
     <v-main style="background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%)">
+      <PullToRefreshWrapper
+        :on-refresh="handleRefresh"
+        :disabled="isLoading || isLoadingLocation || isRefreshingMap || loadingRegions || loadingProvinces || loadingCities || loadingBarangays"
+      >
       <!-- Success Toast -->
       <v-snackbar
         v-model="showSuccess"
@@ -1717,6 +1739,7 @@ watch(
           </v-card-text>
         </v-card>
       </v-container>
+      </PullToRefreshWrapper>
     </v-main>
   </v-app>
 </template>

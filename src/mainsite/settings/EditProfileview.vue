@@ -4,6 +4,7 @@ import { onBeforeRouteLeave, useRouter } from 'vue-router'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { Capacitor } from '@capacitor/core'
 import { useDisplay } from 'vuetify'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { supabase } from '@/utils/supabase'
 import { useAuthUserStore } from '@/stores/authUser'
 import { withSchemaColumnFallback } from '@/utils/supabaseSchema'
@@ -766,6 +767,10 @@ const goToAddressBook = () => {
   router.push({ name: 'my-address' })
 }
 
+const handleRefresh = async () => {
+  await loadProfileEditor()
+}
+
 const openDeleteAccountDialog = () => {
   if (isSaving.value || uploading.value || isDeletingAccount.value) {
     return
@@ -893,6 +898,10 @@ onMounted(() => {
     </v-app-bar>
 
     <v-main class="modern-font profile-page">
+      <PullToRefreshWrapper
+        :on-refresh="handleRefresh"
+        :disabled="isLoadingProfile || isSaving || uploading || isDeletingAccount || isCameraStarting || showCameraDialog"
+      >
       <v-snackbar v-model="showSuccess" :timeout="3000" :color="snackbarColor" location="top">
         {{ successMessage }}
         <template #actions>
@@ -1040,6 +1049,7 @@ onMounted(() => {
           </v-col>
         </v-row>
       </v-container>
+      </PullToRefreshWrapper>
     </v-main>
 
     <v-bottom-sheet v-model="showPicker" inset>

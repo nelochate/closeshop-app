@@ -118,13 +118,13 @@ const overviewCards = computed(() => [
     to: buildSellerAnalyticsRoute('sales'),
     featured: true,
   },
-  {
-    title: 'Total Revenue',
-    value: formatCurrency(dashboardMetrics.value.totalRevenue),
-    caption: 'Delivered and paid orders',
-    icon: 'mdi-cash-multiple',
-    tone: 'success' as const,
-    to: buildSellerAnalyticsRoute('sales'),
+    {
+    title: 'Total Products',
+    value: formatCompactNumber(dashboardMetrics.value.totalProducts),
+    caption: `${dashboardMetrics.value.lowStockProducts} low stock`,
+    icon: 'mdi-package-variant-closed',
+    tone: 'primary' as const,
+    to: buildSellerProductsRoute('all'),
   },
   {
     title: 'Total Orders',
@@ -166,42 +166,7 @@ const overviewCards = computed(() => [
     tone: 'error' as const,
     to: buildSellerOrdersRoute('cancelled'),
   },
-  {
-    title: 'Store Visits',
-    value: formatCompactNumber(visitSummary.value.totalVisits),
-    caption: visitSummary.value.hasVisitTracking
-      ? `${formatCompactNumber(visitSummary.value.uniqueVisitors)} unique visitors`
-      : 'Visit tracking not active yet',
-    icon: 'mdi-storefront-outline',
-    tone: 'secondary' as const,
-    to: buildSellerAnalyticsRoute('visits'),
-    featured: true,
-  },
-  {
-    title: 'Total Products',
-    value: formatCompactNumber(dashboardMetrics.value.totalProducts),
-    caption: `${dashboardMetrics.value.lowStockProducts} low stock`,
-    icon: 'mdi-package-variant-closed',
-    tone: 'primary' as const,
-    to: buildSellerProductsRoute('all'),
-  },
-  {
-    title: 'Low Stock',
-    value: formatCompactNumber(dashboardMetrics.value.lowStockProducts),
-    caption: `${dashboardMetrics.value.outOfStockProducts} out of stock`,
-    icon: 'mdi-alert-outline',
-    tone: 'warning' as const,
-    to: buildSellerProductsRoute('low-stock'),
-  },
-  {
-    title: 'Total Buyers',
-    value: formatCompactNumber(dashboardMetrics.value.totalCustomers),
-    caption: 'Customers who ordered',
-    icon: 'mdi-account-group-outline',
-    tone: 'info' as const,
-    to: buildSellerAnalyticsRoute('customers'),
-    featured: true,
-  },
+
 ])
 
 const handleUserShopRefresh = async () => {
@@ -776,6 +741,51 @@ onUnmounted(() => {
           </v-card>
         </v-container>
 
+         <v-container
+          class="seller-shop-section seller-shop-section--actions"
+          :class="isMobile ? 'px-3 py-1' : 'py-2'"
+        >
+          <div class="management-actions-grid">
+            <v-btn
+              @click="goToOrders"
+              color="primary"
+              :size="isMobile ? 'large' : 'x-large'"
+              class="action-btn"
+              :rounded="isMobile ? 'lg' : 'xl'"
+              variant="flat"
+              :height="isMobile ? 68 : 60"
+            >
+              <v-icon start :size="isMobile ? 20 : 24">mdi-receipt-text-outline</v-icon>
+              <span class="action-btn__label">Shop Orders</span>
+            </v-btn>
+
+            <v-btn
+              @click="goToProducts"
+              color="secondary"
+              :size="isMobile ? 'large' : 'x-large'"
+              class="action-btn"
+              :rounded="isMobile ? 'lg' : 'xl'"
+              variant="flat"
+              :height="isMobile ? 68 : 60"
+            >
+              <v-icon start :size="isMobile ? 20 : 24">mdi-package-variant</v-icon>
+              <span class="action-btn__label">Product Management</span>
+            </v-btn>
+
+            <v-btn
+              @click="goToAnalytics"
+              color="info"
+              class="action-btn action-btn--subtle"
+              :rounded="isMobile ? 'lg' : 'xl'"
+              variant="outlined"
+              :height="isMobile ? 68 : 60"
+            >
+              <v-icon start :size="isMobile ? 20 : 24">mdi-chart-line</v-icon>
+              <span class="action-btn__label">Sales Analytics</span>
+            </v-btn>
+          </div>
+        </v-container>
+
         <v-container
           class="seller-shop-section seller-shop-section--overview"
           :class="isMobile ? 'px-3 py-2' : 'py-3'"
@@ -823,50 +833,7 @@ onUnmounted(() => {
           </template>
         </v-container>
 
-        <v-container
-          class="seller-shop-section seller-shop-section--actions"
-          :class="isMobile ? 'px-3 py-1' : 'py-2'"
-        >
-          <div class="management-actions-grid">
-            <v-btn
-              @click="goToOrders"
-              color="primary"
-              :size="isMobile ? 'large' : 'x-large'"
-              class="action-btn"
-              :rounded="isMobile ? 'lg' : 'xl'"
-              variant="flat"
-              :height="isMobile ? 68 : 60"
-            >
-              <v-icon start :size="isMobile ? 20 : 24">mdi-receipt-text-outline</v-icon>
-              <span class="action-btn__label">Shop Orders</span>
-            </v-btn>
 
-            <v-btn
-              @click="goToProducts"
-              color="secondary"
-              :size="isMobile ? 'large' : 'x-large'"
-              class="action-btn"
-              :rounded="isMobile ? 'lg' : 'xl'"
-              variant="flat"
-              :height="isMobile ? 68 : 60"
-            >
-              <v-icon start :size="isMobile ? 20 : 24">mdi-package-variant</v-icon>
-              <span class="action-btn__label">Product Management</span>
-            </v-btn>
-
-            <v-btn
-              @click="goToAnalytics"
-              color="info"
-              class="action-btn action-btn--subtle"
-              :rounded="isMobile ? 'lg' : 'xl'"
-              variant="outlined"
-              :height="isMobile ? 68 : 60"
-            >
-              <v-icon start :size="isMobile ? 20 : 24">mdi-chart-line</v-icon>
-              <span class="action-btn__label">Sales Analytics</span>
-            </v-btn>
-          </div>
-        </v-container>
       </v-main>
     </PullToRefreshWrapper>
   </v-app>

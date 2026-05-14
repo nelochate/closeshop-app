@@ -280,7 +280,6 @@ const goToLogin = () => {
 
 .back-to-login-btn {
   pointer-events: auto;
-  background: rgba(255, 255, 255, 0.2);
   backdrop-filter: blur(8px);
   transition: all 0.3s ease;
   margin-top: max(12px, var(--app-safe-area-top, env(safe-area-inset-top, 0px)));
@@ -305,7 +304,7 @@ const goToLogin = () => {
 }
 
 .gradient-text {
-  background: linear-gradient(135deg, #2e73b8 0%, #667eea 50%, #764ba2 100%);
+  background: linear-gradient(135deg, #2e73b8 0%, #2f4dd3 50%, #1b379d 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -362,4 +361,4 @@ const goToLogin = () => {
     padding-right: max(12px, var(--app-safe-area-right, env(safe-area-inset-right, 0px)));
   }
 }
-</style> 
+</style>

@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { supabase } from '@/utils/supabase'
 import { formatAppDateTime, parseAppTimestamp } from '@/utils/dateTime'
 import {
@@ -301,6 +302,7 @@ onUnmounted(() => {
 <template>
   <v-app>
     <v-main class="earnings-page">
+      <PullToRefreshWrapper :on-refresh="refreshStatement" :disabled="loading">
       <div class="header-section">
         <div class="header-section__inner">
           <div class="header-section__lead">
@@ -313,9 +315,6 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <v-btn icon variant="text" class="refresh-btn" @click="refreshStatement">
-            <v-icon size="24">mdi-refresh</v-icon>
-          </v-btn>
         </div>
       </div>
 
@@ -426,6 +425,7 @@ onUnmounted(() => {
           </div>
         </template>
       </div>
+      </PullToRefreshWrapper>
     </v-main>
   </v-app>
 </template>

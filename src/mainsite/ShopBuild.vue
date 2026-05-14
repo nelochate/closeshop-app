@@ -14,6 +14,7 @@ import {
   parseCoordinate,
   resolveCoordinateAddress,
 } from '@/utils/location'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 // -------------------- MAPBOX --------------------
 import mapboxgl from 'mapbox-gl'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -917,6 +918,34 @@ const loadShopData = async () => {
   }
 }
 
+const handleRefresh = async () => {
+  await fetchRegions()
+
+  if (shopId.value) {
+    await loadShopData()
+  } else {
+    if (selectedRegion.value) {
+      await fetchProvinces(selectedRegion.value)
+    }
+
+    if (selectedProvince.value) {
+      await fetchCities(selectedProvince.value)
+    }
+
+    if (selectedCity.value) {
+      await fetchBarangays(selectedCity.value)
+    }
+  }
+
+  if (currentStep.value === 6) {
+    await nextTick()
+    initMap(
+      latitude.value ?? DEFAULT_SHOP_LOCATION.lat,
+      longitude.value ?? DEFAULT_SHOP_LOCATION.lng,
+    )
+  }
+}
+
 // Update address fields when PSGC selections change
 watch(selectedRegion, (regionCode) => {
   if (syncingLocationSelections.value || shouldSkipLocationWatchEffects()) return
@@ -1256,6 +1285,10 @@ onUnmounted(() => {
     </v-app-bar>
 
     <v-main class="pb-16">
+      <PullToRefreshWrapper
+        :on-refresh="handleRefresh"
+        :disabled="loadingShopData || saving || uploading || loadingRegions || loadingProvinces || loadingCities || loadingBarangays || isCameraActive"
+      >
       <!-- Progress Steps -->
       <v-card class="steps-card" flat>
         <v-card-text class="steps-container">
@@ -2053,6 +2086,7 @@ onUnmounted(() => {
           </v-card-actions>
         </v-card>
       </v-dialog>
+      </PullToRefreshWrapper>
     </v-main>
   </v-app>
 </template>

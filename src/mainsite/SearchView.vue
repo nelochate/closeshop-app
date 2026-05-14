@@ -1,6 +1,7 @@
 <script setup>
 import { ref, watch, onUnmounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { supabase } from '@/utils/supabase'
 import { locationNamesMatch } from '@/utils/location'
 
@@ -192,11 +193,16 @@ const showEmptyState = computed(() =>
   getTrimmedQuery().length >= 2 &&
   !hasResults.value
 )
+
+async function handleRefresh() {
+  await fetchSearchResults()
+}
 </script>
 
 <template>
   <v-app>
     <v-main class="page">
+      <PullToRefreshWrapper :on-refresh="handleRefresh" :disabled="loading">
       <!-- 🔍 Header -->
       <v-sheet class="hero" :style="{ paddingTop: heroPaddingTop }">
         <div class="hero-row">
@@ -327,6 +333,7 @@ const showEmptyState = computed(() =>
           </div>
         </template>
       </v-container>
+      </PullToRefreshWrapper>
     </v-main>
   </v-app>
 </template>

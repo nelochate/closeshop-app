@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { supabase } from '@/utils/supabase'
 import { reconcileAutoCompletedOrders } from '@/utils/orderAutoCompletion'
 import { formatAppDateTime, getAppTimestampValue, parseAppTimestamp } from '@/utils/dateTime'
@@ -892,6 +893,27 @@ const refreshOrders = async () => {
   await Promise.all([fetchOrders(), fetchEarningsRecords()])
 }
 
+const handleRefresh = async () => {
+  currentTime.value = Date.now()
+
+  if (!currentRiderNumericId.value) {
+    await checkRiderApproval()
+    if (!isApproved.value || !currentRiderNumericId.value) {
+      return
+    }
+  }
+
+  await refreshOrders()
+
+  if (currentLocation.value?.latitude && currentLocation.value?.longitude) {
+    filterOrdersByDistance(currentLocation.value.latitude, currentLocation.value.longitude)
+    await publishRiderLocationToActiveOrders({ force: true })
+    return
+  }
+
+  getCurrentLocation()
+}
+
 // Navigate to order details
 const viewOrderDetails = (order) => {
   router.push({ name: 'rider-order-details', params: { id: order.id } })
@@ -961,6 +983,10 @@ onUnmounted(() => {
 <template>
   <v-app>
     <v-main class="rider-dashboard-main">
+      <PullToRefreshWrapper
+        :on-refresh="handleRefresh"
+        :disabled="loading || loadingProfile || locationLoading"
+      >
       <!-- Header -->
       <div class="header-section">
         <div class="header-section__inner">
@@ -985,7 +1011,7 @@ onUnmounted(() => {
                 </v-btn>
               </template>
               <v-list>
-                <v-list-item @click="refreshOrders">
+                <v-list-item @click="handleRefresh">
                   <template #prepend>
                     <v-icon>mdi-refresh</v-icon>
                   </template>
@@ -1281,6 +1307,7 @@ onUnmounted(() => {
           </v-card>
         </div>
       </div>
+      </PullToRefreshWrapper>
     </v-main>
   </v-app>
 </template>

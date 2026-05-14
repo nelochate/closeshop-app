@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
+import PullToRefreshWrapper from '@/components/PullToRefreshWrapper.vue'
 import { supabase } from '@/utils/supabase'
 import { requiredValidator, emailValidator } from '@/utils/validators'
 import { Capacitor } from '@capacitor/core'
@@ -242,6 +243,15 @@ const checkExistingSession = async () => {
   }
 }
 
+const handleRefresh = async () => {
+  if (isNative) {
+    await initializeGoogleSignIn()
+  }
+
+  await handleRedirectCallback()
+  await checkExistingSession()
+}
+
 onMounted(async () => {
   console.log('Component mounted, platform:', Capacitor.getPlatform())
   
@@ -258,83 +268,85 @@ onMounted(async () => {
 
 <template>
   <v-app class="main-bg">
-    <div class="login-container">
-      <div class="login-header d-flex flex-column align-center">
-        <div class="circle-deco"></div>
-        <v-img src="/images/logo.png" max-width="100" class="logo"></v-img>
-        <h2 class="login-title">CloseShop</h2>
-        <p class="login-subtitle">Use the account below to sign in</p>
+    <PullToRefreshWrapper :on-refresh="handleRefresh" :disabled="isLoading || isLoading2">
+      <div class="login-container">
+        <div class="login-header d-flex flex-column align-center">
+          <div class="circle-deco"></div>
+          <v-img src="/images/logo.png" max-width="100" class="logo"></v-img>
+          <h2 class="login-title">CloseShop</h2>
+          <p class="login-subtitle">Use the account below to sign in</p>
+        </div>
+
+        <div v-if="showError" class="error-message">{{ errorMessage }}</div>
+        <div v-if="showSuccess" class="success-message">{{ successMessage }}</div>
+
+        <div class="login-card">
+          <v-form @submit.prevent="login">
+            <v-text-field
+              v-model="username"
+              placeholder="Email"
+              variant="outlined"
+              density="comfortable"
+              class="login-input"
+              :rules="[requiredValidator, emailValidator]"
+            />
+
+            <v-text-field
+              v-model="password"
+              :type="showPassword ? 'text' : 'password'"
+              placeholder="Password"
+              variant="outlined"
+              density="comfortable"
+              class="login-input"
+              :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
+              @click:append-inner="showPassword = !showPassword"
+              :rules="[requiredValidator]"
+            />
+
+            <v-btn
+              type="submit"
+              color="primary"
+              block
+              class="login-btn"
+              :loading="isLoading"
+              :disabled="isLoading"
+              prepend-icon="mdi-login"
+            >
+              Sign In
+            </v-btn>
+
+            <div class="divider">
+              <span class="divider-text">or</span>
+            </div>
+
+            <v-btn
+              @click="signInWithGoogle"
+              block
+              class="google-btn mb-3"
+              :loading="isLoading2"
+              :disabled="isLoading2"
+              variant="outlined"
+            >
+              <template v-slot:prepend>
+                <v-icon class="google-icon" size="large">mdi-google</v-icon>
+              </template>
+              Sign in with Google
+            </v-btn>
+
+            <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
+
+            <p class="register-link">
+              Don't have an account? <RouterLink to="/register">Register</RouterLink>
+            </p>
+
+            <div class="privacy-notice">
+              <v-icon color="primary" size="small" class="mr-2">mdi-shield-lock-outline</v-icon>
+              <span class="privacy-text">Your data is protected with us. We never share your information with third parties.</span>
+            </div>
+          </v-form>
+        </div>
       </div>
-
-      <div v-if="showError" class="error-message">{{ errorMessage }}</div>
-      <div v-if="showSuccess" class="success-message">{{ successMessage }}</div>
-
-      <div class="login-card">
-        <v-form @submit.prevent="login">
-          <v-text-field
-            v-model="username"
-            placeholder="Email"
-            variant="outlined"
-            density="comfortable"
-            class="login-input"
-            :rules="[requiredValidator, emailValidator]"
-          />
-
-          <v-text-field
-            v-model="password"
-            :type="showPassword ? 'text' : 'password'"
-            placeholder="Password"
-            variant="outlined"
-            density="comfortable"
-            class="login-input"
-            :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-            @click:append-inner="showPassword = !showPassword"
-            :rules="[requiredValidator]"
-          />
-
-          <v-btn
-            type="submit"
-            color="primary"
-            block
-            class="login-btn"
-            :loading="isLoading"
-            :disabled="isLoading"
-            prepend-icon="mdi-login"
-          >
-            Sign In
-          </v-btn>
-
-          <div class="divider">
-            <span class="divider-text">or</span>
-          </div>
-
-          <v-btn
-            @click="signInWithGoogle"
-            block
-            class="google-btn mb-3"
-            :loading="isLoading2"
-            :disabled="isLoading2"
-            variant="outlined"
-          >
-            <template v-slot:prepend>
-              <v-icon class="google-icon" size="large">mdi-google</v-icon>
-            </template>
-            Sign in with Google
-          </v-btn>
-
-          <p class="forgot-link" @click="router.push('/forgot-password')">Forgot Password?</p>
-
-          <p class="register-link">
-            Don't have an account? <RouterLink to="/register">Register</RouterLink>
-          </p>
-
-          <div class="privacy-notice">
-            <v-icon color="primary" size="small" class="mr-2">mdi-shield-lock-outline</v-icon>
-            <span class="privacy-text">Your data is protected with us. We never share your information with third parties.</span>
-          </div>
-        </v-form>
-      </div>
-    </div>
+    </PullToRefreshWrapper>
   </v-app>
 </template>
 
